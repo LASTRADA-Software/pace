@@ -1394,7 +1394,7 @@ class IMetricsSink
         /// verb is what the seal exists to make worthless. (#178)
         NodeSealedFramesRefused,
         /// A verb only a machine that proved its identity may send -- REGISTER, NODE-ANNOUNCE,
-        /// HEARTBEAT, WITHDRAW -- refused on a connection that proved none that is live. (#178)
+        /// HEARTBEAT, WITHDRAW, MACHINE-BUDGET -- refused on a connection that proved none that is live. (#178)
         SchedulerRequestsRefusedNodeIdentityRequired,
         /// Enrollment requests the leader forgot because the machine stopped asking for
         /// `PendingRowLifetime` before anybody decided about it. A machine switched off or given up
@@ -1567,6 +1567,23 @@ class IMetricsSink
         /// half of `NodeEndpointChanges`, counted apart because only a voter's move re-addresses it
         /// in the cluster's record.
         NodeRaftEndpointChanges,
+
+        /// Admission queue (#1728): what the leader's scheduler surface did with queued compile requests.
+        AdmissionQueued,
+        AdmissionGrantedWorker,
+        AdmissionGrantedLocal,
+        AdmissionDeduplicated,
+        AdmissionRanAlone,
+        AdmissionAbandoned,
+        AdmissionWorkerRefused,
+        AdmissionWaitMillisTotal,
+        AdmissionWaitCount,
+
+        /// Admission forwarding (#1728): what a node that does not lead did with the queue exchanges a
+        /// launcher on its machine sent it. Written by the FORWARDING node's surface, never the leader's.
+        AdmissionForwarded,
+        AdmissionForwardFailed,
+        AdmissionForwardAbandoned,
 
         Last,
     };

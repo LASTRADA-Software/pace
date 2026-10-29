@@ -52,7 +52,8 @@ Every rule below has already been a bug.
   replay, an oversized or unframed header) closes UNANSWERED, because there the
   frame is not known to be the peer's at all.
 - **A reply is one frame per request, and `Status::Progress` is the first of two exceptions --
-  bounded to exactly one verb, carrying nothing, and paid for with a version step.** The
+  bounded to exactly the verbs a table names (`Compile`, and `Admit` since #1728), carrying
+  nothing, and paid for with a version step.** The
   second is `Status::Push`, below, bounded the same way.
   A dispatched compile is bounded by how long a COMPILER runs, so its client's total
   deadline is minutes by construction and was therefore also how long a worker whose
@@ -72,7 +73,9 @@ Every rule below has already been a bug.
     "The framing already lets a receiver step over what it does not know" is the
     tempting reason not to bump, and it is a fact about REQUESTS.
   - **Which verbs may be answered with it is a column of `OpTable`**, and
-    `ProgressIsCompileOnly()` is `static_assert`ed. Every other verb on this wire is
+    `ProgressVerbsAre({Compile, Admit})` is `static_assert`ed (`Admit` joined at version 16,
+    #1728: a queue waits as long as it is long, and a pulse is what tells that from a dead leader).
+    Every other verb on this wire is
     answered from a table in microseconds, so a pulse on one would be a frame no client
     could observe and a second reply shape every reader would have to handle for
     nothing -- and a mask widened by hand would give it to them by omission.
@@ -853,7 +856,9 @@ Every rule below has already been a bug.
   link is torn down, fleet-wide, for a change nobody asked for. Same rule as SIGPIPE
   above, reached from the option side rather than the signal side: per socket, never
   process-wide. `DialOptions::keepAlive` says so at the call, `Detail::ArmKeepAlive`
-  applies it, and `SocketAddress_test` asserts the socket is **still not probing**
+  applies it, and an ACCEPTED socket has the second door: `ISocket::armKeepAlive`, per socket,
+  called on the loop thread by the server once it decides the connection is long-lived (#1736);
+  `SocketAddress_test` asserts the socket is **still not probing**
   after `ApplyHotSocketOptions` — the negative half, which is the assertion that
   fails when somebody later folds the two together for tidiness
   ([#247](https://github.com/LASTRADA-Software/pace/issues/247)). Four things

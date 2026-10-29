@@ -510,6 +510,22 @@ class WorkerRegistry
     [[nodiscard]] std::expected<WorkerInfo, PickError> Pick(std::string_view fingerprint,
                                                             std::span<std::string_view const> excluded = {});
 
+    /// The workers that could take a job of @p fingerprint right now, best first: live, an exact
+    /// toolchain match, not excluded, and a slot free by the same `FreeSlots` test `Pick` applies.
+    ///
+    /// What the admission queue places against (#1728). Unlike `Pick` it stamps nothing: a queue
+    /// asks this on every pass and only the grant it makes is a choice, so recording a pick here
+    /// would stamp every candidate of every pass.
+    /// @param fingerprint The toolchain; matched byte for byte.
+    /// @param excluded Endpoints the client could not reach.
+    /// @return Every such worker, most free slots first.
+    [[nodiscard]] std::vector<WorkerInfo> Candidates(std::string_view fingerprint,
+                                                     std::span<std::string const> excluded = {}) const;
+
+    /// @param workerId A worker id.
+    /// @return That worker's entry when it is registered and live, else nothing.
+    [[nodiscard]] std::optional<WorkerInfo> Find(std::string_view workerId) const;
+
     /// Note that a job has been dispatched to a worker.
     ///
     /// Moves every entry sharing that worker's endpoint, because a job occupies the

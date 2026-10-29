@@ -377,8 +377,9 @@ std::size_t DialAndAnnounce(SchedulerLink& link,
             // round.
             auto const unreachable = link.Target();
             auto const next = link.Lost();
-            auto const said = reachability.Failed(SchedulerOutcome::Unreachable,
-                                                  SchedulerFailure { .endpoint = unreachable, .next = next });
+            auto const said =
+                reachability.Failed(SchedulerOutcome::Unreachable,
+                                    SchedulerFailure { .endpoint = unreachable, .subject = proof.subject, .next = next });
             logger.Log(said.level, said.message);
             // Another configured endpoint is tried now rather than a heartbeat interval
             // from now: this machine is out of the fleet for as long as it takes, and a
@@ -389,7 +390,7 @@ std::size_t DialAndAnnounce(SchedulerLink& link,
                 return 0;
             continue;
         }
-        if (auto const back = reachability.Succeeded(AnnounceStage::Dial, link.Target()); back.has_value())
+        if (auto const back = reachability.Succeeded(AnnounceStage::Dial, link.Target(), proof.subject); back.has_value())
             logger.Log(back->level, back->message);
 
         // Proved before anything is said, and sealed from then on (#178). A connection the proof did
@@ -404,14 +405,16 @@ std::size_t DialAndAnnounce(SchedulerLink& link,
             auto const next = link.Lost();
             auto const said = reachability.Failed(
                 SchedulerOutcomeOfProof(proved.error().result),
-                SchedulerFailure { .endpoint = unproved, .reason = proved.error().reason, .next = next });
+                SchedulerFailure {
+                    .endpoint = unproved, .subject = proof.subject, .reason = proved.error().reason, .next = next });
             logger.Log(said.level, said.message);
             if (!next.has_value())
                 return 0;
             continue;
         }
         if (proof.prover != nullptr)
-            if (auto const back = reachability.Succeeded(AnnounceStage::Proof, link.Target()); back.has_value())
+            if (auto const back = reachability.Succeeded(AnnounceStage::Proof, link.Target(), proof.subject);
+                back.has_value())
                 logger.Log(back->level, back->message);
         client = *std::move(proved);
 

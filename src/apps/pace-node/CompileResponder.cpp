@@ -42,8 +42,10 @@ namespace
     {
       public:
         /// @param capacity What to give the slot back to.
-        explicit SlotHeld(CompileCapacity& capacity) noexcept:
-            _capacity { &capacity }
+        /// @param chargedBytes What the take recorded for this compile; returned with the slot.
+        SlotHeld(CompileCapacity& capacity, std::uint64_t chargedBytes) noexcept:
+            _capacity { &capacity },
+            _chargedBytes { chargedBytes }
         {
         }
 
@@ -54,12 +56,32 @@ namespace
 
         ~SlotHeld() override
         {
-            _capacity->ReleaseSlot();
+            _capacity->ReleaseSlot(_chargedBytes);
         }
 
       private:
         CompileCapacity* _capacity;
+        std::uint64_t _chargedBytes;
     };
+
+    /// What the leader's queue charged the compile in @p frame, as the request states it.
+    ///
+    /// Zero for every frame that states none -- an older launcher, one that failed open, a frame that
+    /// does not decode (the protocol refuses that on its own terms later). **Zero here is "nothing
+    /// stated", never "free"**: the figure feeds the node's `MachineBudget` report and admits and refuses
+    /// nothing, so the worst a missing one does is under-report held bytes, which the leader covers by
+    /// charging max(its own figure, this one).
+    /// @param frame A whole request, header included.
+    /// @param payloadLength The header's declared payload length.
+    /// @return The stated charge, or zero.
+    [[nodiscard]] std::uint64_t ChargedBytesOf(std::span<std::byte const> frame, std::size_t payloadLength) noexcept
+    {
+        // Subtracting, for `WorkerProtocol::DeclaredRequestFootprint`'s reason: the sum can wrap.
+        if (frame.size() < Wire::RequestHeaderSize || frame.size() - Wire::RequestHeaderSize < payloadLength)
+            return 0;
+        auto const fields = Wire::DecodeCompilePayload(frame.subspan(Wire::RequestHeaderSize, payloadLength));
+        return fields.has_value() ? fields->chargedBytes.value_or(0) : 0;
+    }
 
     /// One row per `SlotAdmission`: what the client is told and which counter rises.
     struct AdmissionRow
@@ -254,10 +276,16 @@ core::async::Task<FrameReply> CompileResponder::Answer(std::span<std::byte const
     // The cap is enforced here as well as advertised, and a job over it is REFUSED
     // rather than queued: refusing costs the client one local compile, while queueing
     // hides the overload from the scheduler that is trying to route around it.
-    if (auto const& admitted = AdmissionTable[static_cast<std::size_t>(_capacity.TryTakeSlot())];
+    //
+    // The leader's charge rides the take, so the worker reports what it holds in the same breath as
+    // the slot it holds it in (`CompileCapacity::Held`).
+    auto const charged = header.has_value() && header->opRaw == static_cast<std::uint8_t>(Wire::Op::Compile)
+                             ? ChargedBytesOf(frame, static_cast<std::size_t>(header->payloadLength))
+                             : std::uint64_t { 0 };
+    if (auto const& admitted = AdmissionTable[static_cast<std::size_t>(_capacity.TryTakeSlot(charged))];
         admitted.refusal.has_value())
         co_return Cc::Refuse(_metrics, *admitted.refusal, admitted.detail);
-    auto slot = std::make_unique<SlotHeld>(_capacity);
+    auto slot = std::make_unique<SlotHeld>(_capacity, charged);
 
     // Counted at the socket, which is what "bytes received" means to an operator sizing
     // a link: the payload as it arrived, not what it decompressed to.

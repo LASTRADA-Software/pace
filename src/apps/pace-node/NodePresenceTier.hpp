@@ -4,6 +4,7 @@
 #include "CacheTier.hpp"
 #include "EndpointDialer.hpp"
 #include "EndpointResolver.hpp"
+#include "MachineBudget.hpp"
 #include "NodeAnnounce.hpp"
 #include "NodeConditions.hpp"
 #include "NodeConfig.hpp"
@@ -64,6 +65,11 @@ struct NodePresenceParts
     /// Re-derives `announced` when due, asked at the top of every round so a network change this
     /// loop was woken for is published before the round reads it; null where nothing publishes.
     IEndpointRefresh* endpoints {};
+    /// What compiles on this machine hold, summed over every holder (#1728): the worker's running
+    /// compiles and the local leases this node grants. Read per round for the machine's budget report.
+    IHeldCharges const& held;
+    /// The peaks this node's worker measured and has not reported; drained into the report.
+    MeasuredPeaks& peaks;
 };
 
 /// Per-call send/recv ceiling on the presence loop's connection to a scheduler: the ceiling of
@@ -91,6 +97,9 @@ struct PresenceRound
     /// How loudly a scheduler that does not answer, or refuses, is said; the process's one.
     SchedulerReachability& reachability;
     Cluster::IAskedJoinsSource const* askedJoins; ///< The fleets it once asked; null where none are kept.
+    /// Set to whether the round REACHED a scheduler -- dialled, proved and was answered, a refusal
+    /// included -- rather than whether one recorded this machine. Null where the caller does not ask.
+    bool* reachedScheduler {};
 };
 
 /// Announce this machine once, and hand over the history it owes.
@@ -116,6 +125,8 @@ struct PresenceMessage
     /// How loudly a scheduler that does not answer, or refuses, is said; the process's one.
     SchedulerReachability& reachability;
     std::span<CompileCacheWire::JoinMemoFields const> joinMemos; ///< The fleets it once asked, as the wire carries them.
+    /// As `PresenceRound::reachedScheduler`.
+    bool* reachedScheduler {};
 };
 
 /// Make one presence announcement: dial, follow a redirect, and fall back.
@@ -242,9 +253,9 @@ class NodePresence
     /// @return True when the loop should end.
     [[nodiscard]] bool WaitOutInterval(std::stop_token const& stop);
 
-    // No `_cfg` and no `_capacity`: the scheduler list is read once in `Start` and the
-    // capacity is converted once into `_capacityWire` below, so keeping either would be a
-    // member nothing reads -- and a second route to a fact that already has one.
+    // The announcement keeps no `_cfg` and no `_capacity` of its own: the scheduler list is read
+    // once in `Start` and its capacity is converted once into `_capacityWire` below. The two kept
+    // here are for the machine's compile BUDGET (#1728), which is a different record, read per round.
     Cc::IAdvertisedEndpointSource const& _announced;
     CacheTier const* _cacheTier;
     IMetricsSink const& _metrics;
@@ -254,7 +265,11 @@ class NodePresence
     NodeProofClient const* _prover;
     SchedulerReachability& _reachability;
     Cluster::IAskedJoinsSource const* _askedJoins;
-    IEndpointRefresh* _endpoints; ///< Refreshed at the top of each round; null for none.
+    IEndpointRefresh* _endpoints;               ///< Refreshed at the top of each round; null for none.
+    NodeConfig const& _cfg;                     ///< The configuration, for the machine budget's flags.
+    Distributed::NodeCapacity const& _capacity; ///< What this machine is, for the machine budget.
+    IHeldCharges const& _held;                  ///< What compiles on it hold; read per round.
+    MeasuredPeaks& _peaks;                      ///< Measured and unreported; drained per round.
 
     /// This machine's capacity record, converted once: it is compiled-in and configured
     /// state, and nothing about it changes between rounds.

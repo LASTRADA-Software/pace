@@ -11,8 +11,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <string>
@@ -24,6 +26,7 @@
 
     #include <windows.h>
 #else
+    #include <sys/resource.h>
     #include <sys/wait.h>
 
     #include <cerrno>
@@ -114,6 +117,61 @@ namespace
         while (ReadFile(readEnd, buf.data(), static_cast<DWORD>(buf.size()), &n, nullptr) && n > 0)
             dst.append(buf.data(), n);
     }
+
+    /// A job object the spawned compile is assigned to, so the peak memory of the process and of
+    /// everything it starts can be read back after it exits.
+    ///
+    /// Deliberately WITHOUT `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`: closing the handle must never kill a
+    /// compiler that is still running, so a failure here costs the measurement and nothing else.
+    class JobHandle
+    {
+      public:
+        JobHandle():
+            _job(CreateJobObjectW(nullptr, nullptr))
+        {
+        }
+
+        ~JobHandle()
+        {
+            if (_job != nullptr)
+                CloseHandle(_job);
+        }
+
+        JobHandle(JobHandle const&) = delete;
+        JobHandle& operator=(JobHandle const&) = delete;
+        JobHandle(JobHandle&&) = delete;
+        JobHandle& operator=(JobHandle&&) = delete;
+
+        /// Whether a job object exists.
+        [[nodiscard]] bool Valid() const noexcept
+        {
+            return _job != nullptr;
+        }
+
+        /// Put `process` in the job.
+        /// @param process A process handle with `PROCESS_SET_QUOTA | PROCESS_TERMINATE` access.
+        /// @return Whether the assignment succeeded.
+        [[nodiscard]] bool Assign(HANDLE process) const noexcept
+        {
+            return _job != nullptr && AssignProcessToJobObject(_job, process) != FALSE;
+        }
+
+        /// The peak commit charge of any ONE process of the job (`PeakProcessMemoryUsed`): the most
+        /// private memory a single process had committed at once. Not a working set, and not the job's
+        /// total: a driver that runs its compiler as a child reports the larger of the two processes.
+        /// @return Bytes, or nullopt when the system would not say.
+        [[nodiscard]] std::optional<std::uint64_t> PeakProcessMemory() const noexcept
+        {
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION info {};
+            if (_job == nullptr
+                || !QueryInformationJobObject(_job, JobObjectExtendedLimitInformation, &info, sizeof(info), nullptr))
+                return std::nullopt;
+            return static_cast<std::uint64_t>(info.PeakProcessMemoryUsed);
+        }
+
+      private:
+        HANDLE _job;
+    };
 
     /// A `CreateProcess` attribute list carrying the handles a child may inherit.
     ///
@@ -422,7 +480,7 @@ namespace
                                            nullptr,
                                            nullptr,
                                            TRUE,
-                                           EXTENDED_STARTUPINFO_PRESENT,
+                                           EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED,
                                            childEnvironment,
                                            nullptr,
                                            &si.StartupInfo,
@@ -438,6 +496,13 @@ namespace
                     CloseHandle(errR);
                 return result;
             }
+
+            // The child was created suspended so it joins the job BEFORE it can start a descendant of
+            // its own. A job that could not be made or joined only costs the measurement: the spawn
+            // proceeds and `peakMemoryBytes` stays disengaged.
+            JobHandle const job;
+            bool const measured = job.Assign(pi.hProcess);
+            ResumeThread(pi.hThread);
 
             // Drain both pipes CONCURRENTLY. Sequential draining deadlocks (and then
             // captures a truncated, run-varying amount) whenever the not-yet-drained
@@ -459,6 +524,8 @@ namespace
             DWORD exit = 0;
             GetExitCodeProcess(pi.hProcess, &exit);
             result.exitCode = static_cast<int>(exit);
+            if (measured)
+                result.peakMemoryBytes = job.PeakProcessMemory();
             CloseHandle(outR);
             if (errR != nullptr)
                 CloseHandle(errR);
@@ -469,6 +536,29 @@ namespace
     };
 
 #else
+
+    /// What one unit of `rusage::ru_maxrss` is, in bytes: kibibytes on Linux and the BSDs, bytes on
+    /// macOS. One row per OS rather than an `#ifdef` at the call.
+    inline constexpr std::uint64_t MaxRssUnitBytes =
+    #if defined(__APPLE__)
+        1;
+    #else
+        1024;
+    #endif
+
+    /// The largest resident set a reaped child tree reached, in `rusage`'s own unit.
+    ///
+    /// glibc declares `ru_maxrss` inside an anonymous union, which a member access cannot name without
+    /// tripping `cppcoreguidelines-pro-type-union-access`; the bytes are read at the member's offset instead.
+    /// @param usage What `wait4` filled in.
+    /// @return `ru_maxrss`.
+    [[nodiscard]] long MaxRssOf(::rusage const& usage) noexcept
+    {
+        long value = 0;
+        auto const bytes = std::as_bytes(std::span { &usage, 1 });
+        std::memcpy(&value, bytes.subspan(offsetof(::rusage, ru_maxrss), sizeof(value)).data(), sizeof(value));
+        return value;
+    }
 
     /// POSIX process runner: posix_spawnp with two pipes, drained with poll().
     class PosixProcessRunner final: public IProcessRunner
@@ -732,9 +822,14 @@ namespace
 
             DrainBoth(outRead, errRead, result);
 
+            // wait4 rather than waitpid: the same reap, which also hands back the resource usage of
+            // the child and every descendant it waited for. `ru_maxrss` is the LARGEST of them, not a sum.
             int status = 0;
-            while (::waitpid(pid, &status, 0) < 0 && errno == EINTR)
+            ::rusage usage {};
+            while (::wait4(pid, &status, 0, &usage) < 0 && errno == EINTR)
                 continue;
+            if (auto const maxRss = MaxRssOf(usage); maxRss > 0)
+                result.peakMemoryBytes = static_cast<std::uint64_t>(maxRss) * MaxRssUnitBytes;
             if (WIFEXITED(status))
                 result.exitCode = WEXITSTATUS(status);
             else if (WIFSIGNALED(status))

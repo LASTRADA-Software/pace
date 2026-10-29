@@ -44,6 +44,7 @@
 #include <Pace/Metrics/IMetricsSink.hpp>
 #include <Pace/Platform/LocalAddresses.hpp>
 #include <Pace/Platform/LocalAddressesTestUtils.hpp>
+#include <Pace/Protocol/AdmitKeepAlive.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
 #include <Pace/Protocol/SealedFrameSocket.hpp>
 #include <Pace/Transport/ListenQueue.hpp>
@@ -91,6 +92,7 @@
 #include <core/net/ISocket.hpp>
 #include <core/net/Sockets.hpp>
 #include <core/net/testing/FailingListener.hpp>
+#include <core/net/testing/InMemorySocket.hpp>
 #include <core/platform/Clock.hpp>
 #include <tests/AbortiveClient.hpp>
 #include <tests/BoundedWait.hpp>
@@ -4716,8 +4718,8 @@ struct TicketedNode
     Testing::ScratchDirectory const scratch { "pace-ticketed-node" };
     Cc::CompileJobRunner jobs { compiler, scratch.Path(), { { "gcc-13", "g++" } }, Cc::ToolchainSurvey::Completed() };
     Cc::WorkerProtocol worker {
-        jobs,          Cc::UncheckedLeaseValidator(), { Wire::IdentityCodec }, &Testing::TestWorkerKey(),
-        fleet.metrics, Cc::IgnoreJobRefusals()
+        jobs,          Cc::UncheckedLeaseValidator(), { Wire::IdentityCodec },    &Testing::TestWorkerKey(),
+        fleet.metrics, Cc::IgnoreJobRefusals(),       Cc::IgnoreJobMeasurements()
     };
     core::async::ThreadPoolExecutor pool { 1 };
     CompileCapacity capacity { 1, WorkerMaxRequestBytes, std::chrono::seconds { 5 }, fleet.logger };
@@ -5835,4 +5837,147 @@ TEST_CASE("The cluster-status verb reads a live node's cluster over its node por
     REQUIRE(rendered.has_value());
     CHECK(Unwrap(rendered).contains("n1"));
     CHECK(Unwrap(rendered).contains("10.0.0.1:6675"));
+}
+
+namespace
+{
+/// A hold that asks for a window of its own, for `IdleWindowFor`.
+class WindowedHold final: public IConnectionHold
+{
+  public:
+    explicit WindowedHold(std::chrono::milliseconds window) noexcept:
+        _window { window }
+    {
+    }
+
+    [[nodiscard]] bool SurvivesFrame(std::uint8_t /*opRaw*/) const noexcept override
+    {
+        return true;
+    }
+
+    [[nodiscard]] std::chrono::milliseconds IdleWindow() const noexcept override
+    {
+        return _window;
+    }
+
+    [[nodiscard]] std::optional<core::net::KeepAliveSettings> KeepAlive() const noexcept override
+    {
+        return std::nullopt;
+    }
+
+  private:
+    std::chrono::milliseconds _window;
+};
+
+/// A hold that asks for the kernel's keepalive, as an admission grant does.
+class ProbedHold final: public IConnectionHold
+{
+  public:
+    [[nodiscard]] bool SurvivesFrame(std::uint8_t /*opRaw*/) const noexcept override
+    {
+        return true;
+    }
+
+    [[nodiscard]] std::chrono::milliseconds IdleWindow() const noexcept override
+    {
+        return Wire::MaxCompileLeaseLifetime;
+    }
+
+    [[nodiscard]] std::optional<core::net::KeepAliveSettings> KeepAlive() const noexcept override
+    {
+        return AdmitKeepAliveProbe;
+    }
+};
+} // namespace
+
+TEST_CASE("The idle window before the next request is the header's, or the hold's", "[frame][admission]")
+{
+    // Both arms, because a constant answers either one alone: a connection holding nothing keeps the
+    // slow-loris property, and one holding a granted compile is not swept at the header's five seconds
+    // while the compiler runs (#1728).
+    ConnectionScope scope;
+    CHECK(FrameServer::IdleWindowFor(scope) == FrameServer::HeaderTimeout);
+
+    scope.Hold(std::make_unique<WindowedHold>(Wire::MaxCompileLeaseLifetime));
+    CHECK(FrameServer::IdleWindowFor(scope) == Wire::MaxCompileLeaseLifetime);
+
+    // The HOLD decides, not the fact of holding: a ticket put back in the queue asks for a short one.
+    scope.Hold(std::make_unique<WindowedHold>(123ms));
+    CHECK(FrameServer::IdleWindowFor(scope) == 123ms);
+
+    scope.End();
+    CHECK(FrameServer::IdleWindowFor(scope) == FrameServer::HeaderTimeout);
+}
+
+TEST_CASE("A retired watch is silent only for the cancellation its retirement produced", "[frame][admission]")
+{
+    using Outcome = FrameServer::WatchOutcome;
+    auto const failed = [](core::net::NetErrorCode code) {
+        return core::net::IoResult { std::unexpected {
+            core::net::NetError { .code = code, .systemCode = 0, .context = {} } } };
+    };
+
+    // The retirement's own `Cancelled` is nobody leaving.
+    CHECK(FrameServer::ClassifyWatch(failed(core::net::NetErrorCode::Cancelled), true) == Outcome::Retired);
+
+    // A reset that resolved the read before the retirement found it is the departure it always was --
+    // the case a retirement-only test read as silence, and the scope was never told.
+    CHECK(FrameServer::ClassifyWatch(failed(core::net::NetErrorCode::ConnReset), true) == Outcome::Abortive);
+
+    // Not retired, ANY error is abortive -- a `Cancelled` too, which is a close under the watch.
+    CHECK(FrameServer::ClassifyWatch(failed(core::net::NetErrorCode::Cancelled), false) == Outcome::Abortive);
+    CHECK(FrameServer::ClassifyWatch(failed(core::net::NetErrorCode::ConnReset), false) == Outcome::Abortive);
+
+    // A value is never the retirement's, retired or not.
+    for (auto const retired: { false, true })
+    {
+        CHECK(FrameServer::ClassifyWatch(core::net::IoResult { 0U }, retired) == Outcome::Graceful);
+        CHECK(FrameServer::ClassifyWatch(core::net::IoResult { 7U }, retired) == Outcome::Pipelined);
+    }
+}
+
+TEST_CASE("Only a connection that holds something asking for keepalive is armed, and only once",
+          "[frame][admission][keepalive]")
+{
+    // #1736: a connection that holds nothing is a short one, already bounded by its pulse, and arming it
+    // would add probes to connections that end first -- so the arm is asked of the HOLD, never made for
+    // every connection that has been written to.
+    auto pair = core::net::testing::InMemorySocketPair::create();
+    auto const* const raw = pair.server.get();
+    NullLogger logger;
+    ConnectionScope scope;
+
+    FrameServer::ArmHeldKeepAlive(scope, *pair.server, logger, "node");
+    CHECK(raw->keepAliveRequests().empty()); // Nothing held.
+
+    scope.Hold(std::make_unique<WindowedHold>(123ms));
+    FrameServer::ArmHeldKeepAlive(scope, *pair.server, logger, "node");
+    CHECK(raw->keepAliveRequests().empty()); // A hold that asks for none.
+
+    scope.Hold(std::make_unique<ProbedHold>());
+    FrameServer::ArmHeldKeepAlive(scope, *pair.server, logger, "node");
+    FrameServer::ArmHeldKeepAlive(scope, *pair.server, logger, "node");
+    REQUIRE(raw->keepAliveRequests().size() == 1); // Once per connection.
+    CHECK(raw->keepAliveRequests().front().idle == AdmitKeepAliveProbe.idle);
+    CHECK(raw->keepAliveRequests().front().interval == AdmitKeepAliveProbe.interval);
+    CHECK(raw->keepAliveRequests().front().count == AdmitKeepAliveProbe.count);
+}
+
+TEST_CASE("A refusal to arm keepalive is said once and does not end the connection", "[frame][admission][keepalive]")
+{
+    // The interface default answers `Unsupported`. The request WAS answered and the lease sweep is still
+    // the backstop, so it is a warning and the hold stays.
+    Testing::ScriptedSocket socket { std::vector<std::byte> {} };
+    CapturingLogger logger;
+    ConnectionScope scope;
+    scope.Hold(std::make_unique<ProbedHold>());
+
+    FrameServer::ArmHeldKeepAlive(scope, socket, logger, "node");
+    FrameServer::ArmHeldKeepAlive(scope, socket, logger, "node");
+
+    auto const records = logger.Snapshot();
+    REQUIRE(records.size() == 1);
+    CHECK(records.front().level == LogLevel::Warn);
+    CHECK(records.front().message.contains("could not arm keepalive"));
+    CHECK(scope.Holds());
 }

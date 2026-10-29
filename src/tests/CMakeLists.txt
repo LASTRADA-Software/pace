@@ -8111,7 +8111,7 @@ if(TARGET PaceTest)
         # the assertion that could not have failed while this ticket was open: 69
         # cases ran, and 69 is non-zero.
         #
-        # 261 = 190 (CompileCacheWire) + 26 (RaftWire) + 17 (ClusterState)
+        # 275 = 204 (CompileCacheWire) + 26 (RaftWire) + 17 (ClusterState)
         #     + 23 (DiscoveryWire) + 1 (RaftTypes) + 1 (SchedulerService)
         #     + 1 (MachineTicket) + 1 (MachineStanding) + 1 (IdentityKeyLabel).
         # The first four files are wholly wire subject and are the scan's table; the
@@ -8128,7 +8128,7 @@ if(TARGET PaceTest)
         # anything matches nothing. No `SKIP_RETURN_CODE` here: every selected case
         # must PASS for the count to be the count, so a run that skipped is a failure
         # of this check, never a state to report.
-        PASS_REGULAR_EXPRESSION "All tests passed [(][0-9]+ assertions in 261 test cases[)]"
+        PASS_REGULAR_EXPRESSION "All tests passed [(][0-9]+ assertions in 275 test cases[)]"
         LABELS "hygiene"
         TIMEOUT 300
     )

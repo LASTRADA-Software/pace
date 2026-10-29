@@ -669,7 +669,7 @@ TEST_CASE("A version-14 AUTH in its own two-field grammar is refused by number, 
     REQUIRE(error.present);
     CHECK(error.code == Wire::ErrorCode::UnsupportedVersion);
     CHECK(error.code != Wire::ErrorCode::MalformedFrame);
-    CHECK(error.message == "unsupported wire version 14; this server speaks 15..15");
+    CHECK(error.message == "unsupported wire version 14; this server speaks 16..16");
 }
 
 TEST_CASE("A wire version change mid-connection is rejected", "[compile-cache][handler][version]")
@@ -2044,5 +2044,40 @@ TEST_CASE("A CACHE-DROP dirties a WATCH on the key and publishes no keyspace eve
         REQUIRE(ExchangeOn(engine, Wire::EncodeCacheDrop("watched")).front().status == Wire::Status::Ok);
         CHECK_FALSE(engine.Get("watched")->found);
         CHECK_FALSE(handle->IsDirty());
+    }
+}
+
+TEST_CASE("The daemon refuses the admission verbs by name and sends them to a compile node",
+          "[compile-cache][handler][admission]")
+{
+    // #1728. Not a dropped frame -- a missing `switch` arm produces one and the generic walk
+    // above only asserts the refusal is not `UnknownOpcode` -- and WHICH refusal: a client told
+    // `UnknownOpcode` concludes this daemon is too old and steps over a refusal it should follow;
+    // told `NoCluster` it goes looking for consensus these verbs do not ask about.
+    auto const excluded = std::array<std::string_view, 0> {};
+    std::vector<std::vector<std::byte>> const frames {
+        Wire::EncodeAdmit(Wire::AdmitRequest { .kind = Wire::AdmitKind::Dispatchable,
+                                               .fingerprint = "fp",
+                                               .cacheKey = "k",
+                                               .sourcePath = {},
+                                               .treeLabel = {},
+                                               .storable = true,
+                                               .acceptedCodecs = {},
+                                               .excluded = excluded,
+                                               .toolchainLabel = {} }),
+        Wire::EncodeSettle(Wire::SettleRequest { .outcome = Wire::SettleOutcome::Stored, .peakBytes = std::nullopt }),
+        Wire::EncodeMachineBudget(
+            Wire::MachineBudgetReport { .memoryBudgetBytes = 1, .slots = 1, .heldSlots = 0, .heldBytes = 0, .peaks = {} }),
+    };
+    for (auto const& frame: frames)
+    {
+        CcFixture fix;
+        auto const reply = SoleReply(Exchange(fix, frame));
+        REQUIRE(reply.present);
+        auto const error = ErrorOf(reply);
+        REQUIRE(error.present);
+        INFO("op byte " << static_cast<unsigned>(frame[2]));
+        CHECK(error.code == Wire::ErrorCode::DispatchNotPermitted);
+        CHECK(error.message.contains("pace-node"));
     }
 }

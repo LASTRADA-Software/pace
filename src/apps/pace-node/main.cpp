@@ -10,6 +10,8 @@
 /// rather than an accident of layering.
 ///
 #include "AdminEndpoint.hpp"
+#include "AdmissionResponder.hpp"
+#include "AdmitForwarder.hpp"
 #include "CacheTier.hpp"
 #include "ClusterAdminCli.hpp"
 #include "CompileCapacity.hpp"
@@ -29,6 +31,7 @@
 #include "LiveNodeConfig.hpp"
 #include "LiveStatsResponder.hpp"
 #include "LiveStatsSources.hpp"
+#include "MachineBudget.hpp"
 #include "NodeActivation.hpp"
 #include "NodeAnnounce.hpp"
 #include "NodeAudience.hpp"
@@ -124,6 +127,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -629,6 +633,107 @@ struct RouteParts
     Node::RouteHostCell& cell; ///< The last usable route host.
 };
 
+/// A machine as the scrape names it: its key in hex (what the roster and `pacectl` name it by).
+/// @param machine The machine's key bytes.
+/// @return Its hex spelling.
+[[nodiscard]] std::string MachineLabel(Distributed::MachineId const& machine)
+{
+    std::string hex;
+    for (auto const byte: machine)
+        hex += std::format("{:02x}", static_cast<unsigned>(static_cast<unsigned char>(byte)));
+    return hex;
+}
+
+/// The leader's admission queue as the scrape reads it: its depth, the bytes charged per machine, and
+/// each reporting machine's budget beside what the queue counts in use against it.
+/// @param service The scheduler service whose queue is sampled.
+/// @return The gauges at this instant.
+[[nodiscard]] AdmissionGauges SampleAdmission(Distributed::SchedulerService const& service)
+{
+    auto const snapshot = service.AdmissionSnapshotNow();
+    auto gauges = AdmissionGauges { .queueDepth = snapshot.depth, .chargedBytes = {}, .budgets = {} };
+    for (auto const& [machine, bytes]: snapshot.chargedBytes)
+        gauges.chargedBytes.emplace_back(MachineLabel(machine), bytes);
+    for (auto const& machine: snapshot.budgets)
+        gauges.budgets.push_back(AdmissionGauges::MachineBudget { .machine = MachineLabel(machine.machine),
+                                                                  .budgetBytes = machine.budgetBytes.value_or(0),
+                                                                  .inUseBytes = machine.inUseBytes });
+    return gauges;
+}
+
+/// The relay a launcher's `ADMIT` reaches on a node that does not lead (#1728): the connection it dials
+/// to the leader and the forwarder that speaks over it. Two members of one object so that the pair is
+/// declared where the surface that routes to it can be destroyed first, and the forwarder -- which
+/// borrows the dialer -- is destroyed before it.
+struct AdmissionRelay
+{
+    std::optional<Node::ProvenSchedulerDialer> dialer;
+    std::optional<Node::AdmitForwarder> forwarder;
+};
+
+/// What `StartAdmissionRelay` reads, none of it owned.
+struct AdmissionRelayParts
+{
+    NodeConfig const& cfg;                                      ///< The configuration the node runs under.
+    std::optional<Node::NodeProofClient> const& prover;         ///< The identity prover; engaged on every start.
+    Node::NodeIoLoop& nodeIo;                                   ///< The loop the relay dials and waits on.
+    Node::KnownSchedulingLeader const& leader;                  ///< Where the leader is, as last learned.
+    IMetricsSink& metrics;                                      ///< Where the relay counts.
+    Node::HeldChargeRegistry& held;                             ///< The machine's ledger of held charges.
+    Cc::IAdvertisedEndpointSource const* announced;             ///< This node's own `0xFC` endpoint, never dialled.
+    std::optional<Node::SchedulingRedirectResponder>& redirect; ///< The redirect surface, when this node has one.
+    Node::SchedulerTier* tier;                                  ///< The scheduler tier, when this node runs one.
+};
+
+/// Build the admission relay and hand it to every surface that routes to it.
+///
+/// The queue lives on the leader alone, so whenever this node does not lead -- a learner always, a voter
+/// while another leads (Ruling 10) -- the relay carries `ADMIT` and `SETTLE` there over a connection that
+/// proves THIS node's identity key, instead of sending the launcher away with `NotLeader`. Built under
+/// `ForwardsAdmission`, the predicate the `AdmissionForwarding` surface is served under, so the counters a
+/// scrape reads present are the ones a relay can move.
+/// @param relay Receives the dialer and the forwarder.
+/// @param parts What the relay reads.
+void StartAdmissionRelay(AdmissionRelay& relay, AdmissionRelayParts const& parts)
+{
+    if (!Node::ForwardsAdmission(parts.cfg))
+        return;
+    // Every node adopts or mints its identity key before any body starts, and the start is REFUSED
+    // without one (`AdoptNodeKey`, the identity-key step), so `prover` is always engaged here:
+    // an invariant, not a configuration this body could meet. A change that broke it ends the start on a
+    // named exception rather than serving a surface with nothing to relay through, and it adds no exit of
+    // its own beside the refusal that already owns the case.
+    if (!parts.prover.has_value())
+        throw std::logic_error { "forwarding admission needs the identity prover, which every start builds" };
+    relay.dialer.emplace(*parts.prover, parts.nodeIo.Connector(), parts.nodeIo.Reactor());
+    relay.forwarder.emplace(
+        parts.leader, *relay.dialer, parts.nodeIo.Reactor(), parts.metrics, &parts.held, parts.announced);
+    if (parts.redirect.has_value())
+        parts.redirect->ForwardAdmissionWith(*relay.forwarder);
+    if (parts.tier != nullptr)
+        parts.tier->ForwardAdmissionWith(*relay.forwarder);
+}
+
+/// Serve the leader's admission queue (#1728) from the scheduler tier, when this node runs one.
+/// @param responder Receives the queue's responder.
+/// @param tier The scheduler tier; null on a node that schedules nothing, which then has no queue.
+/// @param membership Folds a connection into the caller context the gate asks about.
+/// @param loop The reactor requests park on.
+/// @param metrics Where the admission counters are written.
+/// @param held Where a loopback-granted local lease is recorded for the machine's own report.
+void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
+                         Node::SchedulerTier* tier,
+                         Distributed::IMembershipOracle const& membership,
+                         core::net::EventLoop& loop,
+                         IMetricsSink& metrics,
+                         Node::HeldChargeRegistry& held)
+{
+    if (tier == nullptr)
+        return;
+    responder.emplace(tier->ServiceForSurfaces(), membership, loop, metrics, &held);
+    tier->ServeAdmissionWith(*responder);
+}
+
 /// Everything the node runs, under whichever host runs it.
 /// @param cfg The configuration the node started with.
 /// @param identityKey The machine's identity key, or nothing.
@@ -1044,6 +1149,17 @@ struct RouteParts
     //
     // Its heartbeat dials through `workerDialer`, declared above it so it outlives the tier.
     Node::BlockingEndpointDialer workerDialer { Node::HeartbeatIoTimeout };
+    // The machine's compile ledger (#1728), declared above the worker tier and the presence loop that
+    // both reach it, so it outlives them: the peaks this worker measures, and the charges held for
+    // compiles no `CompileCapacity` counts (the leases this node grants). Reported every presence round.
+    Node::MeasuredPeaks measuredPeaks;
+    Node::HeldChargeRegistry leaseCharges;
+    // The leader's admission queue (#1728): parks `ADMIT` on the node's reactor and holds each grant on
+    // its connection. Declared after the scheduler tier it serves and the ledger it records local leases
+    // in, so it is destroyed before both.
+    std::optional<Node::AdmissionResponder> admissionResponder;
+    StartAdmissionQueue(
+        admissionResponder, schedulerTier.get(), membership.Oracle(), nodeIo.Reactor(), metrics, leaseCharges);
     auto workerOrRefusal = Node::WorkerTier::Start(Node::WorkerTierParts { .cfg = cfg,
                                                                            .reloader = reloader,
                                                                            .capacity = capacity,
@@ -1064,7 +1180,8 @@ struct RouteParts
                                                                            .conditions = conditions,
                                                                            .hostEvents = hostEvents,
                                                                            .suspendWait = DefaultDrainWait(),
-                                                                           .schedulerDialer = workerDialer },
+                                                                           .schedulerDialer = workerDialer,
+                                                                           .measurements = measuredPeaks },
                                                    &Node::MakeSystemWorkerMachine);
     if (!workerOrRefusal.has_value())
     {
@@ -1356,6 +1473,25 @@ struct RouteParts
     std::optional<Node::SchedulingRedirectResponder> schedulingRedirect;
     if (Node::RedirectsScheduling(cfg))
         schedulingRedirect.emplace(membership.Oracle(), knownSchedulingLeader);
+    // And the door a launcher on this machine uses to reach the fleet's compile queue (#1728): the queue
+    // lives on the leader alone, so whenever this node does not lead -- a learner always, a voter while
+    // another leads (Ruling 10) -- it relays `ADMIT` and `SETTLE` there over a connection that proves
+    // THIS node's identity key, instead of sending the launcher away with `NotLeader`. Built under
+    // `ForwardsAdmission`, the predicate the `AdmissionForwarding` surface is served under, so the
+    // counters a scrape reads present are the ones a relay can move. Its own `0xFC` endpoint is never
+    // dialled (`announced`). Declared after the redirect and the queue and before the surface that routes
+    // to it, so it is destroyed after that surface closes its connections.
+    AdmissionRelay admissionRelay;
+    StartAdmissionRelay(admissionRelay,
+                        AdmissionRelayParts { .cfg = cfg,
+                                              .prover = prover,
+                                              .nodeIo = nodeIo,
+                                              .leader = knownSchedulingLeader,
+                                              .metrics = metrics,
+                                              .held = leaseCharges,
+                                              .announced = &announced,
+                                              .redirect = schedulingRedirect,
+                                              .tier = schedulerTier.get() });
 
     auto nodeSurfaceOrRefusal = Node::StartNodeSurfaceOrExplain(
         nodeIo,
@@ -1550,7 +1686,14 @@ struct RouteParts
             // scrape say NO cluster rather than a cluster of nobody. The tier is
             // declared above, so it outlives the provider: locals are destroyed in
             // reverse.
-            .consensus = Node::ConsensusScrapeSource(consensusTier.get()) },
+            .consensus = Node::ConsensusScrapeSource(consensusTier.get()),
+            // The leader's queue, sampled per scrape; empty on a node that schedules nothing. The
+            // machine is rendered as its key in hex, which is what the roster and `pacectl` name it by.
+            .admission = schedulerTier == nullptr
+                             ? std::function<AdmissionGauges()> {}
+                             : std::function<AdmissionGauges()> { [service = &schedulerTier->Service()] {
+                                   return SampleAdmission(*service);
+                               } } },
         startedAt);
 
     // Absent when this node runs no scheduler: there is then no registry to report,
@@ -1688,6 +1831,12 @@ struct RouteParts
     //
     // Its rounds dial through `presenceDialer`, declared just above it so it outlives the loop.
     Node::BlockingEndpointDialer presenceDialer { Node::PresenceIoTimeout };
+    // What compiles on this machine hold: the worker's running ones, when it runs a worker, and the
+    // leases this node grants. One sum for the report, whichever of them exist.
+    Node::CombinedHeldCharges const machineHeld {
+        workerTier != nullptr ? std::vector<Node::IHeldCharges const*> { &workerTier->Capacity(), &leaseCharges }
+                              : std::vector<Node::IHeldCharges const*> { &leaseCharges }
+    };
     auto const presence =
         Node::NodePresence::Start(Node::NodePresenceParts { .cfg = cfg,
                                                             .schedulers = appliedSchedulers,
@@ -1703,7 +1852,9 @@ struct RouteParts
                                                             .dialer = presenceDialer,
                                                             .hostEvents = hostEvents,
                                                             .askedJoins = Node::AskedJoinsOf(formationRuntime.get()),
-                                                            .endpoints = &endpointResolver });
+                                                            .endpoints = &endpointResolver,
+                                                            .held = machineHeld,
+                                                            .peaks = measuredPeaks });
 
     // Installed only once the listener is up and the heartbeat is running, so a
     // stop arriving during startup cannot close a listener that does not exist yet.

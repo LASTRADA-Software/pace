@@ -331,6 +331,17 @@ LeaseValidator UncheckedLeaseValidator()
     };
 }
 
+IJobMeasurementSink& IgnoreJobMeasurements() noexcept
+{
+    struct Ignoring final: IJobMeasurementSink
+    {
+        void OnPeak(Wire::EstimateKeyFields const& /*key*/, std::uint64_t /*peakBytes*/) override {}
+    };
+    // A function-local static, for `IgnoreJobRefusals`' reason.
+    static Ignoring ignoring;
+    return ignoring;
+}
+
 IJobRefusalObserver& IgnoreJobRefusals() noexcept
 {
     struct Ignoring final: IJobRefusalObserver
@@ -349,6 +360,7 @@ WorkerProtocol::WorkerProtocol(ICompileJobRunner& jobs,
                                Ed25519KeyPair const* replyKey,
                                IMetricsSink& metrics,
                                IJobRefusalObserver& refusals,
+                               IJobMeasurementSink& measurements,
                                std::size_t maxDecompressedBytes):
     _jobs { jobs },
     _validator { std::move(validator) },
@@ -356,6 +368,7 @@ WorkerProtocol::WorkerProtocol(ICompileJobRunner& jobs,
     _replyKey { replyKey },
     _metrics { metrics },
     _refusals { refusals },
+    _measurements { measurements },
     _maxDecompressedBytes { maxDecompressedBytes }
 {
 }
@@ -558,6 +571,16 @@ std::vector<std::byte> WorkerProtocol::Compile(std::span<std::byte const> payloa
             _metrics, SurfaceRefusal { .code = descriptor.code, .counter = descriptor.counter }, outcome.error().detail);
     }
 
+    // The peak the compiler and its children measured, for the estimate this compile was admitted
+    // under. Reported only when BOTH are known: a peak nobody measured is not a small one, and a
+    // measured peak with no key estimates nothing. A refused or failed-to-spawn job never gets here.
+    if (outcome->peakMemoryBytes.has_value() && !fields->admissionCacheKey.empty())
+        _measurements.OnPeak(
+            Wire::EstimateKeyFields { .cacheKey = std::string { Wire::AsStringView(fields->admissionCacheKey) },
+                                      .sourcePath = std::string { Wire::AsStringView(fields->admissionSourcePath) },
+                                      .compilerIdentity = std::string { fingerprint } },
+            *outcome->peakMemoryBytes);
+
     // A compiler that ran and rejected the code did its job — that is the client's
     // answer, not a worker failure — so this counts completions rather than
     // successes, and a non-zero exit is not a refusal.
@@ -744,6 +767,16 @@ std::expected<void, AnnounceRefusal> AnnounceNodePresence(core::net::ISocket& sc
     // id to forget. A registrar clears its worker id on that refusal so the caller's retry
     // re-registers; presence has nothing corresponding, because the ENDPOINT is the key and it
     // does not stop being the key when a scheduler restarts.
+    return std::unexpected { AnnounceRefusal {
+        .kind = AnnounceRefusalKindOf(outcome), .reason = DescribeOutcome(outcome), .leader = RedirectTarget(outcome) } };
+}
+
+std::expected<void, AnnounceRefusal> SendMachineBudget(core::net::ISocket& scheduler,
+                                                       Wire::MachineBudgetReport const& report)
+{
+    auto const outcome = ExchangeWithScheduler(scheduler, Wire::EncodeMachineBudget(report));
+    if (outcome.IsHit())
+        return {};
     return std::unexpected { AnnounceRefusal {
         .kind = AnnounceRefusalKindOf(outcome), .reason = DescribeOutcome(outcome), .leader = RedirectTarget(outcome) } };
 }

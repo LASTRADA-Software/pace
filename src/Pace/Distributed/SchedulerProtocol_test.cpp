@@ -222,7 +222,7 @@ TEST_CASE("A version-14 LEASE in its own three-field grammar is refused by numbe
     auto const reply = fixture.protocol.Answer(frame, Insider);
     REQUIRE(ErrorOf(reply) == Wire::ErrorCode::UnsupportedVersion);
     auto const text = PayloadOf(reply).subspan(1);
-    CHECK(std::string_view { reinterpret_cast<char const*>(text.data()), text.size() } == "supported versions 15..15");
+    CHECK(std::string_view { reinterpret_cast<char const*>(text.data()), text.size() } == "supported versions 16..16");
     CHECK(fixture.metrics.Read(IMetricsSink::Counter::DispatchFramesRefusedUnsupportedVersion) == 1);
     CHECK(ErrorOf(reply) != Wire::ErrorCode::MalformedFrame);
 }
@@ -1042,7 +1042,10 @@ TEST_CASE("Exactly the verbs a machine joins the fleet with require a proven ide
     // The column, read back: a verb gaining the requirement by accident refuses every client that
     // sends it, and one losing it re-opens the address route for a node. Named here rather than
     // derived, because the SET is the decision being pinned.
-    auto const joining = std::array { Wire::Op::Register, Wire::Op::NodeAnnounce, Wire::Op::Heartbeat, Wire::Op::Withdraw };
+    // MachineBudget (#1728) is a machine stating how much memory it may be charged, so it joins them.
+    auto const joining = std::array {
+        Wire::Op::Register, Wire::Op::NodeAnnounce, Wire::Op::Heartbeat, Wire::Op::Withdraw, Wire::Op::MachineBudget
+    };
     for (auto const& row: Wire::OpTable)
     {
         auto const joins = std::ranges::contains(joining, row.code);
@@ -1268,4 +1271,38 @@ TEST_CASE("A LEASE's toolchain label reaches the scheduler's unserved list",
     auto const unserved = fixture.service.UnservedToolchainsNow();
     REQUIRE(unserved.size() == 1);
     CHECK(unserved.front().label == "cl 19.44.35207");
+}
+
+TEST_CASE("The synchronous protocol refuses the admission verbs by name; the leader queue serves them",
+          "[distributed][scheduler][protocol][admission]")
+{
+    // #1728. ADMIT parks until the queue decides, which a protocol that answers from its own tables and
+    // never suspends cannot do, so `AdmissionResponder` answers these three in front of it
+    // (`AdmissionResponder_test.cpp` is the real behaviour). What THIS object owes is the reply it
+    // gives when it is asked directly -- a node whose reactor never wired a queue, a test over the bare
+    // protocol: `DispatchNotPermitted`, never `UnknownOpcode` (which tells a client this build is too
+    // old) and never a dropped frame (which reads as a dead host).
+    Fixture fixture;
+    auto const excluded = std::array<std::string_view, 0> {};
+    std::vector<std::vector<std::byte>> const frames {
+        Wire::EncodeAdmit(Wire::AdmitRequest { .kind = Wire::AdmitKind::LocalOnly,
+                                               .fingerprint = {},
+                                               .cacheKey = "k",
+                                               .sourcePath = {},
+                                               .treeLabel = {},
+                                               .storable = false,
+                                               .acceptedCodecs = {},
+                                               .excluded = excluded,
+                                               .toolchainLabel = {} }),
+        Wire::EncodeSettle(Wire::SettleRequest { .outcome = Wire::SettleOutcome::Failed, .peakBytes = std::nullopt }),
+        Wire::EncodeMachineBudget(
+            Wire::MachineBudgetReport { .memoryBudgetBytes = 1, .slots = 1, .heldSlots = 0, .heldBytes = 0, .peaks = {} }),
+    };
+    for (auto const& frame: frames)
+    {
+        INFO("op byte " << static_cast<unsigned>(frame[2]));
+        auto const reply = fixture.protocol.Answer(frame, Insider);
+        CHECK(StatusOf(reply) == Wire::Status::Error);
+        CHECK(ErrorOf(reply) == Wire::ErrorCode::DispatchNotPermitted);
+    }
 }

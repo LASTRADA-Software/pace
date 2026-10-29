@@ -287,6 +287,29 @@ struct NodeConfig
     /// of 12.5 MiB, max 21.6 MiB (#1667). An `optional` for the reason the field above is one.
     std::optional<std::uint64_t> compileInflightMaxBytes;
 
+    /// The compile slots this MACHINE counts, when the operator named a number (#1728).
+    ///
+    /// Absent is the machine's logical cores (`MachineBudgetOf`). **Not `slots`**, though the two are
+    /// both counts of compiles: `slots` sizes the WORKER and is zero on a node that runs none, while
+    /// this is what the fleet's queue shares between every compile on the machine -- local leases
+    /// included -- and a `--slots=0` node still has one. An `optional` for `slots` reason: it is this
+    /// row's provenance, so a registration replays what was typed and never today's core count.
+    std::optional<std::uint32_t> machineSlots;
+
+    /// The memory the fleet's queue may have this machine's compiles hold at once, when the operator
+    /// named one (`--machine-memory-budget`, bytes after `N%` is resolved against host RAM).
+    ///
+    /// Absent is 75% of RAM less the cache tier's reserve, never below the default estimate
+    /// (`MachineBudgetOf`). An `optional` for `slots` reason.
+    std::optional<std::uint64_t> machineMemoryBudgetBytes;
+
+    /// What an unknown translation unit is assumed to need, when the operator named a figure.
+    ///
+    /// Absent is `DefaultCompileEstimateBytes` (`CompileEstimateDefaultOf`). An `optional` for `slots`
+    /// reason. Also the floor of the derived machine budget: a machine that cannot hold one unknown
+    /// compile would otherwise queue every compile for ever.
+    std::optional<std::uint64_t> compileEstimateDefaultBytes;
+
     /// Where the admin endpoint listens, or empty to leave it off.
     ///
     /// One string rather than the daemon's address/port/enabled triple, because a
@@ -992,6 +1015,18 @@ struct NodeConfig
 /// @param slots What `WorkerSlotsOf` answered -- the count the worker runs, never the flag.
 /// @return The budget, in bytes.
 [[nodiscard]] std::size_t CompileByteBudgetOf(NodeConfig const& cfg, std::uint32_t slots) noexcept;
+
+/// What an unknown translation unit is assumed to need, in bytes: 2 GiB.
+///
+/// Deliberately conservative: an estimate too high costs a compile some waiting, one too low is the
+/// out-of-memory kill the queue exists to prevent.
+inline constexpr std::uint64_t DefaultCompileEstimateBytes = 2ULL << 30;
+
+/// The estimate an unknown translation unit is charged: `--compile-estimate-default`, or
+/// `DefaultCompileEstimateBytes` when it names none.
+/// @param cfg The parsed configuration.
+/// @return The estimate, in bytes.
+[[nodiscard]] std::uint64_t CompileEstimateDefaultOf(NodeConfig const& cfg) noexcept;
 
 /// The least in-flight compile budget a worker may run with: the larger of the per-request
 /// ceiling (`CompileRequestMaxOf`) and the listener's COMPILE frame cap floor.

@@ -5,10 +5,12 @@
 #include <Pace/Core/Ed25519.hpp>
 #include <Pace/Core/EnumTable.hpp>
 #include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/AdmissionQueue.hpp>
 #include <Pace/Distributed/FleetSample.hpp>
 #include <Pace/Distributed/IClusterAdmin.hpp>
 #include <Pace/Distributed/LeaseTable.hpp>
 #include <Pace/Distributed/LeaseToken.hpp>
+#include <Pace/Distributed/PeakEstimates.hpp>
 #include <Pace/Distributed/UnservedToolchains.hpp>
 #include <Pace/Distributed/WorkerRegistry.hpp>
 #include <Pace/Metrics/IMetricsSink.hpp>
@@ -20,6 +22,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <functional>
 #include <map>
 #include <mutex>
@@ -27,6 +30,8 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <core/platform/Clock.hpp>
@@ -647,6 +652,76 @@ struct SchedulerReply
     }
 };
 
+/// What the admission queue decided for one ticket, ready for the connection that waits on it.
+///
+/// Built under the scheduler's own lock and handed over as plain data, so the responder that parks
+/// the connection never touches the queue: it answers `refusal` when one is engaged and the encoded
+/// `grant` otherwise.
+struct AdmissionVerdict
+{
+    Ticket ticket {};                      ///< The ticket this answers.
+    std::optional<SchedulerReply> refusal; ///< Engaged when the re-gate (R9) or the lease refused it; nothing is held then.
+    CompileCacheWire::GrantKind kind {};   ///< Meaningful when `refusal` is not engaged.
+    std::vector<std::byte> grant;          ///< The encoded `AdmitGrant`, when `refusal` is not engaged.
+    std::uint64_t chargedBytes {};         ///< What the grant charged; zero for `Stored`.
+    bool ranAlone {};                      ///< Its estimate exceeded the whole budget.
+    /// Enqueue to decision, on the service clock: what the GRANT tells the client, which sums one
+    /// opening by its last grant (`Cc::RunMiss`), so a requeued request still counts its first wait.
+    std::chrono::milliseconds queued {};
+    /// Its LAST park to decision: the enqueue, or the worker refusal that put it back (R7). What the
+    /// leader's wait metric adds once per grant, so a refused request's first wait is not summed twice.
+    std::chrono::milliseconds waited {};
+};
+
+/// What a settle did with its ticket.
+enum class SettleResult : std::uint8_t
+{
+    Settled,    ///< The ticket ended.
+    Requeued,   ///< A worker refused it: back at the front of the queue, still this connection's.
+    NotLeading, ///< A worker refused it on a node that no longer leads: abandoned, nobody queues it.
+};
+
+/// The queue as a scrape reads it.
+struct AdmissionSnapshot
+{
+    std::size_t depth {};                                          ///< Requests waiting.
+    std::vector<std::pair<MachineId, std::uint64_t>> chargedBytes; ///< Bytes charged per machine, nonzero only.
+    /// Every machine that reported a budget: the budget, and what the queue counts in use against it.
+    std::vector<MachineLedgerView> budgets;
+};
+
+/// Who to tell when the queue changes under a waiting connection. Called from any thread the service
+/// is driven on, outside the service admission lock, and must not block.
+struct AdmissionObserver
+{
+    /// Capacity may have appeared: a worker registered, heartbeated or withdrew. A pump is due.
+    std::function<void()> changed;
+    /// This node stopped leading: every queued ticket was forgotten and is to be answered `NotLeader`
+    /// naming the new leader.
+    std::function<void(std::vector<Ticket> const& lost, std::string const& leaderEndpoint)> demoted;
+};
+
+/// The estimate an unknown translation unit is charged unless the node says otherwise (2 GiB).
+inline constexpr std::uint64_t DefaultAdmissionEstimateBytes = 2ULL << 30;
+
+/// How many figures each of the two estimate maps remembers.
+inline constexpr std::size_t AdmissionEstimateCapacity = 65'536;
+
+/// Why a DISPATCHABLE request the queue granted `Local` was not placed on a worker.
+///
+/// Read from the registry as it stands when the grant is minted, because the queue's own candidates are
+/// only the workers with a free slot -- "none was free" and "none exists" are opposite fixes, and the
+/// launcher records them apart exactly as the LEASE path's `NoWorker`, `Excluded` and `NoCapacity` rows
+/// are. Only a worker that proved its identity serves: the queue places on no other.
+/// @param live The registry's live workers (`WorkerRegistry::LiveWorkers`).
+/// @param fingerprint The toolchain the request named.
+/// @param excluded The workers the client could not reach, by advertised endpoint.
+/// @return `NoWorker` when nothing serves the toolchain, `AllExcluded` when everything that does is
+///         excluded, otherwise `NoRoom`.
+[[nodiscard]] CompileCacheWire::LocalGrantReason LocalGrantReasonOf(std::span<WorkerInfo const> live,
+                                                                    std::string_view fingerprint,
+                                                                    std::span<std::string const> excluded);
+
 /// The fleet scheduler: who may compile where, and on whose behalf.
 ///
 /// ## Why this is not in the cache daemon any more
@@ -695,7 +770,8 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
                      IMetricsSink& metrics,
                      ILogger& logger,
                      ILeaseSigner const& signer,
-                     std::string_view clusterId);
+                     std::string_view clusterId,
+                     std::uint64_t admissionEstimateBytes = DefaultAdmissionEstimateBytes);
 
     /// Where a node's handed-over history goes, or null to discard it.
     ///
@@ -756,6 +832,74 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     {
         return _role.load(std::memory_order_acquire);
     }
+
+    /// @return This node's own machine id: its identity public key, as the registry stores one.
+    [[nodiscard]] MachineId OwnMachineId() const;
+
+    /// Queue one compile request for admission (#1728).
+    ///
+    /// Runs the full gate (`Scheduling`: leadership and membership) and enqueues; it does NOT pump, so
+    /// the caller registers its wait first and then asks `PumpAdmission` -- which is what keeps a
+    /// decision from being made for a connection nobody is waiting on.
+    /// @param caller The connection context the request is gated with now.
+    /// @param regate Asked again at grant time for a FRESH context of the same connection (R9): the one
+    ///        above is a snapshot, and a `--cluster-forget` or a lost leadership during the wait must end
+    ///        in a refusal, not a grant. Called under the admission lock, so it must not call back in.
+    /// @param machine The machine a local lease charges: this node's own for a loopback caller, the
+    ///        caller's proven key for a forwarded one.
+    /// @param request The decoded request.
+    /// @return The ticket, or the refusal.
+    [[nodiscard]] std::expected<Ticket, SchedulerReply> Admit(CallerContext const& caller,
+                                                              std::function<CallerContext()> regate,
+                                                              MachineId const& machine,
+                                                              CompileCacheWire::AdmitRequestFields const& request);
+
+    /// Admit whatever now fits, re-gating each decision (R9) and minting its lease.
+    /// @return One verdict per ticket decided, in grant order; a refused one has already been abandoned.
+    [[nodiscard]] std::vector<AdmissionVerdict> PumpAdmission();
+
+    /// A granted ticket finished: free its charge and lease, learn its peak, wake its waiters.
+    ///
+    /// `WorkerRefused` is the one outcome that does not end the ticket: the worker's lease is given
+    /// back, and the SAME ticket goes back to the front of the queue with the refusal counted (R7), to
+    /// be decided by a later pump for the connection that is still waiting on it. After
+    /// `AdmissionQueue::MaxWorkerRefusals` it is placed on its caller.
+    ///
+    /// **Except on a node that no longer leads.** A grant outlives a demotion (`LoseLeadership` keeps
+    /// granted tickets so their settle still releases), and a refusal settled after it would put the
+    /// ticket back in a FOLLOWER's queue, which nothing pumps -- a compile parked forever behind pulses
+    /// that keep its connection alive. So there the ticket is abandoned instead, decided under the
+    /// same lock the demotion forgets the queue under, and the answer says so.
+    /// @param ticket The ticket a verdict granted.
+    /// @param settlement How it ended.
+    /// @return `Requeued` when a refusal put the ticket back, `NotLeading` when it was abandoned
+    ///         because this node no longer leads, `Settled` otherwise.
+    [[nodiscard]] SettleResult SettleAdmission(Ticket ticket, Settlement const& settlement);
+
+    /// The ticket connection ended at any stage: free whatever it holds. Unknown tickets are ignored.
+    /// @param ticket Any ticket.
+    void AbandonAdmission(Ticket ticket);
+
+    /// A machine states its budget and what it holds (`MACHINE-BUDGET`).
+    /// @param caller The connection context; gated like any scheduling verb.
+    /// @param machine The reporting machine: the caller proven key.
+    /// @param report The report; its peaks are recorded in the estimates.
+    /// @return `Ok`, or the refusal.
+    [[nodiscard]] SchedulerReply ReportMachineBudget(CallerContext const& caller,
+                                                     MachineId const& machine,
+                                                     CompileCacheWire::MachineBudgetReport const& report);
+
+    /// @return Queue depth and bytes charged per machine, as of now.
+    [[nodiscard]] AdmissionSnapshot AdmissionSnapshotNow() const;
+
+    /// @return The queue's depth, clients and per-machine ledger, read under the admission lock, or
+    ///         ABSENT when this node does not lead or the queue has never seen a request or a budget:
+    ///         a fleet with no admission data says so rather than reporting a queue of zero.
+    [[nodiscard]] std::optional<QueueView> AdmissionDetailNow() const;
+
+    /// Be told when capacity may have appeared and when leadership is lost. A wiring door, set once.
+    /// @param observer What to call; empty members are skipped.
+    void ObserveAdmission(AdmissionObserver observer);
 
     /// Admit a worker to the fleet.
     /// @param caller Who is asking.
@@ -1201,6 +1345,54 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
                                              std::string_view fingerprint,
                                              std::string_view workerKey);
 
+    /// The candidates a queued request is placed on: the registry live workers with a free slot.
+    class RegistryPlacement final: public IPlacementSource
+    {
+      public:
+        /// @param workers The registry; must outlive this.
+        explicit RegistryPlacement(WorkerRegistry const& workers) noexcept:
+            _workers { workers }
+        {
+        }
+
+        /// @copydoc IPlacementSource::Candidates
+        [[nodiscard]] std::vector<Placement> Candidates(std::string_view fingerprint,
+                                                        std::span<std::string const> excluded) const override;
+
+      private:
+        WorkerRegistry const& _workers;
+    };
+
+    /// What the service remembers of one ticket until it is settled or abandoned.
+    struct AdmissionTicket
+    {
+        std::function<CallerContext()> regate;      ///< The connection's context as it is NOW, for the grant's gate (R9).
+        std::string fingerprint;                    ///< Toolchain the request named.
+        std::string cacheKey;                       ///< The object key the request missed; signed into a grant.
+        CompileCacheWire::AdmitKind kind {};        ///< Whether a worker could have run it, for a local grant's reason.
+        std::vector<std::string> excluded;          ///< Workers the client could not reach, for the same.
+        std::string toolchainLabel;                 ///< What the client calls the toolchain, for `unserved-toolchain`.
+        core::platform::SteadyTimePoint enqueuedAt; ///< For `queued`.
+        core::platform::SteadyTimePoint parkedAt;   ///< For `waited`: the enqueue, or the last requeue.
+        std::optional<Distributed::Lease> lease;    ///< Engaged once granted on a worker.
+    };
+
+    /// Tell the admission observer a pump is due. Called outside every lock.
+    void NotifyAdmissionChanged();
+
+    /// Frees the lease a worker grant took and the speculative job count beside it.
+    /// @param held The ticket record; its lease is taken.
+    void ReleaseAdmissionLease(AdmissionTicket& held);
+
+    /// Turn one decision into a verdict: re-gate, mint the lease, encode the grant.
+    /// Caller holds `_admissionMutex`.
+    /// @param decision What the queue admitted.
+    /// @param held The ticket record.
+    /// @return The verdict; nothing when the worker it was placed on has left since, which the caller
+    ///         answers by putting the ticket back at the front (`AdmissionQueue::ReturnToFront`).
+    [[nodiscard]] std::optional<AdmissionVerdict> GrantFor(Decision const& decision, AdmissionTicket& held);
+
+    core::platform::IClock& _clock;
     core::platform::WallClockRef _wallClock;
     IMetricsSink& _metrics;
     /// Where the endpoint-mismatch observation goes (#242).
@@ -1267,8 +1459,24 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
 
     WorkerRegistry _workers;
     LeaseTable _leases;
-    /// What `Lease` refused `no-worker`, by toolchain. See `UnservedToolchainsNow`.
+    /// What `Lease` refused `no-worker`, and what the queue granted `Local` for want of any worker
+    /// (`LocalGrantReason::NoWorker`), by toolchain. See `UnservedToolchainsNow`.
     UnservedToolchains _unserved;
+
+    /// The admission queue and everything it reads (#1728), behind ONE mutex: the queue is not
+    /// thread-safe, and it is driven from the reactor (admit, settle, pump) and from the consensus
+    /// driver thread (demotion). Order: this is taken BEFORE the registry and the lease table own
+    /// locks, never after.
+    mutable std::mutex _admissionMutex;
+    PeakEstimates _estimates;                                      ///< Guarded by `_admissionMutex`.
+    RegistryPlacement _placement;                                  ///< Reads `_workers`, which locks for itself.
+    AdmissionQueue _queue;                                         ///< Guarded by `_admissionMutex`.
+    std::unordered_map<Ticket, AdmissionTicket> _admissionTickets; ///< Guarded by `_admissionMutex`.
+    AdmissionObserver _admissionObserver;                          ///< Guarded by `_leaderMutex`.
+    /// Whether the queue belongs to a leader, written in the same locked step a demotion forgets the
+    /// queue in -- so a settle reading it under `_admissionMutex` can never re-park a ticket into a
+    /// queue that demotion has already forgotten. `_role` is published later and outside the lock.
+    bool _admissionLeading { false }; ///< Guarded by `_admissionMutex`.
 
     /// This node's standing, and where the leader is.
     ///

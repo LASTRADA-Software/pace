@@ -2178,7 +2178,8 @@ symptom was that they were slow.
     and a learner granted none, so only a broken client sends one there.
   - **A node running NO consensus follows no leader**, and answers as the `pace-kv` daemon
     does: the capacity verbs (`Register`, `Heartbeat`, `Withdraw`, `Lease`, `Release`,
-    `NodeAnnounce`) `DispatchNotPermitted`, the cluster verbs `NoCluster` — the daemon reaching
+    `NodeAnnounce`, and the admission verbs `Admit`, `Settle`, `MachineBudget`)
+    `DispatchNotPermitted`, the cluster verbs `NoCluster` — the daemon reaching
     `NodeAnnounce`'s code through `RefusalFor`'s fallback. The codes agree on every scheduling
     verb, and `NodeFrameSurface_test` pins that agreement on the wire; the words are each
     binary's own.
@@ -2373,6 +2374,13 @@ Six more about what the tier IS and who gets to see it:
   and that is correct rather than the same defect: a node offering no slots has a
   capacity of zero, which is a reading rather than an unmade measurement. The two
   fields answer different questions and the same word would be wrong in one of them.
+  **"No worker" is not "no machine" for the fleet's compile queue (#1728, R6)**: every
+  node, a `--slots=0` one included, states its machine's compile budget
+  (`MachineBudgetOf`: `--machine-slots`, `--machine-memory-budget`) on the presence loop's
+  round, which runs everywhere. It is a budget record and not a worker registration -- such
+  a node still registers nothing and is never sent a dispatched compile -- and its flags are
+  deliberately NOT worker-column rows, or the generated rule above would refuse them on
+  exactly the node that needs them.
   **The worker is `WorkerTier`, null on such a node** (#1387): no idle pool thread, no
   capacity sized to zero, no validator. It owns the `SchedulerLink`, so a worker cannot
   exist without one and a start that reaches it with no `--scheduler` is refused by
@@ -3774,9 +3782,11 @@ cluster's pre-shared key instead; #178 PR 6 made it prove WHICH machine it is, b
 its own identity key, and sealed every frame after the proof. Each rule below is what some
 plausible simpler design gets wrong.
 
-**No address admits another machine, and the verbs a machine JOINS with need a proof.** They -- `Register`, `NodeAnnounce`, `Heartbeat`, `Withdraw` -- decide where the fleet's work
-is sent, and they are `IdentityRequirement::ProvenNodeOnly`, a COLUMN of `OpTable` pinned by
-`JoiningVerbsNeedAnIdentity`, refused `NodeIdentityRequired` and counted
+**No address admits another machine, and the verbs a machine JOINS with need a proof.** They --
+`Register`, `NodeAnnounce`, `Heartbeat`, `Withdraw` -- decide where the fleet's work is sent, and
+`MachineBudget` decides how much work a machine is ADMITTED (the memory budget the leader charges
+it against, #1728); all five are `IdentityRequirement::ProvenNodeOnly`, a COLUMN of `OpTable`
+pinned by `JoiningVerbsNeedAnIdentity`, refused `NodeIdentityRequired` and counted
 (`SchedulerRequestsRefusedNodeIdentityRequired`). Loopback is NOT exempt: a process on the
 scheduler's own host could otherwise register an endpoint of its choosing and be leased the
 fleet's jobs. Every node naming `--scheduler` therefore needs a key to prove -- and every node
@@ -4034,6 +4044,95 @@ here asserts first, with the addition beside it only to stop a change that satis
 half from passing. The in-process fleet asserts it from addresses nobody listed
 (`FleetTickets_test`, `FrameEndpoint_test`'s relabelled-peer cases).
 
+## The compile queue (#1728)
+
+<!-- agent-tripwire: A miss is ADMITTED (queued) at the fleet's leader -->
+
+A build with more compiler processes than the machine has memory for was killed by the kernel
+rather than slowed. The leader now holds a queue in front of every machine's compile budget.
+Each rule below is a shape a plausible simpler design gets wrong, and none of them fails a build.
+
+- **A miss is ADMITTED (queued) at the leader, never refused for capacity.** A refusal sends the
+  client to a local compile, which is exactly the load the queue exists to bound. Waiting is the
+  product; the leader pulses (`Status::Progress`, `Admit` being the second verb allowed it) so a
+  long queue reads as alive against the client's sliding idle bound. A request larger than a whole
+  machine's budget waits for an idle machine and runs ALONE; it is never starved and never refused.
+  A `NoRoom` Local grant is an ordinary queue decision, not a refusal, and is not counted as one.
+- **The connection is the lease.** A grant is charged to the connection that asked, carries no
+  token to expire, and is released by `SETTLE` on that connection or by its close. A close is an
+  abandonment, counted apart (`AdmissionAbandoned`); a `kill -9` of ninja must give the memory back
+  at once with no timer. The only frame a held connection may send next is its `SETTLE`, or, after
+  `Settle{WorkerRefused}`, a fresh `ADMIT` that binds to the SAME ticket (Ruling 9).
+- **A worker refusal keeps the ticket's place and count.** The leader re-parks the same ticket at
+  the FRONT; after `MaxWorkerRefusals` the grant is Local. Abandoning it instead would lose the
+  front position and let a flapping worker starve the head of the queue.
+- **A worker FAILURE settles `NotStored`, never abandon**: an
+  abandon raises the ESTIMATE of a translation unit that merely met a bad worker, and feeding that to the
+  estimator poisons every later admission of it.
+- **Deduplication is woken by STORE, never by a release.** Only a `storable` compile that shares a
+  cache with its peers waits on another's key, and it is answered `Stored` when the object is
+  STORED. A release wakes nobody: a compile that failed stored nothing, and the waiters must then
+  compile.
+- **Every node states its machine budget, `--slots=0` included, and that is not a worker
+  registration.** `MachineBudget` rides the presence loop's round, which runs everywhere; its flags
+  (`--machine-slots`, `--machine-memory-budget`) are deliberately not worker-column rows.
+- **A failover admits nothing on a machine before that machine's budget report arrives**, and the
+  ledger charges `max(charged, held)`: the new leader knows only what the machine says it holds,
+  and an admission before that report double-books memory a surviving compile still has.
+- **Every non-leader forwards `Admit`/`Settle` inline to the leader, never to itself**: a voting
+  follower as well as a learner. A voter that answered `NotLeader` would leave a launcher with no
+  queue on every node but one. The relay holds one upstream connection per client connection.
+- **The grant says what it granted**: `workerKey`, `lifetime` and `dialHint` as `LeaseGrant` does
+  -- the hint from the same `DialHintFor`, so a worker reachable only where it was last seen is
+  dialled there whichever path granted it -- and a `reason` on a Local grant of a dispatchable
+  request, so a fleet that never distributes still says why (`DeclineDispatch`) instead of reading
+  green.
+- **An admission's worker lease is filed under its TICKET, never under the cache key** (Ruling 17).
+  Deduplication is the QUEUE's, and only where a waiter can fetch the result; a lease table keyed by
+  the cache key refused the second of two machines that missed one key `AlreadyInFlight`, which its
+  launcher read as "compile here" -- an uncharged compile, the load the queue exists to bound. The
+  token still signs the OBJECT key, as a `Lease` grant's does: the table's key is bookkeeping the
+  worker never sees.
+- **A launcher asks the queue at its OWN node, `PACE_ADDR`, whatever `PACE_SCHEDULER` names** (Ruling
+  16, `Cc::AdmissionEndpointOf`). The leader charges a compile to the machine that ASKED, and names
+  it only by a key the connection PROVED or by loopback: the launcher's node proves its machine's key
+  when it relays, while a launcher dialling a remote scheduler directly proves nothing and would be
+  charged to no machine. `PACE_SCHEDULER` keeps one meaning, where a `LEASE` goes when no queue
+  answers, and a plan is refused for a remembered-unreachable endpoint only when EVERY place it could
+  be spent was unreached (`Cc::PlanUnreachableAt`).
+- **A launcher fails OPEN only where no queue ANSWERED.** An unreachable, refusing or unreadable
+  node costs the build nothing, and a launcher whose FETCH already found the node unreachable does
+  not dial it again: on Windows a refused loopback connect can take the whole connect budget. The
+  one compile with no such evidence is a passthrough whose command line did not parse -- it makes
+  no FETCH -- so with the node stopped and the reachability memo empty it pays one connect, up to a
+  second on Windows, and records it; a stopped node costs a build at most one such connect per
+  fifteen-second memo window, never one per compile. Where the queue DID answer and the launcher
+  gives up on it anyway -- `MaxWorkerRefusals` worker refusals in a row -- the compile is asked for
+  again `LocalOnly`, excluding that worker, and runs HERE charged, never in the open.
+- **A held admission connection carries TCP keepalive at BOTH ends** (Ruling 18, #1736): the
+  launcher's dial of its node (`Cc::DefaultAdmitBudget`) and the node's relay to the leader
+  (`Node::ForwardDialBudget`) arm it per dial, as `wire-and-protocol.md` requires, and the leader arms
+  it on the ACCEPTED connection once that connection holds a grant, through core-cpp's
+  `ISocket::armKeepAlive` (v0.11.0). The intervals are core-cpp's `KeepAliveSettings {}`, which every
+  `KeepAlive::Yes` dial applies -- a dial takes none of its own -- and ONE constant names them for all
+  three, `Pace::AdmitKeepAliveProbe` (`Pace/Protocol/AdmitKeepAlive.hpp`), pinned by a `static_assert`:
+  a peer whose host vanished is noticed in `idle + count * interval` = **16 s** on Linux and macOS and
+  **30 s** on Windows, where the OS fixes the count at 10. That bounds the relay noticing a vanished
+  LEADER (failing its launcher open, giving back its own held charge), a launcher noticing a vanished
+  node, and the leader noticing a vanished caller -- whose Worker grant would otherwise hold another
+  machine's budget until `MaxCompileLeaseLifetime` (one hour) sweeps it, which stays as the backstop.
+  - **What arms is a COLUMN of what is held**, `IConnectionHold::KeepAlive()`, pure so a new hold
+    answers rather than inherits a silence; `FrameServer::ArmHeldKeepAlive` asks it on the loop thread
+    (which `armKeepAlive` requires) once a reply that left a hold is WRITTEN, and a queued request
+    that holds nothing is not armed. Once per CONNECTION (`ConnectionScope::NoteKeepAliveArmed`), so a
+    requeue on the same socket is not a second request. A failure to arm is a `Warn`, never a
+    refusal: the sweep is still there.
+  - **Every pace socket that wraps an `ISocket` forwards `armKeepAlive`** (`SealedFrameSocket`,
+    `TotalDeadlineSocket`, and the test fake `RelabelledPeerSocket`), or the call lands on the
+    interface default, `Unsupported` -- `SetReceiveDeadline`'s defect class, one rule higher. The two
+    production wrappers each have a case asserting the request reaches the socket under them; the fake's
+    is the proven-leader forwarding case, whose ledger sits UNDER it.
+
 ## Open work
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues; AGENT.md tripwires rules, not residuals -->
@@ -4082,3 +4181,7 @@ half from passing. The in-process fleet asserts it from addresses nobody listed
   it can be spawned and once for its banner, and the first is in a serial loop in
   front of the pool built to hide exactly that. `CompilerBanner` knows both facts
   and reports neither, so two callers reconstruct what it discarded.
+- **[#1730](https://github.com/LASTRADA-Software/pace/issues/1730)** — one cache key is not
+  deduplicated across machines that share a cache, so the same compile can be admitted twice.
+- **[#1731](https://github.com/LASTRADA-Software/pace/issues/1731)** — admission test gaps
+  deferred by the #1728 reviews.

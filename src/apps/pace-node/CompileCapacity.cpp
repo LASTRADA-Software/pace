@@ -38,7 +38,7 @@ std::optional<CompileCapacity::Bytes> CompileCapacity::TryTakeBytes(std::size_t 
     return std::optional<Bytes> { std::in_place, this, want };
 }
 
-SlotAdmission CompileCapacity::TryTakeSlot() noexcept
+SlotAdmission CompileCapacity::TryTakeSlot(std::uint64_t chargedBytes) noexcept
 {
     // Tested and taken under ONE lock, the lock `Cordon` and `ReleaseSlot` hold. Between
     // a lock-free test and a take, another connection could take the last slot -- two
@@ -54,10 +54,18 @@ SlotAdmission CompileCapacity::TryTakeSlot() noexcept
     if (_inFlight.load(std::memory_order_acquire) >= _slots)
         return SlotAdmission::Full;
     _inFlight.fetch_add(1, std::memory_order_acq_rel);
+    _heldBytes += chargedBytes;
     return SlotAdmission::Taken;
 }
 
-void CompileCapacity::ReleaseSlot() noexcept
+HeldCharges CompileCapacity::Held() const
+{
+    auto const guard = std::scoped_lock { _drainMutex };
+    return HeldCharges { .slots = static_cast<std::uint32_t>(_inFlight.load(std::memory_order_acquire)),
+                         .bytes = _heldBytes };
+}
+
+void CompileCapacity::ReleaseSlot(std::uint64_t chargedBytes) noexcept
 {
     // Under the drain's own mutex, because the wait it wakes is on a condition
     // variable: notifying outside the lock can leave a drain that has evaluated its
@@ -65,6 +73,7 @@ void CompileCapacity::ReleaseSlot() noexcept
     // happened.
     auto const guard = std::scoped_lock { _drainMutex };
     auto const remaining = _inFlight.fetch_sub(1, std::memory_order_acq_rel) - 1;
+    _heldBytes -= chargedBytes;
     _drained.notify_all();
 
     // The LAST release under a cordon, and only that one. A release while compiles are

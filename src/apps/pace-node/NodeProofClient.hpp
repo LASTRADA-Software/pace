@@ -31,7 +31,7 @@ namespace Pace::Node
 ///
 /// ## Why before anything else
 ///
-/// The verbs a joining machine sends -- `Register`, `NodeAnnounce`, `Heartbeat`, `Withdraw` --
+/// The verbs a joining machine sends -- `Register`, `NodeAnnounce`, `Heartbeat`, `Withdraw`, `MachineBudget` --
 /// require a proven identity (`CompileCacheWire::IdentityRequirement`), and what a proof
 /// establishes is connection state. So a round that dials proves once, and every verb on that
 /// connection is sent sealed, as the machine the cluster admitted.
@@ -342,6 +342,15 @@ class NodeProofClient
     /// @param peer A fresh connection to a scheduler, wrapped so it can be sealed.
     /// @return What was learned.
     [[nodiscard]] NodeProofAttempt Prove(SealedFrameSocket& peer) const;
+
+    /// Whom this client proves itself to by default: the trust the presence round's `Prove` judges a
+    /// scheduler by. Exposed so a caller on a reactor, which awaits `ProveAsync`, asks the SAME question
+    /// of the scheduler it dials as the presence round does, and never a second answer of its own.
+    /// @return The default trust; outlives this client's caller, as the constructor's reference does.
+    [[nodiscard]] IServerTrust const& DefaultTrust() const noexcept
+    {
+        return _trust;
+    }
 
     /// @return The id this machine proves.
     [[nodiscard]] std::string_view NodeId() const noexcept

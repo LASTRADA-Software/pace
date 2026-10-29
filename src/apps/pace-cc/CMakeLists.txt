@@ -160,6 +160,8 @@ set(_pace_cc_sources
     LauncherCli.cpp
     CacheKey.cpp
     CacheProtocol.cpp
+    AdmitSession.cpp
+    MissFlow.cpp
     ReactorExchange.cpp
     Dispatch.cpp
     EndpointDial.cpp
@@ -307,6 +309,8 @@ if(PACE_BUILD_TESTS)
         ObjectEquivalence_test.cpp
         ObjectSections_test.cpp
         CompileCorrelation_test.cpp
+        AdmitSession_test.cpp
+        MissFlow_test.cpp
         ReactorExchange_test.cpp
         Dispatch_test.cpp
         EndpointDial_test.cpp
@@ -343,6 +347,19 @@ if(PACE_BUILD_TESTS)
         target_compile_definitions(pace-cc-tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
     endif()
     target_link_libraries(pace-cc-tests PRIVATE Catch2::Catch2 Threads::Threads pace-monocypher core::async core::net)
+
+    # The peak-memory tests (ProcessRunner_test.cpp) run a helper that allocates and touches a
+    # known amount in a CHILD of the process they spawn, and is also the trivial
+    # process (asked for one MiB). It arrives through the TEST ENVIRONMENT, never as compile definitions: an absolute
+    # build-tree path in a `-D` is text in the preprocessed unit, so the same source in another
+    # build directory keyed differently and missed the warm replay build.
+    add_executable(peak-memory-child PeakMemoryChild.cpp)
+    # `core::async` is header-only and carries core-cpp's include path for `<core/Ranges.hpp>`.
+    target_link_libraries(peak-memory-child PRIVATE core::async)
+    if(TARGET peak-memory-child)
+        add_dependencies(pace-cc-tests peak-memory-child)
+        set(_pace_cc_peak_environment "PACE_TEST_PEAK_MEMORY_CHILD=$<TARGET_FILE:peak-memory-child>")
+    endif()
     if(PACE_ENABLE_COMPRESSION AND _pace_cc_zstd AND _pace_cc_lz4)
         target_link_libraries(pace-cc-tests PRIVATE ${_pace_cc_zstd} ${_pace_cc_lz4})
         target_compile_definitions(pace-cc-tests PRIVATE PACE_COMPRESSION_ENABLED=1)
@@ -364,7 +381,8 @@ if(PACE_BUILD_TESTS)
     # failed-assertion count, so `SKIP_RETURN_CODE 4` scored a case failing exactly four
     # assertions as *skipped* (#1128). Under the Catch2 the top-level CMakeLists pins
     # EXACTLY any failure exits 42, and `catch-skip-exit-contract` asserts it does.
-    catch_discover_tests(pace-cc-tests PROPERTIES SKIP_RETURN_CODE 4 ENVIRONMENT_MODIFICATION "${PACE_ERROR_DIALOG_ENVIRONMENT}")
+    catch_discover_tests(pace-cc-tests PROPERTIES SKIP_RETURN_CODE 4
+        ENVIRONMENT_MODIFICATION "${PACE_ERROR_DIALOG_ENVIRONMENT}" ENVIRONMENT "${_pace_cc_peak_environment}")
 
     # ---------------------------------------------------------------------
     # The end-to-end compile-cache test (`compile-cache-e2e`) used to be

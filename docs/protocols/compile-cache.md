@@ -51,7 +51,7 @@ daemon, the launcher, and the test client cannot disagree about the layout.
 | `0x00` | Miss | FETCH found nothing. Payload empty. A legitimate negative, not an error. |
 | `0x01` | Ok | Command succeeded; payload is the result, if any. |
 | `0x02` | Error | Command refused; payload is `[u8 errorCode][message]`. |
-| `0x03` | Progress | The server is still working on this request. Payload empty. **Not** an outcome: zero or more precede exactly one of the three above, and only on COMPILE. |
+| `0x03` | Progress | The server is still working on this request. Payload empty. **Not** an outcome: zero or more precede exactly one of the three above, and only on COMPILE and ADMIT. |
 | `0x04` | Push | One frame of a subscription's stream. **Not** an outcome either, and only on SUBSCRIBE. |
 
 Which statuses an op may be answered with is table data, not convention:
@@ -66,6 +66,9 @@ Which statuses an op may be answered with is table data, not convention:
 | LEASE | Ok, Error |
 | RELEASE | Ok, Error |
 | COMPILE | Ok, Progress, Error |
+| ADMIT | Ok, Progress, Error |
+| SETTLE | Ok, Error |
+| MACHINE-BUDGET | Ok, Error |
 
 A miss and a refusal being distinct is the point. When both were the byte `0x00`,
 a client the daemon could not serve saw an endlessly cold cache and no
@@ -117,7 +120,7 @@ diagnostic — the build merely got slower, forever, with nothing to show for it
 | `0x28` | *(reserved)* | Never sent. Was `roster-expired`, named for the certified roster's lapse ([#178](https://github.com/LASTRADA-Software/pace/issues/178)); what it still meant is `grant-unverifiable`. The number is burnt. |
 | `0x29` | node-key-unknown | A node proof verified, under a key this cluster does not hold for the id it named: a machine nobody admitted, or one presenting a key other than the one admitted under its id. The remedy is an admission, not a new key. |
 | `0x2a` | node-key-revoked | A node proof verified under a key the cluster has **revoked** — the forgotten machine itself. The connection is kept and marked, and every later verb on it is refused as the forgotten machine's, from any address, this machine's included. |
-| `0x2b` | node-identity-required | A verb only a machine that **proved** its identity may send — REGISTER, NODE-ANNOUNCE, HEARTBEAT, WITHDRAW — arrived on a connection that has not, loopback included. A machine ticket admits a client and never satisfies these: a ticketed connection is not sealed. |
+| `0x2b` | node-identity-required | A verb only a machine that **proved** its identity may send — REGISTER, NODE-ANNOUNCE, HEARTBEAT, WITHDRAW, MACHINE-BUDGET — arrived on a connection that has not, loopback included. A machine ticket admits a client and never satisfies these: a ticketed connection is not sealed. |
 | `0x2c` | enrollment-host-full | The request came from an address that already has as many enrollment requests waiting as one host may hold, counted by the address each request first came from, so it was not recorded. Its own code rather than enrollment-full, because one address asking a lot and many machines waiting are different problems; a joiner treats both as a wait. |
 | `0x2d` | ticket-refused | An AUTH presenting a machine ticket this node did not accept: a signature that does not verify, a machine the roster does not hold, a revoked key, an audience that is not this node, or an expiry passed. One code for all of them. The message names the reason when the caller could have checked it itself -- malformed bytes, a wrong audience, an expiry -- or when it is the node's own state; a forgery, a machine the roster does not hold and a revoked key all read `not admitted by this node`, because AUTH answers any address and those three would tell a stranger which ids the roster holds. The node still counts each of them apart. Not `unauthenticated`, which says a credential is still owed; this one says a credential was presented and judged. |
 | `0x2e` | identified-caller-required | An operator's **control** verb -- `CLUSTER-ADMIT` in every form, `CLUSTER-FORGET`, `CLUSTER-SET`, `ENROLL-CONTROL` -- from a caller admitted by `--fleet-open` alone. `--fleet-open` admits a caller to what the fleet serves and never to what decides the fleet; a caller on this machine, one that proved a node key, or one presenting a verified machine ticket is past this refusal, and is then asked for an operator's standing (`operator-standing-required`). Not `not-a-member`: the caller is admitted, and the remedy is to identify itself. |
@@ -505,6 +508,73 @@ wait past its own grant by roughly a round trip
 ([#1122](https://github.com/LASTRADA-Software/pace/issues/1122)), which was
 harmless only because the worker declines an outrun job first.
 
+### ADMIT, SETTLE and MACHINE-BUDGET
+
+Version 16 puts a queue in front of the fleet's capacity. Three verbs, all of the scheduler
+family and all `RequiresAuth`; a cache listener refuses them `dispatch-not-permitted` for the
+reason it refuses `LEASE`, and a node that runs no consensus the same.
+
+```
+ADMIT           [0xFC][ver][0x22][u32 len]  payload: [kind][fingerprint][cacheKey][sourcePath]
+                                                    [treeLabel][storable][codecs][exclusions]
+                                                    [toolchainLabel]
+  reply Ok:                                         [kind][endpoint][leaseToken][codecs]
+                                                    [u64 chargedBytes][u64 queuedMs]
+                                                    [u32 lifetime][workerKey][reason][dialHint]
+SETTLE          [0xFC][ver][0x23][u32 len]  payload: [outcome][peakBytes]
+  reply Ok:                                         empty
+MACHINE-BUDGET  [0xFC][ver][0x24][u32 len]  payload: [u64 memoryBudget][u32 slots][u32 heldSlots]
+                                                    [u64 heldBytes][peaks]
+  reply Ok:                                         empty
+```
+
+`ADMIT` asks the fleet's leader to admit one compile: it waits for the memory the compile is
+estimated to need and is then told where it runs. Because a queue is as long as it is, the reply
+may be preceded by any number of `Progress` pulses -- the second verb, after `COMPILE`, allowed
+one -- which is what lets a client tell a queued request from a dead leader against its sliding
+idle bound. `kind` is one byte, `0` dispatchable or `1` local-only (it must run on the machine
+that asked); `storable` is `0` or `1`; `codecs` and `exclusions` are the lists `LEASE` carries.
+`cacheKey` is at most 64 bytes, `fingerprint` at most 64, `sourcePath` (root-relative) at most 512
+and `treeLabel` at most 256; a field over its cap is refused `malformed-frame`, never truncated.
+`toolchainLabel` is what a person calls the toolchain (`cl 19.44.35207`), as `LEASE` carries it:
+display only, empty when the client did not say, and -- like `treeLabel` -- refused unless it is
+UTF-8, because the leader keeps it and the fleet page renders it.
+
+The grant is exactly ten fields. Its `kind` is `0` a worker (`endpoint` and `leaseToken` name
+it), `1` the machine that asked, or `2` stored -- another compile of the same key finished and
+stored the object, so the client fetches it. `chargedBytes` is the memory estimate charged for the
+admission and `queuedMs` how long the request waited since it was enqueued. The last four are a
+worker grant's, empty or zero otherwise, and are what a `LEASE` grant carries for the same reasons:
+`lifetime` is how long the token lives from when the client receives it, in milliseconds;
+`workerKey` the named worker's identity key (empty, or exactly a key's width), which the compile
+reply must be sealed under; and `dialHint` where the worker was last seen, at most as long as an
+endpoint, dialled before `endpoint` and never signed -- the token signs `endpoint`, so a stale hint
+is refused `lease-endpoint-mismatch` by whatever answers there. `reason` is one byte saying why a
+dispatchable request was granted the machine that asked: `0` it asked to (every other grant
+says this), `1` no worker serves its toolchain, `2` every worker that does was excluded, `3` none
+had room. Every byte is pinned: an `AdmitKind`, `GrantKind`, `LocalGrantReason` or `SettleOutcome`
+past its last value is refused.
+
+Two machines that missed the same key are each granted a worker: the leader files a worker
+grant's lease under the admission, never under the cache key, so no admission is refused
+`already-in-flight`. A second request for a key already being compiled waits for that compile only
+where its result can be fetched -- a storable compile asked for by the same machine -- and is then
+answered `2` stored.
+
+`SETTLE` tells the leader how an admitted compile ended, **on the connection that admitted it** --
+the charge is scoped to the connection, so it carries no lease token, and the leader releases
+whatever a connection still holds when it closes. `outcome` is `0` stored, `1` not stored, `2`
+failed or `3` the worker refused the job. `peakBytes` is the measured peak as a big-endian `u64`,
+or an **empty** field when none was measured: absent is not zero.
+
+`MACHINE-BUDGET` is a node reporting its own ledger -- the memory it will let compiles hold, its
+slots and what is held now, with a bounded sample of measured peaks. It is a machine speaking for
+itself, so it requires a proven node identity exactly as `REGISTER` does. `peaks` is one nested
+field list of at most 64 entries, each four fields: cache key, source path, compiler identity and
+the peak as a `u64`.
+
+All three are capped at the control ceiling, 64 KiB.
+
 ### Bulk fields carry a codec envelope
 
 A preprocessed translation unit and an object file are both large, so those
@@ -518,7 +588,7 @@ its cache because two peers were compiled with different codec sets.
 
 ### Control verbs have a lower ceiling
 
-`REGISTER`, `HEARTBEAT`, `LEASE` and `RELEASE` are capped at 64 KiB rather than the
+`REGISTER`, `HEARTBEAT`, `LEASE`, `RELEASE`, `ADMIT`, `SETTLE` and `MACHINE-BUDGET` are capped at 64 KiB rather than the
 session cap. That listener is meant to be reachable by a whole fleet, and a scheduler
 that can be made to allocate 256 MiB per frame by anything that authenticated
 once is a scheduler that stops scheduling. `COMPILE` is the deliberate exception,
@@ -527,7 +597,7 @@ since it carries a whole translation unit.
 ## Node identity and sealed frames
 
 A machine that **joins the fleet** — registers a worker, announces itself, heartbeats,
-withdraws — proves which machine it is before it sends any of those verbs, and every frame
+withdraws, reports its memory budget — proves which machine it is before it sends any of those verbs, and every frame
 after that proof is sealed ([#178](https://github.com/LASTRADA-Software/pace/issues/178)).
 A client asking for a lease or a cache entry runs no handshake and pays no round trip for
 any of this. A remote one proves its machine with a machine ticket instead (`AUTH`, below);
@@ -691,7 +761,7 @@ through the daemon's connection logger, so a rejection is visible to the
 operator as well as to the client.
 
 An `unsupported-version` message names the offered version *and* the supported
-range (`unsupported wire version 14; this server speaks 15..15`). A rejection that
+range (`unsupported wire version 14; this server speaks 16..16`). A rejection that
 does not say what would have worked cannot be acted on, and this is the only
 message an operator with a mismatched install will ever see.
 

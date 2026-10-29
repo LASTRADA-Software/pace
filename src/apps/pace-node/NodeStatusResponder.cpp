@@ -330,7 +330,8 @@ std::vector<std::byte> NodeStatusResponder::ExplainAdmission(std::optional<std::
     auto const key = Distributed::KeyOfMachine(*roster, *subject);
     auto fields = Distributed::OnTheWire(Distributed::ExplainConnection(
         _membership,
-        ConnectionFacts { .host = {}, .proven = key, .authenticatedMachine = key, .revokedMachine = std::nullopt }));
+        ConnectionFacts {
+            .host = {}, .proven = key, .authenticatedMachine = key, .revokedMachine = std::nullopt, .scope = {} }));
     fields.standing = Distributed::OnTheWire(Distributed::StandingOfMachine(*roster, *subject, _standing.Pending(*subject)));
     fields.subject = *subject;
     return CompileCacheWire::EncodeReply(CompileCacheWire::Status::Ok, CompileCacheWire::EncodeAdmissionExplanation(fields));

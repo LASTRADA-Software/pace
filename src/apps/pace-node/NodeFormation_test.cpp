@@ -146,6 +146,9 @@ TEST_CASE("Each mode opens the Raft port its row says and runs the consensus it 
         // schedules and redirects.
         CHECK(RedirectsScheduling(cfg) == row.redirect);
         CHECK_FALSE((ServesScheduler(cfg) && RedirectsScheduling(cfg)));
+        // And every node answering the scheduling verbs relays its launchers' queue verbs while it does not
+        // lead (Ruling 10): a learner always, a voter while another leads -- every consensus member.
+        CHECK(ForwardsAdmission(cfg) == row.consensus);
     }
 }
 
@@ -156,6 +159,7 @@ TEST_CASE("A configuration no record shaped runs no consensus and opens no raft 
     CHECK_FALSE(ServesScheduler(cfg));
     CHECK_FALSE(ServesEnrollment(cfg, true));
     CHECK_FALSE(RedirectsScheduling(cfg));
+    CHECK_FALSE(ForwardsAdmission(cfg));
     CHECK(RowFor(NodeSurface::Raft).Resolve(cfg).empty());
     CHECK(SchedulersOf(cfg, AsConfigured).empty());
     CHECK(BootstrapMembersOf(cfg).empty());
@@ -178,6 +182,7 @@ TEST_CASE("An empty --listen-raft closes consensus for a mode that listens and n
         // that still runs it (a learner) does.
         CHECK(RedirectsScheduling(cfg) == RunsConsensus(cfg));
         CHECK_FALSE((ServesScheduler(cfg) && RedirectsScheduling(cfg)));
+        CHECK(ForwardsAdmission(cfg) == RunsConsensus(cfg));
     }
 
     // Named, because it is the case a narrowed predicate gets wrong: a voter with its consensus

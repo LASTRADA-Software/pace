@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 
@@ -28,6 +30,11 @@ struct CompileRun
     int exitCode { NotSpawned };
     std::string out; ///< Captured stdout (empty for combined captures).
     std::string err; ///< Captured stderr (empty for combined captures).
+
+    /// The peak memory the process AND ITS DESCENDANTS used, in bytes. Disengaged when it was not
+    /// measured -- the process was not spawned, or the platform declined to answer -- and never 0
+    /// for "unknown": a caller charging a memory budget must tell *nothing measured* from *tiny*.
+    std::optional<std::uint64_t> peakMemoryBytes { std::nullopt };
 };
 
 /// One environment variable a spawn ADDS to the environment it inherits.

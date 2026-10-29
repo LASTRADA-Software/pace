@@ -679,3 +679,56 @@ TEST_CASE("A counter the sink has no slot for is omitted and named, never render
     // A zero here is a reading, not a missing line.
     CHECK(healthyBody.contains("pace_metrics_catalogue_skew 0\n"));
 }
+
+TEST_CASE("The admission queue renders its depth and a charge per machine, and nothing when it is not served",
+          "[metrics][prometheus][admission]")
+{
+    // #1728. Gauges sampled per scrape. A process that serves no admission surface leaves the block
+    // absent -- not a zero depth, which would claim a queue that is empty -- and a machine with nothing
+    // charged has no sample, for the reason a tier the cache lacks has none.
+    AtomicMetricsSink metrics;
+
+    auto const absent = RenderPrometheus(metrics, MetricsSnapshot { .storage = std::nullopt, .host = std::nullopt });
+    CHECK_FALSE(absent.contains("pace_admission_queue_depth"));
+    CHECK_FALSE(absent.contains("pace_admission_charged_bytes"));
+
+    auto const idle = RenderPrometheus(
+        metrics,
+        MetricsSnapshot { .storage = std::nullopt,
+                          .host = std::nullopt,
+                          .admission = AdmissionGauges { .queueDepth = 0, .chargedBytes = {}, .budgets = {} } });
+    CHECK(idle.contains("# TYPE pace_admission_queue_depth gauge"));
+    CHECK(idle.contains("pace_admission_queue_depth 0\n"));
+    CHECK_FALSE(idle.contains("pace_admission_charged_bytes"));
+
+    auto const busy = RenderPrometheus(
+        metrics,
+        MetricsSnapshot {
+            .storage = std::nullopt,
+            .host = std::nullopt,
+            .admission = AdmissionGauges { .queueDepth = 3,
+                                           .chargedBytes = { { "ab12", 2048 }, { "cd34", 1 } },
+                                           .budgets = { { .machine = "ab12", .budgetBytes = 8192, .inUseBytes = 4096 },
+                                                        { .machine = "ef56", .budgetBytes = 1024, .inUseBytes = 0 } } } });
+    CHECK(busy.contains("pace_admission_queue_depth 3\n"));
+    CHECK(busy.contains("# TYPE pace_admission_charged_bytes gauge"));
+    CHECK(busy.contains("pace_admission_charged_bytes{machine=\"ab12\"} 2048\n"));
+    CHECK(busy.contains("pace_admission_charged_bytes{machine=\"cd34\"} 1\n"));
+    // One header for the series, however many machines: a parser rejects a repeated one.
+    auto const first = busy.find("# HELP pace_admission_charged_bytes");
+    REQUIRE(first != std::string::npos);
+    CHECK(busy.find("# HELP pace_admission_charged_bytes", first + 1) == std::string::npos);
+
+    // Spec goal 9: each REPORTING machine's budget beside what the queue counts in use against it --
+    // `ef56` charged nothing and still has a budget; `cd34` never reported one and has no budget line.
+    CHECK(busy.contains("# TYPE pace_admission_budget_bytes gauge"));
+    CHECK(busy.contains("pace_admission_budget_bytes{machine=\"ab12\"} 8192\n"));
+    CHECK(busy.contains("pace_admission_budget_bytes{machine=\"ef56\"} 1024\n"));
+    CHECK_FALSE(busy.contains("pace_admission_budget_bytes{machine=\"cd34\"}"));
+    CHECK(busy.contains("# TYPE pace_admission_in_use_bytes gauge"));
+    CHECK(busy.contains("pace_admission_in_use_bytes{machine=\"ab12\"} 4096\n"));
+    CHECK(busy.contains("pace_admission_in_use_bytes{machine=\"ef56\"} 0\n"));
+    // Nothing reported a budget on the idle queue, so neither series has even a header there.
+    CHECK_FALSE(idle.contains("pace_admission_budget_bytes"));
+    CHECK_FALSE(idle.contains("pace_admission_in_use_bytes"));
+}

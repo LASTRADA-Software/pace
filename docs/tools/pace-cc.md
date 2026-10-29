@@ -691,11 +691,14 @@ Writes use an atomic append (`FILE_APPEND_DATA` / `O_APPEND`) so the hundreds of
 concurrent compilers in one build interleave whole lines instead of shredding
 each other's. Recording failures are swallowed: statistics never break a build.
 
-A line is tab-separated and names its own format first: `v2`, then fifteen columns in
+A line is tab-separated and names its own format first: `v3`, then seventeen columns in
 this order — `outcome`, `prefetch-group`, `value-bytes`, `elapsed-ms`, `source`,
 `detail`, `preprocess-ms`, `cache-ms`, `direct-ms`, `direct-hit`, `timestamp` (seconds
-since the Unix epoch), `dispatch`, `dispatch-detail`, `dispatch-specifics` and
-`exit-code`, the code the compile exited with. A line with no version was written by
+since the Unix epoch), `dispatch`, `dispatch-detail`, `dispatch-specifics`,
+`exit-code` (the code the compile exited with), `queued-ms` (milliseconds waited for a
+compile slot) and `peak-memory-bytes`. An empty `exit-code`, `queued-ms` or
+`peak-memory-bytes` means no reading, never a zero. `pace-cc -s` prints the wait and the
+peak-memory lines only over records that carry them. A line with no version was written by
 an older launcher and is read by how many columns it has, as it always was; its exit
 code is *absent*, never a zero that would call every old compile a success. A line
 naming a version this launcher does not know — a newer launcher appending to the same
@@ -843,6 +846,47 @@ none of them is a caching failure.
 | `the scheduler stopped reporting progress` | The scheduler's progress pulses stopped mid-exchange: the node is alive at the TCP level and its answer stalled. |
 | `a worker compile failed and was retried locally` | The remote compiler exited non-zero, so the result was discarded and the translation unit compiled here to confirm. Broken code produces this on every machine and is not a fleet problem; a *rising* count against a build that keeps succeeding is a worker producing failures that are not real, and the verbose line names the machine. |
 | `the dispatched object could not be written`, `the depfile for a dispatched compile could not be written` | The object came back and this machine could not store it — a full disk or a read-only output path. Local, not a fleet problem, and the compile is redone here. |
+
+## The compile queue
+
+Since #1728 every compile the launcher runs on a miss, and every compile it declines to cache,
+asks the fleet's queue first (`ADMIT`, always to this machine's own node at `PACE_ADDR`, which
+answers when it leads and forwards to the leader when it does not). `PACE_SCHEDULER` does **not**
+redirect it: the leader charges a compile to the machine that asked, which it can name only by the
+key this machine's node proves on the forwarded connection, so a launcher asking a remote
+scheduler directly would be charged to no machine at all. `PACE_SCHEDULER` keeps its one meaning,
+where a `LEASE` goes when no queue answers. The queue exists so that a build with more compiler processes than the machine has
+memory for waits instead of being killed by the kernel: a miss is **admitted, never refused for
+capacity**. The reply says where the compile runs: on a worker, on this machine, or nowhere --
+*stored*, because another compile of the same key finished and stored its object while this one
+waited, in which case the launcher fetches it.
+
+- **The connection is the lease.** The launcher keeps the admitting connection open for the
+  whole compile and ends it with `SETTLE` (stored, not stored, failed, or *the worker refused
+  the job*). `kill -9` of the launcher or of ninja closes the connection and the leader gives the
+  memory back at once; nothing has to expire.
+- **A worker that declines keeps your place.** A refused dispatch goes back to the front of the
+  queue on the same connection and is counted; after three refusals the compile runs locally.
+- **A wait is not a hang.** The leader pulses while a request is queued, so the launcher tells a
+  long queue from a dead leader; `PACE_VERBOSE` says when it is waiting.
+- **It fails open.** A node that is stopped, unreachable, refuses the verb, or answers something
+  unreadable costs the build nothing: the compile runs as it did before the queue, and a launcher
+  that already found the node unreachable on this invocation does not dial it a second time.
+  A launcher that learns this from a FETCH also writes it to the reachability memo, so for the
+  next fifteen seconds no launcher of the build dials the queue either. The one compile that pays
+  is one with no such evidence: a command line the launcher cannot parse makes no FETCH, so with
+  the node stopped and nothing in the memo it dials the queue once -- on Windows, where a refused
+  loopback connect can take the whole one-second connect bound, up to one second -- and that
+  failure is then remembered. So a stopped node costs a build at most one such connect per
+  fifteen-second memo window, not one per compile.
+  A *local* grant that says the machine has no room yet is an ordinary queue decision and is not
+  counted as a refusal.
+- **`pace-cc -s`** reports what the queue cost: `waited <s> s for a compile slot (<n> compiles)`
+  and `peak compile memory <n> GiB`, each only over records that carry the reading (the
+  `queued-ms` and `peak-memory-bytes` columns above).
+
+The budget the queue charges against is the node's, see
+[the machine's compile budget](pace-node.md#the-machines-compile-budget).
 
 ## Exit codes
 

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include "HeldCharges.hpp"
+
 #include <Pace/Core/BoundedDrain.hpp>
 #include <Pace/Core/Logger.hpp>
 #include <Pace/Metrics/IMetricsSink.hpp>
@@ -93,7 +95,7 @@ enum class HeartbeatWake : std::uint8_t
 ///
 /// Not thread-safe by accident: it is thread-safe on purpose, because the compiles
 /// it counts run on an executor while the loop that admitted them keeps accepting.
-class CompileCapacity
+class CompileCapacity final: public IHeldCharges
 {
   public:
     /// @param slots How many compiles may run at once.
@@ -132,7 +134,7 @@ class CompileCapacity
     CompileCapacity& operator=(CompileCapacity const&) = delete;
     CompileCapacity(CompileCapacity&&) = delete;
     CompileCapacity& operator=(CompileCapacity&&) = delete;
-    ~CompileCapacity() = default;
+    ~CompileCapacity() override = default;
 
     /// A held byte reservation, released when it goes out of scope.
     ///
@@ -175,13 +177,23 @@ class CompileCapacity
     ///
     /// Under the drain's mutex, which is what makes the cordon and the take one step: see
     /// `SlotAdmission`.
-    /// @return `Taken` when a slot was taken, and the caller then owes a `ReleaseSlot`;
-    ///         otherwise which refusal this is.
-    [[nodiscard]] SlotAdmission TryTakeSlot() noexcept;
+    ///
+    /// The memory the leader's queue charged this compile is recorded WITH the take, under the same
+    /// lock, so what `Held` reports is never a slot without its charge or the reverse.
+    /// @param chargedBytes What the leader charged it (`CompileRequest::chargedBytes`); zero when the
+    ///        request stated none. Held for the report only: it admits and refuses nothing here.
+    /// @return `Taken` when a slot was taken, and the caller then owes a `ReleaseSlot` of the same
+    ///         @p chargedBytes; otherwise which refusal this is.
+    [[nodiscard]] SlotAdmission TryTakeSlot(std::uint64_t chargedBytes = 0) noexcept;
 
     /// Give one slot back, wake a drain that may be waiting on it, and report a cordoned
     /// worker that has just drained.
-    void ReleaseSlot() noexcept;
+    /// @param chargedBytes What the matching `TryTakeSlot` recorded.
+    void ReleaseSlot(std::uint64_t chargedBytes = 0) noexcept;
+
+    /// What the compiles running on this worker hold: their slots, and the bytes the leader charged them.
+    /// @return The held slots and bytes, read under the take's own lock.
+    [[nodiscard]] HeldCharges Held() const override;
 
     /// Cordon this worker, or lift its cordon.
     ///
@@ -342,8 +354,11 @@ class CompileCapacity
     bool _wakeRequested { false };
     std::atomic<std::size_t> _bytesInFlight { 0 };
     std::atomic<std::size_t> _inFlight { 0 };
+    /// What the running compiles were charged by the leader. Guarded by `_drainMutex`, which is what
+    /// makes it agree with `_inFlight` at every reading.
+    std::uint64_t _heldBytes { 0 };
 
-    std::mutex _drainMutex;
+    mutable std::mutex _drainMutex;
     std::condition_variable _drained;
     /// Notified by `Cordon` whenever the cordon moves, and by `WakeHeartbeat`; waited on by
     /// `WaitForHeartbeat`. `_any` because the wait takes a stop token.

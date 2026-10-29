@@ -355,6 +355,66 @@ static void AppendTierMetrics(std::string& out, TieredStorageStats const& tiers)
     }
 }
 
+namespace
+{
+    /// One per-machine admission gauge: its name, its help and the budget row's field it renders.
+    struct AdmissionBudgetSeries
+    {
+        std::string_view name;                                 ///< The series name.
+        std::string_view help;                                 ///< Its `# HELP` text.
+        std::uint64_t AdmissionGauges::MachineBudget::* value; ///< The field it renders.
+    };
+
+    /// The budget series: one header each, and a sample per machine that reported a budget.
+    constexpr std::array AdmissionBudgetSeriesTable {
+        AdmissionBudgetSeries { .name = "pace_admission_budget_bytes",
+                                .help = "Memory each machine said compiles may hold at once: the budget the leader "
+                                        "admits against.",
+                                .value = &AdmissionGauges::MachineBudget::budgetBytes },
+        AdmissionBudgetSeries { .name = "pace_admission_in_use_bytes",
+                                .help = "Memory the leader counts as in use on each machine when it admits: the larger "
+                                        "of what it charged and what the machine reports it holds.",
+                                .value = &AdmissionGauges::MachineBudget::inUseBytes },
+    };
+} // namespace
+
+/// Render the admission queue (#1728): its depth, what each machine has been charged, and each
+/// reporting machine's budget beside what the queue counts in use against it.
+///
+/// Each per-machine series is one sample per machine under one `# HELP`. A machine with nothing
+/// charged renders no charged line rather than a zero, which a dashboard would read as a machine that
+/// reported a budget and is idle; a machine that never reported renders no budget line, which would
+/// read as a machine that admits nothing.
+/// @param out Destination.
+/// @param admission The queue as sampled.
+static void AppendAdmissionMetrics(std::string& out, AdmissionGauges const& admission)
+{
+    Append(out,
+           Metric { .name = "pace_admission_queue_depth",
+                    .help = "Compile requests waiting for the leader to admit them.",
+                    .type = MetricType::Gauge,
+                    .value = admission.queueDepth });
+    // The machine is rendered in hex by the sampler, so no character in a label here needs escaping.
+    if (!admission.chargedBytes.empty())
+    {
+        constexpr std::string_view Name = "pace_admission_charged_bytes";
+        out +=
+            std::format("# HELP {0} Memory the leader has charged to compiles it admitted, per machine.\n# TYPE {0} {1}\n",
+                        Name,
+                        TypeName(MetricType::Gauge));
+        for (auto const& [machine, bytes]: admission.chargedBytes)
+            out += std::format("{}{{machine=\"{}\"}} {}\n", Name, machine, bytes);
+    }
+    if (admission.budgets.empty())
+        return;
+    for (auto const& series: AdmissionBudgetSeriesTable)
+    {
+        out += std::format("# HELP {0} {1}\n# TYPE {0} {2}\n", series.name, series.help, TypeName(MetricType::Gauge));
+        for (auto const& row: admission.budgets)
+            out += std::format("{}{{machine=\"{}\"}} {}\n", series.name, row.machine, row.*series.value);
+    }
+}
+
 /// Render what a node believes about its own Raft cluster.
 ///
 /// Gauges, every one: they describe a state rather than count events, which is why
@@ -547,6 +607,10 @@ std::string RenderPrometheus(StatsReading const& reading)
     // member set INSIDE it is a reading and renders, which is the whole of #435.
     if (snapshot.consensus.has_value())
         AppendConsensusMetrics(out, *snapshot.consensus);
+
+    // And the leader's queue, from a process that serves the admission surface.
+    if (snapshot.admission.has_value())
+        AppendAdmissionMetrics(out, *snapshot.admission);
 
     // Every counter the sink knows, without exception. Exporting the *table*
     // rather than a hand-picked subset is the whole point: seven of the nine

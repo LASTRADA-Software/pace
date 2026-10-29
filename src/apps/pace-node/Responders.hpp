@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include "AdmissionResponder.hpp"
+#include "AdmitForwarder.hpp"
 #include "CacheProxy.hpp"
 #include "EnrollmentAbsence.hpp"
 #include "FrameEndpoint.hpp"
@@ -316,14 +318,44 @@ class SchedulerResponder final: public IFrameResponder
     {
     }
 
+    /// Route the admission verbs (`ADMIT`, `SETTLE`, `MACHINE-BUDGET`, #1728) to the leader's queue.
+    ///
+    /// A setter rather than a constructor argument, for `SchedulerService::SetRole`'s reason: the
+    /// queue parks on the node's reactor, which is built after the tier this responder belongs to.
+    /// Without one the admission verbs are answered as before, `DispatchNotPermitted`.
+    /// @param admission The queue's responder; must outlive this.
+    void ServeAdmissionWith(AdmissionResponder& admission) noexcept
+    {
+        _admission = &admission;
+    }
+
+    /// Relay a launcher's `ADMIT` and `SETTLE` to the leader whenever THIS node does not lead (Ruling 10).
+    ///
+    /// The queue lives on the leader alone, and a launcher talks only to its own machine's node, so a
+    /// voter that follows another would otherwise send it away with `NotLeader` -- exactly what a learner
+    /// stopped doing (`SchedulingRedirectResponder::ForwardAdmissionWith`). Which responder answers is
+    /// `ForwardsToLeader`. Wired once, before serving, and only together with `ServeAdmissionWith`.
+    /// @param forwarder The relay; must outlive this.
+    void ForwardAdmissionWith(AdmitForwarder& forwarder) noexcept
+    {
+        _forwarder = &forwarder;
+    }
+
     /// @copydoc IFrameResponder::Answer
     ///
-    /// Never suspends. The scheduler answers from its own tables -- a decision
+    /// Never suspends for every verb but `ADMIT`. The scheduler answers from its own tables -- a decision
     /// layer kept pure so every capacity and expiry rule is a `core::platform::ManualClock` unit
     /// test -- so this is a one-line adapter, and a responder that costs a frame
-    /// allocation and no round trip is a legitimate thing to be.
+    /// allocation and no round trip is a legitimate thing to be. `ADMIT` parks, in the admission
+    /// responder, until the queue decides.
     [[nodiscard]] core::async::Task<FrameReply> Answer(std::span<std::byte const> frame, PeerIdentity peer) override
     {
+        auto const opRaw = frame.size() >= CompileCacheWire::RequestHeaderSize ? std::to_integer<std::uint8_t>(frame[2])
+                                                                               : std::uint8_t { 0 };
+        if (ForwardsToLeader(peer, opRaw))
+            co_return co_await _forwarder->Answer(frame, std::move(peer));
+        if (ServesAdmission(opRaw))
+            co_return co_await _admission->Answer(frame, std::move(peer));
         co_return _protocol.Answer(frame, Context(std::move(peer)));
     }
 
@@ -394,9 +426,12 @@ class SchedulerResponder final: public IFrameResponder
     /// A round trip. `SchedulerProtocol::Answer` never suspends -- it answers from its
     /// own tables -- so what this covers is a peer sending a payload it already has in
     /// hand, and the endpoint's own header window is the right size for that.
-    [[nodiscard]] std::chrono::milliseconds RequestTimeout(std::uint8_t /*opRaw*/) const noexcept override
+    [[nodiscard]] std::chrono::milliseconds RequestTimeout(std::uint8_t opRaw) const noexcept override
     {
-        return FrameServer::HeaderTimeout;
+        // A queued admission waits as long as the compiles ahead of it.
+        if (RelaysByVerb(opRaw))
+            return _forwarder->RequestTimeout(opRaw);
+        return ServesAdmission(opRaw) ? _admission->RequestTimeout(opRaw) : FrameServer::HeaderTimeout;
     }
 
     /// Kilobytes, not megabytes.
@@ -445,9 +480,16 @@ class SchedulerResponder final: public IFrameResponder
     /// cannot realistically vanish inside one -- and the write that would discover it
     /// is the very next statement anyway. Watching would buy a park and a wake per
     /// request to learn something the write already reports.
-    [[nodiscard]] std::optional<IMetricsSink::Counter> PeerWatchCounter(std::uint8_t /*opRaw*/) const noexcept override
+    ///
+    /// **`ADMIT` is the exception**, and the reason is the same one turned over: it parks for as long as
+    /// the compiles ahead of it run, so a client can vanish inside it and the answer is what wakes.
+    ///
+    /// A relayed `ADMIT` files under the forwarder's counter (`RelaysByVerb`).
+    [[nodiscard]] std::optional<IMetricsSink::Counter> PeerWatchCounter(std::uint8_t opRaw) const noexcept override
     {
-        return std::nullopt;
+        if (RelaysByVerb(opRaw))
+            return _forwarder->PeerWatchCounter(opRaw);
+        return ServesAdmission(opRaw) ? _admission->PeerWatchCounter(opRaw) : std::nullopt;
     }
 
     /// @copydoc IFrameResponder::ProgressInterval
@@ -456,9 +498,12 @@ class SchedulerResponder final: public IFrameResponder
     /// memory in microseconds, so there is no interval in which a client could wonder
     /// whether this node is still there. A pulse would be a frame that cannot arrive
     /// before the reply it precedes, on a verb whose client is not looping for one.
-    [[nodiscard]] std::optional<std::chrono::milliseconds> ProgressInterval(std::uint8_t /*opRaw*/) const noexcept override
+    /// **`ADMIT` again excepted**: it is the one scheduler verb a client waits minutes for.
+    [[nodiscard]] std::optional<std::chrono::milliseconds> ProgressInterval(std::uint8_t opRaw) const noexcept override
     {
-        return std::nullopt;
+        if (RelaysByVerb(opRaw))
+            return _forwarder->ProgressInterval(opRaw);
+        return ServesAdmission(opRaw) ? _admission->ProgressInterval(opRaw) : std::nullopt;
     }
 
     /// @copydoc IFrameResponder::StreamFor
@@ -511,9 +556,58 @@ class SchedulerResponder final: public IFrameResponder
         return Distributed::CallerContextOf(_membership, std::move(peer));
     }
 
+    /// @param opRaw A verb, as received.
+    /// @return True when an admission responder is attached and answers @p opRaw.
+    [[nodiscard]] bool ServesAdmission(std::uint8_t opRaw) const noexcept
+    {
+        return _admission != nullptr && AdmissionResponder::Serves(opRaw);
+    }
+
+    /// Whether the endpoint's per-verb questions -- the answer window, the pulse, the departure counter --
+    /// are the forwarder's for @p opRaw: a queue verb on a node that does not lead.
+    ///
+    /// Asked by verb alone, because those questions are, so it reads the ROLE and not `ForwardsToLeader`'s
+    /// connection facts: a launcher's `ADMIT` on a follower is relayed, and its wait's departure is filed
+    /// as the forwarder's rather than as a wait on a queue this node does not hold. A role moving between
+    /// this question and the routing can file one departure under the other row -- a leadership change
+    /// racing a client that left, counted once either way.
+    /// @param opRaw The verb, as received.
+    /// @return True when the forwarder answers the per-verb questions.
+    [[nodiscard]] bool RelaysByVerb(std::uint8_t opRaw) const noexcept
+    {
+        return _forwarder != nullptr && ServesAdmission(opRaw) && AdmitForwarder::Serves(opRaw) && !_admission->Leads();
+    }
+
+    /// Whether @p opRaw from @p peer goes to the leader through the forwarder rather than to this node's
+    /// own queue (Ruling 10).
+    ///
+    /// Only the queue's verbs from a launcher on this machine (`AdmitForwarder::ForwardsFor`), and then:
+    /// - a connection holding a link to the leader the forwarder left (`AdmitForwarder::Relays`) stays
+    ///   with the forwarder, whoever leads now -- its `SETTLE`, or the `ADMIT` after a worker's refusal,
+    ///   answers what the LEADER holds on that link;
+    /// - any other `SETTLE` is this node's queue's: a grant it made while it led, or nothing;
+    /// - an `ADMIT` is relayed unless this node's queue decides it (`AdmissionResponder::DecidesHere`):
+    ///   this node leads, or the caller proved this machine's own key -- this node's forwarder dialled
+    ///   back to itself, which must never be relayed again.
+    /// @param peer Who asks, with the connection's scope.
+    /// @param opRaw The verb, as received.
+    /// @return True to hand the request to the forwarder.
+    [[nodiscard]] bool ForwardsToLeader(PeerIdentity const& peer, std::uint8_t opRaw) const
+    {
+        if (_forwarder == nullptr || !ServesAdmission(opRaw) || !AdmitForwarder::ForwardsFor(peer, opRaw))
+            return false;
+        if (peer.scope != nullptr && AdmitForwarder::Relays(*peer.scope))
+            return true;
+        if (opRaw != static_cast<std::uint8_t>(CompileCacheWire::Op::Admit))
+            return false;
+        return !_admission->DecidesHere(peer);
+    }
+
     Distributed::SchedulerProtocol& _protocol;
     Distributed::IMembershipOracle const& _membership;
     IMetricsSink& _metrics;
+    AdmissionResponder* _admission { nullptr }; ///< The leader's queue, once the node wires one.
+    AdmitForwarder* _forwarder { nullptr };     ///< The relay to the leader while this node follows; else null.
 };
 
 /// Serves this node's own cache tier to clients on this machine, and to nobody else.
@@ -1501,6 +1595,12 @@ class MergedResponder final: public IFrameResponder
         { .op = CompileCacheWire::Op::Lease, .refusal = NoSchedulerHere, .detail = NoSchedulerHereWhy },
         { .op = CompileCacheWire::Op::Release, .refusal = NoSchedulerHere, .detail = NoSchedulerHereWhy },
         { .op = CompileCacheWire::Op::NodeAnnounce, .refusal = NoSchedulerHere, .detail = NoSchedulerHereWhy },
+        // The admission queue (#1728) asks for capacity as `Lease` does, and a node running no
+        // consensus has no queue to join -- `DispatchNotPermitted`, as the daemon's rows answer
+        // them, never the family's `NoCluster` and never `UnimplementedVerb`.
+        { .op = CompileCacheWire::Op::Admit, .refusal = NoSchedulerHere, .detail = NoSchedulerHereWhy },
+        { .op = CompileCacheWire::Op::Settle, .refusal = NoSchedulerHere, .detail = NoSchedulerHereWhy },
+        { .op = CompileCacheWire::Op::MachineBudget, .refusal = NoSchedulerHere, .detail = NoSchedulerHereWhy },
     });
 
     // A verb row refines its family's answer, so it may only name a family that HAS one: a row for a

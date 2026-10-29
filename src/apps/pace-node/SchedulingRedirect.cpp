@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include "AdmitForwarder.hpp"
 #include "Responders.hpp"
 #include "SchedulingRedirect.hpp"
 
@@ -165,6 +166,12 @@ std::optional<std::vector<std::byte>> SchedulingRedirectResponder::Decide(PeerId
     if (auto const* const row = core::findOrNull(NamedRefusals, descriptor->code, &NamedRefusal::op); row != nullptr)
         return Cc::RefuseWithoutCounter(row->answer, row->detail);
 
+    // The queue's verbs from this machine are RELAYED, not redirected (#1728): nothing is refused here,
+    // and `Answer` hands the frame on. Asked AFTER the gate above, so a caller nothing admits is
+    // refused `NotAMember` whatever it sends.
+    if (_forwarder != nullptr && AdmitForwarder::ForwardsFor(peer, opRaw))
+        return std::nullopt;
+
     // Possibly empty: no leader is known. Sent anyway rather than refused another way, because a
     // `NotLeader` naming nobody is what a follower says during an election, and every client
     // already reads it as *no leader*: the reply then carries the code's default words, which
@@ -181,6 +188,8 @@ core::async::Task<FrameReply> SchedulingRedirectResponder::Answer(std::span<std:
 
     if (auto refusal = Decide(peer, header->opRaw); refusal.has_value())
         co_return *std::move(refusal);
+    if (_forwarder != nullptr && AdmitForwarder::ForwardsFor(peer, header->opRaw))
+        co_return co_await _forwarder->Answer(frame, std::move(peer));
     co_return Cc::RefuseWithoutCounter(NotThisComponentsVerb, "this node serves no component for that verb");
 }
 
@@ -190,9 +199,28 @@ std::optional<std::vector<std::byte>> SchedulingRedirectResponder::RefusePeer(Pe
     return Decide(peer, opRaw);
 }
 
-std::vector<std::byte> SchedulingRedirectResponder::RefusalReply(Wire::PrePayloadDecision decision,
-                                                                 std::uint8_t /*opRaw*/,
-                                                                 std::string_view detail) const
+void SchedulingRedirectResponder::ForwardAdmissionWith(AdmitForwarder& forwarder) noexcept
+{
+    _forwarder = &forwarder;
+}
+
+std::chrono::milliseconds SchedulingRedirectResponder::RequestTimeout(std::uint8_t opRaw) const noexcept
+{
+    return _forwarder != nullptr && AdmitForwarder::Serves(opRaw) ? _forwarder->RequestTimeout(opRaw)
+                                                                  : FrameServer::HeaderTimeout;
+}
+
+std::optional<IMetricsSink::Counter> SchedulingRedirectResponder::PeerWatchCounter(std::uint8_t opRaw) const noexcept
+{
+    return _forwarder != nullptr && AdmitForwarder::Serves(opRaw) ? _forwarder->PeerWatchCounter(opRaw) : std::nullopt;
+}
+
+std::optional<std::chrono::milliseconds> SchedulingRedirectResponder::ProgressInterval(std::uint8_t opRaw) const noexcept
+{
+    return _forwarder != nullptr && AdmitForwarder::Serves(opRaw) ? _forwarder->ProgressInterval(opRaw) : std::nullopt;
+}
+
+std::vector<std::byte> SchedulerSurfaceRefusalReply(Wire::PrePayloadDecision decision, std::string_view detail)
 {
     return Cc::RefuseWithoutCounter({ .code = Wire::ErrorCodeFor(decision),
                                       .rationale = decision == Wire::PrePayloadDecision::Unauthenticated
@@ -201,12 +229,24 @@ std::vector<std::byte> SchedulingRedirectResponder::RefusalReply(Wire::PrePayloa
                                     detail);
 }
 
+std::vector<std::byte> SchedulerSurfaceEndpointRefusalReply(EndpointRefusal refusal, std::string_view detail)
+{
+    auto const& row = Detail::SchedulerEndpointRefusals[static_cast<std::size_t>(refusal)];
+    return Cc::RefuseWithoutCounter({ .code = ErrorCodeFor(refusal), .rationale = row.rationale }, detail);
+}
+
+std::vector<std::byte> SchedulingRedirectResponder::RefusalReply(Wire::PrePayloadDecision decision,
+                                                                 std::uint8_t /*opRaw*/,
+                                                                 std::string_view detail) const
+{
+    return SchedulerSurfaceRefusalReply(decision, detail);
+}
+
 std::vector<std::byte> SchedulingRedirectResponder::EndpointRefusalReply(EndpointRefusal refusal,
                                                                          std::uint8_t /*opRaw*/,
                                                                          std::string_view detail) const
 {
-    auto const& row = Detail::SchedulerEndpointRefusals[static_cast<std::size_t>(refusal)];
-    return Cc::RefuseWithoutCounter({ .code = ErrorCodeFor(refusal), .rationale = row.rationale }, detail);
+    return SchedulerSurfaceEndpointRefusalReply(refusal, detail);
 }
 
 } // namespace Pace::Node

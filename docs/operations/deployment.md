@@ -648,6 +648,18 @@ is where they are explained one by one.
 | `pace_dispatch_leases_released_late_total` | A compile outran the lease timeout and reported back too late. Read as a fraction of `released_total`; a steady fraction means the lease bound is too short for this site's slowest translation unit. |
 | `pace_dispatch_leases_malformed_total` | A client asked for a lease naming its key, toolchain or toolchain label in bytes that are not UTF-8, and was refused. |
 | `pace_dispatch_leases_field_too_long_total` | A client asked for a lease with a key, toolchain fingerprint or toolchain label longer than a scheduler records, and was refused. |
+| `pace_admission_queued_total` | Compile requests the leader queued for admission. |
+| `pace_admission_granted_worker_total` | Admissions granted on a worker, charged the compile's estimated memory against that machine's budget. |
+| `pace_admission_granted_local_total` | Admissions granted to run on the machine that asked. |
+| `pace_admission_deduplicated_total` | Requests answered *stored*: another compile of the same key stored its object while they waited. |
+| `pace_admission_ran_alone_total` | Admissions whose estimate exceeded a whole machine's budget, so the compile ran alone. |
+| `pace_admission_abandoned_total` | Queued or granted requests whose connection closed, or whose next frame was not a settle. |
+| `pace_admission_worker_refused_total` | Admitted compiles a worker declined; the same request goes back to the head of the queue, and runs locally after three refusals. |
+| `pace_admission_wait_milliseconds_total` | Milliseconds admitted requests spent queued, each grant counting from its request's last park: a `_sum`, whose count is `pace_admission_wait_count_total`. |
+| `pace_admission_wait_count_total` | Grants the wait sum covers, one per grant: the `_count` of that pair. |
+| `pace_admission_forwarded_total` | Queue requests this node, which does not lead, relayed to the leader for a launcher on this machine. |
+| `pace_admission_forward_failed_total` | Queue requests this node could not relay to the leader; the launcher compiled without the queue. |
+| `pace_admission_forward_abandoned_total` | Relayed queue requests whose launcher left before the leader answered. |
 | `pace_dispatch_worker_registrations_total` | Workers registering. A steady rise means heartbeats are not arriving. |
 | `pace_dispatch_worker_registrations_malformed_total` | A peer named its toolchain, endpoint or version in bytes that are not UTF-8 and was refused. |
 | `pace_dispatch_worker_registrations_field_too_long_total` | A peer registered with a fingerprint, endpoint, version, toolchain label, display name or codec list longer than a scheduler records, and was refused. |

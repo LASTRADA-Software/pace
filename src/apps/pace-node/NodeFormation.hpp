@@ -161,6 +161,15 @@ using HeldNodeKey = std::expected<std::optional<Ed25519PublicKey>, FormationUnre
 /// @return True when the redirect responder belongs on this node's `0xFC` surface.
 [[nodiscard]] bool RedirectsScheduling(NodeConfig const& cfg) noexcept;
 
+/// Whether @p cfg relays a launcher's queue verbs to the leader whenever it does not lead (#1728, Ruling
+/// 10): every node that answers the scheduling verbs at all -- a learner through its redirect, a voter
+/// through its scheduler while another leads.
+///
+/// `main` builds the forwarder under THIS, and the metrics surface it writes is served under it.
+/// @param cfg The configuration.
+/// @return True when the forwarder belongs on this node.
+[[nodiscard]] bool ForwardsAdmission(NodeConfig const& cfg) noexcept;
+
 /// Whether @p cfg serves the enrollment surface: it runs consensus -- there is a cluster to be
 /// admitted to -- AND a scheduler tier was built, without which the responder has nothing to admit
 /// through. The second half is a runtime fact about what was BUILT, which the caller states. And

@@ -1607,6 +1607,7 @@ std::expected<CompileOutcome, JobError> CompileJobRunner::Run(CompileJob const& 
         .stdoutText = std::move(run.out),
         .stderrText = std::move(run.err),
         .correlation = correlation,
+        .peakMemoryBytes = run.peakMemoryBytes,
     };
     if (run.exitCode == 0)
     {

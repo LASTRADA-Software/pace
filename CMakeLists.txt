@@ -533,8 +533,8 @@ endif()
 CPMAddPackage(
     NAME core-cpp
     GITHUB_REPOSITORY contour-terminal/core-cpp
-    GIT_TAG v0.6.0
-    VERSION 0.6.0
+    GIT_TAG v0.11.0
+    VERSION 0.11.0
     SYSTEM YES
     EXCLUDE_FROM_ALL YES
     OPTIONS

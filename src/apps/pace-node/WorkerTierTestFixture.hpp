@@ -7,6 +7,7 @@
 
 #include "EndpointDialerTestUtils.hpp"
 #include "EndpointResolver.hpp"
+#include "MachineBudget.hpp"
 #include "NodeConditions.hpp"
 #include "NodeConfig.hpp"
 #include "NodeFormation.hpp"
@@ -182,6 +183,8 @@ struct WorkerTierFixture
     NodeConfig cfg = Worker();
     /// Where the tier answers its conditions; a case reads it after `Start`.
     NodeConditions conditions;
+    /// Where the worker reports the peaks it measures (#1728); nothing here reads them.
+    MeasuredPeaks measuredPeaks;
     int discoveryCalls = 0;
     /// How often the machine was asked for; a no-worker start must never ask.
     int machineBuilds = 0;
@@ -210,6 +213,9 @@ struct WorkerTierFixture
     /// Whether the machine's compilers cannot be started (`NeverSpawnsRunner`) rather than asked
     /// for real -- how a case launches a heartbeat that serves nothing without ending the node.
     bool compilersCannotRun = false;
+    /// Builds the machine's process runner when set, in place of the real one: a case that needs a
+    /// compile to RUN and report something (a measured peak) supplies it. Empty for the real runner.
+    std::function<std::unique_ptr<Cc::IProcessRunner>()> makeRunner;
     /// What the heartbeat's scheduler dials answer, one frame per dial, read by the first `Start`.
     /// EMPTY by default: a case that launches no heartbeat expects no dial at all, so any is a
     /// `FAIL` in the fake's own voice -- which is how a case asserts that a host event dialled nobody
@@ -244,8 +250,14 @@ struct WorkerTierFixture
             if (machineThrows)
                 throw std::filesystem::filesystem_error("temp_directory_path",
                                                         std::make_error_code(std::errc::no_such_file_or_directory));
-            return WorkerMachine { .runner =
-                                       compilersCannotRun ? std::make_unique<NeverSpawnsRunner>() : Cc::MakeProcessRunner(),
+            auto runner = [this]() -> decltype(WorkerMachine::runner) {
+                if (makeRunner)
+                    return makeRunner();
+                if (compilersCannotRun)
+                    return std::make_unique<NeverSpawnsRunner>();
+                return Cc::MakeProcessRunner();
+            }();
+            return WorkerMachine { .runner = std::move(runner),
                                    .host = Cc::MakeToolchainHost(),
                                    .discovery = std::make_unique<CountingDiscovery>(discoveryCalls),
                                    .claimant = MakeLockFileScratchClaimant(),
@@ -276,7 +288,8 @@ struct WorkerTierFixture
                                                    .conditions = conditions,
                                                    .hostEvents = hostEvents,
                                                    .suspendWait = suspendWait,
-                                                   .schedulerDialer = Dialer() },
+                                                   .schedulerDialer = Dialer(),
+                                                   .measurements = measuredPeaks },
                                  makeMachine);
     }
 };

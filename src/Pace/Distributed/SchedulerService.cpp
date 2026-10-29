@@ -707,7 +707,9 @@ SchedulerService::SchedulerService(core::platform::IClock& clock,
                                    IMetricsSink& metrics,
                                    ILogger& logger,
                                    ILeaseSigner const& signer,
-                                   std::string_view clusterId):
+                                   std::string_view clusterId,
+                                   std::uint64_t admissionEstimateBytes):
+    _clock { clock },
     _wallClock { wallClock },
     _metrics { metrics },
     _logger { logger },
@@ -715,7 +717,10 @@ SchedulerService::SchedulerService(core::platform::IClock& clock,
     _clusterId { clusterId },
     _workers { clock },
     _leases { clock },
-    _unserved { clock }
+    _unserved { clock },
+    _estimates { admissionEstimateBytes, AdmissionEstimateCapacity },
+    _placement { _workers },
+    _queue { _estimates, _placement }
 {
 }
 
@@ -783,10 +788,27 @@ std::chrono::milliseconds SchedulerService::AgreedLeaseLifetime() const
 void SchedulerService::SetRole(SchedulerRole role, std::string_view leaderEndpoint, std::uint64_t epoch)
 {
     auto observer = std::function<void(SchedulerRole)> {};
+    auto admission = AdmissionObserver {};
     {
         std::scoped_lock const guard { _leaderMutex };
         _leaderEndpoint.assign(leaderEndpoint);
         observer = _roleObserver;
+        admission = _admissionObserver;
+    }
+    // A node that STOPS leading forgets its queue: every waiting request is told `NotLeader`, naming
+    // where the new leader is, by whoever holds its connection. The role is read before it is
+    // overwritten, and only a transition out of `Leader` counts -- a node that was never leading has
+    // nothing queued, and `Undecided` -> `Follower` must not look like a demotion.
+    auto lost = std::vector<Ticket> {};
+    {
+        std::scoped_lock const guard { _admissionMutex };
+        if (role != SchedulerRole::Leader && _role.load(std::memory_order_acquire) == SchedulerRole::Leader)
+        {
+            lost = _queue.LoseLeadership();
+            for (auto const ticket: lost)
+                _admissionTickets.erase(ticket);
+        }
+        _admissionLeading = role == SchedulerRole::Leader;
     }
     // Before the role, for the reason the endpoint is: a thread that has seen
     // `Leader` must already be able to see the term it leads under, or the first
@@ -798,6 +820,8 @@ void SchedulerService::SetRole(SchedulerRole role, std::string_view leaderEndpoi
     // After the role is published, and outside the lock, so an observer may read this service.
     if (observer)
         observer(role);
+    if (!lost.empty() && admission.demoted)
+        admission.demoted(lost, std::string { leaderEndpoint });
 }
 
 void SchedulerService::ObserveRole(std::function<void(SchedulerRole)> observer)
@@ -1149,6 +1173,7 @@ SchedulerReply SchedulerService::Register(CallerContext const& caller, WorkerReg
     // the one exchange in which a worker talks to the scheduler it was CONFIGURED to
     // reach, so it is the only place an identity can be handed over without either
     // end inferring it (#401).
+    NotifyAdmissionChanged();
     return SchedulerReply::Success(Wire::EncodeRegisterReply(
         { .workerId = std::string { id }, .clusterId = _clusterId, .epoch = _epoch.load(std::memory_order_relaxed) }));
 }
@@ -1274,6 +1299,10 @@ SchedulerReply SchedulerService::Heartbeat(CallerContext const& caller,
     // number.
     if (_history != nullptr && !history.empty())
         _history->AcceptHistory(*endpoint, history);
+
+    // A heartbeat restates what the worker is running, which is how a slot the queue was waiting on
+    // comes free: the queued requests are due a pump (#1728).
+    NotifyAdmissionChanged();
 
     // **This reply deliberately carries no term.** #421 first put the scheduler's term
     // here, and review found it: this channel is unauthenticated -- `Credential` is
@@ -1548,6 +1577,7 @@ SchedulerReply SchedulerService::Release(CallerContext const& caller, std::strin
     // overwrite, so a burst of leases took a worker out of rotation until it landed.
     _workers.JobFinished(lease->workerId);
     _metrics.Increment(IMetricsSink::Counter::DispatchLeasesReleased);
+    NotifyAdmissionChanged();
     return SchedulerReply::Success();
 }
 

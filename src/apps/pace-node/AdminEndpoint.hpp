@@ -116,6 +116,10 @@ struct NodeScrapeSources
     /// present answer is a different fact entirely — a node that runs consensus and
     /// holds no configuration — and renders, which is the whole of #435.
     std::function<ConsensusStatus()> consensus;
+
+    /// The leader's admission queue as it stands (#1728), or **empty** when this process serves no
+    /// scheduler: a callable for `busySlots`' reason, sampled per scrape.
+    std::function<AdmissionGauges()> admission {};
 };
 
 /// Build the provider that answers each `/metrics` scrape.

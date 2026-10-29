@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include "AdmitSession.hpp"
 #include "ArgumentDenials.hpp"
 #include "CacheProtocol.hpp"
 #include "CodecEnvelope.hpp"
@@ -862,6 +863,11 @@ struct DispatchRequest
     /// Sent with the LEASE so a scheduler with no worker for `fingerprint` can say WHICH compiler
     /// nobody serves. Display only: nothing matches on it, and the fingerprint decides.
     std::string_view toolchainLabel {};
+
+    /// The root-relative source path an ADMITTED compile was queued under (`AdmitRequest::sourcePath`),
+    /// echoed on the compile request so the worker can key the peak it measures. Read only by the
+    /// `AdmitTicket` overload of `Dispatch`; empty when unknown.
+    std::string_view admissionSourcePath {};
 };
 
 /// Ask the scheduler for a worker and have it compile this translation unit.
@@ -922,6 +928,51 @@ struct DispatchRequest
 /// @return What happened. Never throws; every failure is a status.
 [[nodiscard]] DispatchResult Dispatch(IEndpointExchange& exchange,
                                       DispatchRequest const& request,
+                                      DispatchBudgets const& budgets = {},
+                                      Credential const& credential = {},
+                                      CompileCacheWire::CodecList const& acceptedCodecs = {},
+                                      core::platform::IClock* clock = nullptr);
+
+/// Whether a dispatch ended in a worker refusing a job the leader admitted, for a reason a
+/// re-queue answers: the worker is full, cordoned or stopping (`NoCapacity`), or out of memory
+/// budget (`EndpointBusy`) -- the named causes of R7.
+///
+/// Any other way a dispatch fails is not this: an unreachable worker, a refused argument or a
+/// crossed reply is not cured by asking the queue again.
+/// @param result What `Dispatch` returned.
+/// @return True when the COMPILE exchange itself was declined for capacity.
+[[nodiscard]] bool IsWorkerCapacityRefusal(DispatchResult const& result) noexcept;
+
+/// Have the worker an ADMISSION granted compile this translation unit.
+///
+/// The queue already did what the first two legs of the lease `Dispatch` do: it chose the worker
+/// and minted the token, so this is the compile leg alone. **No `LEASE` and no `RELEASE`**: the
+/// leader holds the lease for as long as the launcher holds its admission connection
+/// (`IAdmitSession`), and resolves it from `SETTLE` or from that connection's end -- a release sent
+/// from here would be a second owner of the same fact.
+///
+/// **The grant's age starts at `ticket.receivedAt`** (R2), never at when the launcher asked: a
+/// request that queued for twenty minutes holds a grant that is seconds old. What is left of the
+/// compile budget is measured from there, against the lifetime the leader minted the token with and
+/// relayed beside it (`AdmitTicket::lifetime`) -- and the worker enforces the token's real expiry
+/// whatever this side believes. A grant naming no lifetime leaves the compile budget as it is.
+///
+/// The worker's key, which the reply must be sealed under (W-4), is the one the leader relayed beside
+/// the token (`AdmitTicket::workerKey`), never read out of it: this client verifies no claims. A
+/// grant naming none sends nothing. An admission names no dial hint, so the advertised name is
+/// dialled.
+/// @param exchange How to reach the worker.
+/// @param request The job. `schedulerEndpoint` and `fingerprint` are unused here beyond what the
+///        compile request states.
+/// @param ticket The grant: a `Worker` ticket naming the endpoint and carrying the token.
+/// @param budgets The deadlines the compile leg runs under.
+/// @param credential Presented to the worker.
+/// @param acceptedCodecs What this client can decode.
+/// @param clock Where "now" comes from; null means a `core::platform::SteadyClock`.
+/// @return What happened. Never throws; every failure is a status.
+[[nodiscard]] DispatchResult Dispatch(IEndpointExchange& exchange,
+                                      DispatchRequest const& request,
+                                      AdmitTicket const& ticket,
                                       DispatchBudgets const& budgets = {},
                                       Credential const& credential = {},
                                       CompileCacheWire::CodecList const& acceptedCodecs = {},

@@ -534,6 +534,10 @@ TEST_CASE("NodeConfig: every flag that is worker state reaches the supervisor", 
     cfg.drainTimeout = std::chrono::seconds { 90 };
     cfg.compileRequestMaxBytes = 512ULL * 1024 * 1024;
     cfg.compileInflightMaxBytes = 4ULL * 1024 * 1024 * 1024;
+    // The machine budget (#1728), typed, so each emits.
+    cfg.machineSlots = 14;
+    cfg.machineMemoryBudgetBytes = 20ULL * 1024 * 1024 * 1024;
+    cfg.compileEstimateDefaultBytes = 3ULL * 1024 * 1024 * 1024;
     // Worker state like any other, and the one that supplies most of the rest: a
     // registration that dropped it would come back at every boot knowing only what
     // was typed alongside --install-service, which for a package install is close
@@ -7188,4 +7192,105 @@ TEST_CASE("NodeConfig: the compile ceilings are registered when typed and left t
     CHECK(std::ranges::none_of(quietSpec.arguments, [](std::string const& arg) {
         return FlagMatches(arg, "--compile-request-max") || FlagMatches(arg, "--compile-inflight-max");
     }));
+}
+
+TEST_CASE("NodeConfig.machine-flags-parse", "[node][config][machinebudget]")
+{
+    // #1728. The machine's compile budget: three rows, none of them a WORKER row, because a node
+    // running no worker still reports a budget and would otherwise be refused them.
+    constexpr auto GiB = std::uint64_t { 1 } << 30;
+
+    SECTION("each flag's grammar")
+    {
+        auto const typed =
+            ParseNodeArgv({ "--machine-slots=12", "--machine-memory-budget=24g", "--compile-estimate-default=3g" });
+        REQUIRE(typed.has_value());
+        CHECK(typed->machineSlots == std::optional<std::uint32_t> { 12 });
+        CHECK(typed->machineMemoryBudgetBytes == std::optional<std::uint64_t> { 24 * GiB });
+        CHECK(typed->compileEstimateDefaultBytes == std::optional<std::uint64_t> { 3 * GiB });
+        CHECK(CompileEstimateDefaultOf(*typed) == 3 * GiB);
+
+        // The budget takes `N%` of host RAM, as `--cache-memory` does.
+        auto const percent = ParseNodeArgv({ "--machine-memory-budget=60%" });
+        REQUIRE(percent.has_value());
+        CHECK(percent->machineMemoryBudgetBytes.value_or(0) > 0);
+    }
+
+    SECTION("absent is absent, and the estimate falls back to 2 GiB")
+    {
+        auto const bare = Unwrap(ParseNodeArgv({}));
+        CHECK_FALSE(bare.machineSlots.has_value());
+        CHECK_FALSE(bare.machineMemoryBudgetBytes.has_value());
+        CHECK_FALSE(bare.compileEstimateDefaultBytes.has_value());
+        CHECK(CompileEstimateDefaultOf(bare) == 2 * GiB);
+    }
+
+    SECTION("zero and nonsense are refused by the row's grammar, naming why")
+    {
+        for (auto const* const argument: { "--machine-slots=0",
+                                           "--machine-slots=many",
+                                           "--machine-memory-budget=0",
+                                           "--machine-memory-budget=lots",
+                                           "--compile-estimate-default=0",
+                                           "--compile-estimate-default=0g" })
+        {
+            INFO("argument: " << argument);
+            CHECK_FALSE(ParseNodeArgv({ argument }).has_value());
+        }
+        auto const zero = ParseNodeArgv({ "--machine-memory-budget=0" });
+        REQUIRE_FALSE(zero.has_value());
+        CHECK(zero.error().context.contains("more than zero"));
+    }
+
+    SECTION("the YAML keys spell the flags, and the command line still wins")
+    {
+        auto const fromFile = FromFileAndArgv({ Setting("machine_slots", { "8" }),
+                                                Setting("machine_memory_budget", { "16g" }),
+                                                Setting("compile_estimate_default", { "1g" }) },
+                                              {});
+        REQUIRE(fromFile.has_value());
+        CHECK(fromFile->machineSlots == std::optional<std::uint32_t> { 8 });
+        CHECK(fromFile->machineMemoryBudgetBytes == std::optional<std::uint64_t> { 16 * GiB });
+        CHECK(fromFile->compileEstimateDefaultBytes == std::optional<std::uint64_t> { 1 * GiB });
+
+        auto const overridden = FromFileAndArgv({ Setting("machine_slots", { "8" }) }, { "--machine-slots=4" });
+        REQUIRE(overridden.has_value());
+        CHECK(overridden->machineSlots == std::optional<std::uint32_t> { 4 });
+    }
+
+    SECTION("a node running no worker accepts them")
+    {
+        auto const noWorker = ParseNodeArgv({ "--slots=0", "--machine-slots=4", "--machine-memory-budget=8g" });
+        REQUIRE(noWorker.has_value());
+        REQUIRE_FALSE(RunsWorker(*noWorker));
+        auto const refusal = StartupPolicyRejection(*noWorker);
+        CHECK_FALSE((refusal.has_value() && refusal->contains("machine-")));
+    }
+
+    SECTION("provenance: a registration replays what was TYPED, never a derived figure")
+    {
+        auto const typed = Unwrap(ParseNodeArgv({ "--machine-slots=12", "--machine-memory-budget=24g" }));
+        auto const spec = MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, typed, Testing::InstallerPathProbe());
+        CHECK(
+            std::ranges::any_of(spec.arguments, [](std::string const& arg) { return FlagMatches(arg, "--machine-slots"); }));
+        CHECK(std::ranges::any_of(spec.arguments,
+                                  [](std::string const& arg) { return FlagMatches(arg, "--machine-memory-budget"); }));
+        // The one not typed stays out, so the next start derives it again.
+        CHECK(std::ranges::none_of(spec.arguments,
+                                   [](std::string const& arg) { return FlagMatches(arg, "--compile-estimate-default"); }));
+
+        // And what it replays parses back to the same configuration.
+        auto const reparsed = ReparseSpec(spec);
+        REQUIRE(reparsed.has_value());
+        CHECK(reparsed->machineSlots == typed.machineSlots);
+        CHECK(reparsed->machineMemoryBudgetBytes == typed.machineMemoryBudgetBytes);
+
+        auto const bare = Unwrap(ParseNodeArgv({}));
+        auto const bareSpec =
+            MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, bare, Testing::InstallerPathProbe());
+        CHECK(std::ranges::none_of(bareSpec.arguments, [](std::string const& arg) {
+            return FlagMatches(arg, "--machine-slots") || FlagMatches(arg, "--machine-memory-budget")
+                   || FlagMatches(arg, "--compile-estimate-default");
+        }));
+    }
 }

@@ -317,6 +317,33 @@ class IJobRefusalObserver
 /// @return An observer that does nothing; static, so it outlives every protocol given it.
 [[nodiscard]] IJobRefusalObserver& IgnoreJobRefusals() noexcept;
 
+/// Told what a finished compile PEAKED at, for the memory estimates the fleet's queue keeps.
+///
+/// The worker is the only place a dispatched compile's peak is measured, and the node is the only
+/// place that can report it (`MachineBudget`); this is the seam between them, so the protocol states
+/// WHAT was measured and names no ledger. Called on whichever thread ran the job, so an implementation
+/// is thread-safe. Only a compile that carried admission data (`CompileRequest::admissionCacheKey`) and
+/// was MEASURED is reported: a peak with no key estimates nothing, and a missing one is not a small one.
+class IJobMeasurementSink
+{
+  public:
+    IJobMeasurementSink() = default;
+    IJobMeasurementSink(IJobMeasurementSink const&) = delete;
+    IJobMeasurementSink& operator=(IJobMeasurementSink const&) = delete;
+    IJobMeasurementSink(IJobMeasurementSink&&) = delete;
+    IJobMeasurementSink& operator=(IJobMeasurementSink&&) = delete;
+    virtual ~IJobMeasurementSink() = default;
+
+    /// One compile finished with a measured peak.
+    /// @param key What the peak was measured for: the object key, the source path and the toolchain.
+    /// @param peakBytes The measured peak.
+    virtual void OnPeak(CompileCacheWire::EstimateKeyFields const& key, std::uint64_t peakBytes) = 0;
+};
+
+/// The sink for a caller that keeps no measurements.
+/// @return A sink that does nothing; static, so it outlives every protocol given it.
+[[nodiscard]] IJobMeasurementSink& IgnoreJobMeasurements() noexcept;
+
 class WorkerProtocol
 {
   public:
@@ -350,6 +377,10 @@ class WorkerProtocol
     /// linking `Pace` — nothing at link time.
     /// @param refusals Told of every job the runner refused, beside the counter; must outlive
     ///        this. Required: see `IJobRefusalObserver`.
+    /// @param measurements Told each measured peak that carried admission data; must outlive this.
+    ///        **Required and undefaulted**, as `refusals` is: a defaulted sink is how the node's own
+    ///        site came to drop its ledger with every test still green. A caller that keeps none passes
+    ///        `IgnoreJobMeasurements()` and says so.
     /// @param maxDecompressedBytes Ceiling on what a request's codec envelope may
     ///        declare it expands to. **The surface's own request cap**, passed in
     ///        rather than assumed: this class never sees the listener that enforced
@@ -362,6 +393,7 @@ class WorkerProtocol
                    Ed25519KeyPair const* replyKey,
                    IMetricsSink& metrics,
                    IJobRefusalObserver& refusals,
+                   IJobMeasurementSink& measurements,
                    std::size_t maxDecompressedBytes = DefaultMaxDecompressedBytes);
 
     /// Answer one complete request frame.
@@ -390,7 +422,8 @@ class WorkerProtocol
     CompileCacheWire::CodecList _acceptedCodecs;
     Ed25519KeyPair const* _replyKey; ///< What every reply is signed under; null signs nothing.
     IMetricsSink& _metrics;
-    IJobRefusalObserver& _refusals; ///< Told which refusal, beside `_metrics`' how many.
+    IJobRefusalObserver& _refusals;     ///< Told which refusal, beside `_metrics`' how many.
+    IJobMeasurementSink& _measurements; ///< Told each measured peak that carried admission data.
     /// What a request's envelope may declare it expands to; see the constructor.
     std::size_t _maxDecompressedBytes;
 };
@@ -699,5 +732,16 @@ class WorkerRegistrar
     CompileCacheWire::CapacityFields const& capacity,
     CompileCacheWire::LoadFields const& load = {},
     std::span<CompileCacheWire::JoinMemoFields const> joinMemos = {});
+
+/// Tell a scheduler this machine's compile-memory ledger (`Op::MachineBudget`).
+///
+/// A free function beside `AnnounceNodePresence` for its reason: the report is per MACHINE, names no
+/// worker id, and a node with no worker sends it too (R6). `ExchangeWithScheduler`, which presents no
+/// credential -- the connection was proved and sealed by the caller.
+/// @param scheduler The dialled, proved connection.
+/// @param report What this machine may be charged, what it holds, and the peaks it measured.
+/// @return Nothing on acceptance, or why it was refused and where the leader is.
+[[nodiscard]] std::expected<void, AnnounceRefusal> SendMachineBudget(core::net::ISocket& scheduler,
+                                                                     CompileCacheWire::MachineBudgetReport const& report);
 
 } // namespace Pace::Cc

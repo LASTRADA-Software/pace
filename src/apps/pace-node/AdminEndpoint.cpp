@@ -77,6 +77,8 @@ AdminHttpServer::SnapshotProvider MakeNodeSnapshotProvider(NodeScrapeSources sou
             // empty member set, because a node that RUNS consensus and holds no
             // configuration is the #388 state and has to be visible, not silent.
             .consensus = sources.consensus ? std::optional { sources.consensus() } : std::nullopt,
+            // And the leader's queue, when this node schedules at all.
+            .admission = sources.admission ? std::optional { sources.admission() } : std::nullopt,
             .uptime =
                 Uptime { std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - startedAt) },
         };

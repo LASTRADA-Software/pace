@@ -206,6 +206,23 @@ namespace
                             .code = Wire::ErrorCode::NotSharedCache,
                             .why = "this endpoint is a pace-kv daemon; the fleet's shared cache is the "
                                    "pace-node its shared-cache setting names" },
+        // The admission queue (#1728), `Lease`'s successor: `DispatchNotPermitted` and never
+        // `UnknownOpcode`, for the reason `Withdraw` states -- these verbs are newer than every
+        // deployed client, and a client told the verb is unknown concludes this daemon is too OLD
+        // and steps over a refusal it should follow. Not `NoCluster`: they spend the fleet's
+        // capacity, they do not ask about replicated state.
+        Wire::RefusedVerb { .op = Wire::Op::Admit,
+                            .code = Wire::ErrorCode::DispatchNotPermitted,
+                            .why = "this endpoint is a cache and queues no compiles; the fleet's admission queue is "
+                                   "its leader's, a pace-node, so point clients at one" },
+        Wire::RefusedVerb { .op = Wire::Op::Settle,
+                            .code = Wire::ErrorCode::DispatchNotPermitted,
+                            .why = "this endpoint is a cache and queues no compiles; the fleet's admission queue is "
+                                   "its leader's, a pace-node, so point clients at one" },
+        Wire::RefusedVerb { .op = Wire::Op::MachineBudget,
+                            .code = Wire::ErrorCode::DispatchNotPermitted,
+                            .why = "this endpoint is a cache and keeps no compile ledger; budgets are reported to the "
+                                   "fleet's leader, a pace-node" },
     };
 
     /// Whether every compile-family verb has a row here saying `Wire::NoCompileWorker`'s fact.
@@ -1296,6 +1313,11 @@ core::async::Task<void> CompileCacheHandler::Run(core::net::ISocket* socket,
             // setting names. This daemon is never that machine; same arm, same reason.
             case Wire::Op::SharedFetch:
             case Wire::Op::SharedStore:
+            // The admission queue (#1728), answered by the fleet's leader and refused HERE by name,
+            // through the same door and for the same reason as the capacity verbs above.
+            case Wire::Op::Admit:
+            case Wire::Op::Settle:
+            case Wire::Op::MachineBudget:
                 next = co_await HandleDistributed(socket, descriptor->code);
                 break;
 

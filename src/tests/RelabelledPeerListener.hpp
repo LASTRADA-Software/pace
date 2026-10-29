@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <memory>
 #include <span>
 #include <string>
@@ -77,6 +78,12 @@ class RelabelledPeerSocket final: public core::net::ISocket
     void setReceiveDeadline(std::chrono::milliseconds deadline) noexcept override
     {
         _inner->setReceiveDeadline(deadline);
+    }
+
+    [[nodiscard]] std::expected<void, core::net::NetError> armKeepAlive(
+        core::net::KeepAliveSettings const& settings) override
+    {
+        return _inner->armKeepAlive(settings);
     }
 
     /// @return The host this connection was relabelled with, never the real peer's.

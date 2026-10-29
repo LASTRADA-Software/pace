@@ -3,6 +3,7 @@
 
 #include <Pace/Core/Ed25519.hpp>
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -10,6 +11,8 @@
 
 namespace Pace
 {
+
+class ConnectionScope;
 
 /// Which machine a connection PROVED it is (#178): the node id it claimed and the identity key it
 /// signed the handshake with.
@@ -108,7 +111,19 @@ struct ConnectionFacts
     /// fact here that can only refuse (`RevokedKeyEvidence`).
     std::optional<RevokedKeyEvidence> revokedMachine {};
 
-    [[nodiscard]] friend bool operator==(ConnectionFacts const&, ConnectionFacts const&) = default;
+    /// What the connection owns beyond its bytes: whether its peer has gone, and a hold a reply left
+    /// on it (`ConnectionScope`). Engaged by the endpoint's serve loop for every connection it serves
+    /// and null for a caller that has no connection, which a verb that must park on one refuses.
+    /// Shared, so every copy of these facts a responder takes speaks of the same connection; it takes
+    /// no part in equality, which compares what a connection PROVED.
+    std::shared_ptr<ConnectionScope> scope {};
+
+    /// @return True when every PROVED fact is equal; the scope is the connection's identity, not a fact it proved.
+    [[nodiscard]] friend bool operator==(ConnectionFacts const& left, ConnectionFacts const& right)
+    {
+        return left.host == right.host && left.proven == right.proven
+               && left.authenticatedMachine == right.authenticatedMachine && left.revokedMachine == right.revokedMachine;
+    }
 };
 
 } // namespace Pace

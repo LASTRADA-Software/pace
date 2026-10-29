@@ -3339,6 +3339,57 @@ tally that also covers a full connection cap, so read the node's own counter: a 
 `pace_worker_jobs_refused_endpoint_busy_total` is the signal to raise
 `--compile-inflight-max`.
 
+#### The machine's compile budget
+
+Separate from the worker's in-flight bytes above, every node also states what its
+**machine** may be charged for compiles, to the fleet's queue. It is sent every
+presence round (`MACHINE-BUDGET`), **whether or not the node runs a worker**: a node
+started with `--slots=0` runs no worker and still has a machine.
+
+| Option | Default | What it states |
+| --- | --- | --- |
+| `--machine-slots` (`machine_slots`) | the machine's logical cores | Compiles the machine runs at once, every one on it counted, local ones included. Not `--slots`, which sizes the worker and is `0` on a node with none. `0` is refused. |
+| `--machine-memory-budget` (`machine_memory_budget`) | 75% of RAM, less this node's cache tier, never below `--compile-estimate-default` | The memory those compiles may hold at once. `k`/`m`/`g` or `N%` of host RAM. A typed figure is used as given. `0` is refused. |
+| `--compile-estimate-default` (`compile_estimate_default`) | `2g` | What a translation unit nobody has measured is assumed to need. Too low is the out-of-memory kill the queue exists to prevent. `0` is refused. |
+
+All three are **restart-only**, and a service registration replays only the ones typed.
+Beside the figures, the report carries what the machine's compiles hold now and a
+bounded sample of the peaks its compiler processes measured, so the leader's estimates
+learn from the machines that ran the compiles. A leader that cannot take the report
+refuses it like any other verb; the node logs that once, when it starts, and again when
+it clears.
+
+#### The queue, and who answers it
+
+The queue lives at the fleet's **leader**, which is the one node that knows every machine's
+budget. A launcher asks its own node (`127.0.0.1:6674`); a node that does not lead **forwards**
+`ADMIT` and `SETTLE` inline to the leader, over its own proven identity, and relays the leader's
+pulses and answer back. This holds for every non-leader, a voting follower and a learner alike,
+and a node never forwards to itself. The relay keeps one upstream connection per launcher
+connection for as long as it lives, so a launcher that goes away releases its charge at the
+leader at once (`pace_admission_forward_abandoned_total`). A leader that cannot be reached is
+counted (`pace_admission_forward_failed_total`) and the launcher compiles without the queue.
+
+What the queue does, in the order it matters to an operator:
+
+- **A miss is queued, never refused for capacity.** Waiting is the product; the depth is
+  `pace_admission_queue_depth`.
+- **A compile larger than a whole machine's budget runs alone** on an idle machine
+  (`pace_admission_ran_alone_total`) rather than never.
+- **Duplicates wait for the object, not for each other.** Compiles of one cache key that share a
+  cache are answered *stored* when the first one STOREs, never when it merely finishes, and only
+  for compiles that can be stored.
+- **A worker that refuses an admitted compile keeps the request's place and count**; after three
+  refusals it runs on the machine that asked.
+- **A failover admits nothing on a machine until that machine's budget report arrives**, and the
+  new leader's ledger charges the larger of what it granted and what the machine says it holds,
+  so a leader change cannot over-commit a machine. Expect a short pause after one.
+- **A worker that fails a compile settles it as *not stored*,** which keeps a broken toolchain
+  from teaching the queue that every translation unit is small.
+
+`pacectl live-stats fleet` shows the queue's depth and, per client, the machine and build tree,
+how many compiles are running and how many are queued.
+
 The node's one `0xFC` listener holds its own pool of bytes for frames still being
 read, sized to the largest budget any of its components declares — so it follows the
 compile budget and never undercuts it. It is ONE pool: the cache and shared-cache
@@ -3915,7 +3966,7 @@ lease, and answers every other scheduling verb `not-leader` naming the leader's 
 endpoint, once the caller is admitted, so a launcher pointed at its own machine's learner
 follows it to the leader; it names nobody once the leader has been silent past the
 consensus tier's election timeout. A node running no consensus at all refuses the capacity verbs
-(`REGISTER`, `HEARTBEAT`, `WITHDRAW`, `LEASE`, `RELEASE`, `NODE-ANNOUNCE`)
+(`REGISTER`, `HEARTBEAT`, `WITHDRAW`, `LEASE`, `RELEASE`, `NODE-ANNOUNCE`, `ADMIT`, `SETTLE`, `MACHINE-BUDGET`)
 `dispatch-not-permitted` and the cluster verbs `no-cluster`, the codes `pace-kv` gives
 for the same verbs. None of these is counted.
 
@@ -4107,6 +4158,7 @@ What it shows, and why each part is split the way it is:
 | Leases outstanding | One row per lease the scheduler has handed out and not yet seen resolved: the object key, the worker it went to, that worker's endpoint, and how long it has been held. **Oldest first, and bounded** — the header says `the 50 oldest of 900` when there are more, so a truncated table is not read as the whole fleet's work. A client hands its lease back when the job ends however it ended, so a row that has been there for minutes is a client that died mid-build, and the endpoint is where its work was going. A row with no endpoint is a lease against a worker that is no longer registered. |
 | Why requests were refused | Granted, and refused split four ways, each with what it tells you to do. |
 | Cache tiers | Items, bytes, budget, evictions and index RAM **per tier**. A tier no member runs has no column at all, and a fleet where nobody runs one says so rather than showing an empty table. `index-ram` is what the tier's key index costs in memory: always RAM, even for a disk tier whose budget is bytes on a filesystem, so the two are not comparable and must not be added. |
+| Compile queue | The leader's admission queue (#1728): how many compiles are **waiting**, which machine and build tree each client is compiling for with how many **running** and **queued**, what the queue has **charged** each machine, what is **in use** on it (the larger of that charge and what the machine itself reports holding: after a failover the charge starts at zero while the machine is still full, and in-use is the figure admission refuses on), and the memory **budget** it stated. In `/fleet.json` this is the `admission` object (`depth`, `clients`, `machines`), `null` on a node that leads no queue, and `/fleet.txt` serves the clients as the `clients` section beside the `queue-depth` headline figure (the per-machine ledger is in the JSON and on the page). A node that has not heard a budget or a request shows `–`, never `0 waiting`: zero would say every compile was admitted at once. A machine that stated a budget but no worker name is shown by the first bytes of its key in hex. A budget cell is `–` until the machine has reported one. |
 | Over time | Four charts over 24 hours or 7 days: compiles dispatched, refusals stacked four ways, offerable capacity against jobs in flight, and cache hit rate per bucket. |
 | Members | Who the cluster has agreed on, and where each answers. A member that has announced none shows no scheduler endpoint, because it has not said. |
 
@@ -4556,7 +4608,7 @@ it on every heartbeat round, and a node running consensus verifies the proofs pr
 it against the cluster's roster.
 
 **The verbs a machine JOINS the fleet with require it.** `REGISTER`, `NODE-ANNOUNCE`,
-`HEARTBEAT` and `WITHDRAW` are refused `node-identity-required` on a connection that proved
+`HEARTBEAT`, `WITHDRAW` and `MACHINE-BUDGET` are refused `node-identity-required` on a connection that proved
 no identity the cluster holds -- from any address, loopback included. A **client** is
 admitted without a proof: on this machine by loopback, and from another machine by the
 machine ticket its own node mints ([a machine that only asks](#a-machine-that-only-asks-tickets)),

@@ -1188,7 +1188,7 @@ TEST_CASE("A cluster command that reached nobody is transient, and one the sched
     SECTION("a scheduler on another wire version: a decision, not a transport fault")
     {
         Testing::ScriptedDialer dialer { { Wire::EncodeErrorReply(Wire::ErrorCode::UnsupportedVersion,
-                                                                  "supported versions 15..15") } };
+                                                                  "supported versions 16..16") } };
         auto const refused = RunClusterAdmin(cfg, Ask(ClusterAction::Status), credential, dialer);
         REQUIRE_FALSE(refused.has_value());
         INFO(refused.error().reason);

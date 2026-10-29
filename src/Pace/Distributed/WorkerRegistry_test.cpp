@@ -1252,3 +1252,43 @@ TEST_CASE("A worker whose compile byte budget is spent is passed over until it f
                                               .freeScratchBytes = std::nullopt }));
     CHECK(fix.registry.Pick(Gcc13).has_value());
 }
+
+TEST_CASE("Candidates lists the live, matching, unexcluded workers with a free slot, best first",
+          "[distributed][registry][admission]")
+{
+    Fixture fix;
+    auto const roomy = fix.registry.Register(Announce(Gcc13, "10.0.0.1:6676", 4));
+    auto const small = fix.registry.Register(Announce(Gcc13, "10.0.0.2:6676", 1));
+    auto const excluded = fix.registry.Register(Announce(Gcc13, "10.0.0.3:6676", 8));
+    (void) fix.registry.Register(Announce(Gcc14, "10.0.0.4:6676", 8)); // another toolchain
+    auto const full = fix.registry.Register(Announce(Gcc13, "10.0.0.5:6676", 1));
+    fix.registry.JobStarted(full);
+
+    auto const skip = std::array { std::string { "10.0.0.3:6676" } };
+    auto const candidates = fix.registry.Candidates(Gcc13, skip);
+    std::vector<std::string> ids;
+    ids.reserve(candidates.size());
+    for (auto const& worker: candidates)
+        ids.push_back(worker.id);
+    CHECK(ids == std::vector { roomy, small });
+    CHECK_FALSE(std::ranges::contains(ids, excluded));
+
+    // A candidate is a question, never a pick: nothing was stamped or started by asking.
+    CHECK(Unwrap(fix.registry.Find(roomy)).inFlight == 0);
+
+    // A worker that stopped heartbeating stops being a candidate, and stops being found.
+    fix.clock.advance(std::chrono::milliseconds { 1001 });
+    CHECK(fix.registry.Candidates(Gcc13).empty());
+    CHECK_FALSE(fix.registry.Find(roomy).has_value());
+}
+
+TEST_CASE("Find answers a live worker by id and nothing for an unknown one", "[distributed][registry][admission]")
+{
+    Fixture fix;
+    auto const id = fix.registry.Register(Announce(Gcc13, "10.0.0.1:6676", 4));
+    auto const found = fix.registry.Find(id);
+    REQUIRE(found.has_value());
+    CHECK(Unwrap(found).endpoint == "10.0.0.1:6676");
+    CHECK(Unwrap(found).fingerprint == Gcc13);
+    CHECK_FALSE(fix.registry.Find("no-such-worker").has_value());
+}

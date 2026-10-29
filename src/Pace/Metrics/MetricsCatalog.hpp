@@ -1226,7 +1226,8 @@ inline constexpr EnumTable<IMetricsSink::Counter, CounterDescriptor> CounterTabl
       .type = MetricType::Counter },
     { .counter = IMetricsSink::Counter::SchedulerRequestsRefusedNodeIdentityRequired,
       .prometheusName = "pace_scheduler_requests_refused_node_identity_required_total",
-      .help = "register, node-announce, heartbeat and withdraw requests refused because their connection proved no "
+      .help = "register, node-announce, heartbeat, withdraw and machine-budget requests refused because their connection "
+              "proved no "
               "identity the cluster holds live. An address admits a client, never a machine joining the fleet. A "
               "rise from one host is a node not yet admitted, or one whose proof is being refused.",
       .type = MetricType::Counter },
@@ -1485,6 +1486,62 @@ inline constexpr EnumTable<IMetricsSink::Counter, CounterDescriptor> CounterTabl
       .prometheusName = "pace_node_raft_endpoint_changes_total",
       .help = "Times this node's advertised Raft endpoint moved because the address it routes from changed or a "
               "reload re-pinned it.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionQueued,
+      .prometheusName = "pace_admission_queued_total",
+      .help = "Compile requests the leader queued for admission.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionGrantedWorker,
+      .prometheusName = "pace_admission_granted_worker_total",
+      .help = "Admissions granted on a worker.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionGrantedLocal,
+      .prometheusName = "pace_admission_granted_local_total",
+      .help = "Admissions granted to run on the machine that asked.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionDeduplicated,
+      .prometheusName = "pace_admission_deduplicated_total",
+      .help = "Requests answered 'stored' because another compile of the same key stored the object while they waited.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionRanAlone,
+      .prometheusName = "pace_admission_ran_alone_total",
+      .help = "Admissions whose estimate exceeded a whole machine's budget, so the compile ran alone.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionAbandoned,
+      .prometheusName = "pace_admission_abandoned_total",
+      .help = "Queued or granted requests whose connection closed, or whose next frame was not a settle.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionWorkerRefused,
+      .prometheusName = "pace_admission_worker_refused_total",
+      .help = "Granted compiles a worker refused. The same request goes back to the head of the queue with the refusal "
+              "counted, and runs on its own machine once a worker has refused it three times.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionWaitMillisTotal,
+      .prometheusName = "pace_admission_wait_milliseconds_total",
+      .help = "Milliseconds admitted requests spent queued, each grant counting from the request's last park (its "
+              "enqueue, or the worker refusal that put it back). The sum of a pair whose count is "
+              "pace_admission_wait_count_total.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionWaitCount,
+      .prometheusName = "pace_admission_wait_count_total",
+      .help = "Grants whose wait pace_admission_wait_milliseconds_total sums: one per grant, a worker refusal's regrant "
+              "included. The count of that pair; divide the sum by it for the mean wait.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionForwarded,
+      .prometheusName = "pace_admission_forwarded_total",
+      .help = "Queue requests (admit and settle) this node relayed to the leader on behalf of a launcher on this "
+              "machine, and got the leader's answer to.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionForwardFailed,
+      .prometheusName = "pace_admission_forward_failed_total",
+      .help = "Queue requests this node could not relay: the leader could not be reached or proved no identity, "
+              "stopped answering, or moved more often than a request follows it. The launcher was refused and "
+              "compiles without the queue.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionForwardAbandoned,
+      .prometheusName = "pace_admission_forward_abandoned_total",
+      .help = "Relayed queue requests whose launcher left before the leader's answer reached it. The relay's "
+              "connection to the leader is closed with it, which releases the request there.",
       .type = MetricType::Counter },
 } };
 

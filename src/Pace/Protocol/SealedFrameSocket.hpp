@@ -190,6 +190,13 @@ class SealedFrameSocket final: public core::net::ISocket
     void close() noexcept override;
     [[nodiscard]] core::net::ResultAwaitable<void> shutdownWrite() override;
     void setReceiveDeadline(std::chrono::milliseconds deadline) noexcept override;
+
+    /// @copydoc ISocket::armKeepAlive
+    ///
+    /// Forwarded to the raw socket: the probe is the kernel's, under the seal, and the default
+    /// would answer `Unsupported` for a connection that is TCP all the way down.
+    [[nodiscard]] std::expected<void, core::net::NetError> armKeepAlive(
+        core::net::KeepAliveSettings const& settings) override;
     [[nodiscard]] bool isClosed() const noexcept override;
 
   private:

@@ -421,6 +421,12 @@ launcher's cache key is made of. Before `apps/pace-cc/`, `CompileCache/`.
 - A cordon is the worker PROCESS's state, never replicated and never persisted, so a restart lifts
   it. Stop, cordon and full are ONE locked decision with the slot take (`SlotAdmission`), and a
   compile's slot rides its reply (`IReplyHold`) until the endpoint has WRITTEN it.
+- A miss is ADMITTED (queued) at the fleet's leader, never refused for capacity (#1728): the
+  connection is the lease (a close abandons, `SETTLE` releases), a worker refusal keeps the ticket's
+  place, dedup is woken by STORE, and a worker failure settles `NotStored`.
+- Every node sends its `MachineBudget`, `--slots=0` included, and that is not a worker registration;
+  a failover admits nothing on a machine before its report, charging `max(charged, held)`.
+- Every non-leader, voter or learner, forwards `Admit`/`Settle` inline to the leader, never to itself.
 - A heartbeat age is a duration on a report, never a `TimePoint` on `WorkerInfo` — a raw instant
   breaks every `ManualClock` test.
 - A CoW store file is claimed exclusively at `Open` and a second opener is refused by name

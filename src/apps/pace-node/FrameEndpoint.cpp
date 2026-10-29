@@ -7,6 +7,7 @@
 #include <Pace/Core/BoundedDrain.hpp>
 #include <Pace/Core/HostPort.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/ConnectionScope.hpp>
 #include <Pace/Protocol/Framing/LineReader.hpp>
 #include <Pace/Protocol/SealedFrameSocket.hpp>
 #include <Pace/Protocol/SurfaceRefusal.hpp>
@@ -1198,6 +1199,21 @@ namespace
         /// coupled by an invariant a reader had to reconstruct, which is what
         /// `bugprone-unchecked-optional-access` objects to and it is right to.
         IMetricsSink::Counter counter {};
+
+        /// The connection's scope, told when the peer leaves so a responder parked on something
+        /// other than the socket -- the admission queue -- wakes to find it. Null for a watch armed
+        /// without one (a stream's).
+        std::shared_ptr<ConnectionScope> scope {};
+
+        /// True once the connection has retired this watch with `cancelRead()` because a reply left a
+        /// hold on it and the peer is not expected to speak until the hold is given back.
+        ///
+        /// **What silences the cancellation's error, never the error code alone** -- the rule
+        /// `CancelRead` states: a retired watch resolves as `Cancelled`, which would otherwise read as a
+        /// departure, and silencing by code would stop a genuine abortive close being noticed. The code
+        /// still says whether the retirement is what resolved it: a reset that resolved the read before
+        /// the retirement found it is a departure (`FrameServer::ClassifyWatch`).
+        bool retired { false };
     };
 
     /// How a peer left, as the transport reported it.
@@ -1379,7 +1395,14 @@ namespace
         // therefore a CONSEQUENCE of #1090 rather than a property of this function,
         // which is the opposite of what #1092 warned about and the same fact.
         auto const readable = co_await socket->waitReadable();
-        if (!readable.has_value())
+        auto const outcome = FrameServer::ClassifyWatch(readable, watch->retired);
+        if (outcome == FrameServer::WatchOutcome::Retired)
+        {
+            // Retired by the connection (`SettleWatchHolding`): the read slot is free, nobody left.
+            watch->finished = true;
+            co_return;
+        }
+        if (outcome == FrameServer::WatchOutcome::Abortive)
         {
             // An ERROR is an abortive close -- the peer reset, or the socket was closed
             // under us, including by the `Close()` the connection issues to retrieve
@@ -1389,7 +1412,7 @@ namespace
             // suppressions decide whether it is anybody's business.
             RecordDeparture(*state, socket.get(), *watch, PeerDeparture::Abortive);
         }
-        else if (*readable == 0)
+        else if (outcome == FrameServer::WatchOutcome::Graceful)
         {
             // Zero is EOF: the peer finished sending and said goodbye. Ordinary, and
             // counted apart from the arm above for exactly that reason.
@@ -1398,6 +1421,11 @@ namespace
         // Anything else is bytes pending -- a pipelined request, which proves the peer
         // is still there. `WaitReadable` consumed none of them, so there is nothing to
         // hand back and the loop's reader will collect them itself.
+        //
+        // Told BEFORE `finished`, and only for a departure: a responder parked on the admission
+        // queue wakes on this and finds `gone`, so the order is the one the flags are read in.
+        if (watch->gone && watch->scope != nullptr)
+            watch->scope->NotePeerGone();
         watch->finished = true;
         co_return;
     }
@@ -1490,17 +1518,19 @@ namespace
     /// @param opRaw The verb, as received.
     /// @param reader The connection's reader; a non-empty buffer declines the watch.
     /// @param socket The connection, shared with the watcher for its lifetime.
+    /// @param scope The connection's scope, told when the watch sees the peer leave.
     /// @return The watch, or null when this request is not watched.
     [[nodiscard]] std::shared_ptr<PeerWatch> ArmPeerWatch(std::shared_ptr<FrameServer::State> const& state,
                                                           std::uint8_t opRaw,
                                                           ByteReader const& reader,
-                                                          std::shared_ptr<core::net::ISocket> socket)
+                                                          std::shared_ptr<core::net::ISocket> socket,
+                                                          std::shared_ptr<ConnectionScope> scope)
     {
         auto const counter = state->responder.PeerWatchCounter(opRaw);
         if (!counter.has_value() || !reader.Buffered().empty())
             return nullptr;
 
-        auto watch = std::make_shared<PeerWatch>(PeerWatch { .counter = *counter });
+        auto watch = std::make_shared<PeerWatch>(PeerWatch { .counter = *counter, .scope = std::move(scope) });
         WatchPeer(state, std::move(socket), watch);
         return watch;
     }
@@ -1628,7 +1658,19 @@ namespace
         // the watcher looking exactly like a peer that hung up. Filing either would put
         // this node's own teardowns in a row documented as a client-side story.
         if (hadReply && !state->ClosedLocally(socket))
+        {
             state->metrics.Increment(watch->counter);
+            // Filed HERE, so whatever the reply left held on the connection -- an admission's grant,
+            // released by the close this departure causes -- does not file the same departure again.
+            //
+            // **Test gap, stated:** no case drives this line. The one over the wire never reached it
+            // (40 of 40 runs wrote the grant before the departure was seen), so it was dropped;
+            // `AdmissionResponder.a-departure-the-endpoint-counted-is-not-counted-again` pins the HOLD's
+            // half by calling `NoteDepartureCounted` itself. Deleting this call would double-count and
+            // nothing would go red.
+            if (watch->scope != nullptr)
+                watch->scope->NoteDepartureCounted();
+        }
         co_return true;
     }
 
@@ -1672,6 +1714,34 @@ namespace
         co_return AfterWatch::KeepServing;
     }
 
+    /// `SettleWatch` for a reply that left a hold on the connection: the peer is NOT expected to speak
+    /// until the hold is given back, which is minutes for a compile, so a watch still parked on the
+    /// socket is RETIRED with `cancelRead()` instead of ending the connection at the bound.
+    ///
+    /// **The retirement is the only retrieval of a parked read that is not `Close()`**, and ending the
+    /// connection here would end every admitted compile at the settle bound. The flag is set BEFORE the
+    /// cancel, so `WatchPeer` reads the resulting `Cancelled` as a retirement and never as a departure --
+    /// and only that: a read that had already resolved with a reset, its resumption still queued, is
+    /// filed as the departure it is and tells the scope (`FrameServer::ClassifyWatch`).
+    /// A connection holding nothing, or one whose watch is already finished, takes `SettleWatch`'s road.
+    /// @param reactor The loop this connection runs on; never null.
+    /// @param socket The connection, whose parked read is retrieved.
+    /// @param watch The watch, shared so it cannot die under the wait; may be null.
+    /// @param holds Whether the reply left a hold on the connection.
+    /// @return Whether this connection may serve another request.
+    core::async::Task<AfterWatch> SettleWatchHolding(core::net::EventLoop* reactor,
+                                                     std::shared_ptr<core::net::ISocket> socket,
+                                                     std::shared_ptr<PeerWatch> watch,
+                                                     bool holds)
+    {
+        if (holds && watch != nullptr && !watch->finished)
+        {
+            watch->retired = true;
+            socket->cancelRead();
+        }
+        co_return co_await SettleWatch(reactor, std::move(watch));
+    }
+
     /// The state a progress pulse and its connection share.
     ///
     /// Shaped after `PeerWatch` above, and it is the mirror image of it: that one READS
@@ -1698,6 +1768,36 @@ namespace
         /// endpoint already carries a watch for on the read side.
         bool finished { false };
     };
+
+    /// What a pulse that reached its peer may renew: the request's sweep deadline, when the responder
+    /// asked for its request to be judged by the pulse (`ConnectionScope::JudgeByPulse`).
+    struct PulseRenewal
+    {
+        std::shared_ptr<FrameServer::State> state; ///< Where the deadline is kept.
+        std::shared_ptr<ConnectionScope> scope;    ///< Whether the request asked; null never renews.
+        std::chrono::milliseconds window {};       ///< The request's answer window, renewed whole.
+    };
+
+    /// Move the request's sweep deadline on by its whole answer window, when its responder asked.
+    ///
+    /// **This is what lets a queue wait have no total ceiling and still not wait silently** (#1728):
+    /// a compile queued behind twenty minutes of other compiles is the system working, so its answer
+    /// window bounds the silence since the last pulse the KERNEL ACCEPTED, never the wait.
+    ///
+    /// **Accepted is not delivered, and the difference is the bound's weak side.** A peer whose
+    /// receive window fills stops the writes completing, so it stops renewing and is swept one window
+    /// later. A host that VANISHED does not: its pulses keep landing in this side's send buffer until
+    /// TCP's retransmission gives up and fails the socket -- minutes, set by the kernel, not by this
+    /// window. Keepalive and the retransmission timeout bound that case; this one does not.
+    /// @param renewal What to renew.
+    /// @param socket The connection, as the sweeper tracks it.
+    void RenewAfterPulse(PulseRenewal const& renewal, core::net::ISocket* socket)
+    {
+        if (renewal.state == nullptr || renewal.scope == nullptr || !renewal.scope->JudgedByPulse())
+            return;
+        auto& state = *renewal.state;
+        state.Rearm(socket, state.io.Reactor().clock().now() + renewal.window, SweepPhase::AwaitingAnswer, renewal.window);
+    }
 
     /// Write `Status::Progress` to the peer every `interval` until told to stop.
     ///
@@ -1730,10 +1830,12 @@ namespace
     ///        resume onto a destroyed socket -- the same lifetime rule `WatchPeer` has.
     /// @param pulse Where its state is left; shared with the connection.
     /// @param interval How long between frames.
+    /// @param renewal What a pulse that reached the peer renews (`RenewAfterPulse`).
     core::async::DetachedTask PulseProgress(core::net::EventLoop* reactor,
                                             std::shared_ptr<core::net::ISocket> socket,
                                             std::shared_ptr<ProgressPulse> pulse,
-                                            std::chrono::milliseconds interval)
+                                            std::chrono::milliseconds interval,
+                                            PulseRenewal renewal)
     {
         while (!pulse->stopped)
         {
@@ -1758,6 +1860,7 @@ namespace
             // mechanism that already knows.
             if (!co_await WriteAll(EndpointWriter::Pulse, socket.get(), Wire::EncodeProgressReply()))
                 break;
+            RenewAfterPulse(renewal, socket.get());
         }
         pulse->finished = true;
         co_return;
@@ -1777,18 +1880,20 @@ namespace
     /// @param opRaw The verb, as received.
     /// @param reactor The loop this connection runs on; never null.
     /// @param socket The connection, shared with the pulse for its lifetime.
+    /// @param renewal What each pulse that reaches the peer renews.
     /// @return The pulse, or null when this request is not pulsed.
     [[nodiscard]] std::shared_ptr<ProgressPulse> ArmProgressPulse(IFrameResponder const& responder,
                                                                   std::uint8_t opRaw,
                                                                   core::net::EventLoop* reactor,
-                                                                  std::shared_ptr<core::net::ISocket> socket)
+                                                                  std::shared_ptr<core::net::ISocket> socket,
+                                                                  PulseRenewal renewal)
     {
         auto const interval = responder.ProgressInterval(opRaw);
         if (!interval.has_value() || *interval <= std::chrono::milliseconds::zero())
             return nullptr;
 
         auto pulse = std::make_shared<ProgressPulse>();
-        PulseProgress(reactor, std::move(socket), pulse, *interval);
+        PulseProgress(reactor, std::move(socket), pulse, *interval, std::move(renewal));
         return pulse;
     }
 
@@ -2170,6 +2275,12 @@ namespace
         state->Track(
             socket.get(), deadlineFor(FrameServer::HeaderTimeout), SweepPhase::AwaitingRequest, FrameServer::HeaderTimeout);
 
+        // What this connection owns beyond its bytes (`ConnectionScope`): whether its peer has gone,
+        // and a hold a reply left on it. Declared BEFORE the `try` so the end of the connection
+        // releases the hold on every path out, a throw included, and a frame destroyed by a stopping
+        // reactor releases it through the destructor.
+        auto const scope = std::make_shared<ConnectionScope>();
+
         // The firewall: this is a DetachedTask, whose unhandled_exception terminates
         // the process, so one client's answer must not take the node with it.
         try
@@ -2188,9 +2299,11 @@ namespace
             // established* means everywhere that reads them: `proven` is only ever engaged by a
             // `ProveNode` this loop verified (#178), and `authenticatedMachine` only by an `AUTH`
             // whose verdict was `Accepted`.
-            PeerIdentity identity {
-                .host = peer, .proven = std::nullopt, .authenticatedMachine = std::nullopt, .revokedMachine = std::nullopt
-            };
+            PeerIdentity identity { .host = peer,
+                                    .proven = std::nullopt,
+                                    .authenticatedMachine = std::nullopt,
+                                    .revokedMachine = std::nullopt,
+                                    .scope = scope };
 
             // The handshake outstanding on this connection, or none. Opened by the surface's
             // prover on request and SPENT by the next proof whatever its outcome, which is why
@@ -2214,10 +2327,10 @@ namespace
                 // Whatever a pipelined peer has already sent is kept.
                 reader.ReleaseSpareCapacity();
 
-                state->Rearm(socket.get(),
-                             deadlineFor(FrameServer::HeaderTimeout),
-                             SweepPhase::AwaitingRequest,
-                             FrameServer::HeaderTimeout);
+                // A connection holding a granted admission waits for its settle for as long as the
+                // compile runs, so the sweeper's idle window is the hold's, never the header's.
+                auto const idleWindow = FrameServer::IdleWindowFor(*scope);
+                state->Rearm(socket.get(), deadlineFor(idleWindow), SweepPhase::AwaitingRequest, idleWindow);
 
                 auto const header = co_await reader.ReadExactly(Wire::RequestHeaderSize);
                 if (!header.has_value())
@@ -2295,6 +2408,10 @@ namespace
                 auto const payload = co_await reader.ReadExactly(decoded->payloadLength);
                 if (!payload.has_value())
                     break;
+
+                // A hold the connection keeps ends at a frame it does not survive, before that frame
+                // is answered: an admission's charge is given back by a settle or by the close.
+                scope->BeforeFrame(decoded->opRaw);
 
                 // AUTH is answered HERE and never reaches `Answer`, because what it
                 // changes is this connection's state and the responder is shared by
@@ -2374,7 +2491,7 @@ namespace
                 // Null when this surface does not watch this verb, or when the reader
                 // already holds a pipelined request -- see `ArmPeerWatch`, which carries
                 // the ordering argument. Every helper below takes that null.
-                auto watch = ArmPeerWatch(shared, decoded->opRaw, reader, socket);
+                auto watch = ArmPeerWatch(shared, decoded->opRaw, reader, socket, scope);
 
                 // Closes the window in which this watch's verdict can still change what
                 // this connection does -- see `ConsultedAtExit`, which carries why the
@@ -2388,7 +2505,11 @@ namespace
                 // `ReclaimFromPulse` below is what hands the socket back before the reply.
                 // Null when this surface does not pulse this verb -- see
                 // `ArmProgressPulse` and `IFrameResponder::ProgressInterval` (#245).
-                auto pulse = ArmProgressPulse(state->responder, decoded->opRaw, &state->io.Reactor(), socket);
+                auto pulse = ArmProgressPulse(state->responder,
+                                              decoded->opRaw,
+                                              &state->io.Reactor(),
+                                              socket,
+                                              PulseRenewal { .state = shared, .scope = scope, .window = answerWindow });
 
                 // Awaited: answering may reach the network -- the cache surface
                 // consults an upstream -- and that suspends rather than blocking
@@ -2499,6 +2620,10 @@ namespace
                 // itself busy after its last object has left.
                 reply.hold.reset();
 
+                // The reply is delivered; if it left the connection HOLDING something, the kernel
+                // now probes it (#1736), so a peer whose host vanishes is noticed in seconds.
+                FrameServer::ArmHeldKeepAlive(*scope, *socket, state->logger, state->what);
+
                 // **The watch is settled AFTER the reply, never before it**, and that
                 // ordering is the whole of it: `WriteAll` suspends -- an object is
                 // megabytes and a receive window is not -- so a peer can pipeline its
@@ -2507,7 +2632,8 @@ namespace
                 // the bytes it goes on to pull are dropped: the next `ReadExactly`
                 // starts mid-frame, decodes a foreign magic, and closes a connection
                 // whose peer did nothing wrong.
-                if (co_await SettleWatch(&state->io.Reactor(), watch) == AfterWatch::EndConnection)
+                if (co_await SettleWatchHolding(&state->io.Reactor(), socket, watch, scope->Holds())
+                    == AfterWatch::EndConnection)
                     break;
 
                 // Last, once the reply is written and the watch has settled -- so no read is parked
@@ -2539,6 +2665,12 @@ namespace
         // added between the `catch` and this line has to preserve that or take the
         // guard instead.
         //
+        // The connection ended: whatever a reply left held on it is given back, once, here -- and
+        // BEFORE the connection stops counting as open. `Shutdown()` returns once nothing is open, and
+        // what a hold gives back (an admission's charge, to the node's `HeldChargeRegistry`) belongs to
+        // objects `main` destroys right after the endpoint: released after the count dropped, the
+        // release could reach a registry that is already gone (#1728).
+        scope->End();
         // Deregistered before the socket is destroyed, or the sweeper would hold a
         // pointer into a freed object.
         state->Untrack(socket.get());

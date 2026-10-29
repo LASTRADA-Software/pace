@@ -133,8 +133,8 @@ struct Fixture
 
     Fixture():
         jobs { runner, scratch.Path(), { { "gcc-13", "g++" } }, Cc::ToolchainSurvey::Completed() },
-        protocol { jobs,    Cc::UncheckedLeaseValidator(), { Wire::IdentityCodec }, &Testing::TestWorkerKey(),
-                   metrics, Cc::IgnoreJobRefusals() }
+        protocol { jobs,    Cc::UncheckedLeaseValidator(), { Wire::IdentityCodec },    &Testing::TestWorkerKey(),
+                   metrics, Cc::IgnoreJobRefusals(),       Cc::IgnoreJobMeasurements() }
     {
     }
     Fixture(Fixture const&) = delete;
@@ -440,8 +440,8 @@ TEST_CASE("A worker refuses a non-member its scheduler granted a lease to under 
     REQUIRE(validator.has_value());
     REQUIRE(inForce.Current() == BuiltLeaseCheck::Signed);
     lease.fleet.Pin(std::string { fleet });
-    Cc::WorkerProtocol checked { fix.jobs,    *std::move(validator),  { Wire::IdentityCodec }, &Testing::TestWorkerKey(),
-                                 fix.metrics, Cc::IgnoreJobRefusals() };
+    Cc::WorkerProtocol checked { fix.jobs,    *std::move(validator),   { Wire::IdentityCodec },    &Testing::TestWorkerKey(),
+                                 fix.metrics, Cc::IgnoreJobRefusals(), Cc::IgnoreJobMeasurements() };
 
     // What the scheduler granted: real, signed, naming this worker.
     auto const grant = [&wall](std::string_view serial) {
@@ -1154,8 +1154,8 @@ struct MergedWorker
     ///        seconds to observe one frame.
     MergedWorker(Fixture& fix, NodeIoLoop& io, std::chrono::milliseconds progressInterval = Wire::DefaultProgressInterval):
         jobs { runner, fix.scratch.Path(), { { "gcc-13", "g++" } }, Cc::ToolchainSurvey::Completed() },
-        protocol { jobs,        Cc::UncheckedLeaseValidator(), { Wire::IdentityCodec }, &Testing::TestWorkerKey(),
-                   fix.metrics, Cc::IgnoreJobRefusals() },
+        protocol { jobs,        Cc::UncheckedLeaseValidator(), { Wire::IdentityCodec },    &Testing::TestWorkerKey(),
+                   fix.metrics, Cc::IgnoreJobRefusals(),       Cc::IgnoreJobMeasurements() },
         // **Five seconds rather than the thirty-second default: the NET, not the
         // diagnostic.** `DrainedWithin` above is what reports a slot that never came
         // back, as an ordinary red assertion with a number. This only bounds how long a
@@ -1986,4 +1986,53 @@ TEST_CASE("A cordon is a round trip, not a compile, to every question the endpoi
     CHECK(responder.HoldsOwnByteBudget(compile));
     CHECK(responder.RequestTimeout(cordon) == FrameServer::HeaderTimeout);
     CHECK(responder.RequestTimeout(compile) == Wire::MaxCompileLeaseLifetime);
+}
+
+TEST_CASE("CompileResponder.holds-the-leaders-charge-with-the-slot", "[node][compile-responder][machinebudget]")
+{
+    // #1728. A dispatched compile is charged what the leader's queue charged it, from the moment its slot
+    // is taken until its reply has been written -- the span `Held` reports to the leader. A request that
+    // states no charge holds its slot and zero bytes, never a made-up figure.
+    Fixture fix;
+    core::async::ThreadPoolExecutor reactor { 1 };
+    core::async::ThreadPoolExecutor jobs { 1 };
+    CompileCapacity capacity {
+        /*slots=*/2, /*byteBudget=*/64ULL * 1024ULL * 1024ULL, std::chrono::seconds { 5 }, fix.logger
+    };
+    CompileResponder responder {
+        fix.protocol, capacity, fix.membership, fix.locality, jobs, reactor, fix.metrics, fix.logger
+    };
+    constexpr std::string_view Source = "int main(){return 0;}";
+    auto const enveloped =
+        Wire::EncodeCodecEnvelope(Wire::IdentityCodec, static_cast<std::uint32_t>(Source.size()), Wire::AsBytes(Source));
+    auto const framed = [&enveloped](std::optional<std::uint64_t> charged) {
+        return Wire::EncodeCompile(Wire::CompileRequest { .leaseToken = "l1",
+                                                          .fingerprint = "gcc-13",
+                                                          .args = {},
+                                                          .source = enveloped,
+                                                          .acceptedCodecs = { Wire::IdentityCodec },
+                                                          .sourceName = "a.cpp",
+                                                          .compileDir = {},
+                                                          .compileDirReplacement = {},
+                                                          .sourceRoot = {},
+                                                          .sourceRootReplacement = {},
+                                                          .chargedBytes = charged,
+                                                          .admissionCacheKey = "objkey",
+                                                          .admissionSourcePath = "<SRCROOT>/a.cpp" });
+    };
+
+    constexpr auto Charged = std::uint64_t { 3ULL << 30 };
+    auto stated = AnswerFrom(responder, reactor, framed(Charged), "127.0.0.1", ReplyHold::Keep);
+    REQUIRE(StatusOf(stated.reply) == Wire::Status::Ok);
+    CHECK(capacity.Held() == HeldCharges { .slots = 1, .bytes = Charged });
+
+    auto unstated = AnswerFrom(responder, reactor, framed(std::nullopt), "127.0.0.1", ReplyHold::Keep);
+    REQUIRE(StatusOf(unstated.reply) == Wire::Status::Ok);
+    CHECK(capacity.Held() == HeldCharges { .slots = 2, .bytes = Charged });
+
+    // Released with the slot, the bytes that were taken and no others.
+    stated.hold.reset();
+    CHECK(capacity.Held() == HeldCharges { .slots = 1, .bytes = 0 });
+    unstated.hold.reset();
+    CHECK(capacity.Held() == HeldCharges {});
 }

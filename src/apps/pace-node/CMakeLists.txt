@@ -76,6 +76,9 @@ add_executable(pace-node
     NodeActivation.cpp
     NodeAnnounce.cpp
     NodePresenceTier.cpp
+    AdmissionResponder.cpp
+    AdmitForwarder.cpp
+    MachineBudget.cpp
     NodeRoster.cpp
     NodeConditions.cpp
     NodeConfig.cpp
@@ -208,6 +211,12 @@ if(PACE_BUILD_TESTS)
         NodeActivation_test.cpp
         NodeAnnounce.cpp
         NodePresenceTier.cpp
+        AdmissionResponder.cpp
+        AdmissionResponder_test.cpp
+        AdmitForwarder.cpp
+        AdmitForwarder_test.cpp
+        MachineBudget.cpp
+        MachineBudget_test.cpp
         NodeRoster.cpp
         NodeRoster_test.cpp
         NodeRefusal_test.cpp
@@ -231,6 +240,7 @@ if(PACE_BUILD_TESTS)
         FleetLeaseRouting_test.cpp
         FleetExclusion_test.cpp
         FleetCompileBudget_test.cpp
+        FleetAdmission_test.cpp
         FleetDialHint_test.cpp
         FleetVoterMove_test.cpp
         NodeConfig_test.cpp
@@ -307,6 +317,10 @@ if(PACE_BUILD_TESTS)
         # launcher's unreachable worker to the next one's LEASE through the real scheduler.
         # Tests only: the node never runs the memo.
         "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/ReachabilityMemo.cpp"
+        # The launcher's miss flow and its admission session, for the fleet's end-to-end admission cases:
+        # the real launcher half against the node's real admission surface. Tests only.
+        "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/AdmitSession.cpp"
+        "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/MissFlow.cpp"
     )
     target_include_directories(pace-node-tests PRIVATE
         "${CMAKE_SOURCE_DIR}/src"

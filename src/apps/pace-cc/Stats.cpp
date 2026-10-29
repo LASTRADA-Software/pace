@@ -528,6 +528,10 @@ namespace
         std::uint64_t unavailable {};
         std::uint64_t exitCodes {};      ///< Records that carry an exit code at all.
         std::uint64_t compilesFailed {}; ///< Of those, a non-zero one.
+        std::uint64_t queuedMsTotal {};  ///< Slot wait summed over the records that carry one.
+        std::uint64_t queuedCount {};    ///< Records that carry a slot wait at all.
+        /// Largest peak memory any record reported, in bytes; absent when none did.
+        std::optional<std::uint64_t> peakMemoryMax;
         /// Hits `PACE_VERIFY` rejected; see `Outcome::VerifyMismatch`.
         std::uint64_t verifyMismatches {};
         /// Compiles an input changed during; see `Outcome::InputsMoved`.
@@ -677,9 +681,9 @@ namespace
     /// The format this build writes. **Bumped whenever `LogColumnTable` changes in any way** --
     /// order, meaning, count -- because the version is the only thing a reader can check; the
     /// arity that stood in for it is a count, and two formats can share a count.
-    constexpr unsigned CurrentLogVersion = 2;
+    constexpr unsigned CurrentLogVersion = 3;
 
-    /// One column of a version-2 line, in the order it is written.
+    /// One column of a version-3 line, in the order it is written.
     ///
     /// **Persisted: the enumerator values ARE the on-disk column order**, so they are spelled out,
     /// and a change to them is a change to `CurrentLogVersion`.
@@ -700,7 +704,9 @@ namespace
         DispatchDetail = 12,
         DispatchSpecifics = 13,
         ExitCode = 14,
-        Last = 15,
+        QueuedMs = 15,
+        PeakMemoryBytes = 16,
+        Last = 17,
     };
 
     /// How one column is written and read.
@@ -712,18 +718,27 @@ namespace
         void (*read)(std::string_view text, Record& record);    ///< Sets the record from it.
     };
 
-    /// Parse a signed exit code; nothing for text that is not one.
-    [[nodiscard]] std::optional<std::int32_t> ParseExitCode(std::string_view text)
+    /// Parse an integer reading (an exit code, a wait, a byte count); nothing for empty text or
+    /// text that is not one.
+    template <typename Integer>
+    [[nodiscard]] std::optional<Integer> ParseOptionalInteger(std::string_view text)
     {
-        std::int32_t value = 0;
+        Integer value {};
         auto const [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
         if (text.empty() || error != std::errc {} || end != text.data() + text.size())
             return std::nullopt;
         return value;
     }
 
+    /// Append an optional reading's digits; an absent one writes the empty field.
+    void WriteOptionalUnsigned(std::optional<std::uint64_t> const& value, std::string& line)
+    {
+        if (value.has_value())
+            line += std::to_string(*value);
+    }
+
     /// Every column of the current format, in the order it is written: the ONE description of a
-    /// version-2 line, which the writer and the reader both walk.
+    /// version-3 line, which the writer and the reader both walk.
     constexpr EnumTable<LogColumn, LogColumnRow> LogColumnTable { {
         { .column = LogColumn::Outcome,
           .name = "outcome",
@@ -792,7 +807,15 @@ namespace
                   if (r.exitCode.has_value())
                       l += std::to_string(*r.exitCode);
               },
-          .read = [](std::string_view t, Record& r) { r.exitCode = ParseExitCode(t); } },
+          .read = [](std::string_view t, Record& r) { r.exitCode = ParseOptionalInteger<std::int32_t>(t); } },
+        { .column = LogColumn::QueuedMs,
+          .name = "queued-ms",
+          .write = [](Record const& r, std::string& l) { WriteOptionalUnsigned(r.queuedMs, l); },
+          .read = [](std::string_view t, Record& r) { r.queuedMs = ParseOptionalInteger<std::uint64_t>(t); } },
+        { .column = LogColumn::PeakMemoryBytes,
+          .name = "peak-memory-bytes",
+          .write = [](Record const& r, std::string& l) { WriteOptionalUnsigned(r.peakMemoryBytes, l); },
+          .read = [](std::string_view t, Record& r) { r.peakMemoryBytes = ParseOptionalInteger<std::uint64_t>(t); } },
     } };
     static_assert(RowsInEnumeratorOrder(LogColumnTable, &LogColumnRow::column),
                   "LogColumnTable must hold one row per LogColumn, in enumerator order -- which is the column order");
@@ -943,6 +966,12 @@ namespace
         std::array<char, 32> buffer {};
         auto const written = std::snprintf(buffer.data(), buffer.size(), "%.1f%%", pct);
         return written > 0 ? std::string { buffer.data(), static_cast<std::size_t>(written) } : "n/a";
+    }
+
+    /// One decimal place, for the wait and memory figures the report prints.
+    [[nodiscard]] std::string FormatDecimal(double value)
+    {
+        return std::format("{:.1f}", value);
     }
 
     /// Format one millisecond boundary compactly: sub-second in ms, above in s with a
@@ -1122,6 +1151,13 @@ namespace
                             tally.compilesFailed > 0 ? palette.bad : palette.neutral,
                             palette.reset)
                 << " of " << tally.exitCodes << " that recorded an exit code\n";
+        if (tally.queuedCount > 0)
+            out << "  waited " << FormatDecimal(static_cast<double>(tally.queuedMsTotal) / 1000.0)
+                << " s for a compile slot (" << tally.queuedCount
+                << (tally.queuedCount == 1 ? " compile)\n" : " compiles)\n");
+        if (tally.peakMemoryMax.has_value())
+            out << "  peak compile memory "
+                << FormatDecimal(static_cast<double>(*tally.peakMemoryMax) / static_cast<double>(1ULL << 30)) << " GiB\n";
 
         AppendDispatchLines(out, tally, palette);
 
@@ -1354,6 +1390,15 @@ namespace
         {
             for (Tally* tally: { &folded.overall, &folded.byGroup[record.prefetchGroup] })
             {
+                if (record.queuedMs.has_value())
+                {
+                    ++tally->queuedCount;
+                    tally->queuedMsTotal += record.queuedMs.value_or(0);
+                }
+                if (record.peakMemoryBytes.has_value())
+                {
+                    tally->peakMemoryMax = std::max(tally->peakMemoryMax.value_or(0), record.peakMemoryBytes.value_or(0));
+                }
                 if (record.exitCode.has_value())
                 {
                     ++tally->exitCodes;

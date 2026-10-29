@@ -7,6 +7,7 @@
 #include "TicketCredentials.hpp"
 
 #include <Pace/Core/EnumTable.hpp>
+#include <Pace/Distributed/LeaseToken.hpp>
 #include <Pace/Protocol/CompileReplySeal.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -33,6 +34,7 @@
 #include <core/net/KeepAlive.hpp>
 #include <core/platform/Clock.hpp>
 #include <tests/CompileReplyFakes.hpp>
+#include <tests/LeaseRosterFakes.hpp>
 #include <tests/TicketFakes.hpp>
 #include <tests/Unwrap.hpp>
 
@@ -2570,4 +2572,231 @@ TEST_CASE("The launcher refuses a pass-through exactly where the worker refuses 
     }
     // Zero rows would be a vacuous pass, not a verdict.
     CHECK(asked > 0);
+}
+
+// --- a dispatch under an admission's grant (#1728) ----------------------------------------------------
+
+namespace
+{
+/// A worker grant as the queue hands it to the launcher: a token minted for `Worker`, and beside it the
+/// test worker's identity key and the lease's lifetime, received at @p receivedAt.
+/// @param receivedAt When this side received it.
+/// @param workerKey What the grant relays as its worker's key; the test worker's by default.
+/// @param lifetime What the grant relays as the lease's lifetime.
+/// @param dialHint Where the grant says the worker was last seen; empty for none.
+/// @return The ticket.
+[[nodiscard]] AdmitTicket AdmittedTo(core::platform::SteadyTimePoint receivedAt,
+                                     std::span<std::byte const> workerKey = Testing::TestWorkerPublicKey(),
+                                     std::chrono::milliseconds lifetime = Wire::DefaultCompileLeaseTimeout,
+                                     std::string_view dialHint = {})
+{
+    static auto const signer = Testing::TestLeaseSigner("scheduler");
+    auto const token = Distributed::MintLeaseToken(
+        signer,
+        Distributed::LeaseClaims { .serial = "7",
+                                   .endpoint = std::string { Worker },
+                                   .fingerprint = "gcc-13-abc",
+                                   .key = "objkey",
+                                   .expiresAt = std::chrono::system_clock::time_point { std::chrono::hours { 1 } },
+                                   .clusterId = "c",
+                                   .epoch = 1,
+                                   .signer = {},
+                                   .workerKey = std::string { Wire::AsStringView(workerKey) } });
+    return AdmitTicket { .kind = Wire::GrantKind::Worker,
+                         .endpoint = std::string { Worker },
+                         .leaseToken = token,
+                         .workerCodecs = {},
+                         .chargedBytes = 123'456'789,
+                         .queuedMs = 0,
+                         .lifetime = lifetime,
+                         .workerKey = { workerKey.begin(), workerKey.end() },
+                         .localReason = Wire::LocalGrantReason::Asked,
+                         .dialHint = std::string { dialHint },
+                         .receivedAt = receivedAt };
+}
+
+/// What kind of request each frame written to @p endpoint is.
+[[nodiscard]] std::vector<std::optional<Wire::Op>> OpsTo(ScriptedFleet& fleet, std::string_view endpoint)
+{
+    std::vector<std::optional<Wire::Op>> ops;
+    for (auto const& frame: FramesTo(fleet, endpoint))
+        ops.push_back(OpOf(frame));
+    return ops;
+}
+} // namespace
+
+TEST_CASE("Dispatch.worker-grant-dispatches-without-lease-leg", "[dispatch][admission]")
+{
+    // The queue already chose the worker and minted the token, so the launcher dials the worker and
+    // nobody else: no LEASE to ask for one and no RELEASE to hand it back -- the leader holds the
+    // lease for as long as the admission connection is held.
+    std::vector<std::string> const args { "-O2" };
+    auto const request = Request(args);
+    core::platform::ManualClock clock;
+    ScriptedFleet fleet;
+    fleet.Serve(std::string { Worker }, CompileReply(request, "OBJECTBYTES"));
+
+    auto const result = Dispatch(fleet, request, AdmittedTo(clock.now()), {}, {}, {}, &clock);
+
+    REQUIRE(result.Ran());
+    CHECK(result.workerEndpoint == Worker);
+    REQUIRE(fleet.Dialled().size() == 1);
+    CHECK(fleet.Dialled()[0] == Worker);
+    CHECK(FramesTo(fleet, Scheduler).empty());
+    auto const ops = OpsTo(fleet, Worker);
+    REQUIRE(ops.size() == 1);
+    CHECK(ops[0] == Wire::Op::Compile);
+}
+
+TEST_CASE("Dispatch.worker-grant-dials-the-hint-the-queue-relayed", "[dispatch][admission][dialhint]")
+{
+    // A worker reachable ONLY where it was last seen -- its advertised name answers nothing, as a
+    // laptop's corporate DNS name does off the VPN -- compiles an admitted job exactly as it compiles a
+    // leased one: the admission grant carries the lease grant's hint, and the launcher dials it first.
+    std::vector<std::string> const args { "-O2" };
+    auto const request = Request(args);
+    core::platform::ManualClock clock;
+    ScriptedFleet fleet;
+    fleet.Serve(std::string { Hint }, CompileReply(request, "OBJECTBYTES"));
+
+    auto const result =
+        Dispatch(fleet,
+                 request,
+                 AdmittedTo(clock.now(), Testing::TestWorkerPublicKey(), Wire::DefaultCompileLeaseTimeout, Hint),
+                 {},
+                 {},
+                 {},
+                 &clock);
+
+    REQUIRE(result.Ran());
+    CHECK(result.dialledEndpoint == Hint);
+    CHECK(result.workerEndpoint == Worker); // WHICH worker, by the name the token signs
+    REQUIRE(fleet.Dialled().size() == 1);
+    CHECK(fleet.Dialled()[0] == Hint);
+    CHECK(fleet.Budgets()[0].connect == HintConnectBudget);
+}
+
+TEST_CASE("Dispatch.worker-grant-states-what-the-queue-charged-on-the-compile", "[dispatch][admission]")
+{
+    // Ruling 3: what lets the worker report the slot's bytes and key the peak it measures.
+    std::vector<std::string> const args { "-O2" };
+    auto request = Request(args);
+    request.admissionSourcePath = "src/a.cpp";
+    core::platform::ManualClock clock;
+    ScriptedFleet fleet;
+    fleet.Serve(std::string { Worker }, CompileReply(request, "OBJECTBYTES"));
+
+    REQUIRE(Dispatch(fleet, request, AdmittedTo(clock.now()), {}, {}, {}, &clock).Ran());
+
+    auto const frames = FramesTo(fleet, Worker);
+    REQUIRE(frames.size() == 1);
+    auto const header = Unwrap(Wire::DecodeRequestHeader(frames[0]));
+    auto const fields = Unwrap(Wire::DecodeCompilePayload(frames[0].subspan(Wire::RequestHeaderSize, header.payloadLength)));
+    CHECK(fields.chargedBytes == std::optional<std::uint64_t> { 123'456'789 });
+    CHECK(Wire::AsStringView(fields.admissionCacheKey) == "objkey");
+    CHECK(Wire::AsStringView(fields.admissionSourcePath) == "src/a.cpp");
+}
+
+TEST_CASE("Dispatch.admitted-grant-age-starts-at-grant", "[dispatch][admission]")
+{
+    // R2. A request that queued for fifteen minutes holds a grant that is seconds old: its compile
+    // leg is bounded by what is left of the lease from the moment the grant ARRIVED.
+    std::vector<std::string> const args { "-O2" };
+    auto const request = Request(args);
+
+    core::platform::ManualClock clock;
+    auto const askedAt = clock.now();
+    clock.advance(std::chrono::minutes { 15 }); // the wait in the queue
+    auto const grantedAt = clock.now();
+
+    auto const compileBudgetFor = [&](core::platform::SteadyTimePoint receivedAt) {
+        ScriptedFleet fleet;
+        fleet.UseClock(clock);
+        fleet.Serve(std::string { Worker }, CompileReply(request, "OBJECTBYTES"));
+        auto const result = Dispatch(fleet, request, AdmittedTo(receivedAt), {}, {}, {}, &clock);
+        REQUIRE(result.Ran());
+        REQUIRE(fleet.Budgets().size() == 1);
+        return fleet.Budgets().front().total;
+    };
+
+    // Measured from the grant: the whole lifetime is left.
+    CHECK(compileBudgetFor(grantedAt) == Wire::DefaultCompileLeaseTimeout);
+    // The control: measured from when the request was ASKED, the same grant reads as spent -- the
+    // arithmetic the lease path has and an admission must not, and proof the clock is read at all.
+    CHECK(compileBudgetFor(askedAt) == std::chrono::milliseconds { 1 });
+}
+
+TEST_CASE("Dispatch.admitted-compile-is-bounded-by-the-lifetime-the-grant-carries", "[dispatch][admission]")
+{
+    // Ruling 13: the lifetime the leader minted the token with, relayed beside it -- never a compile-time
+    // constant a fleet that agreed another figure would contradict (#522).
+    std::vector<std::string> const args { "-O2" };
+    auto const request = Request(args);
+    core::platform::ManualClock clock;
+
+    auto const compileBudgetUnder = [&](std::chrono::milliseconds lifetime) {
+        ScriptedFleet fleet;
+        fleet.UseClock(clock);
+        fleet.Serve(std::string { Worker }, CompileReply(request, "OBJECTBYTES"));
+        auto const result =
+            Dispatch(fleet, request, AdmittedTo(clock.now(), Testing::TestWorkerPublicKey(), lifetime), {}, {}, {}, &clock);
+        REQUIRE(result.Ran());
+        REQUIRE(fleet.Budgets().size() == 1);
+        return fleet.Budgets().front().total;
+    };
+
+    CHECK(compileBudgetUnder(std::chrono::minutes { 2 }) == std::chrono::minutes { 2 });
+    CHECK(compileBudgetUnder(std::chrono::minutes { 45 }) == std::chrono::minutes { 45 });
+}
+
+TEST_CASE("Dispatch.worker-grant-naming-no-key-sends-nothing", "[dispatch][admission]")
+{
+    // W-4 on the admission path: a reply could not be authenticated, so no translation unit is sent.
+    std::vector<std::string> const args { "-O2" };
+    core::platform::ManualClock clock;
+    ScriptedFleet fleet;
+    fleet.Serve(std::string { Worker }, CompileReply(Request(args), "OBJECTBYTES"));
+
+    auto ticket = AdmittedTo(clock.now(), {});
+    SECTION("a grant naming no key")
+    {
+        // As relayed.
+    }
+    SECTION("a grant naming a key of another width")
+    {
+        ticket.workerKey.assign(Wire::IdentityPublicKeyBytes - 1, std::byte { 7 });
+    }
+    SECTION("a token naming the key is not read for one")
+    {
+        // The token names the worker's key in its claims; the client reads only what was relayed beside it.
+        ticket.leaseToken = AdmittedTo(clock.now()).leaseToken;
+    }
+
+    auto const result = Dispatch(fleet, Request(args), ticket, {}, {}, {}, &clock);
+
+    CHECK(result.status == DispatchStatus::Unauthenticated);
+    CHECK(fleet.Dialled().empty());
+}
+
+TEST_CASE("Dispatch.a-worker-refusing-for-capacity-is-a-capacity-refusal", "[dispatch][admission]")
+{
+    std::vector<std::string> const args { "-O2" };
+    core::platform::ManualClock clock;
+
+    auto const refusedWith = [&](Wire::ErrorCode code) {
+        ScriptedFleet fleet;
+        fleet.Serve(std::string { Worker }, Wire::EncodeErrorReply(code, {}));
+        return Dispatch(fleet, Request(args), AdmittedTo(clock.now()), {}, {}, {}, &clock);
+    };
+
+    // The two codes a worker answers a job the queue admitted for the named causes: full, cordoned or
+    // stopping (`NoCapacity`), and out of memory budget (`EndpointBusy`).
+    CHECK(IsWorkerCapacityRefusal(refusedWith(Wire::ErrorCode::NoCapacity)));
+    CHECK(IsWorkerCapacityRefusal(refusedWith(Wire::ErrorCode::EndpointBusy)));
+    // Not cured by asking the queue again.
+    CHECK_FALSE(IsWorkerCapacityRefusal(refusedWith(Wire::ErrorCode::UnknownLease)));
+    CHECK_FALSE(IsWorkerCapacityRefusal(refusedWith(Wire::ErrorCode::PayloadTooLarge)));
+    // And a worker nobody reached is not a refusal at all.
+    ScriptedFleet unreachable;
+    CHECK_FALSE(IsWorkerCapacityRefusal(Dispatch(unreachable, Request(args), AdmittedTo(clock.now()), {}, {}, {}, &clock)));
 }

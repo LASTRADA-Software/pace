@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <core/net/ISocket.hpp>
+#include <core/net/testing/InMemorySocket.hpp>
 #include <core/net/testing/SocketDecorator.hpp>
 #include <core/platform/Clock.hpp>
 #include <tests/ScriptedSocket.hpp>
@@ -84,4 +85,21 @@ TEST_CASE("A TLS handshake is bounded by the exchange's deadline, as a read is",
     (void) socket.handshakeIfNeeded();
     CHECK(seen.Handshakes() == 1);
     CHECK(socket.Expired());
+}
+
+TEST_CASE("The total-deadline layer forwards the keepalive request to the socket under it", "[transport][deadline][net]")
+{
+    // The interface default answers Unsupported: a layer that forgot to forward would make every
+    // server that arms a held connection read its transport as having no TCP connection at all.
+    core::platform::ManualClock clock;
+    auto pair = core::net::testing::InMemorySocketPair::create();
+    auto const* const raw = pair.server.get();
+    auto socket = TotalDeadlineSocket { std::move(pair.server), clock, clock.now() + 5s };
+
+    auto const settings = core::net::KeepAliveSettings {};
+    REQUIRE(socket.armKeepAlive(settings).has_value());
+    REQUIRE(raw->keepAliveRequests().size() == 1);
+    CHECK(raw->keepAliveRequests().front().idle == settings.idle);
+    CHECK(raw->keepAliveRequests().front().interval == settings.interval);
+    CHECK(raw->keepAliveRequests().front().count == settings.count);
 }

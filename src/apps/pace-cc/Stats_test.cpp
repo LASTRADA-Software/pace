@@ -1119,8 +1119,8 @@ TEST_CASE("A line this build writes names its format version and round-trips eve
     auto const lines = RawLogLines();
     REQUIRE(lines.size() == 1);
     auto const fields = FieldsOf(lines.front());
-    CHECK(fields.front() == "v2");
-    CHECK(fields.size() == 16); // the marker and fifteen columns
+    CHECK(fields.front() == "v3");
+    CHECK(fields.size() == 18); // the marker and seventeen columns
 
     auto const reading = ReadLog("");
     CHECK(reading.unreadable == 0);
@@ -1159,10 +1159,10 @@ TEST_CASE("A line in a format this build does not know is skipped and counted an
           "[stats][log-format]")
 {
     // Reading three: a later launcher appending to the same log, which is what a rolling upgrade
-    // looks like. Read by position, "v3" would be an outcome, its group a byte count, and a later
+    // looks like. Read by position, "v4" would be an outcome, its group a byte count, and a later
     // column order would put one field's value into another's slot with nothing to notice.
     ScopedStateDir const scoped;
-    AppendRawLine("v3\tHIT\tmain\t4096\t10\ta.cpp\t\t1\t2\t3\t0\t1700000000\tDISPATCHED\t\t\t0\tnew-column");
+    AppendRawLine("v4\tHIT\tmain\t4096\t10\ta.cpp\t\t1\t2\t3\t0\t1700000000\tDISPATCHED\t\t\t0\t\t\tnew-column");
     AppendRecord(MakeDispatchRecord(DispatchOutcome::Declined, "a reason", "b.cpp"));
 
     auto const reading = ReadLog("");
@@ -1175,11 +1175,11 @@ TEST_CASE("A line in a format this build does not know is skipped and counted an
 
 TEST_CASE("A current-format line whose columns do not add up is skipped rather than guessed at", "[stats][log-format]")
 {
-    // Reading four: the marker says version 2 and the columns say otherwise -- a torn append, or
+    // Reading four: the marker says version 3 and the columns say otherwise -- a torn append, or
     // a hand edit. The version is a promise about the columns, so a line breaking it is refused
     // whole rather than read as far as it goes.
     ScopedStateDir const scoped;
-    AppendRawLine("v2\tHIT\tmain\t4096\t10");
+    AppendRawLine("v3\tHIT\tmain\t4096\t10");
 
     auto const reading = ReadLog("");
     CHECK(reading.unreadable == 1);
@@ -1209,4 +1209,70 @@ TEST_CASE("The report counts failed compiles only among records that carry an ex
     AppendRawLine("MISS\tdefault\t0\t10\told.cpp\t\t0\t0\t0\t0\t1700000000\tNOT_ATTEMPTED\t\t");
 
     CHECK(FormatReport("").contains("compile failed: 1 of 3 that recorded an exit code"));
+}
+
+TEST_CASE("Stats.queued-and-peak-round-trip", "[stats][log-format]")
+{
+    ScopedStateDir const scoped;
+    auto record = MakeDispatchRecord(DispatchOutcome::NotAttempted, {}, "a.cpp");
+    record.queuedMs = 12'500;
+    record.peakMemoryBytes = 5ULL << 30;
+    AppendRecord(record);
+
+    auto const reading = ReadLog("");
+    REQUIRE(reading.records.size() == 1);
+    auto const& read = reading.records.front();
+    CHECK(read.queuedMs == std::optional<std::uint64_t> { 12'500 });
+    CHECK(read.peakMemoryBytes == std::optional<std::uint64_t> { 5ULL << 30 });
+}
+
+TEST_CASE("Stats.absent-columns-stay-absent", "[stats][log-format]")
+{
+    ScopedStateDir const scoped;
+    AppendRecord(MakeDispatchRecord(DispatchOutcome::NotAttempted, {}, "a.cpp"));
+
+    auto const reading = ReadLog("");
+    REQUIRE(reading.records.size() == 1);
+    CHECK_FALSE(reading.records.front().queuedMs.has_value());
+    CHECK_FALSE(reading.records.front().peakMemoryBytes.has_value());
+}
+
+TEST_CASE("Stats.old-version-line-is-unreadable", "[stats][log-format]")
+{
+    ScopedStateDir const scoped;
+    AppendRawLine("v2\tMISS\tmain\t0\t10\ta.cpp\t\t0\t0\t0\t0\t1700000000\tNOT_ATTEMPTED\t\t\t0");
+
+    auto const reading = ReadLog("");
+    CHECK(reading.unreadable == 1);
+    CHECK(reading.records.empty());
+}
+
+TEST_CASE("Stats.report-prints-wait", "[stats][log-format]")
+{
+    ScopedStateDir const scoped;
+    for (auto const ms: { 10'000ULL, 20'000ULL })
+    {
+        auto record = MakeDispatchRecord(DispatchOutcome::NotAttempted, {}, "a.cpp");
+        record.queuedMs = ms;
+        AppendRecord(record);
+    }
+    CHECK(FormatReport("").contains("waited 30.0 s for a compile slot (2 compiles)"));
+}
+
+TEST_CASE("Stats.report-prints-peak", "[stats][log-format]")
+{
+    ScopedStateDir const scoped;
+    auto record = MakeDispatchRecord(DispatchOutcome::NotAttempted, {}, "a.cpp");
+    record.peakMemoryBytes = 5ULL << 30;
+    AppendRecord(record);
+    CHECK(FormatReport("").contains("peak compile memory 5.0 GiB"));
+}
+
+TEST_CASE("Stats.report-omits-wait-and-peak-without-readings", "[stats][log-format]")
+{
+    ScopedStateDir const scoped;
+    AppendRecord(MakeDispatchRecord(DispatchOutcome::NotAttempted, {}, "a.cpp"));
+    auto const report = FormatReport("");
+    CHECK_FALSE(report.contains("waited"));
+    CHECK_FALSE(report.contains("peak compile memory"));
 }

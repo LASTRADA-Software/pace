@@ -2040,7 +2040,7 @@ namespace
         std::string_view key; ///< The keystroke's bytes; empty for a section the strip does not name.
     };
 
-    /// One row per `FleetSection`, in enumerator order: what the strip's `keys  m w l c r ! t` hint lists.
+    /// One row per `FleetSection`, in enumerator order: what the strip's `keys  m w l c r ! t u` hint lists.
     ///
     /// A letter per tab, from the section's key -- except `members`, whose `m` `machines` already has, so it
     /// answers to `c`, for cluster, and `conditions`, whose `c` members then has: it answers to `!`, the key a
@@ -2055,6 +2055,8 @@ namespace
         { .section = FleetSection::Revoked, .key = "r" },
         { .section = FleetSection::Conditions, .key = "!" },
         { .section = FleetSection::Tiers, .key = "t" },
+        // `u`, for who is using the queue: `q` quits, and `c` is the cluster's.
+        { .section = FleetSection::Clients, .key = "u" },
         // Not a tab: the history is not in the document a live panel is pushed.
         { .section = FleetSection::Series, .key = {} },
     } };

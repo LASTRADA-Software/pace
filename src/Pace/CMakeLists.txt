@@ -70,12 +70,15 @@ target_sources(Pace
         Cluster/SeedSources.cpp
         Core/Logger.cpp
         Distributed/LeaseTable.cpp
+        Distributed/PeakEstimates.cpp
+        Distributed/AdmissionQueue.cpp
         Distributed/WorkerRegistry.cpp
         Distributed/UnservedToolchains.cpp
         Distributed/FleetVersions.cpp
         Distributed/NodeProof.cpp
         Distributed/StateLeaseRoster.cpp
         Distributed/TicketVerifier.cpp
+        Distributed/SchedulerAdmission.cpp
         Distributed/SchedulerService.cpp
         Distributed/SchedulerProtocol.cpp
         Distributed/FleetHistory.cpp
