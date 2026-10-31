@@ -9,12 +9,15 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <coroutine>
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <string>
@@ -179,6 +182,16 @@ namespace
         /// a client whose `Authorization` sat past byte 8192 was answered `401`, which
         /// reads as a wrong credential rather than as an oversize head.
         TooLarge,
+        /// The head parsed, but declared a body past the matched route's ceiling (or any body
+        /// at all for a route that takes none). Decided by the ROUTE, so it is looked up after
+        /// the match rather than returned by the head read -- and before a byte of the body is
+        /// buffered, which is the whole point of the ceiling.
+        PayloadTooLarge,
+        /// A route that takes a body was sent a `POST` that declared no length.
+        LengthRequired,
+        /// The head asked for a `Transfer-Encoding`. A chunked body declares no length, so it
+        /// cannot be bounded before it is read; refusing it is the bound.
+        TransferEncodingUnsupported,
         Last
     };
 
@@ -253,6 +266,21 @@ namespace
                               .body = "request header fields too large\n",
                               .rationale = "a rise WOULD mean something (a client whose headers outgrew the cap), "
                                            "but this surface reaches no sink; see #828" },
+        AdminHeadOutcomeRow { .outcome = AdminHeadOutcome::PayloadTooLarge,
+                              .status = "413 Content Too Large",
+                              .body = "request body too large\n",
+                              .rationale = "a rise WOULD mean something (a caller past a route's ceiling, or a probe "
+                                           "for an unbounded read), but this surface reaches no sink; see #828" },
+        AdminHeadOutcomeRow { .outcome = AdminHeadOutcome::LengthRequired,
+                              .status = "411 Length Required",
+                              .body = "content-length required\n",
+                              .rationale = "a rise WOULD mean something (a client that does not frame its body), "
+                                           "but this surface reaches no sink; see #828" },
+        AdminHeadOutcomeRow { .outcome = AdminHeadOutcome::TransferEncodingUnsupported,
+                              .status = "501 Not Implemented",
+                              .body = "transfer-encoding is not supported\n",
+                              .rationale = "a rise WOULD mean something (a client streaming a body this surface "
+                                           "cannot bound), but this surface reaches no sink; see #828" },
     };
     static_assert(RowsInEnumeratorOrder(AdminHeadOutcomeTable, &AdminHeadOutcomeRow::outcome));
 
@@ -297,6 +325,11 @@ namespace
         std::string target {};
         /// One slot per `AdminHeaderTable` row, in its order.
         EnumTable<AdminHeader, std::string> headers {};
+        /// Which headers the client sent at all, so an EMPTY `Content-Length:` is not "absent".
+        EnumTable<AdminHeader, bool> present {};
+        /// The bytes read past the blank line that ended the head: the start of the body, or of
+        /// a pipelined request this server will never execute. Owned, so no view borrows it.
+        std::string overflow {};
         /// Why the read ended; see `AdminHeadOutcome`.
         ///
         /// Defaulted to `Malformed` rather than to the enum's zero. `Complete` is
@@ -516,8 +549,9 @@ namespace
         // outcomes is wildly asymmetric: if that invariant is ever broken by an edit
         // to the loop above, `npos` here becomes the LENGTH of the `string_view`
         // below, which is a read far past the buffer rather than a wrong status code.
+        auto const headEnd = buffer.find("\r\n\r\n");
         auto const eol = buffer.find("\r\n");
-        if (eol == std::string::npos)
+        if (eol == std::string::npos || headEnd == std::string::npos)
             co_return RequestHead { .outcome = AdminHeadOutcome::Malformed };
         std::string_view const line { buffer.data(), eol };
 
@@ -543,6 +577,7 @@ namespace
         // A `find` walk, one field line per pass, whose only advance is the `cursor` assignment
         // at the foot -- there is no `continue` to skip it, and each way out is a `break`.
         EnumTable<AdminHeader, std::string> headers {};
+        EnumTable<AdminHeader, bool> present {};
         auto cursor = eol + 2;
         while (cursor < buffer.size())
         {
@@ -554,8 +589,15 @@ namespace
                 for (auto const& row: AdminHeaderTable)
                     if (EqualsIgnoringCase(field.substr(0, colon), row.name))
                     {
-                        headers[static_cast<std::size_t>(row.header)] =
-                            std::string { TrimFieldValue(field.substr(colon + 1)) };
+                        auto const slot = static_cast<std::size_t>(row.header);
+                        // A second framing header is how one message is read as two (request
+                        // smuggling); no honest client sends one, so it is refused outright
+                        // rather than resolved by "last wins".
+                        if (present[slot]
+                            && (row.header == AdminHeader::ContentLength || row.header == AdminHeader::TransferEncoding))
+                            co_return RequestHead { .outcome = AdminHeadOutcome::Malformed };
+                        present[slot] = true;
+                        headers[slot] = std::string { TrimFieldValue(field.substr(colon + 1)) };
                         break;
                     }
             cursor = lineEnd + 2;
@@ -564,6 +606,8 @@ namespace
         co_return RequestHead { .method = std::string { line.substr(0, sp1) },
                                 .target = std::string { target },
                                 .headers = std::move(headers),
+                                .present = present,
+                                .overflow = buffer.substr(headEnd + 4),
                                 .outcome = AdminHeadOutcome::Complete };
     }
 
@@ -614,6 +658,130 @@ namespace
         return AdminResponse { .status = status, .contentType = "text/plain", .body = std::string { body } };
     }
 
+    /// What each method is called on the wire, in enumerator order.
+    inline constexpr EnumTable<AdminMethod, std::string_view> AdminMethodNames { "GET", "POST" };
+
+    /// @param text The request line's method token, case-SENSITIVE as RFC 9110 has it.
+    /// @return The method, or nothing for one this server does not serve.
+    [[nodiscard]] std::optional<AdminMethod> ParseMethod(std::string_view text) noexcept
+    {
+        for (auto const method: Enumerators<AdminMethod>())
+            if (AdminMethodNames[static_cast<std::size_t>(method)] == text)
+                return method;
+        return std::nullopt;
+    }
+
+    /// @param method A method.
+    /// @return Its bit in a set of methods.
+    [[nodiscard]] constexpr std::uint32_t MethodBit(AdminMethod method) noexcept
+    {
+        return std::uint32_t { 1 } << static_cast<unsigned>(method);
+    }
+
+    /// @param methods A set of methods built from `MethodBit`.
+    /// @return The `Allow` header line naming them, in enumerator order.
+    [[nodiscard]] std::string AllowHeader(std::uint32_t methods)
+    {
+        std::string line = "Allow:";
+        char const* separator = " ";
+        for (auto const method: Enumerators<AdminMethod>())
+            if ((methods & MethodBit(method)) != 0)
+            {
+                line += separator;
+                line += AdminMethodNames[static_cast<std::size_t>(method)];
+                separator = ", ";
+            }
+        return line;
+    }
+
+    /// Most digits a `Content-Length` may have before it is simply "too large". Past it the value
+    /// is not parsed at all, so no digit string can overflow or cost more than this.
+    constexpr std::size_t MaxContentLengthDigits = 18;
+
+    /// @param text A `Content-Length` value, already trimmed.
+    /// @return Its value (saturated past `MaxContentLengthDigits` digits so a route's ceiling
+    ///         refuses it), or nothing for anything that is not plain decimal digits: empty,
+    ///         signed, hex, or carrying a stray character.
+    [[nodiscard]] std::optional<std::size_t> ParseContentLength(std::string_view text) noexcept
+    {
+        if (text.empty() || !std::ranges::all_of(text, [](char c) noexcept { return c >= '0' && c <= '9'; }))
+            return std::nullopt;
+        if (text.size() > MaxContentLengthDigits)
+            return std::numeric_limits<std::size_t>::max();
+        std::size_t value = 0;
+        auto const parsed = std::from_chars(text.data(), text.data() + text.size(), value);
+        if (parsed.ec != std::errc {})
+            return std::nullopt;
+        return value;
+    }
+
+    /// @param outcome A refusal row of `AdminHeadOutcomeTable`.
+    /// @return Its response.
+    [[nodiscard]] AdminResponse RefusalFor(AdminHeadOutcome outcome)
+    {
+        auto const& row = AdminHeadOutcomeTable[static_cast<std::size_t>(outcome)];
+        return AdminResponse { .status = row.status, .contentType = "text/plain", .body = std::string { row.body } };
+    }
+
+    /// A body, and why reading it ended.
+    struct BodyRead
+    {
+        /// `Complete`, or the refusal/silence the table says.
+        AdminHeadOutcome outcome { AdminHeadOutcome::Malformed };
+        /// Exactly the declared length when `Complete`.
+        std::string body {};
+    };
+
+    /// Read exactly `length` body bytes: what the head read already holds first, the rest from the
+    /// socket, within `AdminHttpServer::BodyTimeout` in TOTAL.
+    ///
+    /// Bytes past `length` that arrived with the head are dropped, never executed: this server
+    /// answers one request per connection. Reads are sized to what is still owed so the socket
+    /// is not drained past the body.
+    /// @param socket The connection.
+    /// @param clock What the total is measured on.
+    /// @param overflow What the head read held past the blank line.
+    /// @param length The declared body length, already checked against the route's ceiling.
+    /// @return The body, or the outcome that ended the read.
+    core::async::Task<BodyRead> ReadBody(core::net::ISocket* socket,
+                                         core::platform::IClock* clock,
+                                         std::string_view overflow,
+                                         std::size_t length)
+    {
+        BodyRead result;
+        result.body.assign(overflow.substr(0, length));
+        if (result.body.size() < length)
+            socket->setReceiveDeadline(AdminHttpServer::BodyTimeout);
+        auto const started = clock->now();
+        while (result.body.size() < length)
+        {
+            std::array<std::byte, 1024> chunk {};
+            auto const want = std::min(chunk.size(), length - result.body.size());
+            auto const read = co_await socket->read(std::span<std::byte> { chunk.data(), want });
+            if (!read.has_value())
+            {
+                result.outcome = core::net::isDeadlineExpiry(read.error().code) ? AdminHeadOutcome::Truncated
+                                                                                : AdminHeadOutcome::PeerGone;
+                co_return result;
+            }
+            if (*read == 0)
+            {
+                // The peer finished sending short of its own declared length: a message that
+                // contradicts itself, not a slow one.
+                result.outcome = AdminHeadOutcome::Malformed;
+                co_return result;
+            }
+            result.body.append(reinterpret_cast<char const*>(chunk.data()), *read);
+            if (result.body.size() < length && clock->now() - started >= AdminHttpServer::BodyTimeout)
+            {
+                result.outcome = AdminHeadOutcome::Truncated;
+                co_return result;
+            }
+        }
+        result.outcome = AdminHeadOutcome::Complete;
+        co_return result;
+    }
+
 } // namespace
 
 core::async::Task<void> ServeAdminHttp(core::net::ISocket* socket,
@@ -629,6 +797,9 @@ core::async::Task<void> ServeAdminHttp(core::net::ISocket* socket,
     // plaintext socket's implementation is a no-op, so this is unconditional.
     if (!co_await socket->handshakeIfNeeded())
         co_return;
+    // The accepted connection's peer, taken once and owned: a route deciding on WHO is asking
+    // reads this, never a view into anything this frame may free.
+    auto peerHost = socket->peerAddress();
 
     auto const request = co_await ReadRequestHead(socket, clock);
     if (request.outcome != AdminHeadOutcome::Complete)
@@ -646,19 +817,6 @@ core::async::Task<void> ServeAdminHttp(core::net::ISocket* socket,
             (void) co_await WriteResponse(socket, PlainRefusal(row.status, row.body));
         co_return;
     }
-    if (request.method != "GET")
-    {
-        // RFC 9110 §15.5.6 makes `Allow` a MUST on a 405, and it is not ceremony:
-        // without it a client is told the request was wrong and not which half of
-        // it, so a probe pointed at the right path with the wrong verb reads
-        // identically to one pointed at a path this server does not serve.
-        (void) co_await WriteResponse(socket,
-                                      AdminResponse { .status = "405 Method Not Allowed",
-                                                      .contentType = "text/plain",
-                                                      .body = "method not allowed\n",
-                                                      .extraHeaders = { "Allow: GET" } });
-        co_return;
-    }
 
     // Strip any query string so `/metrics?foo=bar` still routes.
     std::string_view const target { request.target };
@@ -666,14 +824,42 @@ core::async::Task<void> ServeAdminHttp(core::net::ISocket* socket,
     auto const path = target.substr(0, questionMark);
     auto const query = questionMark == std::string_view::npos ? std::string_view {} : target.substr(questionMark + 1);
 
-    if (path == "/metrics")
+    // Nothing below may be reached by a message whose framing this server cannot bound.
+    if (request.present[static_cast<std::size_t>(AdminHeader::TransferEncoding)])
+    {
+        (void) co_await WriteResponse(socket, RefusalFor(AdminHeadOutcome::TransferEncodingUnsupported));
+        co_return;
+    }
+
+    auto const method = ParseMethod(request.method);
+    AdminRoute const* matched = nullptr;
+    std::uint32_t allowed = 0;
+    if (path == "/metrics" || path == "/healthz")
+        allowed |= MethodBit(AdminMethod::Get);
+    // Kinds in enumerator order, so `Exact` is tried against every route before
+    // `Prefix` is tried against any: which route answers a path is then a property
+    // of the table rather than of the order a caller happened to build its vector in.
+    for (auto const kind: Enumerators<AdminRouteMatch>())
+        for (auto const& route: routes)
+        {
+            if (route.match != kind || !route.handler)
+                continue;
+            auto const hit = route.match == AdminRouteMatch::Exact ? route.path == path : path.starts_with(route.path);
+            if (!hit)
+                continue;
+            allowed |= MethodBit(route.method);
+            if (matched == nullptr && method.has_value() && route.method == *method)
+                matched = &route;
+        }
+
+    if (method == AdminMethod::Get && path == "/metrics")
     {
         auto const body = RenderPrometheus(*metrics, snapshotProvider(), surfaces);
         (void) co_await WriteResponse(
             socket, AdminResponse { .status = "200 OK", .contentType = "text/plain; version=0.0.4", .body = body });
         co_return;
     }
-    if (path == "/healthz")
+    if (method == AdminMethod::Get && path == "/healthz")
     {
         // A listening port is not a serving one: a surface whose accept loop ended still shows
         // `LISTENING` and refuses every connect. This used to answer `200` regardless, and did for
@@ -698,29 +884,83 @@ core::async::Task<void> ServeAdminHttp(core::net::ISocket* socket,
         co_return;
     }
 
-    AdminRequest routeRequest { .path = path, .query = query };
+    if (matched == nullptr)
+    {
+        if (allowed == 0)
+        {
+            (void) co_await WriteResponse(socket, PlainRefusal("404 Not Found", "not found\n"));
+            co_return;
+        }
+        // RFC 9110 §15.5.6 makes `Allow` a MUST on a 405, and it is not ceremony:
+        // without it a client is told the request was wrong and not which half of
+        // it, so a probe pointed at the right path with the wrong verb reads
+        // identically to one pointed at a path this server does not serve. Derived from
+        // what is registered on THIS path, so a route added later is advertised by existing.
+        (void) co_await WriteResponse(socket,
+                                      AdminResponse { .status = "405 Method Not Allowed",
+                                                      .contentType = "text/plain",
+                                                      .body = "method not allowed\n",
+                                                      .extraHeaders = { AllowHeader(allowed) } });
+        co_return;
+    }
+
+    // The declared length is checked against the ROUTE's ceiling before one byte of the body is
+    // buffered; an oversized body is therefore refused, never read and then judged.
+    auto const lengthSlot = static_cast<std::size_t>(AdminHeader::ContentLength);
+    std::size_t length = 0;
+    if (request.present[lengthSlot])
+    {
+        auto const parsed = ParseContentLength(request.headers[lengthSlot]);
+        if (!parsed.has_value())
+        {
+            (void) co_await WriteResponse(socket, RefusalFor(AdminHeadOutcome::Malformed));
+            co_return;
+        }
+        length = *parsed;
+    }
+    else if (matched->method == AdminMethod::Post)
+    {
+        (void) co_await WriteResponse(socket, RefusalFor(AdminHeadOutcome::LengthRequired));
+        co_return;
+    }
+    if (length > matched->maxBodyBytes)
+    {
+        (void) co_await WriteResponse(socket, RefusalFor(AdminHeadOutcome::PayloadTooLarge));
+        co_return;
+    }
+
+    // Owned by this frame, which outlives the handler call below: the handler's `body` view
+    // borrows it, and nothing moves it once the view exists.
+    auto bodyRead = co_await ReadBody(socket, clock, request.overflow, length);
+    if (bodyRead.outcome != AdminHeadOutcome::Complete)
+    {
+        auto const& row = AdminHeadOutcomeTable[static_cast<std::size_t>(bodyRead.outcome)];
+        if (!row.status.empty())
+            (void) co_await WriteResponse(socket, PlainRefusal(row.status, row.body));
+        co_return;
+    }
+
+    AdminRequest routeRequest {
+        .method = matched->method, .body = bodyRead.body, .peerHost = std::move(peerHost), .path = path, .query = query
+    };
     for (auto const& row: AdminHeaderTable)
     {
         auto const slot = static_cast<std::size_t>(row.header);
         routeRequest.headers[slot] = request.headers[slot];
     }
 
-    // Kinds in enumerator order, so `Exact` is tried against every route before
-    // `Prefix` is tried against any: which route answers a path is then a property
-    // of the table rather than of the order a caller happened to build its vector in.
-    for (auto const kind: Enumerators<AdminRouteMatch>())
-        for (auto const& route: routes)
-        {
-            if (route.match != kind || !route.handler)
-                continue;
-            auto const hit = route.match == AdminRouteMatch::Exact ? route.path == path : path.starts_with(route.path);
-            if (!hit)
-                continue;
-            (void) co_await WriteResponse(socket, route.handler(routeRequest));
-            co_return;
-        }
-
-    (void) co_await WriteResponse(socket, PlainRefusal("404 Not Found", "not found\n"));
+    // A handler is caller code answering hostile input; one that throws (an allocation failure
+    // on a large reply, a bug) must cost this request a 500 and not the process.
+    AdminResponse response;
+    try
+    {
+        response = matched->handler(routeRequest);
+    }
+    catch (...)
+    {
+        response = PlainRefusal("500 Internal Server Error", "internal error\n");
+    }
+    (void) co_await WriteResponse(socket, std::move(response));
     co_return;
 }
 

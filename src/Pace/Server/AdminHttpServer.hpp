@@ -45,6 +45,23 @@ enum class AdminHeader : std::uint8_t
     Authorization = 0,
     /// What a client already holds, for the conditional GETs the charts serve.
     IfNoneMatch,
+    /// How many body bytes follow the head. Read for framing, and the only length this server believes.
+    ContentLength,
+    /// What the body is.
+    ContentType,
+    /// Where a browser says the request came from, for a route that refuses cross-origin callers.
+    Origin,
+    /// What the caller accepts.
+    Accept,
+    /// The MCP revision the caller speaks (`MCP-Protocol-Version`).
+    McpProtocolVersion,
+    /// The MCP method, mirrored into a header so a route can refuse before parsing a body (`Mcp-Method`).
+    McpMethod,
+    /// The MCP tool or resource name, mirrored the same way (`Mcp-Name`).
+    McpName,
+    /// Present only so it can be REFUSED: a chunked body has no declared length, and this server
+    /// bounds a body by the length it declared. Never offered to a route.
+    TransferEncoding,
     Last
 };
 
@@ -59,12 +76,42 @@ struct AdminHeaderRow
 inline constexpr EnumTable<AdminHeader, AdminHeaderRow> AdminHeaderTable {
     AdminHeaderRow { .header = AdminHeader::Authorization, .name = "authorization" },
     AdminHeaderRow { .header = AdminHeader::IfNoneMatch, .name = "if-none-match" },
+    AdminHeaderRow { .header = AdminHeader::ContentLength, .name = "content-length" },
+    AdminHeaderRow { .header = AdminHeader::ContentType, .name = "content-type" },
+    AdminHeaderRow { .header = AdminHeader::Origin, .name = "origin" },
+    AdminHeaderRow { .header = AdminHeader::Accept, .name = "accept" },
+    AdminHeaderRow { .header = AdminHeader::McpProtocolVersion, .name = "mcp-protocol-version" },
+    AdminHeaderRow { .header = AdminHeader::McpMethod, .name = "mcp-method" },
+    AdminHeaderRow { .header = AdminHeader::McpName, .name = "mcp-name" },
+    AdminHeaderRow { .header = AdminHeader::TransferEncoding, .name = "transfer-encoding" },
 };
 static_assert(RowsInEnumeratorOrder(AdminHeaderTable, &AdminHeaderRow::header));
 
+/// The HTTP methods a route may answer.
+///
+/// In-process only: never transmitted or persisted, so the values carry no contract.
+enum class AdminMethod : std::uint8_t
+{
+    /// `GET`, the only method before a route could take a body.
+    Get = 0,
+    /// `POST`, whose body is bounded by `AdminRoute::maxBodyBytes`.
+    Post,
+    Last
+};
+
 /// One admin request, as far as this server understands one.
+///
+/// Every view borrows from storage the server keeps alive for exactly as long as the handler
+/// runs; a handler that wants any of it afterwards copies it.
 struct AdminRequest
 {
+    /// The method the route was matched on.
+    AdminMethod method { AdminMethod::Get };
+    /// The body, exactly `Content-Length` bytes; empty when the request carried none.
+    std::string_view body {};
+    /// The connection's peer as the accepted socket reports it (the host, no port), owned.
+    /// Empty when the socket cannot say, which a caller deciding on it must treat as NOT local.
+    std::string peerHost {};
     /// Path with the query string stripped, so `/metrics?foo=1` routes as `/metrics`.
     std::string_view path;
     /// Whatever followed the `?`, empty when there was none.
@@ -145,6 +192,11 @@ struct AdminRoute
     AdminRouteHandler handler;
     /// Whole path or leading path. Exact unless a route says otherwise.
     AdminRouteMatch match { AdminRouteMatch::Exact };
+    /// The method this route answers; the same path may carry one route per method.
+    AdminMethod method { AdminMethod::Get };
+    /// The largest body this route accepts, refused `413` BEFORE it is read. Zero means a body
+    /// is refused (an empty one is not a body).
+    std::size_t maxBodyBytes { 0 };
 };
 
 /// One log record: the level an operator alerts on, and the sentence they read.
@@ -201,7 +253,9 @@ struct AdminBindFailureReport
 ///   - `GET /metrics` — Prometheus text exposition of the counters + storage
 ///     snapshot (see RenderPrometheus).
 ///   - `GET /healthz` — `200 OK` liveness probe for containers / k8s.
-///   - anything else — `404`; non-GET — `405`; a bad request line, or a head the
+///   - an unknown path — `404`; a known path with a method none of its routes answers — `405`
+///     naming the ones that do; a body past a route's ceiling — `413`, a `POST` without a length
+///     — `411`, a `Transfer-Encoding` — `501`; a bad request line, or a head the
 ///     peer stopped sending mid-way — `400`; a head this server gave up waiting
 ///     for at its read deadline — `408`; a request head over the byte cap — `431`.
 /// A peer that sends NOTHING before the request deadline is closed without any
@@ -260,6 +314,13 @@ class AdminHttpServer
     /// cannot express a total and a total cannot express a stall, so both exist and
     /// neither is derived from the other.
     static constexpr auto HeadTimeout = std::chrono::milliseconds { 10000 };
+
+    /// How long the whole body may take once the head is complete.
+    ///
+    /// A named bound of its own rather than `RequestTimeout` reused by accident: `RequestTimeout`
+    /// is per READ, and a body of `maxBodyBytes` dribbled one byte per read would hold the slot
+    /// for that many reads. Equal to it today, which is a choice and not a derivation.
+    static constexpr auto BodyTimeout = RequestTimeout;
 
     /// How long a served connection listens to its client before closing, and how much.
     ///
