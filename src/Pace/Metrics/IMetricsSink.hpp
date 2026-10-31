@@ -1588,6 +1588,11 @@ class IMetricsSink
         AdmissionForwardFailed,
         AdmissionForwardAbandoned,
 
+        /// MCP requests refused `403` because the connection's peer was not on this machine. The MCP
+        /// surface binds loopback only and is refused at startup otherwise, so a rise here means an
+        /// address this node was never meant to answer reached it anyway.
+        McpRequestsRefusedNotLoopback,
+
         Last,
     };
 

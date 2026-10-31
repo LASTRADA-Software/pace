@@ -1625,6 +1625,20 @@ std::span<OptionSpec<NodeConfig> const> NodeOptions() noexcept
             .same = FieldEq<&NodeConfig::adminListen>(),
         },
         {
+            .primary = "--mcp-listen",
+            .arity = Arity::Value,
+            .operand = "=[<address>:]<port>",
+            .apply = AssignFrom<&NodeConfig::mcpListen, ParseText>(),
+            .explicitBit = &NodeConfig::mcpListenExplicit,
+            .description = "serve MCP (POST /mcp) here, for a Claude Code session\n"
+                           "on this machine; off unless given. A bare port binds\n"
+                           "loopback, and any other address is refused at startup:\n"
+                           "MCP has no authentication, so it is never reachable\n"
+                           "from the network.",
+            .yamlKey = "mcp_listen",
+            .same = FieldEq<&NodeConfig::mcpListen>(),
+        },
+        {
             .primary = "--dashboard",
             .apply = SetTrue<&NodeConfig::dashboard>(),
             .description = "also serve the fleet dashboard on --admin-listen, at\n"
@@ -2687,6 +2701,7 @@ ServiceSpec MakeNodeServiceSpec(std::filesystem::path const& exePath, NodeConfig
     emitIfPresent("machine-memory-budget", cfg.machineMemoryBudgetBytes);
     emitIfPresent("compile-estimate-default", cfg.compileEstimateDefaultBytes);
     emitIfExplicit("admin-listen", cfg.adminListen, cfg.adminListenExplicit);
+    emitIfExplicit("mcp-listen", cfg.mcpListen, cfg.mcpListenExplicit);
     if (cfg.dashboard)
         argv.emplace_back("--dashboard");
     // The PATH, never the secret it holds -- the same rule `--requirepass` is
@@ -4581,6 +4596,17 @@ std::optional<std::string> StartupPolicyRejection(NodeConfig const& cfg)
                      "map of every member's hostname, endpoint and capacity, and an operator who bound it to "
                      "the network is publishing that to whoever asks. A bare port binds loopback and needs no "
                      "credential." },
+        // MCP is never network-bound. Asked of the address the surface will actually take -- its own
+        // row's resolution -- for the reason the dashboard rule above gives: a copy of the defaulting
+        // here would judge an address the surface no longer binds. `IsLoopbackHost` takes no NAME, so
+        // `localhost` is refused too: a resolver is not something this decision may depend on.
+        { .refuses =
+              [](NodeConfig const& c) {
+                  auto const endpoints = RowFor(NodeSurface::Mcp).Resolve(c);
+                  return std::ranges::any_of(endpoints,
+                                             [](SurfaceEndpoint const& e) { return !IsLoopbackHost(e.host); });
+              },
+          .message = McpListenNotLoopbackRefusal },
         // **A worker on a node that can never form**: with the consensus port closed there is no
         // formation runtime, no scheduler of its own and no fleet to join, so the worker would
         // register nowhere. The tier found that at start (`WorkerTier::Start`, "nowhere to

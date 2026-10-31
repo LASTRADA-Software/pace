@@ -298,6 +298,27 @@ namespace
                     "--listen-raft opens neither socket, and one whose consensus address reaches only this machine "
                     "opens neither unless you typed --discovery, which is refused",
         },
+        SurfaceRow {
+            .surface = NodeSurface::Mcp,
+            .name = "mcp",
+            .flags = { "--mcp-listen", {} },
+            .protocol = SurfaceProtocol::Tcp,
+            .bindFailure = BindFailurePolicy::Refuse,
+            .bindFailureReason =
+                "an operator who asks for an MCP endpoint is pointing a session on this machine at it, and a node "
+                "that started without one would answer that session with a refused connection while every other "
+                "surface, and the node's own health, read as fine. The one place the failure can be named is here, "
+                "at the start",
+            .defaultHost = McpListenDefaultHost,
+            .spec = &NodeConfig::mcpListen,
+            .grammar = ListenEndpointGrammar,
+            .resolve = ResolveFromSpec,
+            .closedBecause = nullptr,
+            .note = "off unless set, and loopback only: there is no MCP authentication scheme, so an address other "
+                    "machines could reach is refused at startup, and every request is checked again for a caller on "
+                    "this machine. A bare port binds 127.0.0.1. Never a firewall rule: nothing off this machine may "
+                    "reach it",
+        },
     };
 
     static_assert(RowsInEnumeratorOrder(Surfaces, [](SurfaceRow const& row) { return row.surface; }),
@@ -735,6 +756,8 @@ ServedSurfaces NodeServedSurfacesFor(NodeConfig const& cfg)
         // The discovery row, which asks `StartDiscoveryOrExplain`'s conditions: an announce address,
         // a consensus tier to desire peers onto, and a consensus address that leaves this machine.
         Row { .surface = MetricsSurface::NodeDiscovery, .served = !RowFor(NodeSurface::Discovery).Resolve(cfg).empty() },
+        // The MCP row's own resolution, which is what `McpEndpoint::Start` binds: off unless `--mcp-listen`.
+        Row { .surface = MetricsSurface::NodeMcp, .served = !RowFor(NodeSurface::Mcp).Resolve(cfg).empty() },
         // Never, yet: no `FormationController` is constructed until `main` wires one, so its
         // counters read absent rather than as a node that never yielded. The wiring makes this the
         // condition it constructs the controller under.

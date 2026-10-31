@@ -32,6 +32,7 @@
 #include "LiveStatsResponder.hpp"
 #include "LiveStatsSources.hpp"
 #include "MachineBudget.hpp"
+#include "McpEndpoint.hpp"
 #include "NodeActivation.hpp"
 #include "NodeAnnounce.hpp"
 #include "NodeAudience.hpp"
@@ -1757,16 +1758,34 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
                                                                                       Node::NodeServedSurfacesFor(cfg) } };
     auto const liveSourcesAttached = liveSources.Attach(nodeLiveSources);
 
-    auto surfaceOrRefusal = Node::StartAdminSurfaceOrExplain(cfg,
-                                                             *host,
-                                                             metrics,
-                                                             std::move(snapshotProvider),
-                                                             fleetSources,
-                                                             &sampler,
-                                                             dashboardCredential,
-                                                             logger,
-                                                             conditions,
-                                                             nodeIo.AcceptLoops());
+    // The node's two HTTP surfaces, each on a thread of its own: the admin surface, and MCP for a session on
+    // this machine -- off unless `--mcp-listen`, loopback only (`McpListenNotLoopbackRefusal`) and re-checked
+    // per request. Chained rather than checked twice, so a refusal of either ends the start through one
+    // branch. The MCP tool table arrives with its tools; until then `tools/list` answers an empty list,
+    // which is a true answer.
+    struct HttpSurfaces
+    {
+        Node::AdminSurface admin;
+        std::unique_ptr<Node::McpEndpoint> mcp;
+    };
+    auto surfaceOrRefusal =
+        Node::StartAdminSurfaceOrExplain(cfg,
+                                         *host,
+                                         metrics,
+                                         std::move(snapshotProvider),
+                                         fleetSources,
+                                         &sampler,
+                                         dashboardCredential,
+                                         logger,
+                                         conditions,
+                                         nodeIo.AcceptLoops())
+            .and_then([&](Node::AdminSurface admin) {
+                return Node::StartMcpSurfaceOrExplain(
+                           cfg, std::vector<Mcp::ToolRow> {}, metrics, logger, nodeIo.AcceptLoops())
+                    .transform([&admin](std::unique_ptr<Node::McpEndpoint> mcp) {
+                        return HttpSurfaces { .admin = std::move(admin), .mcp = std::move(mcp) };
+                    });
+            });
 
     // Fatal here and not in the daemon, which is a real difference between the two
     // binaries rather than a defect in either; the row says why
@@ -1776,7 +1795,9 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
         logger.Logf(LogLevel::Error, "{}; refusing to start", surfaceOrRefusal.error().reason);
         return ExitCodeFor(surfaceOrRefusal.error().cause);
     }
-    auto const adminSurface = std::move(*surfaceOrRefusal);
+    // Declared in this order so the MCP endpoint stops before the admin surface, the reverse of their start.
+    auto const adminSurface = std::move(surfaceOrRefusal->admin);
+    auto const mcpEndpoint = std::move(surfaceOrRefusal->mcp);
 
     // How loudly a scheduler that does not answer, or refuses, is said: ONE for the process, lent to
     // the worker's heartbeat and to the presence loop below, so a machine says each loss and each

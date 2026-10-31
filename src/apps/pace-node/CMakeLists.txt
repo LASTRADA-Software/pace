@@ -43,6 +43,7 @@ add_executable(pace-node
     main.cpp
     NodeLogging.cpp
     AdminEndpoint.cpp
+    McpEndpoint.cpp
     CacheProxy.cpp
     CacheTier.cpp
     ClusterAdminCli.cpp
@@ -139,6 +140,8 @@ if(PACE_BUILD_TESTS)
         "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/test_main.cpp"
         AdminEndpoint.cpp
         AdminEndpoint_test.cpp
+        McpEndpoint.cpp
+        McpEndpoint_test.cpp
         CacheProxy.cpp
         CacheProxy_test.cpp
         CacheTier.cpp

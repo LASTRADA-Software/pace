@@ -32,7 +32,7 @@ all — read [How it works](../how-it-works.md#who-leads-and-what-happens-when-t
 
 ## How the pieces fit
 
-A node is up to four surfaces in one process: a **compile worker** always, and
+A node is up to four components in one process: a **compile worker** always, and
 optionally a **scheduler**, a **cache tier** and a **consensus member**. A client
 misses its cache, asks the scheduler for a worker, sends that worker preprocessed
 text, and stores the object it gets back.
@@ -63,6 +63,7 @@ admin             -             not served; set --admin-listen
 raft              0.0.0.0:6680  TCP
 discovery beacon  0.0.0.0:6681  UDP
 discovery reply   0.0.0.0:*     UDP, port chosen by the kernel at bind
+mcp               -             not served; set --mcp-listen
 
 dialled at:
   consensus endpoint  AT STARTUP  -- the address this machine routes from on the raft port, or its fully qualified name until a route is known; derived when the node starts; give --raft-self to state it now
@@ -122,10 +123,11 @@ The surfaces, and what each is for:
 | Admin / metrics | `--admin-listen` | off; a bare port takes **loopback** | TCP |
 | Consensus peer | `--listen-raft` | `6680`; the **mode** opens it (every mode but a learner's), an empty `--listen-raft=` closes it, and a bare port takes the **wildcard** | TCP |
 | Discovery | `--discovery` + `--discovery-reply-port` | `6681`, **on** beside consensus, plus a kernel-chosen reply port; an empty `--discovery=` turns it off; always binds the **wildcard** | **UDP** |
+| MCP, for a Claude Code session on this machine | `--mcp-listen` | off; a bare port takes **loopback**, and any other address is **refused at startup** — never a firewall rule | TCP |
 
 Several things on that table are easy to get wrong and expensive to get wrong:
 
-- **Discovery is UDP.** Three TCP rules and one wrong one leaves a beacon that
+- **Discovery is UDP.** TCP rules alone, however many, leave a beacon that
   reaches nobody, and that presents as a fleet that never forms rather than as a
   firewall mistake.
 - **`--discovery`'s address is where beacons are *sent*, not where they are heard.**
@@ -161,6 +163,15 @@ Several things on that table are easy to get wrong and expensive to get wrong:
   still answer this machine alone, whatever it is bound to. `--admin-listen 6677` binds
   **loopback**, and that is the sharpest of the three: it is what the dashboard's
   credential rule turns on, so widening that address is what makes a token required.
+
+**MCP is never reachable from the network.** `--mcp-listen` serves `POST /mcp` for a
+Claude Code session on this machine, on a thread of its own. There is no MCP
+authentication scheme, so an address other machines could reach is refused at startup,
+and every request is checked again for a caller on this machine before it is read:
+
+| Series | What a rise means |
+|---|---|
+| `pace_mcp_requests_refused_not_loopback_total` | An MCP request whose connection came from another machine was refused `403`. The surface binds loopback only, so any count means a caller reached it from an address it was never meant to answer. Absent on a node without `--mcp-listen`. |
 
 **One caveat `--print-surfaces` states and cannot compute.** Under systemd socket
 activation the `.socket` unit owns the address and port, and `--listen-node` is read

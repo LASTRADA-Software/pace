@@ -4814,6 +4814,20 @@ else()
         TIMEOUT 600
     )
 
+    # The MCP surface over a real `--mcp-listen` port, spoken to the way a client does: both
+    # eras answered, no scrape endpoint on the port, and a network address refused at startup.
+    # Skips 77 without curl or python3, which are the client and the JSON judge.
+    add_test(
+        NAME "node-mcp-e2e"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/node-mcp-e2e.sh"
+            --node "$<TARGET_FILE:pace-node>"
+    )
+    set_tests_properties("node-mcp-e2e" PROPERTIES
+        LABELS "smoke"
+        SKIP_RETURN_CODE 77
+        TIMEOUT 300
+    )
+
     add_test(
         NAME "fleet-dashboard-e2e"
         COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/fleet-dashboard-e2e.sh"

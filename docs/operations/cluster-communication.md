@@ -381,6 +381,7 @@ and the dashboard are off unless configured.
 | a node | the local segment | `--discovery`, UDP `:6681` by default, plus a per-node reply port | a beacon every **15 s** | who is here and which fleet it is in, then a challenge and a proof |
 | an operator | the leader's scheduler | `:6674` | on demand | `CLUSTER-STATUS`, `-SET`, `-FORGET`, `-ADMIT`, and the enrollment verbs |
 | a browser or scraper | a node's `--admin-listen`, or `pace-kv`'s `--metrics` (default `:9259`) | as configured | on demand | HTTP: `/fleet`, `/fleet.json`, `/metrics`, `/healthz` |
+| a Claude Code session on the same machine | that machine's node's `--mcp-listen` | as configured, loopback only | one connection per request | HTTP: `POST /mcp` |
 
 Every number in that table is a real default, read from `NodeSurfaceTable()` — the table
 the node binds from and `--print-surfaces` prints — so a node with no configuration opens
@@ -744,6 +745,7 @@ admin             -             not served; set --admin-listen
 raft              0.0.0.0:6680  TCP
 discovery beacon  0.0.0.0:6681  UDP
 discovery reply   0.0.0.0:*     UDP, port chosen by the kernel at bind
+mcp               -             not served; set --mcp-listen
 
 dialled at:
   consensus endpoint  10.0.0.7:6680  -- what peers DIAL; the raft row above is what this node BINDS
@@ -786,7 +788,7 @@ node surface — an inherited descriptor cannot be adopted onto the reactor yet,
 activated worker is refused at startup rather than left listening on nothing — and
 that `--discovery`'s address is where beacons are *sent* while its sockets bind the
 wildcard. [The node's own page](../tools/pace-node.md#every-port-it-opens)
-carries the full four-surface table.
+carries the full five-surface table.
 
 **On Windows, `--install-service` opens them for you.** It creates one inbound rule
 per surface the registered configuration binds beyond loopback — the rows
@@ -832,6 +834,13 @@ unless set, and a bare port binds loopback — so it needs no rule until you wid
 and widening it is what makes `--dashboard-token-file` required. If you did widen it,
 `--print-surfaces` shows the address rather than a `-`, and that address is the one to
 open.
+
+**The MCP surface never needs a rule.** `--mcp-listen` is off unless set, a bare port
+binds loopback, and an address other machines could reach is refused at startup: MCP has
+no authentication scheme here, so a Claude Code session reaches the fleet *through* its
+own machine's node and never by dialling another node's MCP port. Every request is checked
+again for a caller on this machine, and one that is not is answered `403` and counted in
+`pace_mcp_requests_refused_not_loopback_total`.
 
 !!! warning "Keep the node port off any network you would not run a compiler for"
 

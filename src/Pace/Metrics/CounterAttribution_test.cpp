@@ -102,6 +102,7 @@ constexpr std::array WriterFiles {
     SurfaceWriterFile { .surface = MetricsSurface::CompileScheduler, .path = "src/Pace/Distributed/SchedulerAdmission.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::SchedulerAdmission, .path = "src/apps/pace-node/AdmissionResponder.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::AdmissionForwarding, .path = "src/apps/pace-node/AdmitForwarder.cpp" },
+    SurfaceWriterFile { .surface = MetricsSurface::NodeMcp, .path = "src/apps/pace-node/McpEndpoint.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::CompileWorker, .path = "src/Pace/Distributed/LeaseToken.hpp" },
     SurfaceWriterFile { .surface = MetricsSurface::CompileWorker, .path = "src/apps/pace-cc/CodecEnvelope.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::CompileWorker, .path = "src/apps/pace-cc/WorkerProtocol.cpp" },
@@ -719,7 +720,7 @@ TEST_CASE("counter-attribution: the mechanism figures quoted beside the table st
     // was never taken under. Drift is a red build, which is what the previous "106 of 144" --
     // a sentence with nothing watching it -- did not get. Unaffected by the exemption above: none
     // of these five sets can contain a counter with no writer, exempt or not.
-    CHECK(incremented.size() == 68);
+    CHECK(incremented.size() == 69);
     CHECK(refusalRow.size() == 149);
     CHECK(outcomeRow.size() == 10);
     CHECK(returned.size() == 6);

@@ -297,6 +297,12 @@
 # otherwise has none of.
 #admin_listen:
 
+# serve MCP (POST /mcp) here, for a Claude Code session on this machine;
+# off unless given. A bare port binds loopback, and any other address is
+# refused at startup: MCP has no authentication, so it is never reachable
+# from the network.
+#mcp_listen:
+
 # also serve the fleet dashboard on --admin-listen, at /fleet and
 # /fleet.json. Off unless given: the page is a map of every member's
 # hostname, endpoint and capacity. Answered in full only while this node

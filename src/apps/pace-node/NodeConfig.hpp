@@ -319,6 +319,14 @@ struct NodeConfig
     /// operator's decision, not this program's.
     std::string adminListen;
 
+    /// Where the MCP endpoint listens, or empty to leave it off.
+    ///
+    /// The `--admin-listen` grammar and defaulting -- a bare port binds loopback -- with one rule
+    /// that one does not have: an address that is NOT loopback is a startup refusal, because there is
+    /// no MCP authentication scheme and the design goal is that MCP is never reachable from the
+    /// network. Other machines are reached THROUGH the local node, never by dialling its MCP port.
+    std::string mcpListen;
+
     /// File holding the credential the dashboard requires, or empty for none.
     ///
     /// A FILE and not a flag, for the reason every secret this node reads is one: a
@@ -773,6 +781,7 @@ struct NodeConfig
     bool nodeClassExplicit { false };
     bool toolchainDiscoveryExplicit { false };
     bool adminListenExplicit { false };
+    bool mcpListenExplicit { false };
     bool cacheDiskBytesExplicit { false };
     bool sharedCacheDiskBytesExplicit { false };
     bool raftListenExplicit { false };
@@ -1686,6 +1695,20 @@ inline constexpr std::string_view ThisMachineLoopbackHost = "127.0.0.1";
 /// already means being on the machine, so a bare port needs no token while a bind an
 /// operator deliberately exposed does.
 inline constexpr std::string_view AdminListenDefaultHost = "127.0.0.1";
+
+/// What a bare `--mcp-listen` binds.
+///
+/// Loopback, and the only kind of address the surface may bind at all: a non-loopback one is
+/// refused at startup (`McpListenNotLoopbackRefusal`).
+inline constexpr std::string_view McpListenDefaultHost = "127.0.0.1";
+
+/// Why `--mcp-listen` on an address other machines can reach refuses to start, worded once so the
+/// startup rule and its test cannot drift apart.
+inline constexpr std::string_view McpListenNotLoopbackRefusal =
+    "--mcp-listen must be a loopback address (127.0.0.1 or ::1), or a bare port, which binds 127.0.0.1: MCP has "
+    "no authentication scheme here, so an endpoint other machines can reach would hand this node's fleet "
+    "controls to whoever dials it. A name is not loopback, `localhost` included -- a resolver decides what it "
+    "reaches. Other machines are reached through this node, never by dialling its MCP port.";
 
 /// How an operator states the address peers dial a consensus node at: the remedy for a node that
 /// states none, worded ONCE.

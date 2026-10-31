@@ -52,6 +52,7 @@ enum class NodeSurface : std::uint8_t
     Admin,     ///< `/metrics`, `/healthz` and the fleet dashboard.
     Raft,      ///< Where this node's peers send consensus traffic.
     Discovery, ///< The LAN beacon, and the port it is answered on.
+    Mcp,       ///< MCP for a session on this machine (`POST /mcp`); loopback only.
     Last,      ///< Count; never a surface.
 };
 
