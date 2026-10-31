@@ -126,6 +126,7 @@ target_sources(Pace
         Protocol/MemcachedBinary.cpp
         Protocol/MemcachedMeta.cpp
         Protocol/MemcachedText.cpp
+        Protocol/Mcp/McpServer.cpp
         Protocol/ProtocolAutodetect.cpp
         Protocol/KeyspaceNotifier.cpp
         Protocol/PubSubRegistry.cpp
@@ -243,4 +244,5 @@ target_sources(Pace
             Core/Utf8.hpp
             Core/Logger.hpp
             Core/BufferPool.hpp
+            Protocol/Mcp/McpTool.hpp
 )
