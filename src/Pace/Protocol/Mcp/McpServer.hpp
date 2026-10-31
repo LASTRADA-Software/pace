@@ -59,8 +59,10 @@ class McpServer
 
     /// Answer one HTTP request to the MCP endpoint.
     ///
-    /// Never throws: a tool handler that throws is answered `500` with `-32603` and logged, and the
-    /// server goes on serving.
+    /// Never throws. A tool handler that throws -- or answers success without the structured content
+    /// its `outputSchema` declares -- is logged and answered `200` with a tool result carrying
+    /// `isError: true`, so the model reads which tool failed; only a failure in the envelope itself is a
+    /// `500` with `-32603`. The server goes on serving either way.
     /// @param request The request, as the HTTP server parsed it.
     /// @return The response to write.
     [[nodiscard]] AdminResponse Handle(AdminRequest const& request) const;

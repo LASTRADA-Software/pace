@@ -88,7 +88,7 @@ namespace
         UnsupportedVersion, ///< A protocol version this server does not speak.
         MethodNotFound,     ///< A method this server does not implement (in this era).
         InvalidParams,      ///< A method's parameters are malformed, or name an unknown tool.
-        Internal,           ///< A programmer error while answering, a throwing tool handler included.
+        Internal,           ///< A programmer error in the envelope itself; a throwing TOOL is a tool error instead.
         Last
     };
 
@@ -625,9 +625,29 @@ McpServer::Reply McpServer::CallTool(Envelope const& envelope) const
                                         envelope.era) };
     }
 
+    // A tool that failed in a way it did not report is answered as a tool EXECUTION error in a `200`,
+    // never as a JSON-RPC error in a `500` (ruling R8): an HTTP MCP client reads a non-2xx as the
+    // transport failing, so the model would learn nothing about which tool broke. The cause stays in
+    // the node log, where the operator who can fix it reads it; the model is told only where to look.
+    auto const internalError = [&] {
+        return Reply { RenderToolResult(ToolResult { .structured = {},
+                                                     .text = std::format("internal error in {}; see the node log", *name),
+                                                     .isError = true },
+                                        envelope.era) };
+    };
     try
     {
         auto const result = tool->row.handler(ToolCall { .arguments = *arguments, .clientName = envelope.clientName });
+        // A success with no structured content from a tool that PROMISED some (an `outputSchema`) is a
+        // wrong answer that reads right to a client looking only at the text, and one a client
+        // enforcing output schemas rejects (ruling R9). A tool ERROR owes no structured content.
+        if (!result.isError && result.structured.IsNull() && tool->outputSchema)
+        {
+            _logger.Logf(LogLevel::Error,
+                         "mcp: tool '{}' answered success without the structured content its output schema declares",
+                         *name);
+            return internalError();
+        }
         return Reply { RenderToolResult(result, envelope.era) };
     }
     catch (std::exception const& error)
@@ -638,7 +658,7 @@ McpServer::Reply McpServer::CallTool(Envelope const& envelope) const
     {
         _logger.Logf(LogLevel::Error, "mcp: tool '{}' threw a non-standard exception", *name);
     }
-    return Reply { std::unexpected { Fail(Fault::Internal, std::format("Internal error in tool {}", *name)) } };
+    return internalError();
 }
 
 } // namespace Pace::Mcp

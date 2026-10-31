@@ -36,8 +36,8 @@ constexpr std::string_view EchoInput {
 };
 constexpr std::string_view EchoOutput { R"({"type":"object","properties":{"echoed":{"type":"string"}}})" };
 
-/// The fake table: a read-only tool that echoes, and a destructive one that fails on request and
-/// throws otherwise.
+/// The fake table: a read-only tool that echoes, a destructive one that fails on request and throws
+/// otherwise, and a mutating one that declares an output schema and answers without structured content.
 std::vector<ToolRow> FakeTools()
 {
     return {
@@ -66,7 +66,20 @@ std::vector<ToolRow> FakeTools()
                   .handler = [](ToolCall const& call) -> ToolResult {
                       if (call.arguments.Find("fail"))
                           return ToolResult { .structured = {}, .text = "it failed as asked", .isError = true };
+                      if (call.arguments.Find("quiet"))
+                          return ToolResult { .structured = {}, .text = "done, nothing structured" };
                       throw std::runtime_error("boom");
+                  } },
+        ToolRow { .name = "hollow",
+                  .title = "Hollow",
+                  .description = "Declares an output schema and returns no structured content.",
+                  .inputSchema = R"({"type":"object"})",
+                  .outputSchema = EchoOutput,
+                  .effect = ToolEffect::Mutating,
+                  .handler = [](ToolCall const& call) -> ToolResult {
+                      return ToolResult { .structured = {},
+                                          .text = "nothing structured",
+                                          .isError = call.arguments.Find("fail") != nullptr };
                   } },
     };
 }
@@ -359,7 +372,7 @@ TEST_CASE("mcp-server tools/list reports the table in order with annotations and
     auto const& result = ResultOf(body);
     CHECK(StringAt(result, "resultType") == "complete");
     auto const& tools = *result.Find("tools")->AsArray();
-    REQUIRE(tools.size() == 2);
+    REQUIRE(tools.size() == 3);
 
     auto const& echo = tools[0];
     CHECK(StringAt(echo, "name") == "echo");
@@ -375,6 +388,13 @@ TEST_CASE("mcp-server tools/list reports the table in order with annotations and
     CHECK(explode.Find("outputSchema") == nullptr);
     CHECK(explode.Find("annotations")->Find("readOnlyHint")->AsBool() == false);
     CHECK(explode.Find("annotations")->Find("destructiveHint")->AsBool() == true);
+
+    // `Mutating` is the row whose two hints differ from both neighbours: it changes something, and
+    // removes nothing, so a client prompts without warning of loss.
+    auto const& hollow = tools[2];
+    CHECK(StringAt(hollow, "name") == "hollow");
+    CHECK(hollow.Find("annotations")->Find("readOnlyHint")->AsBool() == false);
+    CHECK(hollow.Find("annotations")->Find("destructiveHint")->AsBool() == false);
 }
 
 TEST_CASE("mcp-server tools/call of an unknown tool is a protocol error", "[mcp]")
@@ -566,7 +586,7 @@ TEST_CASE("mcp-server legacy tools/list and tools/call are served from the same 
     auto const& listed = ResultOf(list);
     CHECK(listed.Find("resultType") == nullptr);
     CHECK(listed.Find("ttlMs") == nullptr);
-    REQUIRE(listed.Find("tools")->AsArray()->size() == 2);
+    REQUIRE(listed.Find("tools")->AsArray()->size() == 3);
     CHECK(StringAt((*listed.Find("tools")->AsArray())[0], "name") == "echo");
 
     auto const call = BodyOf(fixture.Send(LegacyRequest("tools/call", R"({"name":"echo","arguments":{"text":"old"}})")));
@@ -609,13 +629,24 @@ TEST_CASE("mcp-server every response is application/json", "[mcp]")
     }
 }
 
-TEST_CASE("mcp-server a handler that throws is 500 with -32603, logged, and the server keeps serving", "[mcp]")
+TEST_CASE("mcp-server a handler that throws is a tool error in a 200, logged, and the server keeps serving", "[mcp]")
 {
+    // Ruling R8: a non-2xx is read by an HTTP MCP client as a transport failure, so the model would
+    // never see which tool failed. A tool EXECUTION error is what the model can read and report.
     Fixture const fixture;
     auto const response = fixture.Send(ModernRequest("tools/call", R"(,"name":"explode","arguments":{})", "explode"));
-    CHECK(response.status == "500 Internal Server Error");
-    CHECK(ErrorCodeOf(response) == -32603);
-    CHECK(BodyOf(response).Find("id")->AsInt() == 7);
+    CHECK(response.status == "200 OK");
+    auto const body = BodyOf(response);
+    CHECK(body.Find("error") == nullptr);
+    CHECK(body.Find("id")->AsInt() == 7);
+    auto const& result = ResultOf(body);
+    CHECK(result.Find("isError")->AsBool() == true);
+    CHECK(result.Find("structuredContent") == nullptr);
+    auto const& content = *result.Find("content")->AsArray();
+    REQUIRE(content.size() == 1);
+    CHECK(StringAt(content[0], "text") == "internal error in explode; see the node log");
+    // The exception's own text stays in the log: it is a programmer error, not something to hand a model.
+    CHECK(response.body.find("boom") == std::string::npos);
 
     auto const records = fixture.logger.Snapshot();
     REQUIRE(records.size() == 1);
@@ -626,6 +657,61 @@ TEST_CASE("mcp-server a handler that throws is 500 with -32603, logged, and the 
     auto const next = fixture.Send(CallEcho(R"({"text":"still here"})"));
     CHECK(next.status == "200 OK");
     CHECK(StringAt(*ResultOf(BodyOf(next)).Find("structuredContent"), "echoed") == "still here");
+}
+
+TEST_CASE("mcp-server refuses a success without the structured content its output schema promises", "[mcp]")
+{
+    // Ruling R9: a tool declaring an `outputSchema` that answers success with no structured content
+    // is a wrong answer that LOOKS right to a client reading only the text -- and one a client
+    // enforcing output schemas rejects outright. So it is answered as the tool error it is.
+    Fixture const fixture;
+    auto const response = fixture.Send(ModernRequest("tools/call", R"(,"name":"hollow","arguments":{})", "hollow"));
+    CHECK(response.status == "200 OK");
+    auto const responseBody = BodyOf(response);
+    auto const& result = ResultOf(responseBody);
+    CHECK(result.Find("isError")->AsBool() == true);
+    CHECK(result.Find("structuredContent") == nullptr);
+    auto const text = StringAt((*result.Find("content")->AsArray())[0], "text");
+    CHECK(text.find("hollow") != std::string::npos);
+    CHECK(text != "nothing structured");
+
+    auto const records = fixture.logger.Snapshot();
+    REQUIRE(records.size() == 1);
+    CHECK(records[0].level == LogLevel::Error);
+    CHECK(records[0].message.find("hollow") != std::string::npos);
+
+    SECTION("a tool ERROR owes no structured content, so it passes through unchanged")
+    {
+        auto const failed =
+            fixture.Send(ModernRequest("tools/call", R"(,"name":"hollow","arguments":{"fail":true})", "hollow"));
+        auto const failedBody = BodyOf(failed);
+        auto const& failedResult = ResultOf(failedBody);
+        CHECK(failedResult.Find("isError")->AsBool() == true);
+        CHECK(StringAt((*failedResult.Find("content")->AsArray())[0], "text") == "nothing structured");
+    }
+    SECTION("a tool with no output schema may answer success without structured content")
+    {
+        auto const plain =
+            fixture.Send(ModernRequest("tools/call", R"(,"name":"explode","arguments":{"quiet":true})", "explode"));
+        auto const plainBody = BodyOf(plain);
+        auto const& plainResult = ResultOf(plainBody);
+        CHECK(plainResult.Find("isError")->AsBool() == false);
+        CHECK(StringAt((*plainResult.Find("content")->AsArray())[0], "text") == "done, nothing structured");
+        CHECK(fixture.logger.Snapshot().size() == 1);
+    }
+}
+
+TEST_CASE("mcp-server legacy ping answers an empty result object", "[mcp]")
+{
+    Fixture const fixture;
+    auto const response = fixture.Send(LegacyRequest("ping"));
+    CHECK(response.status == "200 OK");
+    auto const body = BodyOf(response);
+    CHECK(StringAt(body, "id") == "l-1");
+    auto const& result = ResultOf(body);
+    REQUIRE(result.AsObject() != nullptr);
+    CHECK(result.AsObject()->empty());
+    CHECK(Json::Serialize(result) == "{}");
 }
 
 TEST_CASE("mcp-server a method other than POST is 405", "[mcp]")
