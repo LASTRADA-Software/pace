@@ -47,6 +47,7 @@ target_sources(Pace
         Core/Ed25519.cpp
         Core/FigureText.cpp
         Core/Hkdf.cpp
+        Core/Json.cpp
         Core/PathKind.cpp
         Core/SecureBytes.cpp
         Core/SecureRandom.cpp
@@ -236,6 +237,7 @@ target_sources(Pace
             Core/Compression.hpp
             Core/Endian.hpp
             Core/FigureText.hpp
+            Core/Json.hpp
             Core/Markup.hpp
             Core/StringHash.hpp
             Core/Utf8.hpp
