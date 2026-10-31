@@ -277,11 +277,13 @@ namespace
 ProvenSchedulerDialer::ProvenSchedulerDialer(NodeProofClient const& prover,
                                              core::net::IConnector& connector,
                                              core::net::EventLoop& reactor,
-                                             ForwardDialBudget budget) noexcept:
+                                             ForwardDialBudget budget,
+                                             std::size_t maxReplyBytes) noexcept:
     _prover { prover },
     _connector { connector },
     _reactor { reactor },
-    _budget { budget }
+    _budget { budget },
+    _maxReplyBytes { maxReplyBytes }
 {
 }
 
@@ -292,10 +294,12 @@ core::async::Task<UpstreamOpening> ProvenSchedulerDialer::Open(std::string endpo
         endpoint,
         core::net::DialOptions { .connectTimeout = _budget.connectTimeout, .keepAlive = _budget.keepAlive });
     if (raw == nullptr)
-        co_return UpstreamOpening { .socket = nullptr, .reason = std::format("nothing answered at {}", endpoint) };
+        co_return UpstreamOpening { .socket = nullptr,
+                                    .reason = std::format("nothing answered at {}", endpoint),
+                                    .fault = UpstreamOpeningFault::Unreached };
 
     // No budget: this end reads replies, and what it holds is bounded by the payload ceiling alone.
-    auto sealed = std::make_unique<SealedFrameSocket>(std::move(raw), SealedFrameEnd::Caller, MaxForwardReplyBytes, nullptr);
+    auto sealed = std::make_unique<SealedFrameSocket>(std::move(raw), SealedFrameEnd::Caller, _maxReplyBytes, nullptr);
 
     auto attempt = NodeProofAttempt {};
     {
@@ -308,7 +312,8 @@ core::async::Task<UpstreamOpening> ProvenSchedulerDialer::Open(std::string endpo
         co_return UpstreamOpening { .socket = nullptr,
                                     .reason = attempt.reason.empty()
                                                   ? std::format("{} did not accept this node's proof", endpoint)
-                                                  : std::move(attempt.reason) };
+                                                  : std::move(attempt.reason),
+                                    .fault = UpstreamOpeningFault::ProofRefused };
     co_return UpstreamOpening { .socket = std::move(sealed), .reason = {} };
 }
 

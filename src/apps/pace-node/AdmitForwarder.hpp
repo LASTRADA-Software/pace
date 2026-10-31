@@ -63,6 +63,17 @@ inline constexpr std::size_t MaxForwardReplyBytes = SchedulingRedirectResponder:
 static_assert(MaxForwardReplyBytes >= CompileCacheWire::MaxRefusalReply,
               "a relayed refusal must fit the relay's ceiling, or the leader's explanation reads as a lost leader");
 
+/// Which half of opening a connection to the leader failed.
+///
+/// **PRIVATE: persisted and transmitted nowhere.** No explicit values. Two answers because their remedies
+/// differ: nothing answering is a network or a dead node, while a proof that did not complete is a
+/// roster question -- this machine is not, or is no longer, one the other end admits.
+enum class UpstreamOpeningFault : std::uint8_t
+{
+    Unreached,    ///< Nothing answered at the endpoint: the connect failed or ran out of time.
+    ProofRefused, ///< Something answered, and the proof did not complete: refused, untrusted, not offered or deferred.
+};
+
 /// What opening the connection to the leader came to.
 struct UpstreamOpening
 {
@@ -70,6 +81,8 @@ struct UpstreamOpening
     std::unique_ptr<core::net::ISocket> socket;
     /// Why not, for the log and the refusal's words; empty when `socket` is set.
     std::string reason;
+    /// Which half failed; meaningful only when `socket` is null.
+    UpstreamOpeningFault fault { UpstreamOpeningFault::Unreached };
 };
 
 /// Opens a connection to the leader's scheduling endpoint.
@@ -128,10 +141,14 @@ class ProvenSchedulerDialer final: public IUpstreamDialer
     /// @param reactor The loop every socket belongs to and the handshake's deadline is armed on; must
     ///        outlive this.
     /// @param budget How long each half of a dial may take.
+    /// @param maxReplyBytes The largest reply payload a connection opened here reads: the admission
+    ///        relay's own ceiling by default, a report's for a caller that forwards reports
+    ///        (`McpUpstream::MaxReplyBytes`).
     ProvenSchedulerDialer(NodeProofClient const& prover,
                           core::net::IConnector& connector,
                           core::net::EventLoop& reactor,
-                          ForwardDialBudget budget = {}) noexcept;
+                          ForwardDialBudget budget = {},
+                          std::size_t maxReplyBytes = MaxForwardReplyBytes) noexcept;
 
     /// @copydoc IUpstreamDialer::Open
     [[nodiscard]] core::async::Task<UpstreamOpening> Open(std::string endpoint) override;
@@ -141,6 +158,7 @@ class ProvenSchedulerDialer final: public IUpstreamDialer
     core::net::IConnector& _connector;
     core::net::EventLoop& _reactor;
     ForwardDialBudget _budget;
+    std::size_t _maxReplyBytes;
 };
 
 /// What a forwarder is built with beyond its collaborators.

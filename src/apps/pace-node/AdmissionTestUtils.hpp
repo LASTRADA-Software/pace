@@ -8,6 +8,7 @@
 #include "NodeConfig.hpp"
 #include "NodeIoLoop.hpp"
 #include "NodeProofClient.hpp"
+#include "NodeProofResponder.hpp"
 #include "NodeSurfaces.hpp"
 #include "Responders.hpp"
 #include "SchedulingRedirect.hpp"
@@ -49,9 +50,11 @@
 #include <core/net/testing/SocketDecorator.hpp>
 #include <core/platform/Clock.hpp>
 #include <tests/BoundedWait.hpp>
+#include <tests/ConsensusStandingFakes.hpp>
 #include <tests/LeaseRosterFakes.hpp>
 #include <tests/MembershipFakes.hpp>
 #include <tests/RaftPeerKeyFakes.hpp>
+#include <tests/RelabelledPeerListener.hpp>
 #include <tests/Unwrap.hpp>
 #include <tests/WireReply.hpp>
 
@@ -593,5 +596,54 @@ struct Follower
 {
     return std::format("127.0.0.1:{}", port);
 }
+
+/// The leader as production serves it to ANOTHER machine: its scheduler behind the node-proof surface,
+/// admitting by the production fold (`Testing::RosterFold`), over a listener whose every connection says
+/// it comes from elsewhere -- so nothing is admitted for being loopback, and only a proven key reaches
+/// the queue.
+struct ProvenLeader
+{
+    /// The host every connection to it reports.
+    static constexpr std::string_view RelabelledHost = "10.0.0.9";
+
+    ProvenLeader()
+    {
+        prover.emplace(
+            std::string { LeaderMachine }, identity, queue.fold.admitted, consensus, random, queue.metrics, queue.logger);
+        merged.emplace(SurfaceComponents { .scheduler = &queue.responder, .nodeProof = &*prover });
+    }
+
+    /// Start serving on a fresh port.
+    /// @return The port.
+    [[nodiscard]] std::uint16_t Serve()
+    {
+        auto listened = core::net::listen(queue.io->Reactor(), core::net::ListenOptions { .host = "127.0.0.1", .port = 0 });
+        REQUIRE(listened.has_value());
+        auto const port = (*listened)->boundPort();
+        // The noting layer sits UNDER the relabelling, so a request is in the ledger only if the relabelled
+        // socket forwarded it -- which is what makes the test fake's own forward a thing a case can fail.
+        auto noting = std::make_unique<KeepAliveNotingListener>(
+            std::unique_ptr<core::net::IListener> { std::move(*listened) }, queue.keepAlives);
+        auto listener = std::make_unique<Testing::RelabelledPeerListener>(std::move(noting), std::string { RelabelledHost });
+        queue.endpoint = FrameEndpoint::StartWithListener(*queue.io,
+                                                          NodeSurface::Node,
+                                                          std::move(listener),
+                                                          std::format("127.0.0.1:{}", port),
+                                                          UnwrapMutable(merged),
+                                                          queue.metrics,
+                                                          queue.logger);
+        REQUIRE(queue.endpoint != nullptr);
+        queue.io->Start();
+        return port;
+    }
+
+    Ed25519KeyPair const identity = Testing::TestKeyPair(std::string { LeaderMachine });
+    SystemSecureRandom random;
+    Testing::ScriptedAppliedState consensus { AppliedStateReading::CaughtUp };
+    std::optional<NodeProofResponder> prover;
+    std::optional<MergedResponder> merged;
+    /// Declared LAST so it is destroyed FIRST: its listener and reactor go before the surfaces they route to.
+    Queue queue;
+};
 
 } // namespace Pace::Node::AdmissionFixture
