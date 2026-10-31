@@ -211,6 +211,36 @@ struct AdminBindFailureReport
     std::string message; ///< What the operator reads, including what happens next.
 };
 
+/// Whether a server answers the two routes every admin surface used to carry unasked.
+///
+/// In-process only: never transmitted or persisted, so the values carry no contract.
+enum class AdminBuiltInRoutes : std::uint8_t
+{
+    /// `GET /metrics` and `GET /healthz`, answered before any caller route: the admin surface.
+    MetricsAndHealth = 0,
+    /// Neither: only the caller's routes are served, and those two paths are a `404` like any
+    /// other. For a surface that is not an admin surface at all -- MCP -- and must not grow a
+    /// scrape endpoint by reusing this HTTP implementation.
+    None,
+    Last
+};
+
+/// How one instance of this server is shaped, beside the routes it serves.
+///
+/// Three facts that were constants of the one admin surface, and are columns now that a second
+/// surface (MCP) runs the same hardened HTTP code: one implementation, as the design requires,
+/// rather than a sibling that shares its parsing and drifts on everything else.
+struct AdminServerProfile
+{
+    /// What the accept loop reports as, to `core::net::AcceptLoopHealth` and the log. A second
+    /// surface reporting as `admin` would make `/healthz` name the wrong port when it stops.
+    std::string_view surface { "admin" };
+    /// How many requests may be in flight before the next connection is answered `503`.
+    std::size_t maxConcurrentRequests { 32 };
+    /// Whether `/metrics` and `/healthz` are served.
+    AdminBuiltInRoutes builtIns { AdminBuiltInRoutes::MetricsAndHealth };
+};
+
 /// Describe an admin endpoint (`/metrics`, `/healthz`) the DAEMON could not bind.
 ///
 /// ## The severity follows the verdict, and the verdicts differ
@@ -353,6 +383,8 @@ class AdminHttpServer
     /// @param tls Server TLS context, or nullptr to serve plaintext.
     /// @param surfaces The metrics surfaces this process serves, for `/metrics`. Defaults to
     ///                 `EverySurface`, so a process that has not been narrowed is unchanged.
+    /// @param profile What this instance reports as, how many requests it serves at once and
+    ///                whether it answers the built-in routes. Defaults to the admin surface's.
     AdminHttpServer(core::net::IListener& listener,
                     IMetricsSink const& metrics,
                     SnapshotProvider snapshotProvider,
@@ -362,7 +394,8 @@ class AdminHttpServer
                     IDrainWait& backoffWait,
                     std::vector<AdminRoute> routes = {},
                     core::net::ITlsContext* tls = nullptr,
-                    std::span<MetricsSurface const> surfaces = EverySurface) noexcept;
+                    std::span<MetricsSurface const> surfaces = EverySurface,
+                    AdminServerProfile profile = {}) noexcept;
 
     /// Accept loop; returns when the listener is closed via Shutdown().
     /// @return Task that resolves when the accept loop exits.
@@ -395,8 +428,11 @@ class AdminHttpServer
     /// reached the loop replies 503 and closes the connection rather than
     /// queueing it. Default sized for "more than every typical scraper plus a
     /// handful of healthcheck probes" but small enough that a buggy or hostile
-    /// client cannot exhaust memory.
+    /// client cannot exhaust memory. The admin surface's figure; another surface
+    /// states its own through `AdminServerProfile`.
     static constexpr std::size_t MaxConcurrentRequests = 32;
+    static_assert(AdminServerProfile {}.maxConcurrentRequests == MaxConcurrentRequests,
+                  "the default profile is the admin surface's, so its cap is this one");
 
   private:
     core::net::IListener& _listener;
@@ -412,6 +448,8 @@ class AdminHttpServer
     /// Which metrics surfaces this process serves, for `/metrics`. A span over storage that
     /// outlives this server -- `EverySurface` and a binary's own set are both constexpr.
     std::span<MetricsSurface const> _surfaces { EverySurface };
+    /// What this instance reports as, its request cap and its built-in routes.
+    AdminServerProfile _profile;
     std::atomic<bool> _shuttingDown { false };
     /// Number of admin requests currently being served as detached tasks.
     /// Bumped in the accept loop, decremented at the end of each request.
@@ -442,12 +480,15 @@ class AdminHttpServer
 /// @param liveness What `/healthz` answers from: `503` naming every surface that stopped
 ///                 accepting or is degraded, `200` while none is. Null only for a caller
 ///                 exercising another route; `AdminHttpServer` always passes its registry.
+/// @param builtIns Whether `/metrics` and `/healthz` are answered; with `None` they are a `404`
+///                 and @p metrics, @p snapshotProvider and @p liveness are never read.
 [[nodiscard]] core::async::Task<void> ServeAdminHttp(core::net::ISocket* socket,
                                                      IMetricsSink const* metrics,
                                                      AdminHttpServer::SnapshotProvider snapshotProvider,
                                                      core::platform::IClock* clock,
                                                      std::span<AdminRoute const> routes = {},
                                                      std::span<MetricsSurface const> surfaces = EverySurface,
-                                                     core::net::AcceptLoopHealth const* liveness = nullptr);
+                                                     core::net::AcceptLoopHealth const* liveness = nullptr,
+                                                     AdminBuiltInRoutes builtIns = AdminBuiltInRoutes::MetricsAndHealth);
 
 } // namespace Pace

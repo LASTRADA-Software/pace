@@ -790,7 +790,8 @@ core::async::Task<void> ServeAdminHttp(core::net::ISocket* socket,
                                        core::platform::IClock* clock,
                                        std::span<AdminRoute const> routes,
                                        std::span<MetricsSurface const> surfaces,
-                                       core::net::AcceptLoopHealth const* liveness)
+                                       core::net::AcceptLoopHealth const* liveness,
+                                       AdminBuiltInRoutes builtIns)
 {
     // TLS terminates here rather than in the accept loop, so a handshake failure
     // costs the same detached task a slow request does and never the loop. A
@@ -834,7 +835,8 @@ core::async::Task<void> ServeAdminHttp(core::net::ISocket* socket,
     auto const method = ParseMethod(request.method);
     AdminRoute const* matched = nullptr;
     std::uint32_t allowed = 0;
-    if (path == "/metrics" || path == "/healthz")
+    auto const servesBuiltIns = builtIns == AdminBuiltInRoutes::MetricsAndHealth;
+    if (servesBuiltIns && (path == "/metrics" || path == "/healthz"))
         allowed |= MethodBit(AdminMethod::Get);
     // Kinds in enumerator order, so `Exact` is tried against every route before
     // `Prefix` is tried against any: which route answers a path is then a property
@@ -852,14 +854,14 @@ core::async::Task<void> ServeAdminHttp(core::net::ISocket* socket,
                 matched = &route;
         }
 
-    if (method == AdminMethod::Get && path == "/metrics")
+    if (servesBuiltIns && method == AdminMethod::Get && path == "/metrics")
     {
         auto const body = RenderPrometheus(*metrics, snapshotProvider(), surfaces);
         (void) co_await WriteResponse(
             socket, AdminResponse { .status = "200 OK", .contentType = "text/plain; version=0.0.4", .body = body });
         co_return;
     }
-    if (method == AdminMethod::Get && path == "/healthz")
+    if (servesBuiltIns && method == AdminMethod::Get && path == "/healthz")
     {
         // A listening port is not a serving one: a surface whose accept loop ended still shows
         // `LISTENING` and refuses every connect. This used to answer `200` regardless, and did for
@@ -973,7 +975,8 @@ AdminHttpServer::AdminHttpServer(core::net::IListener& listener,
                                  IDrainWait& backoffWait,
                                  std::vector<AdminRoute> routes,
                                  core::net::ITlsContext* tls,
-                                 std::span<MetricsSurface const> surfaces) noexcept:
+                                 std::span<MetricsSurface const> surfaces,
+                                 AdminServerProfile profile) noexcept:
     _listener { listener },
     _metrics { metrics },
     _snapshotProvider { std::move(snapshotProvider) },
@@ -983,7 +986,8 @@ AdminHttpServer::AdminHttpServer(core::net::IListener& listener,
     _backoffWait { backoffWait },
     _routes { std::move(routes) },
     _tls { tls },
-    _surfaces { surfaces }
+    _surfaces { surfaces },
+    _profile { profile }
 {
 }
 
@@ -1000,9 +1004,10 @@ static core::async::DetachedTask ServeAdminConnection(std::unique_ptr<core::net:
                                                       std::span<AdminRoute const> routes,
                                                       std::span<MetricsSurface const> surfaces,
                                                       core::net::AcceptLoopHealth const* liveness,
+                                                      AdminBuiltInRoutes builtIns,
                                                       std::atomic<std::size_t>* inFlight)
 {
-    co_await ServeAdminHttp(socket.get(), metrics, std::move(snapshotProvider), clock, routes, surfaces, liveness);
+    co_await ServeAdminHttp(socket.get(), metrics, std::move(snapshotProvider), clock, routes, surfaces, liveness, builtIns);
     (void) co_await CloseLingering(socket.get(), nullptr, AdminHttpServer::Linger);
     inFlight->fetch_sub(1, std::memory_order_acq_rel);
 }
@@ -1015,7 +1020,9 @@ core::async::Task<void> AdminHttpServer::Run()
     // that reset its queued connection with a rate-limited warning; and only a closed or dead
     // listener ends the loop. It used to end on anything but the poll tick, at `Debug`, taking
     // `/healthz` and `/metrics` with it.
-    AcceptLoopReporter acceptErrors { "admin", "admin", _logger, _acceptLoops };
+    AcceptLoopReporter acceptErrors {
+        std::string { _profile.surface }, std::string { _profile.surface }, _logger, _acceptLoops
+    };
     while (!_shuttingDown.load(std::memory_order_acquire))
     {
         auto accepted = co_await _listener.accept();
@@ -1038,7 +1045,7 @@ core::async::Task<void> AdminHttpServer::Run()
         // 503-and-close on the next accept rather than queueing in the
         // kernel until the scraper times out.
         auto const before = _inFlight.fetch_add(1, std::memory_order_acq_rel);
-        if (before >= MaxConcurrentRequests)
+        if (before >= _profile.maxConcurrentRequests)
         {
             _inFlight.fetch_sub(1, std::memory_order_acq_rel);
             // Written through the one response writer rather than as a literal
@@ -1051,8 +1058,9 @@ core::async::Task<void> AdminHttpServer::Run()
             // connection has a handler, so nothing has driven a TLS handshake and
             // a TLS client would not read it either way. It costs the attacker a
             // socket and tells an honest client something.
-            (void) co_await WriteResponse((*accepted).get(),
-                                          PlainRefusal("503 Service Unavailable", "admin: too many concurrent reqs\n"));
+            (void) co_await WriteResponse(
+                (*accepted).get(),
+                PlainRefusal("503 Service Unavailable", std::format("{}: too many concurrent reqs\n", _profile.surface)));
             (void) co_await CloseLingering((*accepted).get(), nullptr, Linger);
             continue;
         }
@@ -1063,6 +1071,7 @@ core::async::Task<void> AdminHttpServer::Run()
                              _routes,
                              _surfaces,
                              &_acceptLoops,
+                             _profile.builtIns,
                              &_inFlight);
     }
     // Shut down between accepts: a loop that was degraded says it stopped.
@@ -1089,7 +1098,8 @@ void AdminHttpServer::Shutdown() noexcept
     // rather than counting polls towards it (#452).
     if (DrainWithin([this] { return _inFlight.load(std::memory_order_acquire) > 0; }) == DrainResult::Ceiling)
         _logger.Logf(LogLevel::Error,
-                     "admin: {} request(s) did not finish within the stop ceiling",
+                     "{}: {} request(s) did not finish within the stop ceiling",
+                     _profile.surface,
                      _inFlight.load(std::memory_order_acquire));
 }
 

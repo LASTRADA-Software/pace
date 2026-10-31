@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <Pace/Cache/IStorage.hpp>
 #include <Pace/Core/Bytes.hpp>
+#include <Pace/Core/HostPort.hpp>
 #include <Pace/Core/Logger.hpp>
 #include <Pace/Core/Version.hpp>
 #include <Pace/Metrics/IMetricsSink.hpp>
@@ -1280,4 +1281,183 @@ TEST_CASE("admin a handler that throws costs a 500, not the process", "[admin][h
         throw std::runtime_error { "x" };
     };
     CHECK(ExchangeWithRoutes("GET /boom HTTP/1.1\r\n\r\n", routes).starts_with("HTTP/1.1 500 Internal Server Error\r\n"));
+}
+
+namespace
+{
+
+/// One request through a whole `AdminHttpServer::Run` shaped by @p profile, over an in-memory listener.
+/// @param request The raw request.
+/// @param routes The caller routes.
+/// @param profile The instance's shape.
+/// @param logger Where the server logs.
+/// @return The raw response.
+[[nodiscard]] std::string ExchangeThroughProfile(std::string_view request,
+                                                 std::vector<Pace::AdminRoute> routes,
+                                                 Pace::AdminServerProfile profile,
+                                                 Pace::ILogger& logger)
+{
+    core::net::testing::InMemoryListener listener;
+    Pace::AtomicMetricsSink metrics;
+    core::platform::SteadyClock clock;
+    core::net::AcceptLoopHealth acceptLoops;
+    Pace::AdminHttpServer server { listener,
+                                   metrics,
+                                   [] { return Pace::MetricsSnapshot {}; },
+                                   logger,
+                                   clock,
+                                   acceptLoops,
+                                   Pace::DefaultDrainWait(),
+                                   std::move(routes),
+                                   nullptr,
+                                   Pace::EverySurface,
+                                   profile };
+    auto client = listener.connectClient();
+    REQUIRE(core::async::syncRun(WriteString(client.get(), request)));
+    REQUIRE(Pace::Testing::ShutdownWrite(*client).has_value());
+    listener.close();
+    core::async::syncRun(server.Run());
+    server.Shutdown();
+    return core::async::syncRun(ReadAvailable(client.get()));
+}
+
+} // namespace
+
+TEST_CASE("admin a profile without built-in routes serves only its own", "[admin][http][profile]")
+{
+    // A second surface on this HTTP code must not grow a scrape endpoint by reuse: with the built-ins
+    // off, `/metrics` and `/healthz` are paths like any other, and the caller's route still answers.
+    Pace::NullLogger logger;
+    Pace::AdminServerProfile const bare { .surface = "probe", .builtIns = Pace::AdminBuiltInRoutes::None };
+    CHECK(ExchangeThroughProfile("GET /metrics HTTP/1.1\r\n\r\n", { GetRoute("/x") }, bare, logger)
+              .starts_with("HTTP/1.1 404 Not Found\r\n"));
+    CHECK(ExchangeThroughProfile("GET /healthz HTTP/1.1\r\n\r\n", { GetRoute("/x") }, bare, logger)
+              .starts_with("HTTP/1.1 404 Not Found\r\n"));
+    CHECK(ExchangeThroughProfile("GET /x HTTP/1.1\r\n\r\n", { GetRoute("/x") }, bare, logger)
+              .starts_with("HTTP/1.1 200 OK\r\n"));
+
+    SECTION("and the default profile keeps them: the control")
+    {
+        CHECK(ExchangeThroughProfile("GET /healthz HTTP/1.1\r\n\r\n", { GetRoute("/x") }, {}, logger)
+                  .starts_with("HTTP/1.1 200 OK\r\n"));
+    }
+}
+
+TEST_CASE("admin a profile's request cap and surface name are the ones the loop uses", "[admin][http][profile]")
+{
+    // A cap of zero refuses every connection, which is the one arrangement that shows the loop reads
+    // the profile's figure rather than the admin surface's thirty-two -- and names the profile's
+    // surface while doing it.
+    Pace::NullLogger logger;
+    auto const refused = ExchangeThroughProfile(
+        "GET /x HTTP/1.1\r\n\r\n", { GetRoute("/x") }, { .surface = "probe", .maxConcurrentRequests = 0 }, logger);
+    INFO("response was: " << refused);
+    CHECK(refused.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
+    CHECK(refused.contains("probe: too many concurrent reqs"));
+
+    SECTION("and the accept loop reports under that name")
+    {
+        Pace::CapturingLogger capturing { Pace::LogLevel::Debug };
+        core::net::testing::InMemoryListener inner;
+        core::net::testing::FailingListener listener {
+            inner, core::net::testing::repeatedFailures(core::net::NetErrorCode::ConnReset, 1)
+        };
+        Pace::AtomicMetricsSink metrics;
+        core::platform::SteadyClock clock;
+        core::net::AcceptLoopHealth acceptLoops;
+        Pace::AdminHttpServer server { listener,
+                                       metrics,
+                                       [] { return Pace::MetricsSnapshot {}; },
+                                       capturing,
+                                       clock,
+                                       acceptLoops,
+                                       Pace::DefaultDrainWait(),
+                                       {},
+                                       nullptr,
+                                       Pace::EverySurface,
+                                       { .surface = "probe" } };
+        auto client = inner.connectClient();
+        REQUIRE(Pace::Testing::ShutdownWrite(*client).has_value());
+        inner.close();
+        core::async::syncRun(server.Run());
+        server.Shutdown();
+        auto const records = capturing.Snapshot();
+        CHECK(std::ranges::any_of(records, [](Pace::CapturingLogger::Record const& record) {
+            return record.message.contains("probe: an accept failed");
+        }));
+        CHECK_FALSE(std::ranges::any_of(
+            records, [](Pace::CapturingLogger::Record const& record) { return record.message.contains("admin:"); }));
+    }
+}
+
+namespace
+{
+
+/// One POST through `AdminHttpServer::Run` over a real listener bound at @p bindHost, dialled at
+/// @p dialHost, returning the `peerHost` its route was shown -- or nothing when this platform will
+/// not bind or dial that family.
+[[nodiscard]] std::optional<std::string> PeerHostOverRealSocket(std::string_view bindHost, std::string_view dialHost)
+{
+    using namespace std::chrono_literals;
+    auto listener = Pace::BlockingListener::Bind(std::string { bindHost }, 0);
+    REQUIRE(listener != nullptr);
+    if (!listener->IsBound())
+        return std::nullopt;
+    listener->SetTimeouts(Pace::AdminHttpServer::AcceptPoll, Pace::AdminHttpServer::RequestTimeout);
+    auto const port = listener->boundPort();
+
+    auto const seen = std::make_shared<BodySeen>();
+    Pace::NullLogger logger;
+    Pace::AtomicMetricsSink metrics;
+    core::platform::SteadyClock clock;
+    core::net::AcceptLoopHealth acceptLoops;
+    Pace::AdminHttpServer server { *listener,
+                                   metrics,
+                                   [] { return Pace::MetricsSnapshot {}; },
+                                   logger,
+                                   clock,
+                                   acceptLoops,
+                                   Pace::DefaultDrainWait(),
+                                   { RecordingPostRoute(seen, "/x", 16) } };
+    std::jthread acceptThread { [&server] { core::async::syncRun(server.Run()); } };
+    // Declared after the thread, so it runs first: the loop is asked to stop before the join, and a
+    // failed assertion below cannot leave the join waiting on a loop nobody stopped.
+    auto const requestStop = [](Pace::AdminHttpServer* admin) {
+        admin->RequestStop();
+    };
+    std::unique_ptr<Pace::AdminHttpServer, decltype(requestStop)> const stopFirst { &server, requestStop };
+
+    core::net::BlockingConnector connector;
+    auto client = core::async::syncRun(
+        connector.connect(std::string { dialHost }, port, core::net::DialOptions { .connectTimeout = 5s }));
+    if (!client.has_value())
+        return std::nullopt;
+    REQUIRE(core::async::syncRun(WriteString(client->get(), "POST /x HTTP/1.1\r\nContent-Length: 1\r\n\r\n{")));
+    auto const response = core::async::syncRun(ReadAvailable(client->get()));
+    INFO("response was: " << response.substr(0, 64));
+    REQUIRE(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    REQUIRE(seen->calls == 1);
+    return seen->peerHost;
+}
+
+} // namespace
+
+TEST_CASE("admin a real loopback connection's peerHost is the kernel's loopback literal", "[admin][http][peer]")
+{
+    // What a route deciding on WHO is asking actually reads, off a real socket rather than a fake:
+    // `inet_ntop`'s host, no port and no brackets. The MCP surface admits on exactly this string.
+    auto const peer = PeerHostOverRealSocket("127.0.0.1", "127.0.0.1");
+    if (!peer.has_value())
+        SKIP("this platform would not bind or dial an IPv4 loopback listener");
+    CHECK(*peer == "127.0.0.1");
+    CHECK(Pace::IsLoopbackHost(*peer));
+}
+
+TEST_CASE("admin a real IPv6 loopback connection's peerHost is ::1, unbracketed", "[admin][http][peer]")
+{
+    auto const peer = PeerHostOverRealSocket("::1", "::1");
+    if (!peer.has_value())
+        SKIP("this host has no IPv6 loopback to bind or dial");
+    CHECK(*peer == "::1");
+    CHECK(Pace::IsLoopbackHost(*peer));
 }
