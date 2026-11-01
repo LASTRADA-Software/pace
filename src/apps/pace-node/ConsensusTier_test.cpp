@@ -4,6 +4,7 @@
 #include "EnrollmentResponder.hpp"
 #include "EnrollmentWindow.hpp"
 #include "LocalCache.hpp"
+#include "McpUpstream.hpp"
 #include "NodeAnnounce.hpp"
 #include "NodeFormation.hpp"
 #include "NodeIdentity.hpp"
@@ -419,6 +420,7 @@ TEST_CASE("A consensus tier is built exactly when RunsConsensus says so", "[node
             *Unwrap(roster),
             schedulers,
             schedulingLeader,
+            nullptr,
             SharedCacheListeners { .directory = directory, .host = sharedCache, .upstream = nullptr },
             metrics,
             logger,
@@ -451,6 +453,7 @@ TEST_CASE("A consensus tier is built exactly when RunsConsensus says so", "[node
             *Unwrap(roster),
             schedulers,
             schedulingLeader,
+            nullptr,
             SharedCacheListeners { .directory = directory, .host = sharedCache, .upstream = nullptr },
             metrics,
             logger,
@@ -481,6 +484,7 @@ TEST_CASE("A consensus tier is built exactly when RunsConsensus says so", "[node
             *Unwrap(roster),
             schedulers,
             schedulingLeader,
+            nullptr,
             SharedCacheListeners { .directory = directory, .host = sharedCache, .upstream = nullptr },
             metrics,
             logger,
@@ -532,6 +536,7 @@ TEST_CASE("A consensus tier refuses to start without an identity key", "[node][c
                                 *Unwrap(roster),
                                 schedulers,
                                 schedulingLeader,
+                                nullptr,
                                 SharedCacheListeners { .directory = directory, .host = sharedCache, .upstream = nullptr },
                                 metrics,
                                 logger,
@@ -1036,6 +1041,9 @@ TEST_CASE("Every state a consensus tier applies reaches the shared-cache directo
     AppliedSchedulers schedulers { cfg, AsConfigured };
     KnownSchedulingLeader knownLeader;
     SchedulingLeaderPublisher schedulingLeader { knownLeader };
+    // And the MCP surface's directory, told by the same two observers: where members answer and the term.
+    AppliedUpstreamDirectory upstreamDirectory { "n1", knownLeader, TestAdvertised() };
+    REQUIRE_FALSE(upstreamDirectory.Term().has_value());
 
     auto started =
         StartConsensusOrExplain(cfg,
@@ -1047,6 +1055,7 @@ TEST_CASE("Every state a consensus tier applies reaches the shared-cache directo
                                 *Unwrap(roster),
                                 schedulers,
                                 schedulingLeader,
+                                &upstreamDirectory,
                                 SharedCacheListeners { .directory = directory, .host = sharedCache, .upstream = &upstream },
                                 metrics,
                                 logger,
@@ -1066,6 +1075,14 @@ TEST_CASE("Every state a consensus tier applies reaches the shared-cache directo
                           != state.members.end();
         },
         [&tier] { return std::format("commit index {}", tier->Status().commitIndex.value); }));
+    // The MCP directory heard the apply that recorded this member, and the term the role observer reported.
+    REQUIRE(Testing::WaitUntil(
+        "the MCP upstream directory to be told the member and the term",
+        [&upstreamDirectory] {
+            return upstreamDirectory.EndpointOf("n1").has_value() && upstreamDirectory.Term().has_value();
+        },
+        [&upstreamDirectory] { return std::format("term told: {}", upstreamDirectory.Term().has_value()); }));
+    CHECK(upstreamDirectory.Term() == std::optional<std::uint64_t> { tier->Status().term.value });
     // Nothing named yet: the host has opened nothing.
     sharedCache.Reconcile();
     CHECK(sharedCache.Current() == nullptr);
@@ -1147,6 +1164,7 @@ TEST_CASE("Every applied state reaches where this node registers, so a voter's r
                                 *Unwrap(roster),
                                 schedulers,
                                 schedulingLeader,
+                                nullptr,
                                 SharedCacheListeners { .directory = directory, .host = sharedCache, .upstream = nullptr },
                                 metrics,
                                 logger,
@@ -2852,6 +2870,7 @@ TEST_CASE("A learner started as main starts it names its leader's scheduling end
                                 *Unwrap(roster),
                                 schedulers,
                                 schedulingLeader,
+                                nullptr,
                                 SharedCacheListeners { .directory = directory, .host = sharedCache, .upstream = nullptr },
                                 metrics,
                                 logger,

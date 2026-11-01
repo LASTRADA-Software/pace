@@ -585,6 +585,16 @@ static_assert(RowsInEnumeratorOrder(CellFormatTable, &CellFormatRow::format));
 /// @return The scale, or absent for a name that section does not render.
 [[nodiscard]] std::optional<CellFormat> FleetColumnFormat(FleetSection section, std::string_view name);
 
+/// The scale of the column @p name of `/fleet.json`'s `compiles` rows, looked up in the table the renderer walks.
+///
+/// Its own door because the compile list is no `FleetSection` (#1728): the page and the JSON carry it, and
+/// `/fleet.txt` does not, so `FleetColumnFormat` has no section to name it by. A consumer of the JSON that must
+/// tell a duration from a count -- the MCP tools convert every `Millis` column to seconds -- asks here rather than
+/// listing which compile columns are milliseconds, a list that would go stale the moment a column was added.
+/// @param name The column's name, as the JSON spells its key.
+/// @return The scale, or absent for a name the compile rows do not carry.
+[[nodiscard]] std::optional<CellFormat> FleetCompileColumnFormat(std::string_view name);
+
 /// The two columns of a section whose scale is a property of the ROW rather than the column.
 struct FleetRowUnitColumns
 {

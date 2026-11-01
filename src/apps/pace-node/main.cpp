@@ -33,6 +33,8 @@
 #include "LiveStatsSources.hpp"
 #include "MachineBudget.hpp"
 #include "McpEndpoint.hpp"
+#include "McpFleetTools.hpp"
+#include "McpUpstream.hpp"
 #include "NodeActivation.hpp"
 #include "NodeAnnounce.hpp"
 #include "NodeAudience.hpp"
@@ -714,6 +716,80 @@ void StartAdmissionRelay(AdmissionRelay& relay, AdmissionRelayParts const& parts
     if (parts.tier != nullptr)
         parts.tier->ForwardAdmissionWith(*relay.forwarder);
 }
+
+/// The MCP surface's way to the rest of the fleet: who answers where, the proven dial, this node's own frame
+/// router for a call to itself, and the gate that refuses at once when the loop a call would run on is not
+/// turning (`LoopGatedUpstream`).
+///
+/// Built on every start, MCP surface or not, because the directory is told every applied state from the
+/// consensus tier's observers, which are wired before the MCP surface is decided; it costs two strings and a
+/// map. Declared before the `0xFC` surface and the consensus tier, so it outlives both: a forwarded call still
+/// in flight on the loop when the MCP surface stops reaches only objects that are still there.
+class McpForwarding
+{
+  public:
+    /// @param cfg The configuration the node runs under; its id is this node's.
+    /// @param prover The identity prover; engaged on every start (`AdoptNodeKey`).
+    /// @param identityKey This node's identity key: what a call to itself presents as proven.
+    /// @param io The loop calls run on.
+    /// @param leader Where the leader answers, as last learned.
+    /// @param advertised This node's own `0xFC` endpoint, never dialled.
+    McpForwarding(NodeConfig const& cfg,
+                  std::optional<Node::NodeProofClient> const& prover,
+                  std::optional<Ed25519KeyPair> const& identityKey,
+                  Node::NodeIoLoop& io,
+                  Node::ISchedulingLeaderSource const& leader,
+                  Cc::IAdvertisedEndpointSource const& advertised):
+        _directory { cfg.nodeId, leader, advertised },
+        _answerer { identityKey.has_value()
+                        ? std::optional { ProvenIdentity { .id = cfg.nodeId, .key = identityKey->PublicKey() } }
+                        : std::nullopt },
+        _dialer {
+            RequireProver(prover), io.Connector(), io.Reactor(), Node::ForwardDialBudget {}, Node::McpUpstream::MaxReplyBytes
+        },
+        _upstream { io.Loop(), _dialer, _directory, _answerer },
+        _gated { _upstream, [&io] { return io.Turning(); } }
+    {
+    }
+
+    /// @return What the consensus tier tells every applied state and term.
+    [[nodiscard]] Node::AppliedUpstreamDirectory& Directory() noexcept
+    {
+        return _directory;
+    }
+
+    /// Answer a call to this node through @p surface's router; before the loop starts.
+    /// @param surface This node's `0xFC` surface, or null when it serves none.
+    void RouteLocalThrough(Node::NodeFrameSurface* surface) noexcept
+    {
+        _answerer.RouteThrough(surface != nullptr ? &surface->Responder() : nullptr);
+    }
+
+    /// @return What the MCP tools ask.
+    [[nodiscard]] Node::IMcpUpstream& Upstream() noexcept
+    {
+        return _gated;
+    }
+
+  private:
+    /// The invariant `StartAdmissionRelay` states: every start adopts or mints its key before any body runs, so
+    /// the prover is engaged; a change that broke it ends the start on a named exception.
+    /// @param prover The identity prover.
+    /// @return It.
+    [[nodiscard]] static Node::NodeProofClient const& RequireProver(std::optional<Node::NodeProofClient> const& prover)
+    {
+        if (!prover.has_value())
+            throw std::logic_error { "forwarding MCP calls needs the identity prover, which every start builds" };
+        return *prover;
+    }
+
+    // Declaration order IS construction order: each borrows the ones above it.
+    Node::AppliedUpstreamDirectory _directory;
+    Node::FrameRouterAnswerer _answerer;
+    Node::ProvenSchedulerDialer _dialer;
+    Node::NodeIoUpstream _upstream;
+    Node::LoopGatedUpstream _gated;
+};
 
 /// Serve the leader's admission queue (#1728) from the scheduler tier, when this node runs one.
 /// @param responder Receives the queue's responder.
@@ -1483,6 +1559,9 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     // dialled (`announced`). Declared after the redirect and the queue and before the surface that routes
     // to it, so it is destroyed after that surface closes its connections.
     AdmissionRelay admissionRelay;
+    // And the MCP surface's way to the fleet, declared before the surface and the consensus tier for the reason
+    // its class states.
+    McpForwarding mcpForwarding { cfg, prover, identityKey, nodeIo, knownSchedulingLeader, announced };
     StartAdmissionRelay(admissionRelay,
                         AdmissionRelayParts { .cfg = cfg,
                                               .prover = prover,
@@ -1535,6 +1614,7 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     // not that case -- this surface's row states `Refuse`, so it arrives as the error
     // above rather than as a null. See `BindFailurePolicy` in NodeSurfaces.hpp.
     auto const nodeSurface = std::move(*nodeSurfaceOrRefusal);
+    mcpForwarding.RouteLocalThrough(nodeSurface.get());
 
     // Says, once a minute and for as long as any is waiting, that machines have asked to join
     // and nobody has decided about them.
@@ -1584,6 +1664,7 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
         *nodeRoster,
         appliedSchedulers,
         schedulingLeader,
+        &mcpForwarding.Directory(),
         Node::SharedCacheListeners { .directory = sharedCache.Directory(),
                                      .host = sharedCache.Host(),
                                      .upstream = cacheTier != nullptr ? &cacheTier->Upstream() : nullptr },
@@ -1761,8 +1842,7 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     // The node's two HTTP surfaces, each on a thread of its own: the admin surface, and MCP for a session on
     // this machine -- off unless `--mcp-listen`, loopback only (`McpListenNotLoopbackRefusal`) and re-checked
     // per request. Chained rather than checked twice, so a refusal of either ends the start through one
-    // branch. The MCP tool table arrives with its tools; until then `tools/list` answers an empty list,
-    // which is a true answer.
+    // branch. The MCP tools reach the fleet through `mcpForwarding`.
     struct HttpSurfaces
     {
         Node::AdminSurface admin;
@@ -1781,7 +1861,7 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
                                          nodeIo.AcceptLoops())
             .and_then([&](Node::AdminSurface admin) {
                 return Node::StartMcpSurfaceOrExplain(
-                           cfg, std::vector<Mcp::ToolRow> {}, metrics, logger, nodeIo.AcceptLoops())
+                           cfg, Node::FleetReadTools(mcpForwarding.Upstream()), metrics, logger, nodeIo.AcceptLoops())
                     .transform([&admin](std::unique_ptr<Node::McpEndpoint> mcp) {
                         return HttpSurfaces { .admin = std::move(admin), .mcp = std::move(mcp) };
                     });

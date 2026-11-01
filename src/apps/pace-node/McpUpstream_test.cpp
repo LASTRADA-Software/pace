@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "AdmissionTestUtils.hpp"
+#include "FleetTextResponder.hpp"
 #include "McpUpstream.hpp"
+#include "NodeIoLoop.hpp"
 
 #include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/LiveStream.hpp>
+#include <Pace/Server/AdminCredential.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -25,13 +30,16 @@
 #include <utility>
 #include <vector>
 
+#include <core/async/SyncRun.hpp>
 #include <core/async/Task.hpp>
 #include <core/net/PlatformLoop.hpp>
 #include <core/net/testing/InMemorySocket.hpp>
 #include <core/net/testing/SocketDecorator.hpp>
 #include <core/platform/Clock.hpp>
 #include <tests/BoundedWait.hpp>
+#include <tests/MembershipFakes.hpp>
 #include <tests/Unwrap.hpp>
+#include <tests/WireReply.hpp>
 
 using namespace Pace;
 using namespace Pace::Node;
@@ -797,4 +805,113 @@ TEST_CASE("mcp-upstream: the applied directory reads members exactly and knows n
     // A later state replaces the earlier one: a forgotten member is unknown again.
     directory.Applied(Cluster::ClusterState {});
     CHECK_FALSE(directory.EndpointOf("node-b").has_value());
+}
+
+namespace
+{
+
+/// An upstream that counts what reached it, for the gate in front of it.
+class CountingUpstream final: public IMcpUpstream
+{
+  public:
+    /// @copydoc IMcpUpstream::Ask
+    [[nodiscard]] UpstreamResult Ask(UpstreamTarget /*target*/,
+                                     std::string_view /*nodeIdOrEmpty*/,
+                                     std::string /*frame*/) override
+    {
+        ++asked;
+        return UpstreamReply { .status = Wire::Status::Ok, .payload = "ok", .answeredBy = "self", .term = std::nullopt };
+    }
+
+    std::size_t asked { 0 }; ///< How many calls reached it.
+};
+
+/// A leader's fleet sources, for the router a call to this node is answered by.
+class LeadingFleet final: public ILiveStatsSources
+{
+  public:
+    /// @copydoc ILiveStatsSources::Capture
+    [[nodiscard]] std::optional<LiveCapture> Capture(Wire::LiveSubject /*subject*/) const override
+    {
+        return std::nullopt;
+    }
+
+    /// @copydoc ILiveStatsSources::Leadership
+    [[nodiscard]] std::optional<LiveLeadership> Leadership() const override
+    {
+        return LiveLeadership { .leads = true, .leaderEndpoint = {} };
+    }
+
+    /// @copydoc ILiveStatsSources::AnsweringEndpoint
+    [[nodiscard]] std::string AnsweringEndpoint() const override
+    {
+        return "n1.test:6674";
+    }
+
+    /// @copydoc ILiveStatsSources::FleetText
+    [[nodiscard]] std::expected<FleetTextDocument, FleetTextDeclined> FleetText(
+        std::string_view /*section*/, std::string_view /*range*/, Wire::FleetTextFormat /*format*/) const override
+    {
+        return FleetTextDocument { .leads = true, .leaderEndpoint = {}, .body = R"({"schema":3})" };
+    }
+};
+
+} // namespace
+
+TEST_CASE("mcp-upstream: a loop that is not turning is refused at once, and nothing is asked", "[node][mcp][mcp-upstream]")
+{
+    // Without the gate a call posted to a loop with no thread is never run, and the tool answers Timeout ten
+    // seconds later naming the node asked. The gate answers at once, naming this node's own loop.
+    CountingUpstream inner;
+    auto turning = false;
+    LoopGatedUpstream gated { inner, [&turning] { return turning; } };
+
+    auto const refused = gated.Ask(UpstreamTarget::Leader, {}, "frame");
+    REQUIRE_FALSE(refused.has_value());
+    CHECK(refused.error().first == UpstreamFailure::LoopNotRunning);
+    CHECK(refused.error().second.contains("--listen-node"));
+    CHECK(inner.asked == 0);
+
+    // The control: a turning loop is asked.
+    turning = true;
+    CHECK(gated.Ask(UpstreamTarget::Leader, {}, "frame").has_value());
+    CHECK(inner.asked == 1);
+}
+
+TEST_CASE("mcp-upstream: a node loop that adopted no surface is not turning, even once started", "[node][mcp][mcp-upstream]")
+{
+    // The production predicate the gate is handed: `NodeIoLoop::Start` starts no thread when nothing was adopted.
+    NodeIoLoop io;
+    CHECK_FALSE(io.Turning());
+    io.Start();
+    CHECK_FALSE(io.Turning());
+}
+
+TEST_CASE("mcp-upstream: a call to this node is answered by its own router as this node's proven identity",
+          "[node][mcp][mcp-upstream]")
+{
+    // The leader asking itself holds no dashboard credential; the proof of its own key stands in for it, as the
+    // proof over a dialled connection does for any other member. The production fold, the key presented.
+    AtomicMetricsSink metrics;
+    LeadingFleet sources;
+    Testing::RosterFold const roster { { "n1" } };
+    FleetTextResponder router { sources, roster.admitted, AdminCredential { "s3cret" }, metrics };
+    auto const frame = Wire::EncodeFleetTextRequest(Wire::FleetTextRequest { .format = Wire::FleetTextFormat::Json });
+
+    FrameRouterAnswerer self { Testing::IdentityOf("n1") };
+    self.RouteThrough(&router);
+    CHECK(Testing::StatusOf(core::async::syncRun(self.Answer(frame))) == Wire::Status::Ok);
+
+    SECTION("without its identity this machine is asked for the credential like any loopback caller")
+    {
+        FrameRouterAnswerer anonymous { std::nullopt };
+        anonymous.RouteThrough(&router);
+        CHECK(Testing::ErrorOf(core::async::syncRun(anonymous.Answer(frame))) == Wire::ErrorCode::Unauthenticated);
+    }
+
+    SECTION("and with no router -- a node serving no 0xFC surface -- there is no reply")
+    {
+        FrameRouterAnswerer unrouted { Testing::IdentityOf("n1") };
+        CHECK(core::async::syncRun(unrouted.Answer(frame)).empty());
+    }
 }

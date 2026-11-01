@@ -44,6 +44,7 @@ add_executable(pace-node
     NodeLogging.cpp
     AdminEndpoint.cpp
     McpEndpoint.cpp
+    McpFleetTools.cpp
     McpUpstream.cpp
     CacheProxy.cpp
     CacheTier.cpp
@@ -143,6 +144,8 @@ if(PACE_BUILD_TESTS)
         AdminEndpoint_test.cpp
         McpEndpoint.cpp
         McpEndpoint_test.cpp
+        McpFleetTools.cpp
+        McpFleetTools_test.cpp
         McpUpstream.cpp
         McpUpstream_test.cpp
         CacheProxy.cpp

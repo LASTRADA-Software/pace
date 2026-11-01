@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include "FrameEndpoint.hpp"
 #include "McpUpstream.hpp"
 #include "NodeCredential.hpp"
 #include "SchedulingRedirect.hpp"
@@ -383,6 +384,41 @@ UpstreamResult NodeIoUpstream::Ask(UpstreamTarget target, std::string_view nodeI
                               UpstreamFailureRowOf(UpstreamFailure::Timeout).sentence,
                               firstEndpoint.empty() ? _directory.SelfId() : firstEndpoint,
                               _policy.deadline.count()));
+}
+
+LoopGatedUpstream::LoopGatedUpstream(IMcpUpstream& inner, std::function<bool()> loopTurning) noexcept:
+    _inner { inner },
+    _loopTurning { std::move(loopTurning) }
+{
+}
+
+UpstreamResult LoopGatedUpstream::Ask(UpstreamTarget target, std::string_view nodeIdOrEmpty, std::string frame)
+{
+    if (!_loopTurning())
+        return Failed(UpstreamFailure::LoopNotRunning,
+                      std::string { UpstreamFailureRowOf(UpstreamFailure::LoopNotRunning).sentence });
+    return _inner.Ask(target, nodeIdOrEmpty, std::move(frame));
+}
+
+FrameRouterAnswerer::FrameRouterAnswerer(std::optional<ProvenIdentity> self) noexcept:
+    _self { std::move(self) }
+{
+}
+
+void FrameRouterAnswerer::RouteThrough(IFrameResponder* router) noexcept
+{
+    _router = router;
+}
+
+core::async::Task<std::vector<std::byte>> FrameRouterAnswerer::Answer(std::vector<std::byte> frame)
+{
+    // No router: the node serves no `0xFC` surface. Empty is what the hop loop reads as no answer it could read.
+    if (_router == nullptr)
+        co_return std::vector<std::byte> {};
+    // `frame` lives in this coroutine's frame across the await, which is the span's contract.
+    auto reply = co_await _router->Answer(std::span<std::byte const> { frame },
+                                          PeerIdentity { .host = "127.0.0.1", .proven = _self });
+    co_return std::move(reply.bytes);
 }
 
 } // namespace Pace::Node

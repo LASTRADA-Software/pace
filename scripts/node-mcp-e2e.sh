@@ -10,8 +10,13 @@
 #                                         bound port through `main`.
 #   2. A modern client is answered      — `server/discover` names `2026-07-28`
 #                                         among the supported versions, and
-#                                         `tools/list` answers; both bodies parse
-#                                         as JSON.
+#                                         `tools/list` names the fleet tools;
+#                                         both bodies parse as JSON.
+#   2b. A fleet tool reaches the loop   — `fleet_overview` on a node that runs
+#                                         no consensus is a tool error naming
+#                                         `no-leader-known`: the call got PAST
+#                                         the loop gate (the loop turns), and
+#                                         the answer is an error, not a fleet.
 #   3. A legacy client is answered      — `initialize` answers `2025-11-25`.
 #   4. It is not a scrape endpoint      — `GET /metrics` on the MCP port is a 404.
 #   5. A network address refuses        — `--mcp-listen=0.0.0.0:<port>` ends the
@@ -82,12 +87,14 @@ wait_for_node_ready 127.0.0.1 "$mcp_port" "$node_pid" "the node's MCP surface" "
 # @param 1 the JSON-RPC method, mirrored into `Mcp-Method` for a modern request
 # @param 2 the body
 # @param 3 the `MCP-Protocol-Version` header value, empty for none
+# @param 4 the tool name to mirror into `Mcp-Name` for a modern `tools/call`, empty for none
 mcp_post() {
-    local method="$1" body="$2" version="$3"
-    local args=(-s -i -m 10 -X POST -H "Content-Type: application/json"
+    local method="$1" body="$2" version="$3" name="${4:-}"
+    local args=(-s -i -m 20 -X POST -H "Content-Type: application/json"
                 -H "Accept: application/json, text/event-stream")
     [[ -n "$version" ]] && args+=(-H "MCP-Protocol-Version: ${version}")
     [[ -n "$method" ]] && args+=(-H "Mcp-Method: ${method}")
+    [[ -n "$name" ]] && args+=(-H "Mcp-Name: ${name}")
     curl "${args[@]}" --data "$body" "http://127.0.0.1:${mcp_port}/mcp" \
         || fail "curl could not complete ${method:-a request} against the MCP surface (status $?)"
 }
@@ -127,8 +134,19 @@ e2e_note "server/discover answered, naming ${MODERN} and ${LEGACY}"
 
 listed="$(mcp_post tools/list "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{${META}}}" "$MODERN")"
 [[ "$listed" == HTTP/1.1\ 200* ]] || fail "tools/list did not answer 200: ${listed%%$'\r'*}"
-json_check "tools/list" "$(body_of "$listed")" "isinstance(d['result']['tools'], list)"
-e2e_note "tools/list answered"
+readonly FLEET_TOOLS="['fleet_overview','running_compiles','conditions','history','enrollment_status']"
+json_check "tools/list" "$(body_of "$listed")" \
+    "all(t in [x['name'] for x in d['result']['tools']] for t in ${FLEET_TOOLS}) and all(x['annotations']['readOnlyHint'] for x in d['result']['tools'] if x['name'] in ${FLEET_TOOLS})"
+e2e_note "tools/list names the five fleet tools, each read-only"
+
+# ------------------------------------------------- 2b. a fleet tool reaches the loop
+called="$(mcp_post tools/call "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"fleet_overview\",\"arguments\":{},${META}}}" "$MODERN" fleet_overview)"
+[[ "$called" == HTTP/1.1\ 200* ]] || fail "tools/call fleet_overview did not answer 200: ${called%%$'\r'*}"
+# `no-leader-known`, and not `loop-not-running`: the gate asks the loop FIRST, so this name is the evidence
+# that the node's 0xFC loop turns; and an error, since a node running no consensus has no fleet to report.
+json_check "tools/call fleet_overview" "$(body_of "$called")" \
+    "d['result']['isError'] is True and 'no-leader-known' in d['result']['content'][0]['text'] and 'structuredContent' not in d['result']"
+e2e_note "fleet_overview on a node with no consensus is a tool error naming no-leader-known"
 
 # ------------------------------------------------------------- 3. legacy era
 initialized="$(mcp_post "" '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"e2e","version":"1"}}}' "")"

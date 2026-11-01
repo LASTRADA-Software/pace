@@ -7,11 +7,13 @@
 #include <Pace/Cluster/ClusterState.hpp>
 #include <Pace/Core/EnumTable.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/ProvenIdentity.hpp>
 
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -31,6 +33,7 @@ class IAdvertisedEndpointSource;
 namespace Pace::Node
 {
 
+class IFrameResponder;
 class ISchedulingLeaderSource;
 
 /// @file McpUpstream.hpp
@@ -120,6 +123,7 @@ enum class UpstreamFailure : std::uint8_t
     Timeout,          ///< No answer within `McpUpstream::CallDeadline`; the flow was cancelled on the loop.
     TooManyRedirects, ///< The leader moved more often than `MaxLeaderRedirects` follows.
     Refused,          ///< The authority answered, with a refusal.
+    LoopNotRunning,   ///< This node's `0xFC` I/O loop is not turning, so nothing could be asked at all.
     Last,             ///< Not a failure.
 };
 
@@ -164,6 +168,10 @@ inline constexpr EnumTable<UpstreamFailure, UpstreamFailureRow> UpstreamFailureT
       .name = "too-many-redirects",
       .sentence = "the leader moved more often than this node follows it" },
     { .failure = UpstreamFailure::Refused, .name = "refused", .sentence = "the node asked refused the request" },
+    { .failure = UpstreamFailure::LoopNotRunning,
+      .name = "loop-not-running",
+      .sentence = "this node's 0xFC I/O loop is not running -- it serves no 0xFC surface (an empty --listen-node), "
+                  "has not finished starting, or is stopping -- so it cannot reach any node, itself included" },
 } };
 static_assert(RowsInEnumeratorOrder(UpstreamFailureTable, &UpstreamFailureRow::failure),
               "UpstreamFailureTable must hold one row per UpstreamFailure, in enumerator order");
@@ -376,6 +384,60 @@ class NodeIoUpstream final: public IMcpUpstream
     IUpstreamDirectory const& _directory;
     IInProcessAnswerer& _local;
     UpstreamPolicy _policy;
+};
+
+/// Refuses at once, rather than after `McpUpstream::CallDeadline`, when the loop a forwarded call would run on
+/// is not turning.
+///
+/// **Why this exists.** `NodeIoLoop` starts no thread on a node that adopted no framed surface, and its reactor
+/// stops once the last adopted loop ends. A call posted there is never run, so every tool would answer
+/// `Timeout` ten seconds later -- a wait that tells a person nothing, ending in a sentence that blames the node
+/// asked. Asked per call, so a loop that stops while the node shuts down is reported the same way.
+class LoopGatedUpstream final: public IMcpUpstream
+{
+  public:
+    /// @param inner What answers when the loop turns; must outlive this.
+    /// @param loopTurning Whether the loop a call would run on is turning now; asked on the calling thread, so
+    ///        it is thread-safe.
+    LoopGatedUpstream(IMcpUpstream& inner, std::function<bool()> loopTurning) noexcept;
+
+    /// @copydoc IMcpUpstream::Ask
+    [[nodiscard]] UpstreamResult Ask(UpstreamTarget target, std::string_view nodeIdOrEmpty, std::string frame) override;
+
+  private:
+    IMcpUpstream& _inner;
+    std::function<bool()> _loopTurning;
+};
+
+/// The production `IInProcessAnswerer`: this node's own `0xFC` frame router, asked as a caller on this machine
+/// that proved this node's own identity.
+///
+/// **Why the caller carries this node's identity.** A fleet read is admitted on the credential or on a proof
+/// (`FleetReader::ProvenMember`), and a node asking itself holds no dashboard credential; the proof it would
+/// make over a dialled connection is the one it states here, without a handshake to itself. It is true by
+/// construction -- nothing but this process reaches this object -- and it admits nothing the roster does not:
+/// `ExplainConnection` asks the roster about the key on every verb, so a node whose own key its cluster has not
+/// recorded is answered as the loopback caller it also is.
+///
+/// Runs on the I/O loop, as the router does for a dialled connection.
+class FrameRouterAnswerer final: public IInProcessAnswerer
+{
+  public:
+    /// @param self This node's id and public identity key, or nothing when it holds no identity key.
+    explicit FrameRouterAnswerer(std::optional<ProvenIdentity> self) noexcept;
+
+    /// Name the router frames are answered by. Called before the loop starts and never after, so the loop
+    /// thread reads what was written before it was created.
+    /// @param router The router, or null on a node that serves no `0xFC` surface; must outlive the loop's
+    ///        last turn.
+    void RouteThrough(IFrameResponder* router) noexcept;
+
+    /// @copydoc IInProcessAnswerer::Answer
+    [[nodiscard]] core::async::Task<std::vector<std::byte>> Answer(std::vector<std::byte> frame) override;
+
+  private:
+    std::optional<ProvenIdentity> _self;
+    IFrameResponder* _router { nullptr };
 };
 
 } // namespace Pace::Node

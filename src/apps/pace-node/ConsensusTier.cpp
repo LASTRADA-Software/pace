@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "ConsensusTier.hpp"
 #include "DiscoveryTier.hpp"
+#include "McpUpstream.hpp"
 #include "NodeFormation.hpp"
 #include "NodeIdentity.hpp"
 #include "NodeStateFiles.hpp"
@@ -1629,6 +1630,7 @@ std::expected<std::unique_ptr<ConsensusTier>, NodeRefusal> StartConsensusOrExpla
     NodeRoster& roster,
     AppliedSchedulers& schedulers,
     SchedulingLeaderPublisher& schedulingLeader,
+    AppliedUpstreamDirectory* upstreamDirectory,
     SharedCacheListeners sharedCache,
     IMetricsSink& metrics,
     ILogger& logger,
@@ -1649,12 +1651,16 @@ std::expected<std::unique_ptr<ConsensusTier>, NodeRefusal> StartConsensusOrExpla
         advertised,
         raftAdvertised,
         identityKey,
-        [&schedulerTier,
-         &schedulingLeader](Distributed::SchedulerRole role, std::string_view leaderEndpoint, std::uint64_t term) {
+        [&schedulerTier, &schedulingLeader, upstreamDirectory](
+            Distributed::SchedulerRole role, std::string_view leaderEndpoint, std::uint64_t term) {
             // Told on every node, scheduler or not: a node running none still names the leader
             // it follows to the launchers that ask it to schedule (#1639). The endpoint is the
             // member record's `0xFC` one (`Republish`), never its Raft one.
             schedulingLeader.LeaderChanged(leaderEndpoint);
+
+            // And the term an MCP answer reports as this node's view of it.
+            if (upstreamDirectory != nullptr)
+                upstreamDirectory->ObservedTerm(term);
 
             // Null when this node runs no scheduler surface, which is a legitimate
             // shape: a LEARNER, which applies the fleet's state and may contribute CPU
@@ -1663,7 +1669,7 @@ std::expected<std::unique_ptr<ConsensusTier>, NodeRefusal> StartConsensusOrExpla
             if (schedulerTier != nullptr)
                 schedulerTier->SetRole(role, leaderEndpoint, term);
         },
-        [&membership, &roster, &schedulers, sharedCache](Cluster::ClusterState const& state) {
+        [&membership, &roster, &schedulers, upstreamDirectory, sharedCache](Cluster::ClusterState const& state) {
             // The member set no longer joins admission; its KEYS do. A machine the cluster
             // agreed to admit is served by every surface at once by the key it proves or
             // presents, never by the address it dials from. `--fleet-open` is this node's own
@@ -1683,6 +1689,10 @@ std::expected<std::unique_ptr<ConsensusTier>, NodeRefusal> StartConsensusOrExpla
             // And where this node registers: the voters' `0xFC` endpoints as the state records
             // them, so a voter that moved, proven, is reached at the next round (T26's carry).
             schedulers.Applied(state);
+
+            // And where each member's `0xFC` port answers, for the MCP surface's forwarded calls to a named node.
+            if (upstreamDirectory != nullptr)
+                upstreamDirectory->Applied(state);
 
             // And the fleet's shared cache: where it is, and whether this machine is it -- recorded
             // and handed to the host's own thread, never opened here: opening a store may walk it,

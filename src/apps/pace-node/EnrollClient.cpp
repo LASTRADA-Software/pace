@@ -112,11 +112,10 @@ namespace
     /// Completeness is asserted below against `KnownEnrollmentDecisions` instead, which
     /// is the one list of these enumerators and is what the decoder reads too.
     ///
-    /// Padded to a common width so the columns after it line up: this list is read by a
-    /// person comparing two addresses on forty rows, and a ragged left edge makes the
-    /// one comparison they are here to make harder.
+    /// Unpadded, because a structured answer (the MCP `enrollment_status` tool) carries the word itself; the
+    /// operator's list pads it to `DecisionLabelWidth` where it renders.
     constexpr std::array DecisionLabels {
-        DecisionLabelRow { .decision = Wire::EnrollmentDecision::Pending, .label = "pending " },
+        DecisionLabelRow { .decision = Wire::EnrollmentDecision::Pending, .label = "pending" },
         DecisionLabelRow { .decision = Wire::EnrollmentDecision::Approved, .label = "approved" },
         DecisionLabelRow { .decision = Wire::EnrollmentDecision::Rejected, .label = "rejected" },
     };
@@ -137,27 +136,58 @@ namespace
 
     static_assert(EveryDecisionIsLabelled(), "every enrollment decision must read as something in an operator's list");
 
-    /// What @p decision reads as in a list.
-    /// @param decision The state.
-    /// @return Its label; never empty, by the assertion above.
-    [[nodiscard]] constexpr std::string_view DescribeEnrollmentDecision(Wire::EnrollmentDecision decision) noexcept
-    {
-        // A range-based `for` rather than `std::ranges::find` with a named iterator, and
-        // that is a PORTABILITY fix rather than a style one. `readability-qualified-auto`
-        // asks for `auto *const found` here, which is right on libstdc++ and libc++ --
-        // where a `std::array` iterator IS a pointer -- and does not COMPILE on MSVC,
-        // where it is a class type. Taking the analyser's advice would turn a Linux-only
-        // lint into a Windows-only build failure, which is the worse trade: the lint is
-        // visible to whoever runs the sweep and the build failure lands on whoever next
-        // builds on Windows. Restructuring satisfies both, and `NOLINT` is not an option
-        // this repository allows.
-        for (auto const& row: DecisionLabels)
-            if (row.decision == decision)
-                return row.label;
-        return std::string_view {};
-    }
+    /// The widest decision label: the list pads every label to it so the columns after it line up -- this
+    /// list is read by a person comparing two addresses on forty rows, and a ragged left edge makes the one
+    /// comparison they are here to make harder.
+    constexpr std::size_t DecisionLabelWidth = std::ranges::max(
+        DecisionLabels | std::views::transform([](DecisionLabelRow const& row) { return row.label.size(); }));
 
+    /// How each enrollment-window state is spelled, wherever this binary names one.
+    struct EnrollmentStateRow
+    {
+        Wire::WireEnrollmentState state; ///< The state.
+        std::string_view name;           ///< Its one spelling.
+    };
+
+    /// One row per state in `KnownEnrollmentStates`, asserted below for `DecisionLabels`' reason.
+    constexpr std::array EnrollmentStateNames {
+        EnrollmentStateRow { .state = Wire::WireEnrollmentState::Manual, .name = "manual" },
+        EnrollmentStateRow { .state = Wire::WireEnrollmentState::AutoApprove, .name = "auto-approve" },
+    };
+
+    static_assert(std::ranges::all_of(Wire::KnownEnrollmentStates,
+                                      [](Wire::WireEnrollmentState state) {
+                                          return std::ranges::count(EnrollmentStateNames, state, &EnrollmentStateRow::state)
+                                                 == 1;
+                                      }),
+                  "every enrollment state must have exactly one name");
 } // namespace
+
+std::string_view DescribeEnrollmentDecision(Wire::EnrollmentDecision decision) noexcept
+{
+    // A range-based `for` rather than `std::ranges::find` with a named iterator, and
+    // that is a PORTABILITY fix rather than a style one. `readability-qualified-auto`
+    // asks for `auto *const found` here, which is right on libstdc++ and libc++ --
+    // where a `std::array` iterator IS a pointer -- and does not COMPILE on MSVC,
+    // where it is a class type. Taking the analyser's advice would turn a Linux-only
+    // lint into a Windows-only build failure, which is the worse trade: the lint is
+    // visible to whoever runs the sweep and the build failure lands on whoever next
+    // builds on Windows. Restructuring satisfies both, and `NOLINT` is not an option
+    // this repository allows.
+    for (auto const& row: DecisionLabels)
+        if (row.decision == decision)
+            return row.label;
+    return std::string_view {};
+}
+
+std::string_view EnrollmentStateName(Wire::WireEnrollmentState state) noexcept
+{
+    // A range-based `for` for `DescribeEnrollmentDecision`'s portability reason.
+    for (auto const& row: EnrollmentStateNames)
+        if (row.state == state)
+            return row.name;
+    return std::string_view {};
+}
 
 EnrollReading ReadEnrollReply(Cc::CacheOutcome const& outcome)
 {
@@ -278,10 +308,10 @@ EnrollReading ReadEnrollReply(Cc::CacheOutcome const& outcome)
 std::string RenderEnrollmentReport(Wire::EnrollmentReport const& report, std::string_view scheduler)
 {
     auto out = std::string {};
+    out += std::format("enrollment: {}", EnrollmentStateName(report.state));
     if (report.state == Wire::WireEnrollmentState::AutoApprove)
-        out += std::format("enrollment: auto-approve ({} min left)\n", report.autoApproveSecondsLeft / 60);
-    else
-        out += "enrollment: manual\n";
+        out += std::format(" ({} min left)", report.autoApproveSecondsLeft / 60);
+    out += '\n';
 
     if (report.pending.empty())
     {
@@ -327,8 +357,9 @@ std::string RenderEnrollmentReport(Wire::EnrollmentReport const& report, std::st
         // one by one against what the joiner printed, and an approval admits exactly this one.
         auto const where =
             entry.nodeEndpoint.empty() ? std::string { "no endpoint" } : std::format("claims {}", entry.nodeEndpoint);
-        out += std::format("  {}  {}  {}  {}  from {}{}  {}s ago  {} attempt(s){}{}{}\n",
+        out += std::format("  {:<{}}  {}  {}  {}  from {}{}  {}s ago  {} attempt(s){}{}{}\n",
                            DescribeEnrollmentDecision(entry.decision),
+                           DecisionLabelWidth,
                            entry.nodeId,
                            EnrollRoleRowFor(entry.role).name,
                            where,

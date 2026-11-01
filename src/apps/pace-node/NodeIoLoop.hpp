@@ -181,6 +181,18 @@ class NodeIoLoop final: public IReactorHome
     /// frees.
     void NoteLoopFinished() noexcept;
 
+    /// Whether the reactor is turning: its thread was started and at least one adopted loop still runs.
+    ///
+    /// What a caller that POSTS work here from another thread asks first: a node that adopted no framed surface
+    /// starts no thread, and the reactor stops once its last loop ends, so work posted to either is never run.
+    /// Safe from any thread; a reactor that is stopping may still answer true for the moment between its last
+    /// loop ending and this being asked, which a post absorbs as a call bounded by its own deadline.
+    /// @return True while posted work would run.
+    [[nodiscard]] bool Turning() const noexcept
+    {
+        return _started.load(std::memory_order_acquire) && _loopsRunning.load(std::memory_order_acquire) > 0;
+    }
+
     /// @return How many adopted loops have not yet finished. For teardown
     ///         assertions.
     [[nodiscard]] std::size_t LoopsRunning() const noexcept
@@ -206,6 +218,7 @@ class NodeIoLoop final: public IReactorHome
 
     std::vector<FrameServer*> _loops;
     std::atomic<std::size_t> _loopsRunning { 0 };
+    std::atomic<bool> _started { false }; ///< Set once the reactor thread exists; see `Turning()`.
 
     core::net::AcceptLoopHealth
         _acceptLoops; ///< The surfaces here that are degraded or stopped accepting; see `AcceptLoops()`.

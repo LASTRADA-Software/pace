@@ -2145,6 +2145,13 @@ std::optional<CellFormat> FleetColumnFormat(FleetSection section, std::string_vi
     return FactsOf(section, name).transform([](ColumnFacts const& facts) -> CellFormat { return facts.format; });
 }
 
+std::optional<CellFormat> FleetCompileColumnFormat(std::string_view name)
+{
+    auto const* const column = core::findIfOrNull(
+        CompileColumns, [name](FleetColumn<FleetCompile> const& candidate) { return candidate.name == name; });
+    return column == nullptr ? std::nullopt : std::optional<CellFormat> { column->format };
+}
+
 std::optional<ColumnKeep> FleetColumnKeep(FleetSection section, std::string_view name)
 {
     return FactsOf(section, name).transform([](ColumnFacts const& facts) -> ColumnKeep { return facts.keep; });
