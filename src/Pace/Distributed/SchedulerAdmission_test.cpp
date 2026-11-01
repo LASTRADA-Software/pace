@@ -19,11 +19,14 @@
 #include <cstdint>
 #include <format>
 #include <functional>
+#include <latch>
 #include <optional>
 #include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
+#include <utility>
 #include <vector>
 
 #include <core/platform/Clock.hpp>
@@ -157,7 +160,7 @@ struct Fleet
 /// The joined compile rows of a leading scheduler.
 [[nodiscard]] std::vector<CompileRow> CompilesOf(SchedulerService const& service)
 {
-    auto rows = service.CompileTickets();
+    auto rows = service.AdmissionReportNow().compiles;
     REQUIRE(rows.has_value());
     return Unwrap(rows);
 }
@@ -806,7 +809,7 @@ TEST_CASE("SchedulerAdmission.a-granted-ticket-lease-carries-its-ticket-id",
 
     // A node that does not lead has no compiles to show, which is not a fleet compiling nothing.
     fleet.service.SetRole(SchedulerRole::Follower, "10.9.9.9:7100", 1);
-    CHECK_FALSE(fleet.service.CompileTickets().has_value());
+    CHECK_FALSE(fleet.service.AdmissionReportNow().compiles.has_value());
     auto const snapshot = CollectFleet({ .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics });
     CHECK_FALSE(snapshot.compiles.has_value());
     CHECK(RenderFleetJson(snapshot, FleetHistoryView {})
@@ -879,6 +882,90 @@ TEST_CASE("SchedulerAdmission.a-local-placement-reports-worker-local-and-no-expi
     // The requester exactly, by its key, beside the name a person reads.
     CHECK(TextOf(json, "requester-key") == FormatEd25519PublicKey(fleet.signer.PublicKey()));
     CHECK_FALSE(TextOf(json, "requester").empty());
+    CHECK(TextOf(json, "fingerprint") == Toolchain);
+}
+
+TEST_CASE("SchedulerAdmission.an-unknown-fingerprint-renders-absent", "[distributed][admission][scheduler][fleetview]")
+{
+    // A local-only request may not know its toolchain. That is a fingerprint nobody stated -- `null` at
+    // the cell -- never an empty string presented as one.
+    Fleet fleet;
+    auto const ticket = fleet.service.Admit(
+        Fleet::Insider,
+        [] { return Fleet::Insider; },
+        fleet.service.OwnMachineId(),
+        Wire::AdmitRequestFields { .kind = Wire::AdmitKind::LocalOnly,
+                                   .fingerprint = {},
+                                   .cacheKey = "k1",
+                                   .sourcePath = "src/a.cpp",
+                                   .treeLabel = "tree",
+                                   .storable = false,
+                                   .acceptedCodecs = {},
+                                   .excluded = {},
+                                   .toolchainLabel = {} });
+    REQUIRE(ticket.has_value());
+
+    auto const document = Unwrap(Json::Parse(RenderFleetJson(
+        CollectFleet({ .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics }), FleetHistoryView {})));
+    auto const json = CompileJsonOf(document, Unwrap(ticket));
+    CHECK(MemberOf(json, "fingerprint").IsNull());
+    CHECK(MemberOf(json, "toolchain").IsNull());
+}
+
+TEST_CASE("SchedulerAdmission.queue-depth-and-compile-totals-are-one-sample",
+          "[distributed][admission][scheduler][fleetview]")
+{
+    // The queue's depth and the compile totals are published side by side in one document, so they come
+    // from ONE read: `AdmissionReportNow` is the only door to either half, which is the structural half of
+    // the guarantee. This is the behavioural half -- a helper thread admits and abandons as fast as it can
+    // while this thread reads, and every read's `depth` equals the queued tickets it lists.
+    constexpr int Churns = 50'000;
+    constexpr int Reads = 50'000;
+    Fleet fleet;
+    // A reported machine keeps the queue's view present whatever the depth; nothing is placed on it.
+    fleet.Report(MachineOf(Testing::TestKeyPair("bystander").PublicKey()), 1024 * MiB, 0);
+    auto const request = Wire::AdmitRequestFields { .kind = Wire::AdmitKind::LocalOnly,
+                                                    .fingerprint = {},
+                                                    .cacheKey = "k",
+                                                    .sourcePath = "src/a.cpp",
+                                                    .treeLabel = "tree",
+                                                    .storable = false,
+                                                    .acceptedCodecs = {},
+                                                    .excluded = {},
+                                                    .toolchainLabel = {} };
+
+    std::latch start { 2 };
+    auto churn = std::thread { [&] {
+        start.arrive_and_wait();
+        // Every ticket is abandoned again, so the queue stays small and each read stays cheap; the depth
+        // still moves on every admit and every abandon.
+        for ([[maybe_unused]] auto const round: std::views::iota(0, Churns))
+        {
+            auto const ticket =
+                fleet.service.Admit(Fleet::Insider, [] { return Fleet::Insider; }, fleet.service.OwnMachineId(), request);
+            if (ticket.has_value())
+                fleet.service.AbandonAdmission(*ticket);
+        }
+    } };
+
+    start.arrive_and_wait();
+    auto disagreements = 0;
+    auto sampled = 0;
+    for ([[maybe_unused]] auto const round: std::views::iota(0, Reads))
+    {
+        auto const report = fleet.service.AdmissionReportNow();
+        if (!report.queue.has_value() || !report.compiles.has_value())
+            continue;
+        ++sampled;
+        auto const queued = std::ranges::count(
+            Unwrap(report.compiles), TicketView::State::Queued, [](CompileRow const& row) { return row.ticket.state; });
+        if (std::cmp_not_equal(queued, Unwrap(report.queue).depth))
+            ++disagreements;
+    }
+    churn.join();
+
+    CHECK(sampled == Reads);
+    CHECK(disagreements == 0);
 }
 
 TEST_CASE("SchedulerAdmission.queued-tickets-report-no-worker", "[distributed][admission][scheduler][fleetview]")

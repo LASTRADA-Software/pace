@@ -411,9 +411,8 @@ AdmissionSnapshot SchedulerService::AdmissionSnapshotNow() const
     return snapshot;
 }
 
-std::optional<QueueView> SchedulerService::AdmissionDetailNow() const
+std::optional<QueueView> SchedulerService::AdmissionDetailLocked() const
 {
-    auto const guard = std::scoped_lock { _admissionMutex };
     if (!_admissionLeading)
         return std::nullopt;
     auto view = _queue.Snapshot();
@@ -422,9 +421,8 @@ std::optional<QueueView> SchedulerService::AdmissionDetailNow() const
     return view;
 }
 
-std::optional<std::vector<CompileRow>> SchedulerService::CompileTickets() const
+std::optional<std::vector<CompileRow>> SchedulerService::CompileTicketsLocked() const
 {
-    auto const guard = std::scoped_lock { _admissionMutex };
     if (!_admissionLeading)
         return std::nullopt;
 
@@ -457,6 +455,14 @@ std::optional<std::vector<CompileRow>> SchedulerService::CompileTickets() const
         rows.push_back(std::move(row));
     }
     return rows;
+}
+
+AdmissionReport SchedulerService::AdmissionReportNow() const
+{
+    // ONE acquisition for both halves: a pump between two reads would publish a queue depth beside
+    // ticket totals from a different moment, in one document.
+    auto const guard = std::scoped_lock { _admissionMutex };
+    return AdmissionReport { .queue = AdmissionDetailLocked(), .compiles = CompileTicketsLocked() };
 }
 
 void SchedulerService::ObserveAdmission(AdmissionObserver observer)

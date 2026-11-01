@@ -709,6 +709,22 @@ struct CompileRow
     std::optional<std::chrono::milliseconds> leaseExpiresIn;
 };
 
+/// The admission queue as a fleet report reads it: its view and its compile tickets, one sample.
+struct AdmissionReport
+{
+    /// The queue's depth, clients and per-machine ledger, or ABSENT when this node does not lead or the
+    /// queue has never seen a request or a budget: a fleet with no admission data says so rather than
+    /// reporting a queue of zero.
+    std::optional<QueueView> queue;
+    /// Every compile ticket the queue holds, each running one joined to its worker lease by the ticket
+    /// id the lease carries -- never by cache key, which two tickets may share. A running ticket granted
+    /// on its own caller says `LocalCompileWorker` and has no expiry; a running one placed on a worker
+    /// whose live lease the join cannot find (expired, or released when its worker was dropped) leaves
+    /// both absent rather than guessing. In no particular order; ABSENT when this node does not lead: a
+    /// follower's queue is not the fleet's, which is a different claim from a leader with no compiles.
+    std::optional<std::vector<CompileRow>> compiles;
+};
+
 /// Who to tell when the queue changes under a waiting connection. Called from any thread the service
 /// is driven on, outside the service admission lock, and must not block.
 struct AdmissionObserver
@@ -911,20 +927,13 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     /// @return Queue depth and bytes charged per machine, as of now.
     [[nodiscard]] AdmissionSnapshot AdmissionSnapshotNow() const;
 
-    /// @return The queue's depth, clients and per-machine ledger, read under the admission lock, or
-    ///         ABSENT when this node does not lead or the queue has never seen a request or a budget:
-    ///         a fleet with no admission data says so rather than reporting a queue of zero.
-    [[nodiscard]] std::optional<QueueView> AdmissionDetailNow() const;
-
-    /// Every compile ticket the queue holds, each running one joined to its worker lease by the
-    /// ticket id the lease carries -- never by cache key, which two tickets may share.
+    /// The queue's view and its joined compile tickets, read under ONE acquisition of the admission
+    /// lock, so the queue depth and the ticket totals a report publishes side by side are one sample.
     ///
-    /// A running ticket granted on its own caller says `LocalCompileWorker` and has no expiry; a
-    /// running one placed on a worker whose live lease the join cannot find (expired, or released
-    /// when its worker was dropped) leaves both absent rather than guessing.
-    /// @return The rows, in no particular order, or ABSENT when this node does not lead: a follower's
-    ///         queue is not the fleet's, which is a different claim from a leader with no compiles.
-    [[nodiscard]] std::optional<std::vector<CompileRow>> CompileTickets() const;
+    /// The ONLY way to read either: there is deliberately no call returning one half alone, so a
+    /// report cannot be written that reads the two in turn and publishes them from different moments.
+    /// @return Both halves; see `AdmissionReport` for when each is absent.
+    [[nodiscard]] AdmissionReport AdmissionReportNow() const;
 
     /// Be told when capacity may have appeared and when leadership is lost. A wiring door, set once.
     /// @param observer What to call; empty members are skipped.
@@ -1411,6 +1420,14 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
         core::platform::SteadyTimePoint parkedAt;   ///< For `waited`: the enqueue, or the last requeue.
         std::optional<Distributed::Lease> lease;    ///< Engaged once granted on a worker.
     };
+
+    /// `AdmissionReport::queue`. Caller holds `_admissionMutex`.
+    /// @return The view, or absent.
+    [[nodiscard]] std::optional<QueueView> AdmissionDetailLocked() const;
+
+    /// `AdmissionReport::compiles`. Caller holds `_admissionMutex`.
+    /// @return The rows, or absent.
+    [[nodiscard]] std::optional<std::vector<CompileRow>> CompileTicketsLocked() const;
 
     /// Tell the admission observer a pump is due. Called outside every lock.
     void NotifyAdmissionChanged();

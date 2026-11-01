@@ -494,10 +494,14 @@ namespace
             .project = [](FleetCompile const& c) { return FleetCell::Of(c.compile.ticket.sourcePath); } },
         FleetColumn<FleetCompile> {
             .name = "fingerprint",
-            .help = "The toolchain fingerprint the request named. Empty for a local-only request that did not know it.",
+            .help = "The toolchain fingerprint the request named. Absent for a local-only request that did not know it.",
             .format = CellFormat::Text,
             .keep = ColumnKeep::Detail,
-            .project = [](FleetCompile const& c) { return FleetCell::Of(c.compile.ticket.fingerprint); } },
+            .project =
+                [](FleetCompile const& c) {
+                    return c.compile.ticket.fingerprint.empty() ? FleetCell::Nothing()
+                                                                : FleetCell::Of(c.compile.ticket.fingerprint);
+                } },
         FleetColumn<FleetCompile> { .name = "toolchain",
                                     .help = "What the client calls the toolchain. Absent when it named none.",
                                     .format = CellFormat::Text,
@@ -1386,8 +1390,10 @@ FleetSnapshot CollectFleet(FleetSources const& sources)
     for (auto const& tier: StorageTierTable)
         snapshot.tiersPresent[static_cast<std::size_t>(tier.tier)] = AnyNodeHasTier(snapshot.nodes, tier.tier);
 
-    snapshot.admission = AdmissionSectionOf(sources.scheduler->AdmissionDetailNow(), snapshot.workers);
-    snapshot.compiles = CompileSectionOf(sources.scheduler->CompileTickets(), snapshot.workers);
+    // ONE read for both sections, so the queue's depth and the compile totals beside it are one sample.
+    auto report = sources.scheduler->AdmissionReportNow();
+    snapshot.admission = AdmissionSectionOf(report.queue, snapshot.workers);
+    snapshot.compiles = CompileSectionOf(std::move(report.compiles), snapshot.workers);
 
     return snapshot;
 }
