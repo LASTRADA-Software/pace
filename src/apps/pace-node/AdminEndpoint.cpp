@@ -4,6 +4,7 @@
 #include "NodeIdentity.hpp"
 
 #include <Pace/Core/HostPort.hpp>
+#include <Pace/Core/Json.hpp>
 #include <Pace/Core/StateFiles.hpp>
 #include <Pace/Core/StopAwareWait.hpp>
 
@@ -562,20 +563,33 @@ std::vector<AdminRoute> MakeFleetRoutes(Distributed::FleetSources sources,
     // REFUSED when it names nothing, never defaulted, exactly as on `/fleet`: a window
     // quietly substituted hands a reader figures for a period they did not ask about,
     // with nothing in the document to say so.
+    //
+    // The document is `AnswerFleetText`'s, the derivation the `fleet-text` verb's JSON format answers
+    // from, so the HTTP and the 0xFC paths share one by construction rather than by two call sites
+    // agreeing. No section is passed: the JSON is one document, and this route never read `section`.
     routes.push_back(AdminRoute {
         .path = "/fleet.json",
-        .handler = gated([] { return Unauthorised("application/json", R"({"error":"credential required"})"); },
-                         [statusFor, rangeAsked, viewFor](Distributed::FleetSnapshot const& snapshot,
-                                                          AdminRequest const& request) -> AdminResponse {
-                             auto const range = rangeAsked(request.query);
-                             if (!range.has_value())
-                                 return RefusedParameter(
-                                     "application/json",
-                                     std::format(R"({{"error":"unknown range","accepted":"{}"}})", KnownRangeKeys()));
-                             return AdminResponse { .status = statusFor(snapshot),
-                                                    .contentType = "application/json",
-                                                    .body = Distributed::RenderFleetJson(snapshot, viewFor(*range)) };
-                         }),
+        .handler = gated(
+            [] { return Unauthorised("application/json", R"({"error":"credential required"})"); },
+            [history, statusFor](Distributed::FleetSnapshot const& snapshot, AdminRequest const& request) -> AdminResponse {
+                auto answer = AnswerFleetText(
+                    snapshot, history, {}, QueryValue(request.query, "range"), CompileCacheWire::FleetTextFormat::Json);
+                if (!answer.has_value())
+                {
+                    // The refusal names what it would accept, as a JSON string: the decline's own
+                    // sentence, so the accepted keys come from the one place that lists them.
+                    auto detail = std::string_view { answer.error().detail };
+                    while (detail.ends_with('\n'))
+                        detail.remove_suffix(1);
+                    auto body = std::string { R"({"error":)" };
+                    Json::AppendString(body, detail);
+                    body += '}';
+                    return RefusedParameter("application/json", std::move(body));
+                }
+                return AdminResponse { .status = statusFor(snapshot),
+                                       .contentType = "application/json",
+                                       .body = std::move(answer->body) };
+            }),
     });
 
     // The same tables again, for a reader with no JSON parser (#1300). `jq` is not on

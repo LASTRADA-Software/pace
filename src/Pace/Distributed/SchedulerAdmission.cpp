@@ -14,6 +14,7 @@
 #include <format>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -210,7 +211,11 @@ std::optional<AdmissionVerdict> SchedulerService::GrantFor(Decision const& decis
             // key without sharing a cache must BOTH compile, and a lease table keyed by the cache key
             // refused the second `AlreadyInFlight` -- which its launcher read as "compile here", with
             // nothing charged. A ticket is unique on this leader, so this `Acquire` cannot be refused.
-            auto const lease = _leases.Acquire(AdmissionLeaseKey(decision.ticket), worker->id, AgreedLeaseLifetime());
+            //
+            // The ticket rides on the lease too, so a report joins a running compile to ITS lease by the
+            // ticket rather than by parsing the bookkeeping name back, or by guessing from the cache key.
+            auto const lease =
+                _leases.Acquire(AdmissionLeaseKey(decision.ticket), worker->id, AgreedLeaseLifetime(), decision.ticket);
             if (!lease.has_value())
             {
                 verdict.refusal = SchedulerReply::Malformed("an admission ticket was granted twice");
@@ -415,6 +420,43 @@ std::optional<QueueView> SchedulerService::AdmissionDetailNow() const
     if (view.depth == 0 && view.clients.empty() && view.machines.empty())
         return std::nullopt;
     return view;
+}
+
+std::optional<std::vector<CompileRow>> SchedulerService::CompileTickets() const
+{
+    auto const guard = std::scoped_lock { _admissionMutex };
+    if (!_admissionLeading)
+        return std::nullopt;
+
+    // Read under the admission lock, after the queue: every admission lease is acquired and released
+    // under this same lock, so the two readings are one sample. A lease the registry's drop of its
+    // worker released (`ReleaseWorker`, outside this lock) is simply not there -- a running compile
+    // whose worker the join cannot establish, and the row says so by leaving it absent.
+    auto const leases = _leases.LiveTicketLeases();
+    std::unordered_map<Ticket, TicketLease const*> byTicket;
+    byTicket.reserve(leases.size());
+    for (auto const& lease: leases)
+        byTicket.emplace(lease.ticket, &lease);
+
+    std::vector<CompileRow> rows;
+    for (auto& ticket: _queue.Tickets())
+    {
+        auto row = CompileRow { .ticket = std::move(ticket), .toolchainLabel = {}, .worker = {}, .leaseExpiresIn = {} };
+        if (auto const held = _admissionTickets.find(row.ticket.ticket); held != _admissionTickets.end())
+            row.toolchainLabel = held->second.toolchainLabel;
+        if (row.ticket.state == TicketView::State::Running)
+        {
+            if (!row.ticket.placement.has_value())
+                row.worker = std::string { LocalCompileWorker };
+            else if (auto const lease = byTicket.find(row.ticket.ticket); lease != byTicket.end())
+            {
+                row.worker = lease->second->workerId;
+                row.leaseExpiresIn = lease->second->expiresIn;
+            }
+        }
+        rows.push_back(std::move(row));
+    }
+    return rows;
 }
 
 void SchedulerService::ObserveAdmission(AdmissionObserver observer)

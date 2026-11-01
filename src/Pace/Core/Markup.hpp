@@ -149,7 +149,7 @@ namespace Detail
     /// revisit this function.
     ///
     /// JSON shares none of it -- every code point has a legal spelling there --
-    /// which is why `AppendJsonText` escapes where this replaces.
+    /// which is why `Json::AppendString` escapes where this replaces.
     inline constexpr std::array MarkupCarriable {
         CodePointRange { .first = 0x0009, .last = 0x0009 }, CodePointRange { .first = 0x000A, .last = 0x000A },
         CodePointRange { .first = 0x000D, .last = 0x000D }, CodePointRange { .first = 0x0020, .last = 0xD7FF },

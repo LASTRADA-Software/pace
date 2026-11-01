@@ -690,6 +690,25 @@ struct AdmissionSnapshot
     std::vector<MachineLedgerView> budgets;
 };
 
+/// What a running compile granted on its own requesting machine names as its worker.
+inline constexpr std::string_view LocalCompileWorker = "local";
+
+/// One compile ticket, joined to the worker lease it holds.
+///
+/// The join is by the ticket id the lease carries (`Lease::ticket`), never by cache key: two
+/// tickets may miss one key, and each holds a lease of its own.
+struct CompileRow
+{
+    TicketView ticket;          ///< The ticket, as the queue holds it.
+    std::string toolchainLabel; ///< What the client calls the toolchain; empty when it named none.
+    /// The worker running it: the lease's worker id, `LocalCompileWorker` for a ticket granted on its
+    /// own caller, and ABSENT where the join cannot establish one -- a queued or waiting ticket, or a
+    /// running one whose live lease is gone.
+    std::optional<std::string> worker;
+    /// What is left of its lease's lifetime; absent for every ticket without a live lease.
+    std::optional<std::chrono::milliseconds> leaseExpiresIn;
+};
+
 /// Who to tell when the queue changes under a waiting connection. Called from any thread the service
 /// is driven on, outside the service admission lock, and must not block.
 struct AdmissionObserver
@@ -896,6 +915,16 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     ///         ABSENT when this node does not lead or the queue has never seen a request or a budget:
     ///         a fleet with no admission data says so rather than reporting a queue of zero.
     [[nodiscard]] std::optional<QueueView> AdmissionDetailNow() const;
+
+    /// Every compile ticket the queue holds, each running one joined to its worker lease by the
+    /// ticket id the lease carries -- never by cache key, which two tickets may share.
+    ///
+    /// A running ticket granted on its own caller says `LocalCompileWorker` and has no expiry; a
+    /// running one placed on a worker whose live lease the join cannot find (expired, or released
+    /// when its worker was dropped) leaves both absent rather than guessing.
+    /// @return The rows, in no particular order, or ABSENT when this node does not lead: a follower's
+    ///         queue is not the fleet's, which is a different claim from a leader with no compiles.
+    [[nodiscard]] std::optional<std::vector<CompileRow>> CompileTickets() const;
 
     /// Be told when capacity may have appeared and when leadership is lost. A wiring door, set once.
     /// @param observer What to call; empty members are skipped.

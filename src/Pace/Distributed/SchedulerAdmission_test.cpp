@@ -3,6 +3,7 @@
 // The admission half of `SchedulerService` (#1728) on a ManualClock: the grants it mints on a worker,
 // the lease and the job each takes, and every way they are given back.
 #include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/Json.hpp>
 #include <Pace/Core/Logger.hpp>
 #include <Pace/Distributed/FleetView.hpp>
 #include <Pace/Distributed/LeaseToken.hpp>
@@ -16,8 +17,10 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <format>
 #include <functional>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -149,6 +152,54 @@ struct Fleet
 {
     REQUIRE_FALSE(verdict.refusal.has_value());
     return Unwrap(Wire::DecodeAdmitGrant(verdict.grant));
+}
+
+/// The joined compile rows of a leading scheduler.
+[[nodiscard]] std::vector<CompileRow> CompilesOf(SchedulerService const& service)
+{
+    auto rows = service.CompileTickets();
+    REQUIRE(rows.has_value());
+    return Unwrap(rows);
+}
+
+/// The row for @p ticket; the case fails when there is none.
+[[nodiscard]] CompileRow RowOf(std::vector<CompileRow> const& rows, Ticket ticket)
+{
+    auto const found = std::ranges::find(rows, ticket, [](CompileRow const& row) { return row.ticket.ticket; });
+    REQUIRE(found != rows.end());
+    return *found;
+}
+
+/// The `compiles` element of a fleet document whose `ticket` is @p ticket; the case fails when there is none.
+[[nodiscard]] Json::Value CompileJsonOf(Json::Value const& document, Ticket ticket)
+{
+    auto const* const compiles = document.Find("compiles");
+    REQUIRE(compiles != nullptr);
+    REQUIRE(compiles->AsArray() != nullptr);
+    for (auto const& row: *compiles->AsArray())
+    {
+        auto const* const id = row.Find("ticket");
+        if (id != nullptr && id->AsInt() == static_cast<std::int64_t>(ticket))
+            return row;
+    }
+    FAIL("no compile row for ticket " << ticket);
+    return {};
+}
+
+/// The member @p key of a JSON object; the case fails when it is missing -- which is not `null`.
+[[nodiscard]] Json::Value MemberOf(Json::Value const& object, std::string_view key)
+{
+    auto const* const member = object.Find(key);
+    REQUIRE(member != nullptr);
+    return *member;
+}
+
+/// A JSON string member's text; the case fails when it is missing or not a string.
+[[nodiscard]] std::string TextOf(Json::Value const& object, std::string_view key)
+{
+    auto const member = MemberOf(object, key);
+    REQUIRE(member.AsString() != nullptr);
+    return *member.AsString();
 }
 } // namespace
 
@@ -715,4 +766,231 @@ TEST_CASE("SchedulerAdmission.a-late-queue-settle-counts-released-late-and-an-ab
         CHECK(releasedLate(fleet) == 0);
         CHECK(DispatchCountsOf(fleet) == DispatchCounts { .granted = 1, .released = 0 });
     }
+}
+
+TEST_CASE("SchedulerAdmission.a-granted-ticket-lease-carries-its-ticket-id",
+          "[distributed][admission][scheduler][fleetview]")
+{
+    Fleet fleet;
+    auto const worker = fleet.RegisterWorker();
+    fleet.Report(MachineOf(fleet.workerKey.PublicKey()));
+    auto const ticket = fleet.Admit("k1");
+    auto const verdicts = fleet.service.PumpAdmission();
+    REQUIRE(verdicts.size() == 1);
+    auto const grant = GrantOf(verdicts[0]);
+    REQUIRE(grant.kind == Wire::GrantKind::Worker);
+
+    fleet.clock.advance(3s);
+    auto const rows = CompilesOf(fleet.service);
+    REQUIRE(rows.size() == 1);
+    auto const& row = rows.front();
+    CHECK(row.ticket.ticket == ticket);
+    CHECK(row.ticket.state == TicketView::State::Running);
+    CHECK(row.ticket.sourcePath == "src/a.cpp");
+    CHECK(row.ticket.fingerprint == Toolchain);
+    CHECK(row.ticket.treeLabel == "tree");
+    CHECK(row.ticket.caller == fleet.service.OwnMachineId());
+    CHECK(row.ticket.age == 3s);
+    CHECK(row.toolchainLabel == ToolchainLabel);
+    REQUIRE(row.ticket.placement.has_value());
+    CHECK(Unwrap(row.ticket.placement).workerId == worker);
+    // Joined through the lease the grant took: its worker, and what is left of the lifetime the grant told
+    // the client, measured on the same clock.
+    CHECK(row.worker == std::optional<std::string> { worker });
+    CHECK(row.leaseExpiresIn == std::optional<std::chrono::milliseconds> { grant.lifetime - 3s });
+
+    // Settled, the ticket and its lease are gone together.
+    REQUIRE(fleet.service.SettleAdmission(ticket, Settlement { .outcome = Wire::SettleOutcome::Stored, .peakBytes = {} })
+            == SettleResult::Settled);
+    CHECK(CompilesOf(fleet.service).empty());
+
+    // A node that does not lead has no compiles to show, which is not a fleet compiling nothing.
+    fleet.service.SetRole(SchedulerRole::Follower, "10.9.9.9:7100", 1);
+    CHECK_FALSE(fleet.service.CompileTickets().has_value());
+    auto const snapshot = CollectFleet({ .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics });
+    CHECK_FALSE(snapshot.compiles.has_value());
+    CHECK(RenderFleetJson(snapshot, FleetHistoryView {})
+              .contains(R"("compiles":null,"compiles-truncated":null,"compile-totals":null)"));
+}
+
+TEST_CASE("SchedulerAdmission.compiles-join-exact-ticket-ids-never-by-cache-key",
+          "[distributed][admission][scheduler][fleetview]")
+{
+    // Two tickets that missed the SAME cache key, unstorable so the queue runs both, each on a worker of
+    // its own. A join by cache key would hand both rows one lease; the join by ticket id hands each its own.
+    Fleet fleet;
+    auto const first = fleet.RegisterWorker(/*slots=*/1);
+    constexpr std::string_view SecondEndpoint = "10.0.0.3:7100";
+    auto const registered = fleet.service.Register(
+        fleet.Worker(),
+        WorkerRegistration { .fingerprint = Toolchain, .endpoint = SecondEndpoint, .slots = 1, .codecs = {} });
+    REQUIRE(registered.status == Wire::Status::Ok);
+    auto const second = Unwrap(Wire::DecodeRegisterReply(registered.payload)).workerId;
+    REQUIRE(first != second);
+    fleet.Report(MachineOf(fleet.workerKey.PublicKey()), 1024 * MiB, 2);
+    auto const workerAt = [&](std::string_view endpoint) {
+        return endpoint == WorkerEndpoint ? first : second;
+    };
+
+    auto const older = fleet.Admit("same");
+    auto const olderGrant = GrantOf(fleet.service.PumpAdmission().at(0));
+    fleet.clock.advance(5s);
+    auto const newer = fleet.Admit("same");
+    auto const newerGrant = GrantOf(fleet.service.PumpAdmission().at(0));
+    REQUIRE(olderGrant.endpoint != newerGrant.endpoint);
+
+    auto const rows = CompilesOf(fleet.service);
+    REQUIRE(rows.size() == 2);
+    auto const olderRow = RowOf(rows, older);
+    auto const newerRow = RowOf(rows, newer);
+    CHECK(olderRow.worker == std::optional<std::string> { workerAt(olderGrant.endpoint) });
+    CHECK(newerRow.worker == std::optional<std::string> { workerAt(newerGrant.endpoint) });
+    CHECK(olderRow.leaseExpiresIn == std::optional<std::chrono::milliseconds> { olderGrant.lifetime - 5s });
+    CHECK(newerRow.leaseExpiresIn == std::optional<std::chrono::milliseconds> { newerGrant.lifetime });
+
+    // Settling one leaves the other joined to ITS lease, not to whatever lease remains for the key.
+    REQUIRE(fleet.service.SettleAdmission(older, Settlement { .outcome = Wire::SettleOutcome::NotStored, .peakBytes = {} })
+            == SettleResult::Settled);
+    auto const after = CompilesOf(fleet.service);
+    REQUIRE(after.size() == 1);
+    CHECK(after.front().ticket.ticket == newer);
+    CHECK(after.front().worker == std::optional<std::string> { workerAt(newerGrant.endpoint) });
+}
+
+TEST_CASE("SchedulerAdmission.a-local-placement-reports-worker-local-and-no-expiry",
+          "[distributed][admission][scheduler][fleetview]")
+{
+    Fleet fleet;
+    fleet.Report(fleet.service.OwnMachineId());
+    auto const ticket = fleet.Admit("k1", Wire::AdmitKind::LocalOnly);
+    REQUIRE(GrantOf(fleet.service.PumpAdmission().at(0)).kind == Wire::GrantKind::Local);
+
+    auto const row = RowOf(CompilesOf(fleet.service), ticket);
+    CHECK(row.ticket.state == TicketView::State::Running);
+    CHECK_FALSE(row.ticket.placement.has_value());
+    CHECK(row.worker == std::optional<std::string> { std::string { LocalCompileWorker } });
+    CHECK_FALSE(row.leaseExpiresIn.has_value());
+
+    auto const document = Unwrap(Json::Parse(RenderFleetJson(
+        CollectFleet({ .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics }), FleetHistoryView {})));
+    auto const json = CompileJsonOf(document, ticket);
+    CHECK(TextOf(json, "worker") == LocalCompileWorker);
+    CHECK(MemberOf(json, "lease-expires-in").IsNull());
+    // The requester exactly, by its key, beside the name a person reads.
+    CHECK(TextOf(json, "requester-key") == FormatEd25519PublicKey(fleet.signer.PublicKey()));
+    CHECK_FALSE(TextOf(json, "requester").empty());
+}
+
+TEST_CASE("SchedulerAdmission.queued-tickets-report-no-worker", "[distributed][admission][scheduler][fleetview]")
+{
+    Fleet fleet;
+    (void) fleet.RegisterWorker(/*slots=*/1);
+    fleet.Report(MachineOf(fleet.workerKey.PublicKey()), 1024 * MiB, 1);
+    (void) fleet.Admit("k1");
+    auto const queued = fleet.Admit("k2");
+    REQUIRE(fleet.service.PumpAdmission().size() == 1);
+
+    auto const row = RowOf(CompilesOf(fleet.service), queued);
+    CHECK(row.ticket.state == TicketView::State::Queued);
+    CHECK_FALSE(row.ticket.placement.has_value());
+    CHECK_FALSE(row.worker.has_value());
+    CHECK_FALSE(row.leaseExpiresIn.has_value());
+
+    // In the document the cells are ABSENT -- `null`, the fleet document's spelling of it -- never an
+    // empty string, `local`, or a zero.
+    auto const document = Unwrap(Json::Parse(RenderFleetJson(
+        CollectFleet({ .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics }), FleetHistoryView {})));
+    auto const json = CompileJsonOf(document, queued);
+    CHECK(TextOf(json, "state") == "queued");
+    CHECK(MemberOf(json, "worker").IsNull());
+    CHECK(MemberOf(json, "lease-expires-in").IsNull());
+}
+
+TEST_CASE("SchedulerAdmission.compile-totals-count-tickets-as-the-queue-does",
+          "[distributed][admission][scheduler][fleetview]")
+{
+    // Running equals what was granted and not settled, queued equals the queue's own depth, and a request
+    // waiting on an identical storable compile is a third state -- in neither of those, and still listed.
+    Fleet fleet;
+    (void) fleet.RegisterWorker(/*slots=*/2);
+    fleet.Report(MachineOf(fleet.workerKey.PublicKey()), 1024 * MiB, 2);
+    auto const owner = fleet.Admit("shared", Wire::AdmitKind::Dispatchable, /*storable=*/true);
+    auto const waiter = fleet.Admit("shared", Wire::AdmitKind::Dispatchable, /*storable=*/true);
+    (void) fleet.Admit("k2");
+    auto const queued = fleet.Admit("k3");
+    auto const granted = fleet.service.PumpAdmission();
+
+    auto const snapshot = CollectFleet({ .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics });
+    REQUIRE(snapshot.compiles.has_value());
+    REQUIRE(snapshot.admission.has_value());
+    auto const& compiles = Unwrap(snapshot.compiles);
+    auto const total = [&](TicketView::State state) {
+        return compiles.totals[static_cast<std::size_t>(state)];
+    };
+    CHECK(total(TicketView::State::Running) == granted.size());
+    CHECK(total(TicketView::State::Queued) == Unwrap(snapshot.admission).depth);
+    CHECK(total(TicketView::State::Waiting) == 1);
+    CHECK(compiles.rows.size() == 4);
+    CHECK(compiles.truncated == 0);
+
+    auto const stateOf = [&](Ticket ticket) {
+        return std::ranges::find(compiles.rows, ticket, [](FleetCompile const& c) { return c.compile.ticket.ticket; })
+            ->compile.ticket.state;
+    };
+    CHECK(stateOf(owner) == TicketView::State::Running);
+    CHECK(stateOf(waiter) == TicketView::State::Waiting);
+    CHECK(stateOf(queued) == TicketView::State::Queued);
+
+    CHECK(RenderFleetJson(snapshot, FleetHistoryView {})
+              .contains(std::format(R"("compile-totals":{{"queued":{},"waiting":1,"running":{}}})",
+                                    Unwrap(snapshot.admission).depth,
+                                    granted.size())));
+
+    // Woken by the owner's store and not yet answered, the waiter is still in progress: still waiting.
+    REQUIRE(fleet.service.SettleAdmission(owner, Settlement { .outcome = Wire::SettleOutcome::Stored, .peakBytes = {} })
+            == SettleResult::Settled);
+    CHECK(RowOf(CompilesOf(fleet.service), waiter).ticket.state == TicketView::State::Waiting);
+    (void) fleet.service.PumpAdmission();
+    auto const answered = CompilesOf(fleet.service);
+    CHECK(std::ranges::find(answered, waiter, [](CompileRow const& row) { return row.ticket.ticket; }) == answered.end());
+}
+
+TEST_CASE("SchedulerAdmission.compiles-over-the-ceiling-report-truncated", "[distributed][admission][scheduler][fleetview]")
+{
+    // Nothing reports a budget, so every ticket stays queued. One past the ceiling is left out of the
+    // list -- the NEWEST, since the list is oldest first -- and counted, and the totals still count it.
+    Fleet fleet;
+    std::vector<Ticket> tickets;
+    tickets.reserve(FleetJsonCompileCeiling + 1);
+    for ([[maybe_unused]] auto const index: std::views::iota(std::size_t { 0 }, FleetJsonCompileCeiling + 1))
+        tickets.push_back(fleet.Admit(std::format("k{}", index)));
+
+    auto const snapshot = CollectFleet({ .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics });
+    REQUIRE(snapshot.compiles.has_value());
+    auto const& compiles = Unwrap(snapshot.compiles);
+    CHECK(compiles.rows.size() == FleetJsonCompileCeiling);
+    CHECK(compiles.truncated == 1);
+    CHECK(compiles.totals[static_cast<std::size_t>(TicketView::State::Queued)] == FleetJsonCompileCeiling + 1);
+    CHECK(compiles.rows.front().compile.ticket.ticket == tickets.front());
+    CHECK(compiles.rows.back().compile.ticket.ticket == tickets[FleetJsonCompileCeiling - 1]);
+    CHECK(RenderFleetJson(snapshot, FleetHistoryView {}).contains(R"("compiles-truncated":1,)"));
+}
+
+TEST_CASE("SchedulerAdmission.fleet-collects-every-lease-past-the-page-window",
+          "[distributed][admission][scheduler][fleetview]")
+{
+    // The page shows `OutstandingLeaseRows`; the snapshot -- and so the JSON -- holds every live lease
+    // up to `FleetJsonLeaseCeiling`, so a program reading it is not handed the page's window as the whole.
+    constexpr auto Granted = static_cast<std::uint32_t>(OutstandingLeaseRows + 5);
+    Fleet fleet;
+    (void) fleet.RegisterWorker(Granted);
+    fleet.Report(MachineOf(fleet.workerKey.PublicKey()), Granted * 128 * MiB, Granted);
+    for (auto const index: std::views::iota(std::uint32_t { 0 }, Granted))
+        (void) fleet.Admit(std::format("k{}", index));
+    REQUIRE(fleet.service.PumpAdmission().size() == Granted);
+
+    auto const snapshot = CollectFleet({ .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics });
+    CHECK(snapshot.liveLeases == Granted);
+    CHECK(snapshot.outstandingLeases.size() == Granted);
+    CHECK(RenderFleetJson(snapshot, FleetHistoryView {}).contains(R"("leases-outstanding-truncated":0)"));
 }

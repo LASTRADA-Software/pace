@@ -3,6 +3,7 @@
 #include <Pace/Core/Ed25519.hpp>
 #include <Pace/Core/EnumTable.hpp>
 #include <Pace/Core/FigureText.hpp>
+#include <Pace/Core/Json.hpp>
 #include <Pace/Core/MachineName.hpp>
 #include <Pace/Core/NumericText.hpp>
 #include <Pace/Distributed/FleetChart.hpp>
@@ -31,6 +32,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 
@@ -173,17 +175,12 @@ namespace
 
     // ---------------------------------------------------------------- helpers
 
-    /// The two escapes live in `FleetText.hpp` so the chart renderer shares them
-    /// rather than carrying a third copy. Named as they were here, so no call site
-    /// moves.
+    /// The markup escape lives in `Core/Markup.hpp` so the chart renderer shares it
+    /// rather than carrying a second copy; a JSON string is written by the tree's one
+    /// JSON escaper, `Json::AppendString`. Named as it was here, so no call site moves.
     [[nodiscard]] std::string EscapeHtml(std::string_view text)
     {
         return EscapeMarkup(text);
-    }
-
-    void AppendJsonString(std::string& out, std::string_view text)
-    {
-        AppendJsonText(out, text);
     }
 
     /// How a human surface dresses one slot limit: the page's chip class, and the tone every other
@@ -281,7 +278,7 @@ namespace
                 out += WriteMachineFigure(cell.share, FigureFormat::Percent);
                 break;
             case FleetCell::Kind::Text:
-                AppendJsonString(out, cell.text);
+                Json::AppendString(out, cell.text);
                 break;
         }
     }
@@ -440,6 +437,130 @@ namespace
     [[nodiscard]] std::vector<AdmissionMachineRow> BudgetRowsOf(FleetSnapshot const& snapshot)
     {
         return snapshot.admission.has_value() ? snapshot.admission->machines : std::vector<AdmissionMachineRow> {};
+    }
+
+    /// A machine id as the queue holds it -- the identity key's raw bytes -- spelled as every
+    /// other surface spells a key, or absent when it is not one.
+    /// @param machine The raw bytes.
+    /// @return The cell.
+    [[nodiscard]] FleetCell MachineKeyCell(std::string_view machine)
+    {
+        if (machine.size() != Ed25519PublicKeyBytes)
+            return FleetCell::Nothing();
+        Ed25519PublicKey key {};
+        std::ranges::transform(machine, key.begin(), [](char byte) { return static_cast<std::byte>(byte); });
+        return FleetCell::Of(FormatEd25519PublicKey(key));
+    }
+
+    /// A duration a row may not have, in milliseconds, or the absence it already carries.
+    /// @param value The duration.
+    /// @return The cell.
+    [[nodiscard]] FleetCell MaybeMillis(std::optional<std::chrono::milliseconds> const& value)
+    {
+        // Never negative on the wire: a remainder past zero is a lease about to be swept, and the
+        // unsigned cell would otherwise wrap it into a huge number.
+        return value.has_value() ? FleetCell::Of(static_cast<std::uint64_t>(std::max<std::int64_t>(value->count(), 0)))
+                                 : FleetCell::Nothing();
+    }
+
+    /// What a compile row shows: one admission ticket, joined to its lease by the ticket id.
+    ///
+    /// Text a peer chose -- the source path, the tree and the toolchain label -- is rendered as sent;
+    /// `Json::AppendString` and `EscapeHtml` make it safe where it lands. Every cell the join could
+    /// not establish is ABSENT, never an empty string or a zero.
+    constexpr std::array<FleetColumn<FleetCompile>, 11> CompileColumns {
+        FleetColumn<FleetCompile> {
+            .name = "ticket",
+            .help = "The admission ticket: what the leader calls this compile from queue to settle.",
+            .format = CellFormat::Count,
+            .keep = ColumnKeep::Identity,
+            .project = [](FleetCompile const& c) { return FleetCell::Of(std::uint64_t { c.compile.ticket.ticket }); } },
+        FleetColumn<FleetCompile> { .name = "requester",
+                                    .help = "The machine that missed, by its display name.",
+                                    .format = CellFormat::Text,
+                                    .keep = ColumnKeep::Vital,
+                                    .project = [](FleetCompile const& c) { return FleetCell::Of(c.requester); } },
+        FleetColumn<FleetCompile> {
+            .name = "requester-key",
+            .help = "The requesting machine's identity key, exactly. Absent when the queue holds an id that is no key.",
+            .format = CellFormat::Text,
+            .keep = ColumnKeep::Detail,
+            .project = [](FleetCompile const& c) { return MachineKeyCell(c.compile.ticket.caller); } },
+        FleetColumn<FleetCompile> {
+            .name = "source",
+            .help = "The source file, as the requester stated it.",
+            .format = CellFormat::Text,
+            .keep = ColumnKeep::Vital,
+            .project = [](FleetCompile const& c) { return FleetCell::Of(c.compile.ticket.sourcePath); } },
+        FleetColumn<FleetCompile> {
+            .name = "fingerprint",
+            .help = "The toolchain fingerprint the request named. Empty for a local-only request that did not know it.",
+            .format = CellFormat::Text,
+            .keep = ColumnKeep::Detail,
+            .project = [](FleetCompile const& c) { return FleetCell::Of(c.compile.ticket.fingerprint); } },
+        FleetColumn<FleetCompile> { .name = "toolchain",
+                                    .help = "What the client calls the toolchain. Absent when it named none.",
+                                    .format = CellFormat::Text,
+                                    .keep = ColumnKeep::Useful,
+                                    .project =
+                                        [](FleetCompile const& c) {
+                                            return c.compile.toolchainLabel.empty()
+                                                       ? FleetCell::Nothing()
+                                                       : FleetCell::Of(c.compile.toolchainLabel);
+                                        } },
+        FleetColumn<FleetCompile> {
+            .name = "tree",
+            .help = "The build tree the client compiles for, as it labelled itself.",
+            .format = CellFormat::Text,
+            .keep = ColumnKeep::Useful,
+            .project = [](FleetCompile const& c) { return FleetCell::Of(c.compile.ticket.treeLabel); } },
+        FleetColumn<FleetCompile> {
+            .name = "state",
+            .help = "queued: waiting for memory or a slot. waiting: waiting on an identical compile to store its "
+                    "result. running: granted and not yet settled.",
+            .format = CellFormat::Text,
+            .keep = ColumnKeep::Vital,
+            .project =
+                [](FleetCompile const& c) {
+                    return FleetCell::Of(
+                        std::string { TicketStateTable[static_cast<std::size_t>(c.compile.ticket.state)].key });
+                } },
+        FleetColumn<FleetCompile> { .name = "age",
+                                    .help = "Since the request was queued, any wait included.",
+                                    .format = CellFormat::Millis,
+                                    .keep = ColumnKeep::Vital,
+                                    .project =
+                                        [](FleetCompile const& c) {
+                                            return FleetCell::Of(static_cast<std::uint64_t>(c.compile.ticket.age.count()));
+                                        } },
+        FleetColumn<FleetCompile> {
+            .name = "worker",
+            .help = "The worker running it, or local when it runs on the requester itself. Absent while it is queued, "
+                    "and for a running compile whose lease is gone.",
+            .format = CellFormat::Text,
+            .keep = ColumnKeep::Vital,
+            .project =
+                [](FleetCompile const& c) {
+                    return c.compile.worker.has_value() ? FleetCell::Of(*c.compile.worker) : FleetCell::Nothing();
+                } },
+        FleetColumn<FleetCompile> {
+            .name = "lease-expires-in",
+            .help = "What is left of the worker lease. Absent where there is no lease: queued, or run locally.",
+            .format = CellFormat::Millis,
+            .keep = ColumnKeep::Useful,
+            .project = [](FleetCompile const& c) { return MaybeMillis(c.compile.leaseExpiresIn); } },
+    };
+
+    /// What the compile section says about its own completeness on the page.
+    /// @param section The section.
+    /// @return The header's meta line.
+    [[nodiscard]] std::string CompileMeta(CompileSection const& section)
+    {
+        auto const total = section.rows.size() + section.truncated;
+        auto const shown = std::min(section.rows.size(), DashboardCompileRows);
+        if (shown < total)
+            return std::format("the {} oldest of {}", shown, total);
+        return "oldest first";
     }
 
     /// One row of the conditions section: a machine, and one condition it reported (#1364).
@@ -821,9 +942,20 @@ namespace
     /// @return The header's meta line.
     [[nodiscard]] std::string OutstandingLeaseMeta(FleetSnapshot const& snapshot)
     {
-        if (snapshot.outstandingLeases.size() < snapshot.liveLeases)
-            return std::format("the {} oldest of {}", snapshot.outstandingLeases.size(), snapshot.liveLeases);
+        // The page shows `OutstandingLeaseRows` of what the snapshot holds, which may be more.
+        auto const shown = std::min(snapshot.outstandingLeases.size(), OutstandingLeaseRows);
+        if (shown < snapshot.liveLeases)
+            return std::format("the {} oldest of {}", shown, snapshot.liveLeases);
         return "oldest first";
+    }
+
+    /// The leases a human surface lists: the oldest `OutstandingLeaseRows` the snapshot holds.
+    /// @param snapshot What to read; must outlive the span.
+    /// @return The window.
+    [[nodiscard]] std::span<LeaseHolding const> ShownLeases(FleetSnapshot const& snapshot) noexcept
+    {
+        return std::span { snapshot.outstandingLeases }.first(
+            std::min(snapshot.outstandingLeases.size(), OutstandingLeaseRows));
     }
 
     /// The per-tier cache columns, rendered once per tier a member actually runs.
@@ -939,7 +1071,8 @@ namespace
     {
         auto whole = ColumnNamesAreKebab(MemberColumns) && ColumnNamesAreKebab(NodeColumns)
                      && ColumnNamesAreKebab(WorkerColumns) && ColumnNamesAreKebab(LeaseColumns)
-                     && ColumnNamesAreKebab(ConditionColumns) && IsKebabName(TierEndpointColumn);
+                     && ColumnNamesAreKebab(ConditionColumns) && ColumnNamesAreKebab(CompileColumns)
+                     && IsKebabName(TierEndpointColumn);
         for (auto const& tier: StorageTierTable)
             for (auto const& column: TierColumns)
                 whole = whole && IsKebabJoin({ tier.name, TierColumnSeparator, column.suffix });
@@ -947,6 +1080,8 @@ namespace
             whole && std::ranges::all_of(FleetSectionTable, [](FleetSectionRow const& row) { return IsKebabName(row.key); });
         whole =
             whole && std::ranges::all_of(LeaseOutcomeTable, [](LeaseOutcomeRow const& row) { return IsKebabName(row.key); });
+        whole =
+            whole && std::ranges::all_of(TicketStateTable, [](TicketStateRow const& row) { return IsKebabName(row.key); });
         whole =
             whole && std::ranges::all_of(FleetSeriesTable, [](FleetSeriesRow const& row) { return IsKebabName(row.key); });
         return whole;
@@ -1165,6 +1300,36 @@ namespace
         std::ranges::sort(section.machines, {}, &AdmissionMachineRow::machine);
         return section;
     }
+
+    /// The scheduler's joined tickets, oldest first, counted in full and listed up to the ceiling.
+    /// @param tickets The rows, or none when this node leads no queue.
+    /// @param workers Where the requesters' names come from.
+    /// @return The section, or none.
+    [[nodiscard]] std::optional<CompileSection> CompileSectionOf(std::optional<std::vector<CompileRow>> tickets,
+                                                                 std::vector<WorkerReport> const& workers)
+    {
+        if (!tickets.has_value())
+            return std::nullopt;
+        CompileSection section;
+        // Counted BEFORE the cut, over every ticket: a reader totalling the listed rows of a truncated
+        // list would otherwise undercount exactly when the fleet is busiest.
+        for (auto const& row: *tickets)
+            ++section.totals[static_cast<std::size_t>(row.ticket.state)];
+        // Oldest first, the ticket breaking a tie so a document is reproducible: tickets are minted in
+        // enqueue order, and two in one clock tick are ordinary on a wide build.
+        std::ranges::sort(*tickets, [](CompileRow const& a, CompileRow const& b) {
+            return a.ticket.age != b.ticket.age ? a.ticket.age > b.ticket.age : a.ticket.ticket < b.ticket.ticket;
+        });
+        auto const keep = std::min(tickets->size(), FleetJsonCompileCeiling);
+        section.truncated = tickets->size() - keep;
+        section.rows.reserve(keep);
+        for (auto& row: *tickets | std::views::take(keep))
+        {
+            auto requester = MachineNameOf(row.ticket.caller, workers);
+            section.rows.push_back(FleetCompile { .compile = std::move(row), .requester = std::move(requester) });
+        }
+        return section;
+    }
 } // namespace
 
 FleetSnapshot CollectFleet(FleetSources const& sources)
@@ -1180,7 +1345,8 @@ FleetSnapshot CollectFleet(FleetSources const& sources)
 
     // Both halves from ONE call, so the count and the listing cannot disagree about
     // how much was left out -- see `LeaseListing`.
-    auto const held = sources.scheduler->OutstandingLeases(OutstandingLeaseRows);
+    // Up to the JSON's ceiling; the page and the text document show the oldest `OutstandingLeaseRows` of them.
+    auto const held = sources.scheduler->OutstandingLeases(FleetJsonLeaseCeiling);
     snapshot.liveLeases = held.total;
 
     // Joined against `snapshot.workers`, which is already in hand -- so the address
@@ -1221,6 +1387,7 @@ FleetSnapshot CollectFleet(FleetSources const& sources)
         snapshot.tiersPresent[static_cast<std::size_t>(tier.tier)] = AnyNodeHasTier(snapshot.nodes, tier.tier);
 
     snapshot.admission = AdmissionSectionOf(sources.scheduler->AdmissionDetailNow(), snapshot.workers);
+    snapshot.compiles = CompileSectionOf(sources.scheduler->CompileTickets(), snapshot.workers);
 
     return snapshot;
 }
@@ -1272,7 +1439,7 @@ namespace
     template <typename Subject, std::size_t N>
     void AppendTextRows(std::string& out,
                         std::array<FleetColumn<Subject>, N> const& columns,
-                        std::vector<Subject> const& subjects)
+                        std::type_identity_t<std::span<Subject const>> subjects)
     {
         bool firstCell = true;
         for (auto const& column: columns)
@@ -1299,7 +1466,7 @@ namespace
     template <typename Subject, std::size_t N>
     void AppendJsonRows(std::string& out,
                         std::array<FleetColumn<Subject>, N> const& columns,
-                        std::vector<Subject> const& subjects)
+                        std::type_identity_t<std::span<Subject const>> subjects)
     {
         out += '[';
         bool firstRow = true;
@@ -1313,7 +1480,7 @@ namespace
             {
                 if (!std::exchange(firstCell, false))
                     out += ',';
-                AppendJsonString(out, column.name);
+                Json::AppendString(out, column.name);
                 out += ':';
                 AppendCellAsJson(out, column.project(subject));
             }
@@ -1473,7 +1640,7 @@ namespace
     template <typename Subject, std::size_t N>
     void AppendHtmlRows(std::string& out,
                         std::array<FleetColumn<Subject>, N> const& columns,
-                        std::vector<Subject> const& subjects)
+                        std::type_identity_t<std::span<Subject const>> subjects)
     {
         out += "<table><thead><tr>";
         for (auto const& column: columns)
@@ -1504,22 +1671,22 @@ std::string RenderFleetJson(FleetSnapshot const& snapshot, FleetHistoryView cons
 
     // FIRST, so a reader that streams can decide what it is reading before it reaches a
     // value whose meaning the generation settles.
-    AppendJsonString(out, "schema");
+    Json::AppendString(out, "schema");
     out += std::format(":{},", FleetJsonSchema);
 
-    AppendJsonString(out, "role");
+    Json::AppendString(out, "role");
     out += ':';
-    AppendJsonString(out, RoleName(snapshot.role));
+    Json::AppendString(out, RoleName(snapshot.role));
 
     out += ',';
-    AppendJsonString(out, "leader");
+    Json::AppendString(out, "leader");
     out += ':';
     // Absent, not an empty string: while an election is in progress there is
     // nobody to name, which is a different fact from a leader whose address is "".
     if (snapshot.leaderEndpoint.empty())
         out += "null";
     else
-        AppendJsonString(out, snapshot.leaderEndpoint);
+        Json::AppendString(out, snapshot.leaderEndpoint);
 
     // The headline figures, keyed by the name each `KpiTable` row carries (#1302).
     //
@@ -1542,7 +1709,7 @@ std::string RenderFleetJson(FleetSnapshot const& snapshot, FleetHistoryView cons
     AppendKpiJson(out, snapshot, history);
 
     out += ',';
-    AppendJsonString(out, "members");
+    Json::AppendString(out, "members");
     out += ':';
     if (snapshot.cluster.has_value())
         AppendJsonRows(out, MemberColumns, snapshot.cluster->members);
@@ -1553,12 +1720,12 @@ std::string RenderFleetJson(FleetSnapshot const& snapshot, FleetHistoryView cons
     // reported none (#1364) -- so *absent* and *nothing raised* are two shapes a consumer can
     // tell apart without knowing which states are quiet.
     out += ',';
-    AppendJsonString(out, "conditions");
+    Json::AppendString(out, "conditions");
     out += ':';
     AppendJsonRows(out, ConditionColumns, ConditionRowsOf(snapshot));
 
     out += ',';
-    AppendJsonString(out, "revoked");
+    Json::AppendString(out, "revoked");
     out += ':';
     if (snapshot.cluster.has_value())
         AppendJsonRows(out, RevokedColumns, snapshot.cluster->revokedKeys);
@@ -1567,7 +1734,7 @@ std::string RenderFleetJson(FleetSnapshot const& snapshot, FleetHistoryView cons
 
     // The compile queue (#1728): `null` where this node leads none, never a queue of zero.
     out += ',';
-    AppendJsonString(out, "admission");
+    Json::AppendString(out, "admission");
     out += ':';
     if (snapshot.admission.has_value())
     {
@@ -1581,14 +1748,14 @@ std::string RenderFleetJson(FleetSnapshot const& snapshot, FleetHistoryView cons
         out += "null";
 
     out += ',';
-    AppendJsonString(out, "nodes");
+    Json::AppendString(out, "nodes");
     out += ':';
     AppendJsonRows(out, NodeColumns, snapshot.nodes);
 
     // The per-tier columns travel as their own object per node, so a tier no
     // member runs contributes no key at all rather than a null nobody asked for.
     out += ',';
-    AppendJsonString(out, "node-tiers");
+    Json::AppendString(out, "node-tiers");
     out += ":[";
     bool firstNode = true;
     for (auto const& node: snapshot.nodes)
@@ -1596,9 +1763,9 @@ std::string RenderFleetJson(FleetSnapshot const& snapshot, FleetHistoryView cons
         if (!std::exchange(firstNode, false))
             out += ',';
         out += '{';
-        AppendJsonString(out, TierEndpointColumn);
+        Json::AppendString(out, TierEndpointColumn);
         out += ':';
-        AppendJsonString(out, node.endpoint);
+        Json::AppendString(out, node.endpoint);
         for (auto const& tier: StorageTierTable)
         {
             if (!snapshot.tiersPresent[static_cast<std::size_t>(tier.tier)])
@@ -1606,7 +1773,7 @@ std::string RenderFleetJson(FleetSnapshot const& snapshot, FleetHistoryView cons
             for (auto const& column: TierColumns)
             {
                 out += ',';
-                AppendJsonString(out, TierColumnName(tier.tier, column.suffix));
+                Json::AppendString(out, TierColumnName(tier.tier, column.suffix));
                 out += ':';
                 AppendCellAsJson(out, column.project(node, tier.tier));
             }
@@ -1616,25 +1783,25 @@ std::string RenderFleetJson(FleetSnapshot const& snapshot, FleetHistoryView cons
     out += ']';
 
     out += ',';
-    AppendJsonString(out, "workers");
+    Json::AppendString(out, "workers");
     out += ':';
     AppendJsonRows(out, WorkerColumns, snapshot.workers);
 
     out += ',';
-    AppendJsonString(out, "leases");
+    Json::AppendString(out, "leases");
     out += ":{";
     for (auto const index: std::views::iota(std::size_t { 0 }, LeaseOutcomeTable.size()))
     {
         if (index != 0)
             out += ',';
-        AppendJsonString(out, LeaseOutcomeTable[index].key);
+        Json::AppendString(out, LeaseOutcomeTable[index].key);
         out += ':';
         out += std::format("{}", CountAt(snapshot, index));
     }
     out += '}';
 
     out += ',';
-    AppendJsonString(out, "leases-outstanding");
+    Json::AppendString(out, "leases-outstanding");
     out += std::format(":{}", snapshot.liveLeases);
 
     // A separate key from the count above rather than a replacement for it, and its
@@ -1643,11 +1810,51 @@ std::string RenderFleetJson(FleetSnapshot const& snapshot, FleetHistoryView cons
     // reader comparing the two sees the truncation instead of having to know about
     // it.
     out += ',';
-    AppendJsonString(out, "leases-outstanding-oldest");
+    Json::AppendString(out, "leases-outstanding-oldest");
     out += ':';
     AppendJsonRows(out, LeaseColumns, snapshot.outstandingLeases);
+    // How many live leases the list above leaves out, past `FleetJsonLeaseCeiling`: a cut-short list
+    // says so in a number, never by a reader comparing two keys.
     out += ',';
-    AppendJsonString(out, "registrations");
+    Json::AppendString(out, "leases-outstanding-truncated");
+    out += std::format(":{}", snapshot.liveLeases - std::min(snapshot.liveLeases, snapshot.outstandingLeases.size()));
+
+    // Every compile in progress (#1728): the admission tickets, each running one joined to its lease by
+    // ticket id. `null` -- all three keys -- where this node leads no queue, never an empty fleet.
+    out += ',';
+    Json::AppendString(out, "compiles");
+    out += ':';
+    if (snapshot.compiles.has_value())
+        AppendJsonRows(out, CompileColumns, snapshot.compiles->rows);
+    else
+        out += "null";
+    out += ',';
+    Json::AppendString(out, "compiles-truncated");
+    out += ':';
+    if (snapshot.compiles.has_value())
+        out += std::format("{}", snapshot.compiles->truncated);
+    else
+        out += "null";
+    // The totals over EVERY ticket, keyed by `TicketStateTable`: a reader never sums a truncated list.
+    out += ',';
+    Json::AppendString(out, "compile-totals");
+    out += ':';
+    if (snapshot.compiles.has_value())
+    {
+        out += '{';
+        for (auto const& row: TicketStateTable)
+        {
+            if (row.state != TicketView::State {})
+                out += ',';
+            Json::AppendString(out, row.key);
+            out += std::format(":{}", snapshot.compiles->totals[static_cast<std::size_t>(row.state)]);
+        }
+        out += '}';
+    }
+    else
+        out += "null";
+    out += ',';
+    Json::AppendString(out, "registrations");
     out += std::format(":{}", snapshot.registrations);
 
     out += '}';
@@ -1739,7 +1946,7 @@ namespace
                 AppendTextRows(out, WorkerColumns, snapshot.workers);
                 return;
             case FleetSection::Leases:
-                AppendTextRows(out, LeaseColumns, snapshot.outstandingLeases);
+                AppendTextRows(out, LeaseColumns, ShownLeases(snapshot));
                 return;
             case FleetSection::Members:
                 // An empty vector where the node runs no cluster at all, which is a
@@ -2682,7 +2889,7 @@ footer { margin-top:2.4rem; padding-top:1rem; border-top:1px solid var(--line);
     /// @param history The window the history-derived figures answer for.
     void AppendKpiJson(std::string& out, FleetSnapshot const& snapshot, FleetHistoryView const& history)
     {
-        AppendJsonString(out, "kpi");
+        Json::AppendString(out, "kpi");
         out += ":{";
         bool firstKpi = true;
         for (auto const& row: KpiTable)
@@ -2690,19 +2897,19 @@ footer { margin-top:2.4rem; padding-top:1rem; border-top:1px solid var(--line);
             if (!std::exchange(firstKpi, false))
                 out += ',';
             auto const readout = row.project(snapshot, history);
-            AppendJsonString(out, row.key);
+            Json::AppendString(out, row.key);
             out += ":{";
-            AppendJsonString(out, "value");
+            Json::AppendString(out, "value");
             out += ':';
             AppendCellAsJson(out, readout.value);
             out += ',';
             // The scale, because the key alone cannot say whether 853 is a count or
             // eight-hundred-and-fifty-three thousandths.
-            AppendJsonString(out, "unit");
+            Json::AppendString(out, "unit");
             out += ':';
-            AppendJsonString(out, CellFormatTable[static_cast<std::size_t>(readout.format)].name);
+            Json::AppendString(out, CellFormatTable[static_cast<std::size_t>(readout.format)].name);
             out += ',';
-            AppendJsonString(out, "of");
+            Json::AppendString(out, "of");
             out += ':';
             AppendCellAsJson(out, readout.of);
             out += '}';
@@ -3141,6 +3348,36 @@ namespace
         AppendHtmlRows(out, ConditionColumns, rows);
         out += "</div></details></div></section>";
     }
+    /// Append the page's Compiles section: every compile in progress, one row per admission ticket,
+    /// joined to its worker lease by ticket id, the oldest `DashboardCompileRows` of them.
+    /// @param out Appended to.
+    /// @param snapshot What to read.
+    void AppendCompilesHtml(std::string& out, FleetSnapshot const& snapshot)
+    {
+        auto const noCompiles = std::vector<FleetCompile> {};
+        auto const& compileRows = snapshot.compiles.has_value() ? snapshot.compiles->rows : noCompiles;
+        out += std::format(R"(<section><div class="sec-head"><h2>Compiles</h2><span class="rule"></span>)"
+                           R"(<span class="meta">{}</span></div><div class="panel wrap">)",
+                           EscapeHtml(snapshot.compiles.has_value() ? CompileMeta(*snapshot.compiles) : "no queue"));
+        AppendHtmlRows(
+            out, CompileColumns, std::span { compileRows }.first(std::min(compileRows.size(), DashboardCompileRows)));
+        out += "</div>";
+        if (snapshot.compiles.has_value())
+        {
+            // The totals walk `TicketStateTable`, so a state added there reaches this line as a row.
+            out += R"(<p class="note">)";
+            for (auto const& row: TicketStateTable)
+                out += std::format("{}{} {}",
+                                   row.state == TicketView::State {} ? "" : ", ",
+                                   snapshot.compiles->totals[static_cast<std::size_t>(row.state)],
+                                   EscapeHtml(row.key));
+            out += ".</p>";
+        }
+        else
+            out += R"(<p class="note">This node leads no compile queue, so it knows of no compiles: )"
+                   R"(not a fleet with nothing compiling.</p>)";
+        out += "</section>";
+    }
 } // namespace
 
 std::string RenderFleetHtml(FleetSnapshot const& snapshot, FleetHistoryView const& history, unsigned refreshSeconds)
@@ -3299,7 +3536,7 @@ std::string RenderFleetHtml(FleetSnapshot const& snapshot, FleetHistoryView cons
     out += std::format(R"(<section><div class="sec-head"><h2>Leases outstanding</h2><span class="rule"></span>)"
                        R"(<span class="meta">{}</span></div><div class="panel wrap">)",
                        EscapeHtml(OutstandingLeaseMeta(snapshot)));
-    AppendHtmlRows(out, LeaseColumns, snapshot.outstandingLeases);
+    AppendHtmlRows(out, LeaseColumns, ShownLeases(snapshot));
     out += "</div>";
     out += R"(<p class="note">A client hands its lease back when the job ends, however it ended, so one that has )"
            R"(been outstanding for minutes is not waiting to age out: it is a client that died mid-build, and the )"
@@ -3441,6 +3678,8 @@ std::string RenderFleetHtml(FleetSnapshot const& snapshot, FleetHistoryView cons
         out += R"(<p class="note">This node leads no compile queue, so there is nothing to show: )"
                R"(not a queue of zero.</p>)";
     out += "</section>";
+
+    AppendCompilesHtml(out, snapshot);
 
     out += R"(<footer>/metrics remains the source of truth for anything alertable)";
     if (refreshSeconds != 0)

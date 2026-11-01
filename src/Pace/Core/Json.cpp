@@ -538,8 +538,6 @@ namespace
         TextEscape { .byte = '\n', .spelling = "\\n" }, TextEscape { .byte = '\r', .spelling = "\\r" },
         TextEscape { .byte = '\t', .spelling = "\\t" },
     };
-
-    inline constexpr std::string_view JsonReplacementEscape = "\\ufffd";
 } // namespace
 
 std::expected<Value, Error> Parse(std::string_view text, ParseLimits const& limits)
@@ -577,7 +575,7 @@ void AppendString(std::string& out, std::string_view utf8)
         }
         else
         {
-            out += JsonReplacementEscape;
+            out += ReplacementEscape;
             utf8.remove_prefix(1);
         }
     }

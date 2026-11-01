@@ -3,6 +3,7 @@
 #include "NodeConditions.hpp"
 #include "NodeIdentity.hpp"
 
+#include <Pace/Core/Json.hpp>
 #include <Pace/Core/Logger.hpp>
 #include <Pace/Distributed/FleetChart.hpp>
 #include <Pace/Distributed/FleetText.hpp>
@@ -2180,4 +2181,27 @@ TEST_CASE("A compile the admission queue placed on a worker reads as dispatched 
     REQUIRE(json.status == "200 OK");
     // Exactly one: the compile the queue placed, and neither the absent `null` nor the `0` it read before.
     CHECK(json.body.contains(R"("dispatched":{"value":1,)"));
+}
+
+TEST_CASE("/fleet.json refuses an unknown range in JSON and still ignores a section", "[node][admin][fleettext]")
+{
+    // The route answers through `AnswerFleetText`, whose refusal is a sentence: the route carries it as
+    // a JSON string, so a scraper reading the 400 still reads JSON, and it names every range served.
+    ChartFixture const fixture;
+    auto const refused = fixture.Get("/fleet.json", "range=30d");
+    REQUIRE(refused.status == "400 Bad Request");
+    auto const document = Json::Parse(refused.body);
+    REQUIRE(document.has_value());
+    auto const* const error = Testing::Unwrap(document).Find("error");
+    REQUIRE(error != nullptr);
+    REQUIRE(error->AsString() != nullptr);
+    for (auto const& row: Distributed::FleetRangeTable)
+    {
+        INFO("range " << row.key);
+        CHECK(error->AsString()->contains(row.key));
+    }
+
+    // The route never read `section`, and routing it through the verb's derivation does not start to:
+    // the JSON is one document, so a stray parameter is not a refusal here.
+    CHECK(fixture.Get("/fleet.json", "section=machines").status == "200 OK");
 }

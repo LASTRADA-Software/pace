@@ -138,6 +138,9 @@ struct Error
 /// @return The text.
 [[nodiscard]] std::string Serialize(Value const& value);
 
+/// How `AppendString` spells a byte that belongs to no valid UTF-8 sequence: U+FFFD, escaped.
+inline constexpr std::string_view ReplacementEscape = "\\ufffd";
+
 /// Append one JSON string literal, quotes included.
 ///
 /// Escapes `"`, `\` and every control character; a byte that belongs to no valid UTF-8 sequence is

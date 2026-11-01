@@ -720,7 +720,7 @@ SchedulerService::SchedulerService(core::platform::IClock& clock,
     _unserved { clock },
     _estimates { admissionEstimateBytes, AdmissionEstimateCapacity },
     _placement { _workers },
-    _queue { _estimates, _placement }
+    _queue { _clock, _estimates, _placement }
 {
 }
 
