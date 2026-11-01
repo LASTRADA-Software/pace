@@ -270,11 +270,15 @@ class IFleetHistoryView
 /// @param history The history the figures and the series draw on, or null to draw none.
 /// @param sectionKey A `FleetSectionTable` key, or empty for every whole-document section.
 /// @param rangeKey A `FleetRangeTable` key, or empty for the day.
+/// @param format `Text` for the tables; `Json` for the body `/fleet.json` serves, rendered by the
+///        same `RenderFleetJson` over the same history view. `Json` takes no section: it is one
+///        document, and a section accepted and silently dropped is the answer this refuses.
 /// @return The document, or `UnknownSelector` with every key this build serves.
 [[nodiscard]] std::expected<FleetTextDocument, FleetTextDeclined> AnswerFleetText(Distributed::FleetSnapshot const& snapshot,
                                                                                   IFleetHistoryView const* history,
                                                                                   std::string_view sectionKey,
-                                                                                  std::string_view rangeKey);
+                                                                                  std::string_view rangeKey,
+                                                                                  CompileCacheWire::FleetTextFormat format);
 
 [[nodiscard]] std::vector<AdminRoute> MakeFleetRoutes(Distributed::FleetSources sources,
                                                       AdminCredential const& credential,

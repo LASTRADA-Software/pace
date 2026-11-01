@@ -231,7 +231,12 @@ using WireVersion = std::uint8_t;
 /// charge, the object key and the source path), where an empty charge means none was stated. An
 /// older client cannot step over a pulse on a verb it does not know, which is
 /// the argument that moved the floor at version 3.
-inline constexpr WireVersion CurrentVersion = 16;
+///
+/// **17 lets FLEET-TEXT carry the fleet JSON** (the MCP surface): the request gained a trailing
+/// `format` field, and the reply for `Json` is `/fleet.json`'s body byte for byte. `WireSurface`
+/// also gained `Mcp`. A version-16 request has three fields where this build reads four, so it is
+/// refused by number, naming the range, before any field is read.
+inline constexpr WireVersion CurrentVersion = 17;
 
 /// The oldest version this build still accepts. Equal to `CurrentVersion` while
 /// only one version exists; widen the range when a second one ships and this
@@ -396,7 +401,11 @@ inline constexpr WireVersion CurrentVersion = 16;
 /// Version 16 moves it for version 3's reason: ADMIT's reply may carry `Status::Progress`, and a
 /// REPLY has a status byte and no kind, so a version-15 client could only read a pulse as a
 /// transport failure. Its request is refused by number, naming the range, before a byte is sent.
-inline constexpr WireVersion MinSupportedVersion = 16;
+///
+/// Version 17 moves it for version 3's reason: FLEET-TEXT's field count is part of the grammar, and
+/// a version-16 request would otherwise be refused as a malformed frame, a confident wrong
+/// diagnosis for a version mismatch.
+inline constexpr WireVersion MinSupportedVersion = 17;
 
 /// Size of the fixed request header: magic, version, op, payload length.
 inline constexpr std::size_t RequestHeaderSize = WireFrame::HeaderSize;
@@ -2622,7 +2631,7 @@ inline constexpr std::array OpTable {
     // fleet map.
     OpDescriptor { .code = Op::FleetText,
                    .name = "fleet-text",
-                   .fieldCount = 3, // section key, range key, dashboard token
+                   .fieldCount = 4, // section key, range key, dashboard token, format
                    .legalStatuses = static_cast<std::uint8_t>(StatusBit(Status::Ok) | StatusBit(Status::Error)),
                    .preAuth = RequiresAuth,
                    .maxPayload = BoundedTo(MaxControlPayload),
@@ -6508,6 +6517,7 @@ enum class WireSurface : std::uint8_t
     Admin = 0x01,     ///< `/metrics`, `/healthz`, the fleet dashboard.
     Raft = 0x02,      ///< Consensus traffic between peers.
     Discovery = 0x03, ///< The LAN beacon.
+    Mcp = 0x04,       ///< MCP for a session on this machine; loopback only.
 };
 
 /// **The `0xFC` port itself is deliberately not a `WireSurface`.**
@@ -7967,6 +7977,7 @@ struct CordonFields
             case WireSurface::Admin:
             case WireSurface::Raft:
             case WireSurface::Discovery:
+            case WireSurface::Mcp:
                 break;
             default:
                 continue;
@@ -10081,6 +10092,17 @@ struct SubscribeRequest
                               .dashboardToken = std::string { AsStringView((*fields)[2]) } };
 }
 
+/// Which document a FLEET-TEXT request asks for.
+///
+/// **Transmitted**, so the values are explicit and part of the wire (the request's fourth field is
+/// this byte). `Json` is `/fleet.json`'s body, byte for byte, and takes no section.
+enum class FleetTextFormat : std::uint8_t
+{
+    Text = 0, ///< The tab-separated tables `/fleet.txt` serves.
+    Json = 1, ///< The document `/fleet.json` serves.
+    Last = 2, ///< Count; never a format.
+};
+
 /// A FLEET-TEXT request's fields: the words a reader typed, which the leader looks up.
 ///
 /// **Keys rather than enumerators**, for the reason `/fleet.txt` takes them as query words: which
@@ -10093,6 +10115,8 @@ struct FleetTextRequest
     std::string range {};   ///< A `FleetRangeTable` key, or empty for the default day.
     /// The dashboard credential, or empty; a secret, so the request is the only place it travels.
     std::string dashboardToken {};
+    /// Which document is wanted; the request's fourth and last field.
+    FleetTextFormat format { FleetTextFormat::Text };
 };
 
 /// Frame a FLEET-TEXT request.
@@ -10102,21 +10126,31 @@ struct FleetTextRequest
 [[nodiscard]] inline std::vector<std::byte> EncodeFleetTextRequest(FleetTextRequest const& request,
                                                                    WireVersion version = CurrentVersion)
 {
-    return Detail::EncodeRequest(
-        version, Op::FleetText, { AsBytes(request.section), AsBytes(request.range), AsBytes(request.dashboardToken) });
+    auto const formatByte = static_cast<std::byte>(request.format);
+    return Detail::EncodeRequest(version,
+                                 Op::FleetText,
+                                 { AsBytes(request.section),
+                                   AsBytes(request.range),
+                                   AsBytes(request.dashboardToken),
+                                   std::span<std::byte const> { &formatByte, 1 } });
 }
 
 /// Decode a FLEET-TEXT request's payload.
 /// @param payload The request body.
-/// @return The request, or nullopt when its fields do not exactly fill it.
+/// @return The request, or nullopt when its fields do not exactly fill it or the format byte
+///         names no `FleetTextFormat`.
 [[nodiscard]] inline std::optional<FleetTextRequest> DecodeFleetTextRequest(std::span<std::byte const> payload)
 {
     auto const fields = WireFields::SplitExactly(payload, OpFieldCount(Op::FleetText));
     if (!fields.has_value())
         return std::nullopt;
+    if ((*fields)[3].size() != 1
+        || std::to_integer<std::uint8_t>((*fields)[3][0]) >= static_cast<std::uint8_t>(FleetTextFormat::Last))
+        return std::nullopt;
     return FleetTextRequest { .section = std::string { AsStringView((*fields)[0]) },
                               .range = std::string { AsStringView((*fields)[1]) },
-                              .dashboardToken = std::string { AsStringView((*fields)[2]) } };
+                              .dashboardToken = std::string { AsStringView((*fields)[2]) },
+                              .format = static_cast<FleetTextFormat>(std::to_integer<std::uint8_t>((*fields)[3][0])) };
 }
 
 /// The cadence a server grants for @p subject when asked for @p asked.

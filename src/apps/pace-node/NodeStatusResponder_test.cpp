@@ -104,8 +104,10 @@ class CapturedReadings final: public ILiveStatsSources
     ///
     /// No fleet: `NodeMetrics` reads a node's own tier, and a case here that reached the fleet
     /// document would be asserting something this responder never renders.
-    [[nodiscard]] std::expected<FleetTextDocument, FleetTextDeclined> FleetText(std::string_view /*section*/,
-                                                                                std::string_view /*range*/) const override
+    [[nodiscard]] std::expected<FleetTextDocument, FleetTextDeclined> FleetText(
+        std::string_view /*section*/,
+        std::string_view /*range*/,
+        CompileCacheWire::FleetTextFormat /*format*/) const override
     {
         return std::unexpected(FleetTextDeclined { .refusal = FleetTextRefusal::NoFleet, .detail = {} });
     }
@@ -222,6 +224,7 @@ struct ConfigShape
     bool admin { false };         ///< Give `--listen-admin` an address.
     bool raft { false };          ///< Give `--listen-raft` an address.
     bool discovery { false };     ///< Give `--discovery` an address.
+    bool mcp { false };           ///< Give `--mcp-listen` an address.
     bool tlsPair { false };       ///< Name a certificate AND a key.
     bool tlsCertOnly { false };   ///< Name a certificate and no key.
     bool tlsSelfSigned { false }; ///< Ask for material to be made.
@@ -245,6 +248,8 @@ struct ConfigShape
     if (shape.raft)
         cfg.raftListen = shape.raftWildcard ? std::format("{}", RaftPort) : std::format("127.0.0.1:{}", RaftPort);
     cfg.raftSelf = std::string { shape.raftSelf };
+    if (shape.mcp)
+        cfg.mcpListen = "127.0.0.1:6677";
     cfg.discoveryAddress = shape.discovery ? std::format("0.0.0.0:{}", DiscoveryPort) : std::string {};
     if (shape.tlsPair || shape.tlsCertOnly)
         cfg.tlsCertFile = "cert.pem";
@@ -358,6 +363,22 @@ struct Fixture
 }
 
 } // namespace
+
+TEST_CASE("A node reports the MCP surface exactly when --mcp-listen resolves one", "[node][node-status]")
+{
+    core::platform::ManualClock clock;
+
+    Fixture const off { { .admin = true }, clock };
+    CHECK_FALSE(SurfaceOf(off.status.Describe(), Wire::WireSurface::Mcp).has_value());
+
+    Fixture const on { { .admin = true, .mcp = true }, clock };
+    auto const fields = on.status.Describe();
+    auto const mcp = SurfaceOf(fields, Wire::WireSurface::Mcp);
+    REQUIRE(mcp.has_value());
+    CHECK(Unwrap(mcp).port == 6677);
+    CHECK_FALSE(Unwrap(mcp).tls);
+    CHECK(fields.surfaces.size() == 2);
+}
 
 TEST_CASE("A node reports only the surfaces its configuration resolves", "[node][node-status]")
 {

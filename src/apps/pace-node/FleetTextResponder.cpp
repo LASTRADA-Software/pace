@@ -179,7 +179,7 @@ core::async::Task<FrameReply> FleetTextResponder::Answer(std::span<std::byte con
 
     auto const request = Wire::DecodeFleetTextRequest(frame.subspan(Wire::RequestHeaderSize));
     if (!request.has_value())
-        co_return Cc::Refuse(_metrics, RefusedMalformed, "a fleet-text request is a section, a range and a token");
+        co_return Cc::Refuse(_metrics, RefusedMalformed, "a fleet-text request is a section, a range, a token and a format");
 
     // The HOST: the dashboard credential and leadership are what `Read` decides from, and
     // neither is a membership question -- the proof has already been folded into the one that
@@ -210,7 +210,7 @@ std::vector<std::byte> FleetTextResponder::Read(Wire::FleetTextRequest const& re
 
 std::vector<std::byte> FleetTextResponder::Render(Wire::FleetTextRequest const& request) const
 {
-    auto document = _sources.FleetText(request.section, request.range);
+    auto document = _sources.FleetText(request.section, request.range, request.format);
     if (!document.has_value())
     {
         if (document.error().refusal == FleetTextRefusal::UnknownSelector)

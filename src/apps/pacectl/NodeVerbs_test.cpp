@@ -156,7 +156,8 @@ TEST_CASE("`node` reports what the endpoint is", "[cli][node][verbs]")
           .nodeId = "node-a",
           .uptimeSeconds = 3600,
           .surfaces = { { .surface = CacheWire::WireSurface::Admin, .port = 9101, .tls = false },
-                        { .surface = CacheWire::WireSurface::Raft, .port = 9102, .tls = false } },
+                        { .surface = CacheWire::WireSurface::Raft, .port = 9102, .tls = false },
+                        { .surface = CacheWire::WireSurface::Mcp, .port = 9103, .tls = false } },
           .components = CacheWire::NodeComponentBit::CacheTier | CacheWire::NodeComponentBit::Worker }) } };
 
     auto const answer = RunNodeVerb("node", node);
@@ -173,6 +174,8 @@ TEST_CASE("`node` reports what the endpoint is", "[cli][node][verbs]")
     CHECK(RequiredCell(answer, "version").lexical == "0.2.0-124-gd911b33e");
     CHECK(RequiredCell(answer, "node-id").lexical == "node-a");
     CHECK(RequiredCell(answer, "uptime-seconds").lexical == "3600");
+    // The MCP surface is rendered beside the others, under its own name.
+    CHECK(RequiredCell(answer, "mcp-port").lexical == "9103");
     CHECK(RequiredCell(answer, "components").lexical == "cache-tier, worker");
     CHECK(RequiredCell(answer, "admin-port").lexical == "9101");
     CHECK(RequiredCell(answer, "raft-port").lexical == "9102");

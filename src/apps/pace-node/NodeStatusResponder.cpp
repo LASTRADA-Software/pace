@@ -432,6 +432,7 @@ CompileCacheWire::NodeStatusFields ConfiguredNodeStatus::Describe() const
         { .surface = NodeSurface::Admin, .tag = CompileCacheWire::WireSurface::Admin },
         { .surface = NodeSurface::Raft, .tag = CompileCacheWire::WireSurface::Raft },
         { .surface = NodeSurface::Discovery, .tag = CompileCacheWire::WireSurface::Discovery },
+        { .surface = NodeSurface::Mcp, .tag = CompileCacheWire::WireSurface::Mcp },
     };
 
     // **There is deliberately no `--tls` boolean to read.** TLS is on by naming material

@@ -988,6 +988,8 @@ namespace
                 return "raft";
             case CompileCacheWire::WireSurface::Discovery:
                 return "discovery";
+            case CompileCacheWire::WireSurface::Mcp:
+                return "mcp";
         }
         // A tag this build does not name never reaches here -- `DecodeNodeStatus` SKIPS
         // one rather than refusing the whole reply, which is what lets an older client

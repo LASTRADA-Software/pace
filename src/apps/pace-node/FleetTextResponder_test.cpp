@@ -68,12 +68,13 @@ class ScriptedFleet final: public ILiveStatsSources
     }
 
     /// @copydoc ILiveStatsSources::FleetText
-    [[nodiscard]] std::expected<FleetTextDocument, FleetTextDeclined> FleetText(std::string_view section,
-                                                                                std::string_view range) const override
+    [[nodiscard]] std::expected<FleetTextDocument, FleetTextDeclined> FleetText(
+        std::string_view section, std::string_view range, CompileCacheWire::FleetTextFormat format) const override
     {
         ++reads;
         askedSection = section;
         askedRange = range;
+        askedFormat = format;
         return answer;
     }
 
@@ -87,13 +88,18 @@ class ScriptedFleet final: public ILiveStatsSources
     mutable std::size_t reads { 0 };     ///< How many reads reached the sources.
     mutable std::string askedSection {}; ///< The section the last read named.
     mutable std::string askedRange {};   ///< The range the last read named.
+    /// The format the last read named.
+    mutable Wire::FleetTextFormat askedFormat { Wire::FleetTextFormat::Text };
 };
 
 /// A FLEET-TEXT frame.
-[[nodiscard]] std::vector<std::byte> FleetTextFrame(std::string section = {}, std::string range = {}, std::string token = {})
+[[nodiscard]] std::vector<std::byte> FleetTextFrame(std::string section = {},
+                                                    std::string range = {},
+                                                    std::string token = {},
+                                                    Wire::FleetTextFormat format = Wire::FleetTextFormat::Text)
 {
     return Wire::EncodeFleetTextRequest(Wire::FleetTextRequest {
-        .section = std::move(section), .range = std::move(range), .dashboardToken = std::move(token) });
+        .section = std::move(section), .range = std::move(range), .dashboardToken = std::move(token), .format = format });
 }
 
 /// What a refusal said, beside its code.
@@ -148,6 +154,25 @@ TEST_CASE("A fleet read is answered with the document the sources rendered for t
     CHECK(rig.sources.askedSection == "series");
     CHECK(rig.sources.askedRange == "7d");
     CHECK(NothingCounted(rig.metrics));
+}
+
+TEST_CASE("The format a fleet read names reaches the sources, and a json read is gated like any other", "[node][fleettext]")
+{
+    Rig rig;
+    rig.sources.answer = FleetTextDocument { .leads = true, .leaderEndpoint = {}, .body = R"({"schema":2})" };
+    auto const reply = rig.AskLocally(FleetTextFrame({}, "24h", {}, Wire::FleetTextFormat::Json));
+    REQUIRE(Testing::StatusOf(reply) == Wire::Status::Ok);
+    CHECK(Wire::AsStringView(Testing::PayloadOf(reply)) == R"({"schema":2})");
+    CHECK(rig.sources.askedFormat == Wire::FleetTextFormat::Json);
+
+    // A follower redirects a json read exactly as it does a text one.
+    rig.sources.leadership = LiveLeadership { .leads = false, .leaderEndpoint = "10.0.0.2:6674" };
+    auto const followed = rig.AskLocally(FleetTextFrame({}, {}, {}, Wire::FleetTextFormat::Json));
+    CHECK(Testing::ErrorOf(followed) == Wire::ErrorCode::NotLeader);
+
+    // And a stranger gets nothing, whatever the format.
+    auto const stranger = rig.Ask(rig.responder, FleetTextFrame({}, {}, {}, Wire::FleetTextFormat::Json), "192.0.2.1");
+    CHECK(Testing::ErrorOf(stranger) == Wire::ErrorCode::NotAMember);
 }
 
 TEST_CASE("A stranger is refused a fleet read by name and counted once whichever door it used", "[node][fleettext]")
@@ -303,14 +328,15 @@ TEST_CASE("A fleet read through the slot is the attached sources' and a detached
     LiveStatsSourceSlot slot;
     {
         auto const attached = slot.Attach(sources);
-        auto const read = slot.FleetText("series", "7d");
+        auto const read = slot.FleetText("series", "7d", Wire::FleetTextFormat::Json);
         REQUIRE(read.has_value());
         CHECK(read->body == "# kpi\nkey\tvalue\n");
         CHECK(sources.askedSection == "series");
         CHECK(sources.askedRange == "7d");
+        CHECK(sources.askedFormat == Wire::FleetTextFormat::Json);
     }
 
-    auto const detached = slot.FleetText("series", "7d");
+    auto const detached = slot.FleetText("series", "7d", Wire::FleetTextFormat::Json);
     REQUIRE_FALSE(detached.has_value());
     CHECK(detached.error().refusal == FleetTextRefusal::NoFleet);
     CHECK(sources.reads == 1);

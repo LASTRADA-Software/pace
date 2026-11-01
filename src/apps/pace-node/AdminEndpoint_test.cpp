@@ -1735,7 +1735,7 @@ TEST_CASE("The fleet document for a selection refuses an unknown key by name and
 
     SECTION("an unknown section is refused with every section this build serves")
     {
-        auto const refused = AnswerFleetText(snapshot, nullptr, "nonesuch", {});
+        auto const refused = AnswerFleetText(snapshot, nullptr, "nonesuch", {}, CompileCacheWire::FleetTextFormat::Text);
         REQUIRE_FALSE(refused.has_value());
         CHECK(refused.error().refusal == FleetTextRefusal::UnknownSelector);
         CHECK(refused.error().detail.starts_with("unknown section"));
@@ -1745,7 +1745,8 @@ TEST_CASE("The fleet document for a selection refuses an unknown key by name and
 
     SECTION("an unknown range is refused even for a section that draws no history")
     {
-        auto const refused = AnswerFleetText(snapshot, nullptr, "members", "1fortnight");
+        auto const refused =
+            AnswerFleetText(snapshot, nullptr, "members", "1fortnight", CompileCacheWire::FleetTextFormat::Text);
         REQUIRE_FALSE(refused.has_value());
         CHECK(refused.error().refusal == FleetTextRefusal::UnknownSelector);
         CHECK(refused.error().detail.starts_with("unknown range"));
@@ -1755,7 +1756,7 @@ TEST_CASE("The fleet document for a selection refuses an unknown key by name and
 
     SECTION("a document says whose view it is, from the snapshot it was rendered from")
     {
-        auto const following = AnswerFleetText(snapshot, nullptr, "series", "1h");
+        auto const following = AnswerFleetText(snapshot, nullptr, "series", "1h", CompileCacheWire::FleetTextFormat::Text);
         REQUIRE(following.has_value());
         CHECK_FALSE(following->leads);
         CHECK(following->leaderEndpoint == "10.0.0.2:6674");
@@ -1763,10 +1764,61 @@ TEST_CASE("The fleet document for a selection refuses an unknown key by name and
         CHECK(following->body.starts_with("# this node does not lead the fleet"));
 
         snapshot.role = Distributed::SchedulerRole::Leader;
-        auto const leading = AnswerFleetText(snapshot, nullptr, "series", "1h");
+        auto const leading = AnswerFleetText(snapshot, nullptr, "series", "1h", CompileCacheWire::FleetTextFormat::Text);
         REQUIRE(leading.has_value());
         CHECK(leading->leads);
         CHECK(leading->body.starts_with("start\tcoverage\tbackfilled\t"));
+    }
+}
+
+TEST_CASE("FleetText Json reply equals /fleet.json body", "[node][admin][fleettext]")
+{
+    // The same snapshot and the same history view through both doors. `AnswerFleetText` is what the
+    // `fleet-text` verb answers from, the route is what a browser gets, and the claim is that they
+    // are one derivation: byte for byte, for every range the table serves.
+    ChartFixture const fixture;
+    Distributed::FleetSources const sources { .scheduler = &fixture.scheduler,
+                                              .cluster = nullptr,
+                                              .metrics = &fixture.metrics };
+
+    for (auto const& row: Distributed::FleetRangeTable)
+    {
+        INFO("range " << row.key);
+        auto const route = fixture.Get("/fleet.json", std::format("range={}", row.key));
+        REQUIRE(route.status == "200 OK");
+        auto const verb = AnswerFleetText(
+            Distributed::CollectFleet(sources), fixture.sampler.get(), {}, row.key, CompileCacheWire::FleetTextFormat::Json);
+        REQUIRE(verb.has_value());
+        CHECK(verb->body == route.body);
+        CHECK_FALSE(verb->body.empty());
+    }
+
+    SECTION("an empty range is the day, as on the route")
+    {
+        auto const verb = AnswerFleetText(
+            Distributed::CollectFleet(sources), fixture.sampler.get(), {}, {}, CompileCacheWire::FleetTextFormat::Json);
+        REQUIRE(verb.has_value());
+        CHECK(verb->body == fixture.Get("/fleet.json", "range=24h").body);
+        CHECK(verb->leads);
+    }
+
+    SECTION("a section is refused for json rather than silently dropped")
+    {
+        auto const verb = AnswerFleetText(Distributed::CollectFleet(sources),
+                                          fixture.sampler.get(),
+                                          "members",
+                                          {},
+                                          CompileCacheWire::FleetTextFormat::Json);
+        REQUIRE_FALSE(verb.has_value());
+        CHECK(verb.error().refusal == FleetTextRefusal::UnknownSelector);
+    }
+
+    SECTION("text format is unchanged by the new parameter")
+    {
+        auto const text = AnswerFleetText(
+            Distributed::CollectFleet(sources), fixture.sampler.get(), {}, {}, CompileCacheWire::FleetTextFormat::Text);
+        REQUIRE(text.has_value());
+        CHECK(text->body == fixture.Get("/fleet.txt").body);
     }
 }
 

@@ -82,8 +82,8 @@ class NodeLiveStatsSources final: public ILiveStatsSources
     }
 
     /// @copydoc ILiveStatsSources::FleetText
-    [[nodiscard]] std::expected<FleetTextDocument, FleetTextDeclined> FleetText(std::string_view section,
-                                                                                std::string_view range) const override;
+    [[nodiscard]] std::expected<FleetTextDocument, FleetTextDeclined> FleetText(
+        std::string_view section, std::string_view range, CompileCacheWire::FleetTextFormat format) const override;
 
   private:
     NodeLiveStatsParts _parts;

@@ -420,8 +420,13 @@ namespace
 std::expected<FleetTextDocument, FleetTextDeclined> AnswerFleetText(Distributed::FleetSnapshot const& snapshot,
                                                                     IFleetHistoryView const* history,
                                                                     std::string_view sectionKey,
-                                                                    std::string_view rangeKey)
+                                                                    std::string_view rangeKey,
+                                                                    CompileCacheWire::FleetTextFormat format)
 {
+    if (format == CompileCacheWire::FleetTextFormat::Json && !sectionKey.empty())
+        return std::unexpected(FleetTextDeclined { .refusal = FleetTextRefusal::UnknownSelector,
+                                                   .detail = "the json format is one document and takes no section\n" });
+
     auto const section = sectionKey.empty() ? std::optional<Distributed::FleetSection> { std::nullopt }
                                             : Distributed::FleetSectionFromKey(sectionKey);
     if (!sectionKey.empty() && !section.has_value())
@@ -437,9 +442,12 @@ std::expected<FleetTextDocument, FleetTextDeclined> AnswerFleetText(Distributed:
             FleetTextDeclined { .refusal = FleetTextRefusal::UnknownSelector,
                                 .detail = std::format("unknown range; this build serves: {}\n", KnownRangeKeys()) });
 
+    auto const view = HistoryViewFor(history, *range);
     return FleetTextDocument { .leads = Distributed::LeadsTheFleet(snapshot),
                                .leaderEndpoint = snapshot.leaderEndpoint,
-                               .body = Distributed::RenderFleetText(snapshot, HistoryViewFor(history, *range), section) };
+                               .body = format == CompileCacheWire::FleetTextFormat::Json
+                                           ? Distributed::RenderFleetJson(snapshot, view)
+                                           : Distributed::RenderFleetText(snapshot, view, section) };
 }
 
 std::vector<AdminRoute> MakeFleetRoutes(Distributed::FleetSources sources,
@@ -589,8 +597,11 @@ std::vector<AdminRoute> MakeFleetRoutes(Distributed::FleetSources sources,
         .handler = gated(
             [] { return Unauthorised("text/plain; charset=utf-8", "credential required\n"); },
             [history, statusFor](Distributed::FleetSnapshot const& snapshot, AdminRequest const& request) -> AdminResponse {
-                auto answer = AnswerFleetText(
-                    snapshot, history, QueryValue(request.query, "section"), QueryValue(request.query, "range"));
+                auto answer = AnswerFleetText(snapshot,
+                                              history,
+                                              QueryValue(request.query, "section"),
+                                              QueryValue(request.query, "range"),
+                                              CompileCacheWire::FleetTextFormat::Text);
                 if (!answer.has_value())
                     return RefusedParameter("text/plain; charset=utf-8", std::move(answer.error().detail));
                 return AdminResponse { .status = statusFor(snapshot),
