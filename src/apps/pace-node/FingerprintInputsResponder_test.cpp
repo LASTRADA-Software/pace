@@ -519,7 +519,6 @@ TEST_CASE("Adopting the capture attaches inputs entry by entry and never serves 
           "[node][fingerprint-inputs]")
 {
     auto const record = std::make_shared<Cc::FingerprintInputs const>(RecordOf(2));
-    auto const servedAt = ServedGeneration { 1 };
 
     SECTION("a matching (fingerprint, compiler) pair gets its inputs attached")
     {
@@ -528,7 +527,7 @@ TEST_CASE("Adopting the capture attaches inputs entry by entry and never serves 
         };
         auto captured = SurveyResult { .outcome = SurveyOutcome::Served, .served = current };
         captured.served.at("fp-a").inputs = record;
-        auto const adoption = AdoptCapture(current, servedAt, servedAt, std::move(captured));
+        auto const adoption = AdoptCapture(current, std::move(captured));
         CHECK(adoption.served.at("fp-a").inputs == record);
         CHECK_FALSE(adoption.refreshFromLiveConfig);
     }
@@ -540,12 +539,9 @@ TEST_CASE("Adopting the capture attaches inputs entry by entry and never serves 
         };
         auto captured = SurveyResult { .outcome = SurveyOutcome::Served, .served = {} };
         captured.served.emplace("fp-pin", ServedWith("/opt/old/g++", nullptr, std::nullopt));
-        for (auto const now: { servedAt, servedAt + 1 })
-        {
-            auto const adoption = AdoptCapture(current, now, servedAt, captured);
-            CHECK(adoption.served.at("fp-pin").compiler == "/opt/new/g++");
-            CHECK_FALSE(adoption.refreshFromLiveConfig);
-        }
+        auto const adoption = AdoptCapture(current, captured);
+        CHECK(adoption.served.at("fp-pin").compiler == "/opt/new/g++");
+        CHECK_FALSE(adoption.refreshFromLiveConfig);
     }
     SECTION("a toolchain a reload added during the capture survives")
     {
@@ -555,22 +551,24 @@ TEST_CASE("Adopting the capture attaches inputs entry by entry and never serves 
         };
         auto captured = SurveyResult { .outcome = SurveyOutcome::Served, .served = {} };
         captured.served.emplace("fp-a", ServedWith("/usr/bin/gcc", record, Probed("/usr/bin/gcc")));
-        auto const adoption = AdoptCapture(current, servedAt + 1, servedAt, std::move(captured));
+        auto const adoption = AdoptCapture(current, std::move(captured));
         REQUIRE(adoption.served.contains("fp-added"));
         CHECK(adoption.served.at("fp-added").compiler == "/usr/bin/clang");
+        CHECK(adoption.served.at("fp-added").inputs == nullptr);
+        // The pair the re-derived map still holds takes its record: the pair match alone decides.
         CHECK(adoption.served.at("fp-a").inputs == record);
         CHECK_FALSE(adoption.refreshFromLiveConfig);
     }
     SECTION("a probe that failed in the capture does not drop a served toolchain")
     {
-        // Same generation: nothing moved, and the capture simply lacks one entry -- a timeout, not staleness.
+        // The capture simply lacks one entry -- a timeout, not staleness.
         auto const current = std::map<std::string, ServedToolchain> {
             { "fp-a", ServedWith("/usr/bin/gcc", nullptr, Probed("/usr/bin/gcc")) },
             { "fp-b", ServedWith("/usr/bin/g++", nullptr, Probed("/usr/bin/g++")) },
         };
         auto captured = SurveyResult { .outcome = SurveyOutcome::Served, .served = {} };
         captured.served.emplace("fp-a", ServedWith("/usr/bin/gcc", record, Probed("/usr/bin/gcc")));
-        auto const adoption = AdoptCapture(current, servedAt, servedAt, std::move(captured));
+        auto const adoption = AdoptCapture(current, std::move(captured));
         CHECK(adoption.served.size() == 2);
         CHECK(adoption.served.at("fp-b").inputs == nullptr);
         CHECK_FALSE(adoption.refreshFromLiveConfig);
@@ -582,23 +580,36 @@ TEST_CASE("Adopting the capture attaches inputs entry by entry and never serves 
         };
         auto captured = SurveyResult { .outcome = SurveyOutcome::Served, .served = {} };
         captured.served.emplace("fp-walked", ServedWith("/usr/bin/gcc", record, Probed("/usr/bin/gcc")));
-        auto const adoption = AdoptCapture(current, servedAt, servedAt, captured);
+        auto const adoption = AdoptCapture(current, captured);
         CHECK(adoption.refreshFromLiveConfig);
         CHECK(adoption.served.contains("fp-cached"));
         CHECK_FALSE(adoption.served.contains("fp-walked"));
         // Its inputs are kept only to carry onto what the refresh re-derives.
         CHECK(adoption.captured.at("fp-walked").inputs == record);
+    }
+    SECTION("a pin under a fingerprint the capture recorded stays unrecorded, on both paths")
+    {
+        // A reload pinned the captured fingerprint to another compiler: the capture's probed record is not the pin's,
+        // and neither the adoption nor the refresh's carry may hand it over -- one pair match decides both.
+        auto const current = std::map<std::string, ServedToolchain> {
+            { "fp-walked", ServedWith("/opt/x/g++", nullptr, std::nullopt) },
+        };
+        auto captured = SurveyResult { .outcome = SurveyOutcome::Served, .served = {} };
+        captured.served.emplace("fp-walked", ServedWith("/usr/bin/g++", record, Probed("/usr/bin/g++")));
+        auto const adoption = AdoptCapture(current, captured);
+        CHECK(adoption.served.at("fp-walked").inputs == nullptr);
 
-        // And once the map was re-derived since the capture started, the map is the newer answer: no refresh.
-        CHECK_FALSE(AdoptCapture(current, servedAt + 1, servedAt, captured).refreshFromLiveConfig);
+        auto refreshed = current;
+        CarryInputsForward(captured.served, refreshed);
+        CHECK(refreshed.at("fp-walked").inputs == nullptr);
+        CHECK_FALSE(InputsBelongTo(captured.served.at("fp-walked"), current.at("fp-walked")));
     }
     SECTION("a capture that served nothing changes nothing")
     {
         auto const current = std::map<std::string, ServedToolchain> {
             { "fp-a", ServedWith("/usr/bin/gcc", nullptr, Probed("/usr/bin/gcc")) },
         };
-        auto const adoption =
-            AdoptCapture(current, servedAt, servedAt, SurveyResult { .outcome = SurveyOutcome::Cancelled, .served = {} });
+        auto const adoption = AdoptCapture(current, SurveyResult { .outcome = SurveyOutcome::Cancelled, .served = {} });
         CHECK(adoption.served.size() == 1);
         CHECK_FALSE(adoption.refreshFromLiveConfig);
     }

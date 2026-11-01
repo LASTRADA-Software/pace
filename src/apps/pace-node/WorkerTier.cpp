@@ -69,13 +69,21 @@ namespace
     /// rather than by a wall-clock threshold -- with the walk held, the worker must still register. Read through the
     /// injected host, and observed against the capture's stop token, so a held node still stops promptly.
     /// @param host Where the variable and the file are read.
+    /// @param logger Where the hold engaging is said, once.
     /// @param stop The capture thread's stop token.
     /// @return False when the node was told to stop while held.
-    [[nodiscard]] bool AwaitCaptureRelease(Cc::IToolchainHost& host, std::stop_token const& stop)
+    [[nodiscard]] bool AwaitCaptureRelease(Cc::IToolchainHost& host, ILogger& logger, std::stop_token const& stop)
     {
         auto const release = host.Environment(CaptureHoldVariable);
         if (!release.has_value() || release->empty())
             return true;
+        // Said, so a node left holding by a stray variable is explained in its own log rather than reading as a
+        // capture that never finishes.
+        logger.Logf(LogLevel::Warn,
+                    "{} is set: the toolchain capture walk is held until {} exists (a test seam; unset it in "
+                    "production)",
+                    CaptureHoldVariable,
+                    *release);
         std::mutex parked;
         std::condition_variable_any woken;
         while (!host.ReadTextFile(*release).has_value())
@@ -507,8 +515,6 @@ void WorkerTier::Serve(std::map<std::string, ServedToolchain> served)
     auto endpoint = _announced.Current();
     AdoptRegistrars(RegistrarsAt(_toolchains, endpoint), _registrars, _withdrawals);
     RegisterUnder(std::move(endpoint));
-    // A new served map: a capture that started against the previous one must not judge this one stale.
-    ++_servedGeneration;
     // AFTER the two calls above: this says the worker is serving, and it must not say so
     // while the compile port still holds the previous answer.
     PublishToolchains(_runtime, _toolchains.size(), _discovered.entries.size());
@@ -516,11 +522,10 @@ void WorkerTier::Serve(std::map<std::string, ServedToolchain> served)
     _runtime.PublishServedInputs(ServedInputsOf(_toolchains, _capture));
 }
 
-std::optional<std::map<std::string, ServedToolchain>> WorkerTier::AdoptCaptured(SurveyResult captured,
-                                                                                ServedGeneration capturedAt)
+std::optional<std::map<std::string, ServedToolchain>> WorkerTier::AdoptCaptured(SurveyResult captured)
 {
     _capture = InputsCaptureState::Concluded;
-    auto adoption = AdoptCapture(_toolchains, _servedGeneration, capturedAt, std::move(captured));
+    auto adoption = AdoptCapture(_toolchains, std::move(captured));
     // Only inputs attach here: nothing this worker serves or registers is added, dropped or re-pointed, so the compile
     // port and the registrations are untouched.
     _toolchains = std::move(adoption.served);
@@ -671,11 +676,10 @@ void WorkerTier::Heartbeat(std::stop_token const& stop,
     // stops hearing from expires. Started after the first registration was queued, never by a request; declared
     // here so returning from this function stops the walk and joins it.
     InputsCapture<SurveyResult> capture;
-    auto const captureGeneration = _servedGeneration;
     capture.Start([this, discovered = _discovered](std::stop_token const& captureStop) {
         // The end-to-end's hold, a no-op unless its variable names a file: what lets it prove registration does not
         // wait on this walk without timing anything.
-        if (!AwaitCaptureRelease(*_machine.host, captureStop))
+        if (!AwaitCaptureRelease(*_machine.host, _logger, captureStop))
             return SurveyResult { .outcome = SurveyOutcome::Cancelled, .served = {} };
         return FingerprintToolchains(discovered,
                                      *_machine.runner,
@@ -718,7 +722,7 @@ void WorkerTier::Heartbeat(std::stop_token const& stop,
         // fingerprint makes THIS beat's recheck unconditional, from the configuration in force.
         auto carry = std::optional<std::map<std::string, ServedToolchain>> {};
         if (auto captured = capture.Take(); captured.has_value())
-            carry = AdoptCaptured(*std::move(captured), captureGeneration);
+            carry = AdoptCaptured(*std::move(captured));
 
         auto const depth =
             carry.has_value() ? RecheckDepth::Unconditional : RecheckDepthFor(reloaded, beat, SweepEveryBeats);

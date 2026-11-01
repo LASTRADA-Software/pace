@@ -1443,10 +1443,10 @@ enum class ErrorCode : std::uint8_t
     /// disagree about a refusal while both looked correct.
     OperatorStandingRequired = 0x33,
 
-    /// FINGERPRINT-INPUTS about a fingerprint this node serves and holds no inputs for, and will not hold while it
-    /// runs: an operator's `--toolchain=<fingerprint>=<compiler>` pin, which is never probed, or a fingerprint this
-    /// process's one capture walk did not reproduce (recorded later only if a re-survey walks it again, e.g. after
-    /// its stamp moved, or at the next start).
+    /// FINGERPRINT-INPUTS about a fingerprint this node serves and holds no inputs for, and will not hold on an
+    /// immediate retry: an operator's `--toolchain=<fingerprint>=<compiler>` pin, which is never probed, or a fingerprint
+    /// this process's one capture walk did not reproduce (recorded later only if a re-survey walks it again, e.g. after its
+    /// stamp moved, or at the next start).
     ///
     /// Its own code rather than `NoWorker`, which is RETRIABLE -- a booting fleet has none yet -- and would send the
     /// asker round again for an answer that cannot change. The transient case, a capture walk still running, is

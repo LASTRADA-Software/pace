@@ -752,40 +752,47 @@ std::shared_ptr<ServedInputs const> ServedInputsOf(std::map<std::string, ServedT
     return std::make_shared<ServedInputs const>(std::move(rows));
 }
 
-CaptureAdoption AdoptCapture(std::map<std::string, ServedToolchain> const& current,
-                             ServedGeneration currentGeneration,
-                             ServedGeneration capturedAt,
-                             SurveyResult captured)
+CaptureAdoption AdoptCapture(std::map<std::string, ServedToolchain> const& current, SurveyResult captured)
 {
     auto adoption = CaptureAdoption { .served = current, .refreshFromLiveConfig = false, .captured = {} };
     if (captured.outcome != SurveyOutcome::Served)
         return adoption;
 
-    auto const unchangedSince = currentGeneration == capturedAt;
     for (auto& [fingerprint, toolchain]: adoption.served)
     {
         // A pin is the operator's decision and is never probed: nothing a walk found can make it stale.
         if (!toolchain.witness.has_value())
             continue;
         auto const same = captured.served.find(fingerprint);
-        if (same != captured.served.end() && same->second.compiler == toolchain.compiler)
+        if (same != captured.served.end() && InputsBelongTo(same->second, toolchain))
         {
+            // The pair match is the whole guarantee: the record is the digest of THIS key for THIS compiler, so it is
+            // right for whatever map holds that pair now -- the one the capture started against or one a reload
+            // re-derived since. What toolchain_diff later reads is recomputed against the key before it is believed.
             if (toolchain.inputs == nullptr)
                 toolchain.inputs = same->second.inputs;
             continue;
         }
-        // The capture filed THIS compiler under another fingerprint: the cached one no longer digests to it. Judged
-        // only while the map is the one the capture started against -- a reload since re-derived it from the live
-        // configuration, which is the newer answer. An entry the capture lacks altogether (a probe that timed out, a
-        // toolchain a reload added) is left alone: absence is not staleness.
+        // The capture filed THIS compiler under another fingerprint: the cached one no longer digests to it. A refresh
+        // from the LIVE configuration is asked for -- it serves nothing the configuration in force would not, and the
+        // capture just rewrote the cache, so it costs no walk. An entry the capture lacks
+        // altogether (a probe that timed out, a toolchain a reload added) is left alone: absence is not staleness.
         auto const moved = std::ranges::any_of(captured.served, [&toolchain](auto const& entry) {
             return entry.second.compiler == toolchain.compiler && entry.second.witness.has_value();
         });
-        if (moved && unchangedSince)
+        if (moved)
             adoption.refreshFromLiveConfig = true;
     }
     adoption.captured = std::move(captured.served);
     return adoption;
+}
+
+bool InputsBelongTo(ServedToolchain const& holder, ServedToolchain const& receiver) noexcept
+{
+    // Both probed -- a pin is never probed, so it neither gives a record nor takes one -- and one compiler: the key
+    // the caller looked both up under is the fingerprint, so this makes the match the whole (fingerprint, compiler)
+    // pair.
+    return holder.witness.has_value() && receiver.witness.has_value() && holder.compiler == receiver.compiler;
 }
 
 void CarryInputsForward(std::map<std::string, ServedToolchain> const& previous, std::map<std::string, ServedToolchain>& next)
@@ -795,7 +802,7 @@ void CarryInputsForward(std::map<std::string, ServedToolchain> const& previous, 
         if (toolchain.inputs != nullptr)
             continue;
         auto const held = previous.find(fingerprint);
-        if (held != previous.end())
+        if (held != previous.end() && InputsBelongTo(held->second, toolchain))
             toolchain.inputs = held->second.inputs;
     }
 }

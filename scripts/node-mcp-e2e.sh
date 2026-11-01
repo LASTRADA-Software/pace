@@ -289,7 +289,7 @@ readonly ACTION_META="\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"$
 action_node_port="$(free_port)"
 action_raft_port="$(free_port)"
 action_mcp_port="$(free_port)"
-# The capture walk is HELD until this file exists (the node's test seam, read only when the variable is set), so 2f
+# The capture walk is HELD until this file exists (the node's test seam, read only when the variable is set), so 2g
 # can assert that the worker registers while the walk has not run -- by state, never by a timing threshold.
 capture_release="${workdir}/capture-release"
 PACE_NODE_TEST_CAPTURE_HOLD="$capture_release" "$node" \

@@ -92,8 +92,9 @@ inline constexpr SurveyPlan StartupSurveyPlan { .initial = FingerprintWalk::Cach
 /// Whether this process's one capture walk has concluded.
 ///
 /// **PRIVATE: persisted and transmitted nowhere.** It decides which absence a toolchain with no inputs reports:
-/// `NotYetCaptured` before, `NotCaptured` after -- a capture runs once, so a toolchain without inputs after it will
-/// not get any until the node restarts, and saying "not yet" then would be a promise nothing keeps.
+/// `NotYetCaptured` before, `NotCaptured` after -- a capture runs once, so a toolchain without inputs after it gets
+/// them only when a re-survey walks it again (a stamp change, a cache miss) or the node restarts, and saying
+/// "not yet" then would be a promise nothing keeps.
 enum class InputsCaptureState : std::uint8_t
 {
     Pending,   ///< The capture walk has not handed back a result.
@@ -246,8 +247,16 @@ struct ServedToolchain
     std::shared_ptr<Cc::FingerprintInputs const> inputs;
 };
 
+/// Whether @p holder's inputs may be given to @p receiver, both found under one fingerprint: both probed -- a pin
+/// neither gives nor takes a record -- and the same compiler. The ONE pair match `CarryInputsForward` and
+/// `AdoptCapture` attach by, so the two cannot disagree about whose record is whose.
+/// @param holder The entry that holds the record.
+/// @param receiver The entry it would be given to.
+/// @return True when the record is the receiver's own digest arguments.
+[[nodiscard]] bool InputsBelongTo(ServedToolchain const& holder, ServedToolchain const& receiver) noexcept;
+
 /// Keep the inputs a previous survey captured for every fingerprint a later survey found unchanged and took
-/// from the cache.
+/// from the cache -- matched on the whole (fingerprint, compiler) pair (`InputsBelongTo`), never onto a pin.
 ///
 /// Sound because the map is keyed by FINGERPRINT: a record filed under a key recomputes to that key, so carrying
 /// it to the same key in the next map hands nobody inputs for another digest -- and the node that reads it
@@ -434,13 +443,6 @@ struct SurveyResult
     std::map<std::string, ServedToolchain> served;           ///< Empty unless `Served`.
 };
 
-/// Which version of the served map a capture is judged against: bumped every time the worker serves a new map.
-///
-/// The capture walks from the configuration the node STARTED with, and the served map can be re-derived from a
-/// reloaded configuration while it runs. Comparing the two after such a change would judge a newer, correct map by an
-/// older survey, so `AdoptCapture` is told both generations and decides staleness only when they agree.
-using ServedGeneration = std::uint64_t;
-
 /// What adopting the capture walk's survey concluded.
 struct CaptureAdoption
 {
@@ -463,18 +465,13 @@ struct CaptureAdoption
 /// it is right by construction even after a race. **A pin is never stale and never touched**; **an entry the capture
 /// lacks is left alone** -- a probe that timed out, or a toolchain a reload added, is not evidence of staleness. A
 /// probed toolchain whose compiler the capture filed under ANOTHER fingerprint is a genuine mismatch, and asks for a
-/// refresh from the live configuration -- but only while @p capturedAt equals @p current's generation: once the map
-/// was re-derived since the capture started, the map is the newer answer and only the attach applies. Pure, so every
-/// race is a unit test.
+/// refresh from the live configuration -- that refresh serves nothing the configuration in force would not. The pair
+/// match alone decides attachment, so a map a reload re-derived while the capture ran takes the inputs of every pair
+/// it still holds. Pure, so every race is a unit test.
 /// @param current What the worker serves now.
-/// @param currentGeneration The served map's generation now.
-/// @param capturedAt The served map's generation when the capture started.
 /// @param captured What the forced walk surveyed.
 /// @return The map to serve, whether to refresh, and the capture's map.
-[[nodiscard]] CaptureAdoption AdoptCapture(std::map<std::string, ServedToolchain> const& current,
-                                           ServedGeneration currentGeneration,
-                                           ServedGeneration capturedAt,
-                                           SurveyResult captured);
+[[nodiscard]] CaptureAdoption AdoptCapture(std::map<std::string, ServedToolchain> const& current, SurveyResult captured);
 
 /// Identify the discovered compilers, and refuse a node that would serve none.
 ///
