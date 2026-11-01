@@ -1047,17 +1047,16 @@ namespace
     /// @param runtime What the node said.
     void AddNodeDetail(std::vector<Field>& record, CompileCacheWire::NodeRuntimeFields const& runtime)
     {
-        if (runtime.slotCeilings.has_value())
+        if (auto const ceilings = NodeStatusView::CeilingsOf(runtime); ceilings.has_value())
         {
-            auto const& ceilings = *runtime.slotCeilings;
-            record.push_back({ .name = "slots-available", .value = NumberCell(std::uint64_t { ceilings.available }) });
-            record.push_back({ .name = "slots-bound-by", .value = TextCell(ceilings.binding) });
-            for (auto const& ceiling: ceilings.ceilings)
+            record.push_back({ .name = "slots-available", .value = NumberCell(std::uint64_t { ceilings->available }) });
+            record.push_back({ .name = "slots-bound-by", .value = TextCell(ceilings->binding) });
+            for (auto const& ceiling: ceilings->ceilings)
                 record.push_back(
                     { .name = std::format("slot-ceiling-{}", ceiling.name),
                       .value = ceiling.slots.has_value() ? NumberCell(std::uint64_t { *ceiling.slots }) : AbsentCell() });
             record.push_back(
-                { .name = "slot-ceilings-sampled-seconds-ago", .value = NumberCell(ceilings.sampledSecondsAgo) });
+                { .name = "slot-ceilings-sampled-seconds-ago", .value = NumberCell(ceilings->sampledSecondsAgo) });
         }
 
         if (auto const tiers = NodeStatusView::TiersOf(runtime); tiers.has_value())

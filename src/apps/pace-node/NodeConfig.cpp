@@ -78,32 +78,6 @@ namespace
         return ParseUtf8Text(sv);
     }
 
-    /// CLI spelling of a LogLevel, matching what ParseNodeLogLevel accepts.
-    ///
-    /// The inverse of that parser, and the pair is what makes a log level survive
-    /// a round trip into a supervisor's argument list.
-    /// @param level Level to name.
-    /// @return Its CLI spelling.
-    [[nodiscard]] constexpr std::string_view LogLevelName(LogLevel level) noexcept
-    {
-        switch (level)
-        {
-            case LogLevel::Trace:
-                return "trace";
-            case LogLevel::Debug:
-                return "debug";
-            case LogLevel::Info:
-                return "info";
-            case LogLevel::Warn:
-                return "warn";
-            case LogLevel::Error:
-                return "error";
-            case LogLevel::Fatal:
-                return "fatal";
-        }
-        return "info";
-    }
-
     /// A port, refusing 0 rather than letting a bind fail with a confusing message.
     /// @param sv Text to parse.
     /// @return The port, or why it is not one.
@@ -1898,7 +1872,7 @@ std::span<OptionSpec<NodeConfig> const> NodeOptions() noexcept
         {
             .primary = "--requirepass",
             .arity = Arity::Value,
-            .operand = "=<secret>",
+            .operand = SecretOperand,
             .apply = AssignFrom<&NodeConfig::requirePass, ParseText>(),
             .description = "the password presented to the --upstream pace-kv,\n"
                            "and to nothing else: a scheduler admits this machine\n"
@@ -2762,7 +2736,7 @@ ServiceSpec MakeNodeServiceSpec(std::filesystem::path const& exePath, NodeConfig
     if (cfg.fleetPin.has_value())
         argv.push_back(std::format("--fleet-id={}", Cluster::FormatPinnedFleet(*cfg.fleetPin)));
     emitIfExplicit("drain-timeout", FormatDuration(cfg.drainTimeout), cfg.drainTimeoutExplicit);
-    emitIfExplicit("log-level", LogLevelName(cfg.logLevel), cfg.logLevelExplicit);
+    emitIfExplicit("log-level", NodeLogLevelName(cfg.logLevel), cfg.logLevelExplicit);
 
     // **Both spellings, because the DEFAULT is platform-dependent** (#496, #507).
     // Emitting only the positive one is sound while the default is false everywhere:
@@ -3840,11 +3814,6 @@ std::string WorkerReadinessPhrase(NodeConfig const& cfg, std::optional<std::uint
                        toolchains);
 }
 
-std::string_view NodeLogLevelSpelling(LogLevel level) noexcept
-{
-    return LogLevelName(level);
-}
-
 std::string AdmissionSummary(NodeConfig const& cfg)
 {
     // One sentence with a conditional tail rather than two whole ones: written twice
@@ -4608,7 +4577,8 @@ std::optional<std::string> StartupPolicyRejection(NodeConfig const& cfg)
         { .refuses =
               [](NodeConfig const& c) {
                   auto const endpoints = RowFor(NodeSurface::Mcp).Resolve(c);
-                  return std::ranges::any_of(endpoints, [](SurfaceEndpoint const& e) { return !IsLoopbackHost(e.host); });
+                  return std::ranges::any_of(endpoints,
+                                             [](SurfaceEndpoint const& e) { return !IsLoopbackHost(e.host); });
               },
           .message = McpListenNotLoopbackRefusal },
         // **A worker on a node that can never form**: with the consensus port closed there is no

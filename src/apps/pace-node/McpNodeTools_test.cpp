@@ -278,15 +278,24 @@ TEST_CASE("node_status equals pacectl node for the same reply", "[mcp][node-stat
             CHECK(*listed[at].AsString() == (*view.values)[at]);
     }
 
-    // The ceilings, binding named.
+    // The ceilings: the view's rows, each with its binding mark -- the view `pacectl node`'s ceiling cells read.
+    auto const ceilingsView = NodeStatusView::CeilingsOf(runtime);
+    REQUIRE(ceilingsView.has_value());
+    auto const& view = Unwrap(ceilingsView);
     auto const& ceilings = At(structured, "slot_ceilings");
-    auto const& sent = Unwrap(runtime.slotCeilings);
-    CHECK(*At(ceilings, "binding").AsString() == sent.binding);
-    CHECK(At(ceilings, "available").AsInt() == std::optional<std::int64_t> { sent.available });
+    CHECK(*At(ceilings, "binding").AsString() == view.binding);
+    CHECK(At(ceilings, "available").AsUint() == std::optional<std::uint64_t> { view.available });
+    CHECK(At(ceilings, "sampled_age_s").AsUint() == std::optional<std::uint64_t> { view.sampledSecondsAgo });
     auto const& ceilingRows = Elements(At(ceilings, "ceilings"));
-    REQUIRE(ceilingRows.size() == sent.ceilings.size());
-    CHECK(At(ceilingRows[1], "binding").AsBool() == std::optional { true });
-    CHECK(At(ceilingRows[2], "slots").IsNull());
+    REQUIRE(ceilingRows.size() == view.ceilings.size());
+    for (auto const index: std::views::iota(std::size_t { 0 }, ceilingRows.size()))
+    {
+        CHECK(*At(ceilingRows[index], "name").AsString() == view.ceilings[index].name);
+        CHECK(At(ceilingRows[index], "binding").AsBool() == std::optional { view.ceilings[index].binding });
+        auto const& slots = At(ceilingRows[index], "slots");
+        CHECK(slots.IsNull() == !view.ceilings[index].slots.has_value());
+        CHECK(slots.AsUint() == view.ceilings[index].slots.transform([](std::uint32_t n) { return std::uint64_t { n }; }));
+    }
 
     // And a node that says nothing about overrides is ABSENT there, never an empty list.
     CHECK(At(structured, "budget_overrides").IsNull());
@@ -408,4 +417,45 @@ TEST_CASE("node_status names who could not be asked rather than answering", "[mc
     auto const other = CallNodeStatus(upstream, none, R"({"node":"node-far"})");
     CHECK(other.isError);
     CHECK(other.text.find(std::string { SelfId }) != std::string::npos);
+}
+
+TEST_CASE("node_status carries 64-bit figures exactly and marks a value that is not UTF-8",
+          "[mcp][node-status][node-status-detail]")
+{
+    ScriptedUpstream upstream;
+    FixedCluster const cluster { std::nullopt };
+    auto fields = EveryDetail();
+    fields.runtime.tiers = Wire::NodeTiersFields { Wire::NodeTierFields {
+        .entries = UINT64_MAX, .bytesUsed = (1ULL << 63) + 1, .bytesLimit = UINT64_MAX, .hits = UINT64_MAX, .misses = 1 } };
+    fields.runtime.effectiveConfig = std::vector {
+        Wire::NodeSettingFields {
+            .name = "--cache-dir", .kind = Wire::WireSettingValue::Value, .text = std::string { "/var/cache/p\xff" } },
+        Wire::NodeSettingFields { .name = "--pidfile", .kind = Wire::WireSettingValue::Value, .text = "/run/p" },
+    };
+    upstream.AnswerStatus(fields);
+    auto const result = CallNodeStatus(upstream, cluster);
+    REQUIRE_FALSE(result.isError);
+
+    // Past 2^63 a figure is written as the unsigned number it is -- never a negative one.
+    auto const text = Json::Serialize(result.structured);
+    CHECK(text.find("\"entries\":18446744073709551615") != std::string::npos);
+    CHECK(text.find("\"bytes\":9223372036854775809") != std::string::npos);
+    CHECK(text.find("\"entries\":-") == std::string::npos);
+    auto const& tier = Elements(At(result.structured, "tiers"))[0];
+    CHECK(At(tier, "budget_bytes").AsUint() == std::optional<std::uint64_t> { UINT64_MAX });
+    // And the ratio of two counters whose sum wraps is still a ratio.
+    auto const* const ratio = std::get_if<double>(&At(tier, "hit_ratio").v);
+    REQUIRE(ratio != nullptr);
+    CHECK(*ratio <= 1.0);
+    CHECK(*ratio > 0.999);
+
+    // The path with a 0xFF byte: escaped behind the marker and flagged, never a replacement character.
+    auto const& settings = Elements(At(result.structured, "effective_config"));
+    REQUIRE(settings.size() == 2);
+    CHECK(At(settings[0], "non_utf8").AsBool() == std::optional { true });
+    auto const& values = Elements(At(settings[0], "values"));
+    REQUIRE(values.size() == 1);
+    CHECK(*values.front().AsString() == "<non-utf8: /var/cache/p\\xFF>");
+    CHECK(text.find("\xef\xbf\xbd") == std::string::npos);
+    CHECK(At(settings[1], "non_utf8").AsBool() == std::optional { false });
 }

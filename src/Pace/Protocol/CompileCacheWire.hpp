@@ -7443,11 +7443,9 @@ inline constexpr std::size_t SharedCacheStatusFieldCount = 5;
     // Absent as zero length; each engaged record encodes non-empty -- see `NodeStatusDetailWire.hpp`.
     auto const slotCeilings =
         runtime.slotCeilings.has_value() ? EncodeNodeSlotCeilings(*runtime.slotCeilings) : std::vector<std::byte> {};
-    auto const tiers =
-        runtime.tiers.has_value() && !runtime.tiers->empty() ? EncodeNodeTiers(*runtime.tiers) : std::vector<std::byte> {};
-    auto const effectiveConfig = runtime.effectiveConfig.has_value() && !runtime.effectiveConfig->empty()
-                                     ? EncodeNodeSettings(*runtime.effectiveConfig)
-                                     : std::vector<std::byte> {};
+    auto const tiers = runtime.tiers.has_value() ? EncodeNodeTiers(*runtime.tiers) : std::vector<std::byte> {};
+    auto const effectiveConfig =
+        runtime.effectiveConfig.has_value() ? EncodeNodeSettings(*runtime.effectiveConfig) : std::vector<std::byte> {};
     auto const budgetOverrides = runtime.budgetOverrides.has_value() ? EncodeNodeBudgetOverrides(*runtime.budgetOverrides)
                                                                      : std::vector<std::byte> {};
 

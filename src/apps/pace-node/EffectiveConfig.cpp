@@ -125,7 +125,7 @@ namespace
     /// @return `--log-level` as the flag spells it.
     [[nodiscard]] std::vector<std::string> LogLevelValue(NodeConfig const& cfg)
     {
-        return { std::string { NodeLogLevelSpelling(cfg.logLevel) } };
+        return { std::string { NodeLogLevelName(cfg.logLevel) } };
     }
 
     /// @param cfg The configuration in force.

@@ -29,7 +29,7 @@ namespace
     template <typename T>
     [[nodiscard]] Json::Value NumberOrNull(std::optional<T> const& value)
     {
-        return value.has_value() ? Int(static_cast<std::int64_t>(*value)) : Null();
+        return value.has_value() ? Json::Unsigned(*value) : Null();
     }
 
     /// @param text A name the view spells.
@@ -79,21 +79,23 @@ namespace
         return Target { .nodeId = std::move(*resolved), .asked = *name };
     }
 
-    /// @param ceilings The record the node sent, or nothing.
-    /// @return The `slot_ceilings` member.
-    [[nodiscard]] Json::Value SlotCeilings(std::optional<Wire::NodeSlotCeilingsFields> const& ceilings)
+    /// @param runtime The decoded record.
+    /// @return The `slot_ceilings` member, read through `NodeStatusView::CeilingsOf` -- the view `pacectl node`
+    ///         renders its ceiling cells from.
+    [[nodiscard]] Json::Value SlotCeilings(Wire::NodeRuntimeFields const& runtime)
     {
+        auto const ceilings = NodeStatusView::CeilingsOf(runtime);
         if (!ceilings.has_value())
             return Null();
         auto rows = Json::Array {};
         rows.reserve(ceilings->ceilings.size());
         for (auto const& ceiling: ceilings->ceilings)
-            rows.push_back(Obj({ { "name", Str(ceiling.name) },
+            rows.push_back(Obj({ { "name", Str(NodeStatusView::ReadableText(ceiling.name)) },
                                  { "slots", NumberOrNull(ceiling.slots) },
-                                 { "binding", Bool(ceiling.name == ceilings->binding) } }));
-        return Obj({ { "available", Int(ceilings->available) },
-                     { "binding", Str(ceilings->binding) },
-                     { "sampled_age_s", Int(static_cast<std::int64_t>(ceilings->sampledSecondsAgo)) },
+                                 { "binding", Bool(ceiling.binding) } }));
+        return Obj({ { "available", Json::Unsigned(ceilings->available) },
+                     { "binding", Str(NodeStatusView::ReadableText(ceilings->binding)) },
+                     { "sampled_age_s", Json::Unsigned(ceilings->sampledSecondsAgo) },
                      { "ceilings", Arr(std::move(rows)) } });
     }
 
@@ -126,12 +128,12 @@ namespace
             auto const ratio = NodeStatusView::HitRatio(stats);
             rows.push_back(Obj({ { "tier", Name(tier.name) },
                                  { "present", Bool(true) },
-                                 { "entries", Int(static_cast<std::int64_t>(stats.entries)) },
-                                 { "bytes", Int(static_cast<std::int64_t>(stats.bytesUsed)) },
+                                 { "entries", Json::Unsigned(stats.entries) },
+                                 { "bytes", Json::Unsigned(stats.bytesUsed) },
                                  { "budget_bytes", NumberOrNull(budget) },
                                  { "budget_unbounded", Bool(!budget.has_value()) },
-                                 { "hits", Int(static_cast<std::int64_t>(stats.hits)) },
-                                 { "misses", Int(static_cast<std::int64_t>(stats.misses)) },
+                                 { "hits", Json::Unsigned(stats.hits) },
+                                 { "misses", Json::Unsigned(stats.misses) },
                                  { "hit_ratio", ratio.has_value() ? Real(*ratio) : Null() } }));
         }
         return Arr(std::move(rows));
@@ -156,7 +158,8 @@ namespace
                     array.push_back(Str(value));
                 values = Arr(std::move(array));
             }
-            rows.push_back(Obj({ { "name", Str(setting.name) }, { "values", std::move(values) } }));
+            rows.push_back(Obj(
+                { { "name", Str(setting.name) }, { "values", std::move(values) }, { "non_utf8", Bool(setting.escaped) } }));
         }
         return Arr(std::move(rows));
     }
@@ -172,7 +175,7 @@ namespace
             rows.push_back(Obj({ { "tier",
                                    entry.tier < StorageTierTable.size() ? Name(StorageTierTable[entry.tier].name)
                                                                         : Str(std::format("tier-{}", entry.tier)) },
-                                 { "bytes", Int(static_cast<std::int64_t>(entry.bytes)) },
+                                 { "bytes", Json::Unsigned(entry.bytes) },
                                  { "baseline_bytes", NumberOrNull(entry.baselineBytes) } }));
         return Arr(std::move(rows));
     }
@@ -198,9 +201,9 @@ namespace
         for (auto const& name: NodeStatusView::ComponentNames(fields.components))
             components += (components.empty() ? "" : ", ") + name;
         auto slots = std::string { "no worker" };
-        if (runtime.slotCeilings.has_value())
+        if (auto const ceilings = NodeStatusView::CeilingsOf(runtime); ceilings.has_value())
             slots = std::format(
-                "{} slot(s) offerable, bound by {}", runtime.slotCeilings->available, runtime.slotCeilings->binding);
+                "{} slot(s) offerable, bound by {}", ceilings->available, NodeStatusView::ReadableText(ceilings->binding));
         else if (runtime.compileSlots.has_value())
             slots = std::format("{} slot(s), ceilings not sampled yet", *runtime.compileSlots);
         auto cache = std::string { "no cache" };
@@ -215,8 +218,8 @@ namespace
                                                             : std::string { "absent" });
         }
         return std::format("node {} version {}, up {} s; runs {}; {}; cache: {}{}",
-                           fields.nodeId.empty() ? std::string { "(no id)" } : fields.nodeId,
-                           fields.version,
+                           fields.nodeId.empty() ? std::string { "(no id)" } : NodeStatusView::ReadableText(fields.nodeId),
+                           NodeStatusView::ReadableText(fields.version),
                            fields.uptimeSeconds,
                            components.empty() ? std::string { "nothing" } : components,
                            slots,
@@ -257,13 +260,13 @@ namespace
 
         auto result = Envelope(*answer);
         result.emplace_back("node", StrOrNull(target->asked));
-        result.emplace_back("version", Str(fields.version));
-        result.emplace_back("node_id", fields.nodeId.empty() ? Null() : Str(fields.nodeId));
+        result.emplace_back("version", Str(NodeStatusView::ReadableText(fields.version)));
+        result.emplace_back("node_id", fields.nodeId.empty() ? Null() : Str(NodeStatusView::ReadableText(fields.nodeId)));
         result.emplace_back("public_key",
                             runtime.identityPublicKey.has_value()
                                 ? Str(FormatEd25519PublicKey(Ed25519PublicKey { *runtime.identityPublicKey }))
                                 : Null());
-        result.emplace_back("uptime_s", Int(static_cast<std::int64_t>(fields.uptimeSeconds)));
+        result.emplace_back("uptime_s", Json::Unsigned(fields.uptimeSeconds));
         result.emplace_back("components", Arr(std::move(components)));
         result.emplace_back("consensus_standing",
                             runtime.consensusStanding.has_value()
@@ -284,7 +287,7 @@ namespace
         result.emplace_back("compile_request_max_bytes", NumberOrNull(runtime.compileRequestMaxBytes));
         result.emplace_back("cordon",
                             runtime.cordon.has_value() ? Name(NodeStatusView::CordonStateName(*runtime.cordon)) : Null());
-        result.emplace_back("slot_ceilings", SlotCeilings(runtime.slotCeilings));
+        result.emplace_back("slot_ceilings", SlotCeilings(runtime));
         result.emplace_back("tiers", Tiers(runtime));
         result.emplace_back("surfaces", Surfaces(fields));
         result.emplace_back("effective_config", Settings(runtime));
@@ -310,7 +313,7 @@ namespace
         R"("slot_ceilings":{"type":["object","null"],"description":"Each ceiling on the worker's slots (slots null where a limit did not apply) and the binding one, as of the last heartbeat; null with no worker or before the first heartbeat."},)"
         R"("tiers":{"type":["array","null"],"description":"One row per cache tier; present:false is a tier this cache lacks (every figure null); budget_unbounded when the budget is zero; hit_ratio null with no lookups. null: no cache."},)"
         R"("surfaces":{"type":"array"},)"
-        R"("effective_config":{"type":["array","null"],"description":"The configuration in force after reloads: {name, values}; values null when unset; a credential reads <redacted> and never leaves its node."},)"
+        R"("effective_config":{"type":["array","null"],"description":"The configuration in force after reloads: {name, values}; values null when unset; a credential reads <redacted> and never leaves its node; non_utf8 true when a value was not UTF-8 and is shown escaped as <non-utf8: ...> with each such byte as \\xHH."},)"
         R"("budget_overrides":{"type":["array","null"],"description":"null: the node does not say."}}})";
 
 } // namespace

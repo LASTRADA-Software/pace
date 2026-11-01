@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -47,6 +48,65 @@ TEST_CASE("A hit ratio of no lookups is no reading, and a zero budget is unbound
 
     stats.hits = 0;
     CHECK(NodeStatusView::HitRatio(stats) == std::optional { 0.0 });
+
+    // Near UINT64_MAX the two counters sum past the width: the ratio stays in [0, 1] rather than dividing by a
+    // wrapped total -- which, for these two, would be zero lookups, or a ratio far above one.
+    stats.hits = UINT64_MAX;
+    stats.misses = 1;
+    auto const nearlyAll = NodeStatusView::HitRatio(stats);
+    REQUIRE(nearlyAll.has_value());
+    CHECK(Unwrap(nearlyAll) <= 1.0);
+    CHECK(Unwrap(nearlyAll) > 0.999);
+    stats.hits = UINT64_MAX;
+    stats.misses = UINT64_MAX;
+    CHECK(NodeStatusView::HitRatio(stats) == std::optional { 0.5 });
+}
+
+TEST_CASE("A value that is not UTF-8 is marked and escaped, never replaced", "[node-status-view][node-status-detail]")
+{
+    CHECK(NodeStatusView::ReadableText("/var/cache/plain") == "/var/cache/plain");
+    // A 0xFF byte starts no UTF-8 sequence: spelled, marked, and the valid text around it kept.
+    CHECK(NodeStatusView::ReadableText(std::string { "/var/cache/a\xff" }) == "<non-utf8: /var/cache/a\\xFF>");
+    // A backslash already in such a value is doubled, so it cannot pass for an escape.
+    CHECK(NodeStatusView::ReadableText(std::string { "c:\\x\xfe" }) == "<non-utf8: c:\\\\x\\xFE>");
+    // Valid multi-byte UTF-8 beside the bad byte is kept as it is.
+    CHECK(NodeStatusView::ReadableText(std::string { "\xc3\xa9\xff" }) == "<non-utf8: \xc3\xa9\\xFF>");
+
+    auto runtime = NodeRuntimeFields {};
+    runtime.effectiveConfig = std::vector {
+        NodeSettingFields { .name = "--cache-dir", .kind = WireSettingValue::Value, .text = std::string { "/d\xff" } },
+        NodeSettingFields { .name = "--pidfile", .kind = WireSettingValue::Value, .text = "/run/p" },
+    };
+    auto const read = NodeStatusView::SettingsOf(runtime);
+    REQUIRE(read.has_value());
+    auto const& settings = Unwrap(read);
+    REQUIRE(settings.size() == 2);
+    CHECK(settings[0].escaped);
+    CHECK(settings[0].values == std::optional { std::vector<std::string> { "<non-utf8: /d\\xFF>" } });
+    CHECK_FALSE(settings[1].escaped);
+}
+
+TEST_CASE("The slot ceilings read with the binding one marked", "[node-status-view][node-status-detail]")
+{
+    auto runtime = NodeRuntimeFields {};
+    CHECK_FALSE(NodeStatusView::CeilingsOf(runtime).has_value());
+    runtime.slotCeilings = NodeSlotCeilingsFields {
+        .ceilings = { NodeSlotCeilingFields { .name = "registered", .slots = 8 },
+                      NodeSlotCeilingFields { .name = "memory", .slots = 3 } },
+        .available = 3,
+        .binding = "memory",
+        .sampledSecondsAgo = 9,
+    };
+    auto const read = NodeStatusView::CeilingsOf(runtime);
+    REQUIRE(read.has_value());
+    auto const& view = Unwrap(read);
+    CHECK(view.available == 3);
+    CHECK(view.binding == "memory");
+    CHECK(view.sampledSecondsAgo == 9);
+    REQUIRE(view.ceilings.size() == 2);
+    CHECK_FALSE(view.ceilings[0].binding);
+    CHECK(view.ceilings[1].binding);
+    CHECK(view.ceilings[1].slots == std::optional<std::uint32_t> { 3 });
 }
 
 TEST_CASE("A list setting's rows gather into one setting, unset reads absent and a redaction reads its marker",

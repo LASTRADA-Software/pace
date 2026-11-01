@@ -1884,3 +1884,44 @@ TEST_CASE("A node reports the configuration in force now, after a reload, with i
     Fixture const unwired { {}, clock };
     CHECK_FALSE(unwired.status.Describe().runtime.effectiveConfig.has_value());
 }
+
+TEST_CASE("The configuration in force is told to a caller a route identifies, never to one --fleet-open admits alone",
+          "[node][node-status][node-status-detail][admission]")
+{
+    // Over the production fold a `--fleet-open` node composes, each caller labelled by the HOST and evidence its
+    // connection established -- a relabelled peer, not a local client every route admits first. The anonymous
+    // caller is a member (it reads the rest of the record) and is not IDENTIFIED, so the configuration is absent.
+    core::platform::ManualClock clock;
+    AtomicMetricsSink metrics;
+    ReloadableConfig config;
+    config.inForce.slots = 4;
+    Fixture const fixture { {}, clock, {}, std::nullopt, DirectSources { .config = &config } };
+    CapturedReadings const readings { metrics, {} };
+    Testing::OpenFleetFold const fold;
+    NodeStatusResponder responder { fixture.status, readings, fold.admitted, HoldsNoRoster, metrics };
+
+    auto const statusFrom = [&responder](PeerIdentity peer) {
+        auto const reply = AnswerFrom(responder, HeaderFor(Wire::Op::NodeStatus), std::move(peer));
+        auto const header = Wire::DecodeReplyHeader(reply);
+        REQUIRE(header.has_value());
+        REQUIRE(Unwrap(header).status == Wire::Status::Ok);
+        auto const fields = Wire::DecodeNodeStatus(PayloadOf(reply, Unwrap(header)));
+        REQUIRE(fields.has_value());
+        return Unwrap(fields);
+    };
+
+    // Admitted by --fleet-open alone: answered, and the configuration withheld -- absent, never empty.
+    auto const anonymous = statusFrom(Testing::OpenFleetFold::Anonymous());
+    CHECK(anonymous.version == "1.2.3");
+    CHECK_FALSE(anonymous.runtime.effectiveConfig.has_value());
+
+    // The same address with a verified ticket, or having proved the roster's key, and this machine: told.
+    for (auto const& [label, peer]: { std::pair { "ticketed", Testing::OpenFleetFold::Ticketed() },
+                                      std::pair { "proven", Testing::OpenFleetFold::Proven() },
+                                      std::pair { "loopback", PeerIdentity { .host = "127.0.0.1" } } })
+    {
+        INFO(label);
+        auto const told = statusFrom(peer);
+        CHECK(told.runtime.effectiveConfig.has_value());
+    }
+}

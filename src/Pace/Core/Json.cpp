@@ -227,7 +227,12 @@ namespace
                 auto const [end, ec] = std::from_chars(token.data(), token.data() + token.size(), whole);
                 if (ec == std::errc {})
                     return Value { .v = whole };
-                // Out of range is a number too large for an integer, never a wrapped one; it becomes a double.
+                // Past `INT64_MAX` and within `UINT64_MAX` is an unsigned integer, read exactly.
+                std::uint64_t positive = 0;
+                auto const [uend, uec] = std::from_chars(token.data(), token.data() + token.size(), positive);
+                if (uec == std::errc {} && uend == token.data() + token.size())
+                    return Value { .v = positive };
+                // Out of range of both is a number too large for an integer, never a wrapped one; it becomes a double.
             }
             double real = 0;
             if (!ParseFiniteDouble(token, real))
@@ -517,7 +522,7 @@ namespace
                     out += "null";
                 else if constexpr (std::is_same_v<Held, bool>)
                     out += held ? "true" : "false";
-                else if constexpr (std::is_same_v<Held, std::int64_t>)
+                else if constexpr (std::is_same_v<Held, std::int64_t> || std::is_same_v<Held, std::uint64_t>)
                     out += std::to_string(held);
                 else if constexpr (std::is_same_v<Held, double>)
                     AppendReal(out, held);

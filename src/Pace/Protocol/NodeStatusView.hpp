@@ -23,6 +23,38 @@
 namespace Pace::NodeStatusView
 {
 
+/// What opens a value that is not valid UTF-8, as `ReadableText` renders it: the reader is TOLD the value was
+/// escaped, rather than handed a replacement character that names a different path.
+inline constexpr std::string_view NonUtf8Marker = "<non-utf8: ";
+
+/// Text a node sent, as a reader prints it.
+/// @param text The bytes as they travelled.
+/// @return Them unchanged when they are UTF-8; otherwise `<non-utf8: ...>`, every byte that starts no valid
+///         sequence spelled `\xHH` and a backslash doubled -- distinguishable from any UTF-8 value, and never lossy.
+[[nodiscard]] std::string ReadableText(std::string_view text);
+
+/// One ceiling on a worker's slots as a reader reads it.
+struct CeilingView
+{
+    std::string name;                   ///< The limit, as the node named it.
+    std::optional<std::uint32_t> slots; ///< What it allows, or DISENGAGED where it did not apply.
+    bool binding { false };             ///< Whether it is the one that produced `available`.
+};
+
+/// Every ceiling on a worker's slots, as a reader reads them.
+struct CeilingsView
+{
+    std::uint32_t available { 0 };         ///< The slots offerable now.
+    std::string binding;                   ///< The binding ceiling's name.
+    std::uint64_t sampledSecondsAgo { 0 }; ///< How old the heartbeat reading is.
+    std::vector<CeilingView> ceilings;     ///< One per limit, in the node's order.
+};
+
+/// The slot ceilings a reply reports.
+/// @param runtime The decoded runtime record.
+/// @return The ceilings, each marked whether it binds; DISENGAGED with no worker or before its first heartbeat.
+[[nodiscard]] std::optional<CeilingsView> CeilingsOf(CompileCacheWire::NodeRuntimeFields const& runtime);
+
 /// One cache tier as a reader names it.
 struct TierView
 {
@@ -41,8 +73,9 @@ struct TierView
 
 /// The share of lookups a tier answered.
 /// @param stats A tier's figures.
-/// @return Hits over hits plus misses, in [0, 1]; DISENGAGED when nothing was looked up, since a ratio of no
-///         lookups is no reading at all, and zero would be a cache that missed everything.
+/// @return Hits over hits plus misses, in [0, 1] even when the two counters sum past `UINT64_MAX`; DISENGAGED when
+///         nothing was looked up, since a ratio of no lookups is no reading at all, and zero would be a cache that
+///         missed everything.
 [[nodiscard]] std::optional<double> HitRatio(CompileCacheWire::NodeTierFields const& stats) noexcept;
 
 /// A tier's budget as a reader takes it.
@@ -56,9 +89,14 @@ struct SettingView
 {
     std::string name; ///< The flag, as the node's table spells it.
 
-    /// Its values as a reader prints them, in the order sent: a value as the node wrote it, `RedactedSettingText`
-    /// for a credential, `<omitted: why>` for a value the record could not carry. DISENGAGED when unset.
+    /// Its values as a reader prints them, in the order sent: a value as the node wrote it (through `ReadableText`,
+    /// so one that is not UTF-8 is marked), `RedactedSettingText` for a credential, `<omitted: why>` for a value the
+    /// record could not carry. DISENGAGED when unset.
     std::optional<std::vector<std::string>> values;
+
+    /// Whether the name or any value was not UTF-8 and was escaped: the flag a structured reader keys on, so a value
+    /// that merely LOOKS like the marker cannot pass for an escaped one, or the reverse.
+    bool escaped { false };
 };
 
 /// The configuration in force, as a reader prints it.

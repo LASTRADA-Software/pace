@@ -279,7 +279,7 @@ namespace
 
     [[nodiscard]] bool IsIntegral(Value const& value) noexcept
     {
-        if (value.AsInt())
+        if (value.AsInt() || value.AsUint())
             return true;
         auto const* real = std::get_if<double>(&value.v);
         return real && std::isfinite(*real) && *real == std::trunc(*real);
@@ -296,8 +296,10 @@ namespace
     constexpr std::array TypeTable {
         TypeRow { .name = "string", .matches = [](Value const& v) noexcept { return v.AsString() != nullptr; } },
         TypeRow { .name = "integer", .matches = IsIntegral },
-        TypeRow { .name = "number",
-                  .matches = [](Value const& v) noexcept { return v.AsInt() || std::holds_alternative<double>(v.v); } },
+        TypeRow {
+            .name = "number",
+            .matches =
+                [](Value const& v) noexcept { return v.AsInt() || v.AsUint() || std::holds_alternative<double>(v.v); } },
         TypeRow { .name = "boolean", .matches = [](Value const& v) noexcept { return v.AsBool().has_value(); } },
         TypeRow { .name = "object", .matches = [](Value const& v) noexcept { return v.AsObject() != nullptr; } },
         TypeRow { .name = "array", .matches = [](Value const& v) noexcept { return v.AsArray() != nullptr; } },

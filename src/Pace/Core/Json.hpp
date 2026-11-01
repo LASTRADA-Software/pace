@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -36,12 +37,16 @@ using Object = std::vector<Member>;
 
 /// One JSON value.
 ///
-/// A number with no fraction and no exponent that fits `std::int64_t` is an integer; every other number is
+/// A number with no fraction and no exponent that fits `std::int64_t` is an integer; one past that which fits
+/// `std::uint64_t` is an UNSIGNED integer, so a 64-bit counter or byte count travels exactly; every other number is
 /// a `double`. Text that does not fit is never wrapped.
 struct Value
 {
-    /// The alternative held, in the order `null`, boolean, integer, real, string, array, object.
-    std::variant<std::nullptr_t, bool, std::int64_t, double, std::string, Array, Object> v {};
+    /// The alternative held, in the order `null`, boolean, integer, unsigned integer, real, string, array, object.
+    ///
+    /// The unsigned alternative holds what does not fit `std::int64_t`: a writer stores a value up to `INT64_MAX`
+    /// as the signed one (`Unsigned` does), so a reader of a small count keeps reading `AsInt`.
+    std::variant<std::nullptr_t, bool, std::int64_t, std::uint64_t, double, std::string, Array, Object> v {};
 
     /// @return True when this is `null`.
     [[nodiscard]] bool IsNull() const noexcept
@@ -62,6 +67,17 @@ struct Value
     {
         if (auto const* held = std::get_if<std::int64_t>(&v))
             return *held;
+        return std::nullopt;
+    }
+
+    /// @return The integer as an unsigned one: the unsigned alternative, or a non-negative signed one; nothing for
+    ///         a negative integer or anything else.
+    [[nodiscard]] std::optional<std::uint64_t> AsUint() const noexcept
+    {
+        if (auto const* held = std::get_if<std::uint64_t>(&v))
+            return *held;
+        if (auto const* held = std::get_if<std::int64_t>(&v); held != nullptr && *held >= 0)
+            return static_cast<std::uint64_t>(*held);
         return std::nullopt;
     }
 
@@ -123,6 +139,17 @@ struct Error
     ErrorCode code;     ///< Why.
     std::size_t offset; ///< Byte offset into the text; never past its size.
 };
+
+/// A count or a byte figure as a JSON value, exactly at any 64-bit width: the signed alternative up to `INT64_MAX`,
+/// the unsigned one above it -- never a negative number for a value past 2^63.
+/// @param number The value.
+/// @return It as a JSON value.
+[[nodiscard]] inline Value Unsigned(std::uint64_t number)
+{
+    if (number <= static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))
+        return Value { .v = static_cast<std::int64_t>(number) };
+    return Value { .v = number };
+}
 
 /// Parse one JSON document.
 /// @param text The document, as received.

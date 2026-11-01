@@ -33,6 +33,41 @@
 namespace Pace::CompileCacheWire
 {
 
+namespace Detail
+{
+    /// Frame a list as a COUNT then one field per row: what makes an engaged EMPTY list encode non-empty, so
+    /// *says it holds none* never reads back as *does not say*.
+    /// @param rows The rows' own bytes.
+    /// @return The list's bytes; never empty.
+    [[nodiscard]] inline std::vector<std::byte> EncodeCountedList(std::vector<std::vector<std::byte>> const& rows)
+    {
+        auto const count = WireFields::ToBigEndian<std::uint32_t>(static_cast<std::uint32_t>(rows.size()));
+        std::vector<std::span<std::byte const>> fields;
+        fields.reserve(1 + rows.size());
+        fields.emplace_back(count);
+        for (auto const& row: rows)
+            fields.emplace_back(row);
+        return WireFields::Encode(WireFields::FieldList { fields });
+    }
+
+    /// Split a list framed by `EncodeCountedList`.
+    /// @param field The list's bytes; never empty here.
+    /// @param most The most rows it may hold.
+    /// @return The rows, or nothing when the count is missing, disagrees with the rows, or exceeds @p most.
+    [[nodiscard]] inline std::optional<std::vector<std::span<std::byte const>>> SplitCountedList(
+        std::span<std::byte const> field, std::size_t most)
+    {
+        auto parts = WireFields::SplitAll(field);
+        if (!parts.has_value() || parts->empty())
+            return std::nullopt;
+        auto const count = WireFields::FromBigEndian<std::uint32_t>(parts->front());
+        if (!count.has_value() || *count > most || *count != parts->size() - 1)
+            return std::nullopt;
+        parts->erase(parts->begin());
+        return parts;
+    }
+} // namespace Detail
+
 // ------------------------------------------------------------------------------------------- slot ceilings
 
 /// The longest ceiling name a record may carry, in bytes. A decoder bound: `SlotLimitTable`'s longest name is
@@ -172,8 +207,8 @@ inline constexpr std::size_t NodeTierFieldCount = 5;
 using NodeTiersFields = std::vector<std::optional<NodeTierFields>>;
 
 /// Frame the tier record: one field per position, empty where the cache has no such tier.
-/// @param tiers The positions; at most `MaxNodeTierPositions` are taken. Never empty when engaged.
-/// @return Its bytes; never empty for a non-empty list.
+/// @param tiers The positions; at most `MaxNodeTierPositions` are taken.
+/// @return Its bytes: a count, then one field per position; never empty, so an engaged empty list stays engaged.
 [[nodiscard]] inline std::vector<std::byte> EncodeNodeTiers(NodeTiersFields const& tiers)
 {
     auto const count = std::min(tiers.size(), MaxNodeTierPositions);
@@ -197,11 +232,7 @@ using NodeTiersFields = std::vector<std::optional<NodeTierFields>>;
                                             std::span<std::byte const> { hits },
                                             std::span<std::byte const> { misses } }));
     }
-    std::vector<std::span<std::byte const>> fields;
-    fields.reserve(rows.size());
-    for (auto const& row: rows)
-        fields.emplace_back(row);
-    return WireFields::Encode(WireFields::FieldList { fields });
+    return Detail::EncodeCountedList(rows);
 }
 
 /// Read the tier record.
@@ -213,8 +244,8 @@ using NodeTiersFields = std::vector<std::optional<NodeTierFields>>;
 {
     if (field.empty())
         return true;
-    auto const positions = WireFields::SplitAll(field);
-    if (!positions.has_value() || positions->empty() || positions->size() > MaxNodeTierPositions)
+    auto const positions = Detail::SplitCountedList(field, MaxNodeTierPositions);
+    if (!positions.has_value())
         return false;
     auto tiers = NodeTiersFields {};
     tiers.reserve(positions->size());
@@ -304,9 +335,10 @@ namespace Detail
     }
 } // namespace Detail
 
-/// Frame the configuration record: one nested `[name, kind, text]` field per setting.
+/// Frame the configuration record: a count, then one nested `[name, kind, text]` field per setting -- never empty,
+/// so an engaged empty list stays engaged.
 /// @param settings The settings; at most `MaxNodeSettings` are taken -- the producer folds a surplus into one
-///        `Omitted` row before it gets here. Never empty when engaged.
+///        `Omitted` row before it gets here.
 /// @return Its bytes.
 [[nodiscard]] inline std::vector<std::byte> EncodeNodeSettings(std::span<NodeSettingFields const> settings)
 {
@@ -319,11 +351,7 @@ namespace Detail
         rows.push_back(
             WireFields::Encode({ AsBytes(setting.name), std::span<std::byte const> { kind }, AsBytes(setting.text) }));
     }
-    std::vector<std::span<std::byte const>> fields;
-    fields.reserve(rows.size());
-    for (auto const& row: rows)
-        fields.emplace_back(row);
-    return WireFields::Encode(WireFields::FieldList { fields });
+    return Detail::EncodeCountedList(rows);
 }
 
 /// Read the configuration record.
@@ -339,8 +367,8 @@ namespace Detail
 {
     if (field.empty())
         return true;
-    auto const rows = WireFields::SplitAll(field);
-    if (!rows.has_value() || rows->size() > MaxNodeSettings)
+    auto const rows = Detail::SplitCountedList(field, MaxNodeSettings);
+    if (!rows.has_value())
         return false;
     auto settings = std::vector<NodeSettingFields> {};
     settings.reserve(rows->size());
@@ -391,7 +419,6 @@ struct NodeBudgetOverrideFields
 [[nodiscard]] inline std::vector<std::byte> EncodeNodeBudgetOverrides(std::span<NodeBudgetOverrideFields const> overrides)
 {
     auto const taken = overrides.first(std::min(overrides.size(), MaxNodeBudgetOverrides));
-    auto const count = WireFields::ToBigEndian<std::uint32_t>(static_cast<std::uint32_t>(taken.size()));
     std::vector<std::vector<std::byte>> rows;
     rows.reserve(taken.size());
     for (auto const& entry: taken)
@@ -404,12 +431,7 @@ struct NodeBudgetOverrideFields
               std::span<std::byte const> { bytes },
               entry.baselineBytes.has_value() ? std::span<std::byte const> { baseline } : std::span<std::byte const> {} }));
     }
-    std::vector<std::span<std::byte const>> fields;
-    fields.reserve(1 + rows.size());
-    fields.emplace_back(count);
-    for (auto const& row: rows)
-        fields.emplace_back(row);
-    return WireFields::Encode(WireFields::FieldList { fields });
+    return Detail::EncodeCountedList(rows);
 }
 
 /// Read the overrides.
@@ -422,15 +444,12 @@ struct NodeBudgetOverrideFields
 {
     if (field.empty())
         return true;
-    auto const parts = WireFields::SplitAll(field);
-    if (!parts.has_value() || parts->empty())
-        return false;
-    auto const count = WireFields::FromBigEndian<std::uint32_t>((*parts)[0]);
-    if (!count.has_value() || *count > MaxNodeBudgetOverrides || *count != parts->size() - 1)
+    auto const parts = Detail::SplitCountedList(field, MaxNodeBudgetOverrides);
+    if (!parts.has_value())
         return false;
     auto overrides = std::vector<NodeBudgetOverrideFields> {};
-    overrides.reserve(*count);
-    for (auto const& row: std::span { *parts }.subspan(1))
+    overrides.reserve(parts->size());
+    for (auto const& row: *parts)
     {
         auto const columns = WireFields::SplitAll(row);
         if (!columns.has_value() || columns->size() < 3 || (*columns)[0].size() != 1)

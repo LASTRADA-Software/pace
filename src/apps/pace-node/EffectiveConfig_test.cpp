@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <filesystem>
 #include <ranges>
 #include <set>
 #include <string>
@@ -86,6 +87,23 @@ TEST_CASE("The rows whose value is a path to a secret file are exactly the secre
     CHECK_FALSE(secretFiles.empty());
 }
 
+TEST_CASE("The redacted rows are exactly the option rows whose operand marks a credential", "[effective-config]")
+{
+    // The marker is the option table's: a row spelling `SecretOperand` IS a credential, and only such a row may be
+    // -- and must be -- `Redacted`. So a `--foo-token=<secret>` added later and shown in clear fails here.
+    auto secrets = std::set<std::string_view> {};
+    for (auto const& option: NodeOptions())
+        if (option.operand == SecretOperand && !option.yamlKey.empty())
+            secrets.insert(option.primary);
+    auto redacted = std::set<std::string_view> {};
+    for (auto const& row: NodeSettingTable())
+        if (row.disclosure == SettingDisclosure::Redacted)
+            redacted.insert(row.flag);
+    CHECK(redacted == secrets);
+    // Absence of the negative is not the positive: the marker matched a row at all.
+    CHECK(secrets.contains("--requirepass"));
+}
+
 TEST_CASE("A credential travels as set or unset, never as its value", "[effective-config]")
 {
     constexpr std::string_view Secret = "correct-horse-battery-staple";
@@ -132,6 +150,18 @@ TEST_CASE("Absent is unset, an emptied listen spec is a value, and a list settin
     CHECK(RowsNamed(EffectiveConfigOf(cfg), "--slots")
           == std::vector {
               Wire::NodeSettingFields { .name = "--slots", .kind = Wire::WireSettingValue::Value, .text = "0" } });
+}
+
+TEST_CASE("A path that is not UTF-8 travels as its bytes, for the reader to mark", "[effective-config]")
+{
+    // The wire carries the bytes the node holds; `NodeStatusView::ReadableText` is where they are marked, never
+    // replaced -- and replacing them here would name a different file.
+    auto cfg = NodeConfig {};
+    cfg.cacheDir = std::filesystem::path { std::string { "/var/cache/pace-\xff" } };
+    auto const rows = RowsNamed(EffectiveConfigOf(cfg), "--cache-dir");
+    REQUIRE(rows.size() == 1);
+    CHECK(rows.front().kind == Wire::WireSettingValue::Value);
+    CHECK(rows.front().text == std::string { "/var/cache/pace-\xff" });
 }
 
 TEST_CASE("A value too long to carry, and values past the ceiling, are omitted by name and never cut", "[effective-config]")

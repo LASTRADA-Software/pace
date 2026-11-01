@@ -496,7 +496,11 @@ Beside them, what that worker is offering and whether anyone knows about it:
   unset setting absent rather than empty. `--requirepass` reads `<redacted>` when set:
   the node replaces it before its reply exists, so its value never leaves the machine. A
   path to a secret file (`--tls-key`, `--dashboard-token-file`, `--cluster-dir`) is shown,
-  because the path is not the secret and the file is.
+  because the path is not the secret and the file is. A value that is not UTF-8 -- a path with
+  such a byte -- reads `<non-utf8: ...>` with each such byte as `\xHH`, never a replacement
+  character that would name another file. A node that admitted the asking connection by
+  `--fleet-open` alone tells it no `config-*` cell: only a caller this machine, a proven key
+  or a verified ticket identifies is told the configuration.
 - **`budget-overrides`** — the cache budgets this node applies from the cluster rather
   than its own flags. Absent until a node can be given one; `none` once it says it
   applies none.

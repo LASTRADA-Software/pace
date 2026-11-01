@@ -107,6 +107,7 @@ TEST_CASE("The NODE-STATUS runtime record's positions 26 to 29 hold exactly thes
         0x00, 0x00, 0x00, 0x09,                                                 // ceiling "c": did not apply
             0x00, 0x00, 0x00, 0x01, 'c', 0x00, 0x00, 0x00, 0x00 })));
     CHECK(std::ranges::equal(at(27), Bytes({
+        0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x02,                         // two positions
         0x00, 0x00, 0x00, 0x00,                                                 // tier 0: absent
         0x00, 0x00, 0x00, 0x3c,                                                 // tier 1: five u64s
             0x00, 0x00, 0x00, 0x08, 0, 0, 0, 0, 0, 0, 0, 1,
@@ -115,7 +116,8 @@ TEST_CASE("The NODE-STATUS runtime record's positions 26 to 29 hold exactly thes
             0x00, 0x00, 0x00, 0x08, 0, 0, 0, 0, 0, 0, 0, 4,
             0x00, 0x00, 0x00, 0x08, 0, 0, 0, 0, 0, 0, 0, 5 })));
     CHECK(std::ranges::equal(at(28), Bytes({
-        0x00, 0x00, 0x00, 0x10,                                                 // one setting
+        0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x01,                         // one setting
+        0x00, 0x00, 0x00, 0x10,                                                 // the setting
             0x00, 0x00, 0x00, 0x02, '-', 'a',                                   // name
             0x00, 0x00, 0x00, 0x01, 0x01,                                       // kind: Value
             0x00, 0x00, 0x00, 0x01, 'v' })));                                   // text
@@ -169,19 +171,18 @@ TEST_CASE("A detail record this build cannot read refuses the reply, and an unna
     SECTION("a redaction that carries text refuses the record: no reader may print bytes beside it")
     {
         auto const row = setting("--requirepass", 0x03, "hunter2");
-        CHECK_FALSE(replaced(28, WireFields::Encode({ std::span<std::byte const> { row } })).has_value());
+        CHECK_FALSE(replaced(28, CompileCacheWire::Detail::EncodeCountedList({ row })).has_value());
     }
     SECTION("an unset setting that carries text refuses the record")
     {
         auto const row = setting("--slots", 0x02, "4");
-        CHECK_FALSE(replaced(28, WireFields::Encode({ std::span<std::byte const> { row } })).has_value());
+        CHECK_FALSE(replaced(28, CompileCacheWire::Detail::EncodeCountedList({ row })).has_value());
     }
     SECTION("a kind byte this build does not name skips that setting and keeps its neighbour")
     {
         auto const unknown = setting("--future", 0x7F, "x");
         auto const known = setting("--slots", 0x01, "4");
-        auto const back = replaced(
-            28, WireFields::Encode({ std::span<std::byte const> { unknown }, std::span<std::byte const> { known } }));
+        auto const back = replaced(28, CompileCacheWire::Detail::EncodeCountedList({ unknown, known }));
         REQUIRE(back.has_value());
         CHECK(Unwrap(back).effectiveConfig
               == std::optional {
@@ -201,11 +202,37 @@ TEST_CASE("A detail record this build cannot read refuses the reply, and an unna
     {
         auto const one = WireFields::ToBigEndian<std::uint64_t>(1);
         auto const tier = WireFields::Encode({ std::span<std::byte const> { one }, std::span<std::byte const> { one } });
-        CHECK_FALSE(replaced(27, WireFields::Encode({ std::span<std::byte const> { tier } })).has_value());
+        CHECK_FALSE(replaced(27, CompileCacheWire::Detail::EncodeCountedList({ tier })).has_value());
+    }
+    SECTION("a tier or setting count disagreeing with its rows refuses the record")
+    {
+        auto const two = WireFields::ToBigEndian<std::uint32_t>(2);
+        auto const row = setting("--slots", 0x01, "4");
+        CHECK_FALSE(
+            replaced(28, WireFields::Encode({ std::span<std::byte const> { two }, std::span<std::byte const> { row } }))
+                .has_value());
+        CHECK_FALSE(replaced(27, WireFields::Encode({ std::span<std::byte const> { two } })).has_value());
     }
     SECTION("an override count disagreeing with its rows refuses the record")
     {
         auto const two = WireFields::ToBigEndian<std::uint32_t>(2);
         CHECK_FALSE(replaced(29, WireFields::Encode({ std::span<std::byte const> { two } })).has_value());
     }
+}
+
+TEST_CASE("An engaged empty tier list or configuration is not an absent one", "[wire][node-status][node-status-detail]")
+{
+    // Says it holds none and does not say are two answers, so each round-trips as itself.
+    auto empty = NodeRuntimeFields {};
+    empty.tiers = NodeTiersFields {};
+    empty.effectiveConfig = std::vector<NodeSettingFields> {};
+    auto const back = DecodeNodeRuntime(EncodeNodeRuntime(empty));
+    REQUIRE(back.has_value());
+    CHECK(Unwrap(back).tiers == std::optional { NodeTiersFields {} });
+    CHECK(Unwrap(back).effectiveConfig == std::optional { std::vector<NodeSettingFields> {} });
+
+    auto const absent = DecodeNodeRuntime(EncodeNodeRuntime(NodeRuntimeFields {}));
+    REQUIRE(absent.has_value());
+    CHECK_FALSE(Unwrap(absent).tiers.has_value());
+    CHECK_FALSE(Unwrap(absent).effectiveConfig.has_value());
 }

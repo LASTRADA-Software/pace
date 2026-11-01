@@ -399,9 +399,17 @@ core::async::Task<FrameReply> NodeStatusResponder::Answer(std::span<std::byte co
 
     switch (static_cast<CompileCacheWire::Op>(header->opRaw))
     {
-        case CompileCacheWire::Op::NodeStatus:
+        case CompileCacheWire::Op::NodeStatus: {
+            auto fields = _identity.Describe();
+            // The configuration in force is told only to a caller a route IDENTIFIES -- this machine, a proven key,
+            // a verified ticket -- never to one `--fleet-open` admitted alone, who could be anybody on the network.
+            // Withheld rather than refused: the rest of the record is what every member may read, and absent says
+            // *not told*, which is not *has none*. The same fold every surface enforces, never a second check.
+            if (!Distributed::RestsOnIdentifiedCaller(Distributed::ExplainConnection(_membership, peer)))
+                fields.runtime.effectiveConfig.reset();
             co_return CompileCacheWire::EncodeReply(CompileCacheWire::Status::Ok,
-                                                    CompileCacheWire::EncodeNodeStatus(_identity.Describe()));
+                                                    CompileCacheWire::EncodeNodeStatus(fields));
+        }
         case CompileCacheWire::Op::NodeMetrics: {
             // The reading `/metrics` renders -- every counter and every block of the snapshot beside
             // them -- in the encoding a live-stats cache subject streams (#1406). ONE capture, so the

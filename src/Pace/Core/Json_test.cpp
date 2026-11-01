@@ -104,11 +104,20 @@ TEST_CASE("json object keeps insertion order", "[json]")
     CHECK(J::Serialize(parsed) == R"({"b":1,"a":2,"c":3})");
 }
 
-TEST_CASE("json integers outside int64 become double, never wrap", "[json]")
+TEST_CASE("json integers past int64 are unsigned up to uint64, then double, never wrapped", "[json]")
 {
+    // Past INT64_MAX and within UINT64_MAX: an unsigned integer, read and written exactly.
     auto const big = Unwrap(J::Parse("9223372036854775808"sv));
     CHECK_FALSE(big.AsInt().has_value());
-    CHECK(std::get<double>(big.v) == 9223372036854775808.0);
+    CHECK(big.AsUint() == std::optional<std::uint64_t> { 9223372036854775808ULL });
+    auto const top = Unwrap(J::Parse("18446744073709551615"sv));
+    CHECK(top.AsUint() == std::optional<std::uint64_t> { UINT64_MAX });
+    CHECK(J::Serialize(top) == "18446744073709551615");
+
+    // One past UINT64_MAX is a double, never a wrapped integer.
+    auto const past = Unwrap(J::Parse("18446744073709551616"sv));
+    CHECK(std::holds_alternative<double>(past.v));
+    CHECK_FALSE(past.AsUint().has_value());
 
     auto const small = Unwrap(J::Parse("-9223372036854775809"sv));
     CHECK(std::get<double>(small.v) == -9223372036854775809.0);
@@ -120,6 +129,20 @@ TEST_CASE("json integers outside int64 become double, never wrap", "[json]")
     // A fraction or an exponent makes a double even when the value is whole.
     CHECK(std::holds_alternative<double>(Unwrap(J::Parse("1.0"sv)).v));
     CHECK(std::holds_alternative<double>(Unwrap(J::Parse("1e2"sv)).v));
+}
+
+TEST_CASE("json Unsigned writes a 64-bit figure exactly and never negative", "[json]")
+{
+    CHECK(J::Serialize(J::Unsigned(UINT64_MAX)) == "18446744073709551615");
+    CHECK(J::Serialize(J::Unsigned((1ULL << 63) + 5)) == "9223372036854775813");
+    // A small figure stays the signed alternative, so `AsInt` keeps reading it.
+    CHECK(J::Unsigned(42).AsInt() == std::optional<std::int64_t> { 42 });
+    CHECK(J::Unsigned(INT64_MAX).AsInt() == std::optional<std::int64_t> { INT64_MAX });
+    CHECK(J::Unsigned(static_cast<std::uint64_t>(INT64_MAX) + 1).AsUint()
+          == std::optional<std::uint64_t> { static_cast<std::uint64_t>(INT64_MAX) + 1 });
+    CHECK(J::Unsigned(0).AsUint() == std::optional<std::uint64_t> { 0 });
+    // A negative integer is not an unsigned one.
+    CHECK_FALSE(Unwrap(J::Parse("-1"sv)).AsUint().has_value());
 }
 
 TEST_CASE("json writes a double so it parses back as a double", "[json]")

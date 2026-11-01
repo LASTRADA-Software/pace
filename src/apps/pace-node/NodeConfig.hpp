@@ -2120,11 +2120,32 @@ enum class ConsensusDialGap : std::uint8_t
 /// @return A phrase naming who this node admits.
 [[nodiscard]] std::string AdmissionSummary(NodeConfig const& cfg);
 
-/// How `--log-level` spells @p level: the inverse of the parser, so a value read back out of a running node
-/// (`node_status`'s configuration in force) can be handed straight back to the flag.
-/// @param level The level.
-/// @return Its spelling.
-[[nodiscard]] std::string_view NodeLogLevelSpelling(LogLevel level) noexcept;
+/// CLI spelling of a LogLevel, matching what ParseNodeLogLevel accepts.
+///
+/// The inverse of that parser, and the pair is what makes a log level survive
+/// a round trip into a supervisor's argument list -- and what lets a value read back out of a running
+/// node (`node_status`'s configuration in force) be handed straight back to the flag.
+/// @param level Level to name.
+/// @return Its CLI spelling.
+[[nodiscard]] constexpr std::string_view NodeLogLevelName(LogLevel level) noexcept
+{
+    switch (level)
+    {
+        case LogLevel::Trace:
+            return "trace";
+        case LogLevel::Debug:
+            return "debug";
+        case LogLevel::Info:
+            return "info";
+        case LogLevel::Warn:
+            return "warn";
+        case LogLevel::Error:
+            return "error";
+        case LogLevel::Fatal:
+            return "fatal";
+    }
+    return "info";
+}
 
 /// What the readiness line says about this node's worker.
 ///
