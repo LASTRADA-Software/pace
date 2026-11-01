@@ -1658,9 +1658,10 @@ std::expected<std::unique_ptr<ConsensusTier>, NodeRefusal> StartConsensusOrExpla
             // member record's `0xFC` one (`Republish`), never its Raft one.
             schedulingLeader.LeaderChanged(leaderEndpoint);
 
-            // And the term an MCP answer reports as this node's view of it.
+            // And the term an MCP answer reports as this node's view of it, and whether this node leads in
+            // it -- the scheduling leader above is empty while it does.
             if (upstreamDirectory != nullptr)
-                upstreamDirectory->ObservedTerm(term);
+                upstreamDirectory->ObservedRole(term, role == Distributed::SchedulerRole::Leader);
 
             // Null when this node runs no scheduler surface, which is a legitimate
             // shape: a LEARNER, which applies the fleet's state and may contribute CPU

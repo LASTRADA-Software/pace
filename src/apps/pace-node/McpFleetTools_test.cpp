@@ -460,6 +460,25 @@ TEST_CASE("A leader that leads no compile queue is reported as none, never as an
     CHECK(result.text.contains("leads no compile queue"));
 }
 
+TEST_CASE("A compile total the leader does not carry reads as absent in the text, never as zero", "[node][mcp][fleet-tools]")
+{
+    // A leader whose totals name no `waiting` (another build), and one whose `queued` is null: the text says `-`
+    // for both, never `0 waiting`, and the structured totals carry exactly what the document carried.
+    auto body = Dist::RenderFleetJson(ScriptedFleet(), Dist::FleetHistoryView {});
+    auto const totals = std::string { R"("compile-totals":{"queued":1,"waiting":0,"running":2})" };
+    auto const at = body.find(totals);
+    REQUIRE(at != std::string::npos);
+    body.replace(at, totals.size(), R"("compile-totals":{"queued":null,"running":2})");
+    ScriptedUpstream upstream;
+    upstream.AnswerOk(body);
+
+    auto const result = Call(upstream, "running_compiles");
+    REQUIRE_FALSE(result.isError);
+    CHECK(result.text.starts_with("2 running, - queued, - waiting;"));
+    CHECK(At(At(result.structured, "totals"), "queued").IsNull());
+    CHECK(At(result.structured, "totals").Find("waiting") == nullptr);
+}
+
 TEST_CASE("An unreachable leader is a tool error naming the endpoint, and nothing structured", "[node][mcp][fleet-tools]")
 {
     ScriptedUpstream upstream;

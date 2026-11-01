@@ -237,11 +237,11 @@ std::optional<std::vector<std::byte>> LiveStatsResponder::Admit(Wire::SubscribeR
         return std::nullopt;
 
     // The decision `FleetText` answers from too; what is this surface's is which counter each
-    // refusal moves. The HOST alone, and that is unchanged by #1512: this is the dashboard
-    // credential and locality, which a proven identity is not a substitute for -- two
-    // credentials answering two questions, and the token is its own file by rule.
-    // By address alone: the fleet subscription is the dashboard's live panel, and what a proven member reads is
-    // the one-shot document (`FleetTextResponder`), not a stream it would hold open.
+    // refusal moves. By ADDRESS alone (`FleetReader::ByAddress`): on this stream the dashboard
+    // credential and locality decide, and a proven identity is not a substitute for the token --
+    // the stream is the dashboard's live panel. `FleetText` is where the two part: there a caller
+    // proving a live roster key reads the one-shot document without the token, which is how a
+    // member's MCP tools read the leader's fleet (`distributed-compilation.md`).
     auto const verdict =
         DecideFleetRead(_sources.Leadership(), _dashboard, request.dashboardToken, watcher.host, FleetReader::ByAddress);
     switch (verdict.decision)

@@ -795,7 +795,7 @@ TEST_CASE("mcp-upstream: the applied directory reads members exactly and knows n
         Cluster::ClusterMember { .id = "node-b", .raftEndpoint = {}, .schedulerEndpoint = std::string { NodeB } });
     state.members.push_back(Cluster::ClusterMember { .id = "node-c", .raftEndpoint = {}, .schedulerEndpoint = {} });
     directory.Applied(state);
-    directory.ObservedTerm(4);
+    directory.ObservedRole(4, false);
 
     CHECK(directory.EndpointOf("node-b") == std::optional<std::string> { std::string { NodeB } });
     CHECK(directory.EndpointOf("node-c") == std::optional<std::string> { std::string {} });
@@ -805,6 +805,27 @@ TEST_CASE("mcp-upstream: the applied directory reads members exactly and knows n
     // A later state replaces the earlier one: a forgotten member is unknown again.
     directory.Applied(Cluster::ClusterState {});
     CHECK_FALSE(directory.EndpointOf("node-b").has_value());
+}
+
+TEST_CASE("mcp-upstream: while this node leads, the directory names its own endpoint as the leader's",
+          "[node][mcp][mcp-upstream]")
+{
+    // The scheduling leader a redirect reads is EMPTY on the leader -- a leader redirects nobody to itself -- so a
+    // directory that read only it would answer every fleet call on the leader with NoLeaderKnown.
+    AdmissionFixture::StatedEndpoint self;
+    self.Set("10.0.0.100:6674");
+    KnownSchedulingLeader leader;
+    AppliedUpstreamDirectory directory { "self", leader, self };
+    CHECK(directory.LeaderEndpoint().empty());
+
+    directory.ObservedRole(5, true);
+    CHECK(directory.LeaderEndpoint() == "10.0.0.100:6674");
+    CHECK(directory.Term() == std::optional<std::uint64_t> { 5 });
+
+    // Deposed: back to the leader consensus names.
+    leader.Publish(LeaderA);
+    directory.ObservedRole(6, false);
+    CHECK(directory.LeaderEndpoint() == LeaderA);
 }
 
 namespace

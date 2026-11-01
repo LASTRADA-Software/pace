@@ -1083,6 +1083,10 @@ TEST_CASE("Every state a consensus tier applies reaches the shared-cache directo
         },
         [&upstreamDirectory] { return std::format("term told: {}", upstreamDirectory.Term().has_value()); }));
     CHECK(upstreamDirectory.Term() == std::optional<std::uint64_t> { tier->Status().term.value });
+    // And that it leads: a one-voter tier's directory names this node's own endpoint as the leader's, although
+    // the scheduling leader a redirect reads is empty while it leads.
+    CHECK(knownLeader.LeaderSchedulingEndpoint().empty());
+    CHECK(upstreamDirectory.LeaderEndpoint() == TestAdvertised().Current());
     // Nothing named yet: the host has opened nothing.
     sharedCache.Reconcile();
     CHECK(sharedCache.Current() == nullptr);

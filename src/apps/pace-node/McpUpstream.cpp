@@ -276,15 +276,22 @@ void AppliedUpstreamDirectory::Applied(Cluster::ClusterState const& state)
     _endpoints = std::move(endpoints);
 }
 
-void AppliedUpstreamDirectory::ObservedTerm(std::uint64_t term)
+void AppliedUpstreamDirectory::ObservedRole(std::uint64_t term, bool selfLeads)
 {
     auto const guard = std::scoped_lock { _lock };
     _term = term;
+    _selfLeads = selfLeads;
 }
 
 std::string AppliedUpstreamDirectory::LeaderEndpoint() const
 {
-    return _leader.LeaderSchedulingEndpoint();
+    {
+        auto const guard = std::scoped_lock { _lock };
+        if (!_selfLeads)
+            return _leader.LeaderSchedulingEndpoint();
+    }
+    // This node leads: its own endpoint, which `NodeIoUpstream` recognises as itself and answers in-process.
+    return _self.Current();
 }
 
 std::optional<std::string> AppliedUpstreamDirectory::EndpointOf(std::string_view nodeId) const

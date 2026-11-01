@@ -388,6 +388,23 @@ namespace
         return *skew ? "MIXED" : "uniform";
     }
 
+    /// Who leads, in words: the document names the leader only from a node that follows it, so a document
+    /// whose `role` is `leader` and whose `leader` is `null` was rendered BY the leader -- which is who answered.
+    /// @param leader The document's `leader`.
+    /// @param role The document's `role`.
+    /// @param reply Who answered.
+    /// @return The words.
+    [[nodiscard]] std::string LeaderWords(std::optional<std::string> const& leader,
+                                          std::optional<std::string> const& role,
+                                          UpstreamReply const& reply)
+    {
+        if (leader.has_value())
+            return *leader;
+        if (role == std::optional<std::string> { "leader" })
+            return std::format("{}, which answered", reply.answeredBy);
+        return "nobody known";
+    }
+
     /// @param strings Some strings.
     /// @return Them as a JSON array.
     [[nodiscard]] Json::Value Strings(std::vector<std::string> const& strings)
@@ -418,7 +435,7 @@ namespace
         auto const flagText = SkewWord(flag.AsBool());
         auto text =
             std::format("fleet led by {}: {} member(s), {} machine(s); versions {} ({}){}; {}",
-                        leader.value_or("nobody known"),
+                        LeaderWords(leader, StringAt(document->root, "role"), document->reply),
                         members->IsNull() ? std::string { "no cluster" } : std::format("{}", ElementsOf(*members).size()),
                         ElementsOf(*nodes).size(),
                         skew.known.empty() ? std::string { "none reported" } : std::format("{}", skew.known),
@@ -549,9 +566,11 @@ namespace
         totalsOut.emplace_back("per_worker", Arr(std::move(counts.perWorker)));
         totalsOut.emplace_back("per_counts_cover_every_ticket", Bool(*truncated == 0));
 
+        // `-` for a state the leader's totals do not carry, or carry as null: absent, never a zero.
         auto const countOf = [totals](std::string_view state) {
             auto const* const member = totals->Find(state);
-            return member != nullptr ? member->AsInt().value_or(0) : 0;
+            auto const count = member != nullptr ? member->AsInt() : std::nullopt;
+            return count.has_value() ? std::format("{}", *count) : std::string { "-" };
         };
         auto text = std::format("{} running, {} queued, {} waiting; oldest queued wait {}; {} of {} listed row(s) "
                                 "shown{}{}; {}",
@@ -949,7 +968,7 @@ namespace
     constexpr std::string_view FleetOverviewOutput =
         R"({"type":"object","required":["answered_by","term","term_scope","role","leader","members","nodes","versions","versions_unreported","version_skew"],"properties":{)"
         R"("answered_by":{"type":"string"},"term":{"type":["integer","null"]},"term_scope":{"const":"this-node"},)"
-        R"("role":{"type":["string","null"]},"leader":{"type":["string","null"],"description":"The leader's 0xFC endpoint; null while none is known."},)"
+        R"("role":{"type":["string","null"]},"leader":{"type":["string","null"],"description":"The leader's 0xFC endpoint as /fleet.json names it: null while the answering node itself leads (role: leader) -- then answered_by is the leader -- or while none is known."},)"
         R"("members":{"type":["array","null"],"description":"/fleet.json members, snake_case; null when the answering node runs no cluster."},)"
         R"("nodes":{"type":"array","description":"/fleet.json nodes, snake_case; heartbeat_age_s in seconds; null cells are absent, never 0."},)"
         R"("versions":{"type":"array","items":{"type":"string"}},"versions_unreported":{"type":"array","items":{"type":"string"}},)"

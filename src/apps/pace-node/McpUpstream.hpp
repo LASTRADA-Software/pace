@@ -245,7 +245,8 @@ class IUpstreamDirectory
     IUpstreamDirectory& operator=(IUpstreamDirectory&&) = delete;
     virtual ~IUpstreamDirectory() = default;
 
-    /// @return The current leader's `0xFC` endpoint; empty when no leader is known.
+    /// @return The current leader's `0xFC` endpoint -- this node's own while it leads; empty when no leader is
+    ///         known.
     [[nodiscard]] virtual std::string LeaderEndpoint() const = 0;
 
     /// @param nodeId A member's id, matched exactly.
@@ -282,9 +283,15 @@ class AppliedUpstreamDirectory final: public IUpstreamDirectory
     /// @param state The state the cluster just applied.
     void Applied(Cluster::ClusterState const& state);
 
-    /// Take the term the consensus role observer just reported.
+    /// Take what the consensus role observer just reported: the term, and whether THIS node leads in it.
+    ///
+    /// **Whether this node leads is told here, because no other source says it**: the scheduling leader this
+    /// directory otherwise reads (`ISchedulingLeaderSource`) is empty while this node leads -- it is the
+    /// endpoint a redirect names, and a leader redirects nobody to itself. Without it a fleet call on the
+    /// leader would answer `NoLeaderKnown` from the one node that knows best.
     /// @param term The term this node now holds.
-    void ObservedTerm(std::uint64_t term);
+    /// @param selfLeads Whether this node leads in @p term.
+    void ObservedRole(std::uint64_t term, bool selfLeads);
 
     /// @copydoc IUpstreamDirectory::LeaderEndpoint
     [[nodiscard]] std::string LeaderEndpoint() const override;
@@ -305,9 +312,10 @@ class AppliedUpstreamDirectory final: public IUpstreamDirectory
     std::string _selfId;                                        ///< This node's id.
     ISchedulingLeaderSource const& _leader;                     ///< Where the leader answers.
     Cc::IAdvertisedEndpointSource const& _self;                 ///< This node's advertised endpoint.
-    mutable std::mutex _lock;                                   ///< Guards the two below.
+    mutable std::mutex _lock;                                   ///< Guards the three below.
     std::map<std::string, std::string, std::less<>> _endpoints; ///< Member id to `0xFC` endpoint.
     std::optional<std::uint64_t> _term;                         ///< The last term observed.
+    bool _selfLeads { false };                                  ///< Whether this node leads in `_term`.
 };
 
 /// Answers a frame on this node, without dialling: the self-target path.

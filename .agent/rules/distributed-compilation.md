@@ -3967,10 +3967,17 @@ another machine claiming a member's id look the same, and "forget it" would remo
 
 **What it does not cover, stated rather than left to be found.** The cache tier is unaffected and
 that is the fix rather than an omission: locality is a property of the VERB, and a machine that
-proved its identity is still not this one (#287). `FleetText` and a live-stats subscription
-are BOTH behind the dashboard credential as well as membership, and that credential is untouched
--- it answers a different question and is its own file by rule, so a proof is not a substitute
-for the token. And a REGISTER's endpoint is still not bound to the machine that proved: the proof
+proved its identity is still not this one (#287). The fleet's two `0xFC` readers part here, and
+the split is deliberate. **`FleetText` admits a caller PROVING a live roster key in place of the
+dashboard credential** (`FleetReader::ProvenMember`, decided by `RestsOnProvenIdentity` off the
+same fold `RefusePeer` asks, LEARNERS included): an MCP session on a node that does not lead must
+read the leader's fleet model, the node holds no dashboard credential, and the design makes read
+tools work on any member. A machine TICKET, `--fleet-open` and loopback without a proof earn
+nothing there -- the token still decides for them, or, with no token file, loopback alone -- and a
+REVOKED key is `Forgotten` and refused at the door before the read is asked. **The live-stats
+fleet subscription is unchanged**: by ADDRESS only (`FleetReader::ByAddress`), dashboard credential
+or, with none, this machine -- a proof is not a substitute for the token on the stream, which is
+the dashboard's panel rather than a read a member makes. And a REGISTER's endpoint is still not bound to the machine that proved: the proof
 says WHICH machine, never that the address it registers is its own.
 
 **Every membership gate on this surface folds the proof, and that is a census rather than a

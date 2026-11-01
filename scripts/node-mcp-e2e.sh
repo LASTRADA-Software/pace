@@ -17,6 +17,12 @@
 #                                         `no-leader-known`: the call got PAST
 #                                         the loop gate (the loop turns), and
 #                                         the answer is an error, not a fleet.
+#   2c. A fleet tool answers through    — on a one-node consensus scheduler, which leads
+#       main's wiring                     alone, `fleet_overview` and `running_compiles`
+#                                         answer with real content; run twice, the
+#                                         second WITH `--dashboard-token-file`, which
+#                                         proves the leader's call to itself is not
+#                                         refused for want of the token.
 #   3. A legacy client is answered      — `initialize` answers `2025-11-25`.
 #   4. It is not a scrape endpoint      — `GET /metrics` on the MCP port is a 404.
 #   5. A network address refuses        — `--mcp-listen=0.0.0.0:<port>` ends the
@@ -161,6 +167,68 @@ e2e_note "the MCP port serves no /metrics"
 
 stop_and_require_clean_exit "$node_pid" "the node" 30 "${workdir}/node.log"
 node_pid=""
+
+# ------------------------------------------ 2c. a fleet tool answers through main's wiring
+# A node that runs consensus and leads alone: the leader endpoint is this node's own, so the call is
+# answered in-process through its own 0xFC router (`FrameRouterAnswerer`), presenting this node's key.
+# @param 1 what this round is, for the notes
+# @param 2.. extra flags for the node
+fleet_round() {
+    local label="$1"; shift
+    local fleet_node_port fleet_raft_port fleet_mcp_port fleet_pid
+    fleet_node_port="$(free_port)"
+    fleet_raft_port="$(free_port)"
+    fleet_mcp_port="$(free_port)"
+    "$node" \
+        --slots=0 \
+        --advertise "127.0.0.1:${fleet_node_port}" \
+        --listen-node "127.0.0.1:${fleet_node_port}" \
+        --listen-raft "127.0.0.1:${fleet_raft_port}" \
+        --raft-self 127.0.0.1 \
+        --discovery= \
+        --cluster-dir "${workdir}/fleet-${label}" \
+        --mcp-listen "$fleet_mcp_port" \
+        "$@" \
+        > "${workdir}/node.log" 2>&1 &
+    fleet_pid=$!
+    node_pid="$fleet_pid"
+    wait_for_node_ready 127.0.0.1 "$fleet_mcp_port" "$fleet_pid" "the scheduler's MCP surface" "${workdir}/node.log"
+    # The fleet model is the leader's: wait for the one-member election as the fact, never as a delay.
+    wait_for_log "consensus: this node is now the leader" "$fleet_pid" "the node" "${workdir}/node.log"
+    # And RECORDED: the call to itself presents this node's key, which reads the fleet only once its own
+    # cluster holds that key -- until then a token file refuses it, which is a refusal and not a wrong answer.
+    wait_for_log "this node's own cluster has recorded it" "$fleet_pid" "the node" "${workdir}/node.log"
+
+    local expected="127.0.0.1:${fleet_node_port}" tool response
+    for tool in fleet_overview running_compiles; do
+        response="$(curl -s -i -m 20 -X POST -H "Content-Type: application/json" \
+            -H "Accept: application/json, text/event-stream" -H "MCP-Protocol-Version: ${MODERN}" \
+            -H "Mcp-Method: tools/call" -H "Mcp-Name: ${tool}" \
+            --data "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"${tool}\",\"arguments\":{},${META}}}" \
+            "http://127.0.0.1:${fleet_mcp_port}/mcp")" \
+            || fail "curl could not complete tools/call ${tool} (${label})"
+        [[ "$response" == HTTP/1.1\ 200* ]] || fail "tools/call ${tool} (${label}) did not answer 200: ${response%%$'\r'*}"
+        json_check "tools/call ${tool} (${label})" "$(body_of "$response")" \
+            "d['result']['isError'] is False and d['result']['structuredContent']['answered_by'] == '${expected}' and isinstance(d['result']['structuredContent']['term'], int) and d['result']['structuredContent']['term_scope'] == 'this-node'"
+    done
+    # And fields only the fleet document gives: it was rendered by a LEADER -- whose document names no
+    # leader, `null` rather than itself -- every machine row carries its heartbeat age in seconds, and the
+    # text names the node that answered as the leader.
+    json_check "fleet_overview content (${label})" "$(body_of "$(curl -s -i -m 20 -X POST -H "Content-Type: application/json" \
+            -H "Accept: application/json, text/event-stream" -H "MCP-Protocol-Version: ${MODERN}" \
+            -H "Mcp-Method: tools/call" -H "Mcp-Name: fleet_overview" \
+            --data "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"tools/call\",\"params\":{\"name\":\"fleet_overview\",\"arguments\":{},${META}}}" \
+            "http://127.0.0.1:${fleet_mcp_port}/mcp")")" \
+        "d['result']['structuredContent']['role'] == 'leader' and d['result']['structuredContent']['leader'] is None and isinstance(d['result']['structuredContent']['nodes'], list) and all('heartbeat_age_s' in n for n in d['result']['structuredContent']['nodes']) and 'version_skew' in d['result']['structuredContent'] and 'fleet led by ${expected}, which answered' in d['result']['content'][0]['text']"
+    e2e_note "fleet_overview and running_compiles answered by the leading scheduler itself (${label})"
+    stop_and_require_clean_exit "$fleet_pid" "the scheduler (${label})" 30 "${workdir}/node.log"
+    node_pid=""
+}
+
+fleet_round no-token
+printf 's3cret-dashboard-token\n' > "${workdir}/token"
+chmod 600 "${workdir}/token"
+fleet_round with-token --dashboard-token-file "${workdir}/token"
 
 # ----------------------------------------------------- 5. a network address refuses
 refusing_port="$(free_port)"
