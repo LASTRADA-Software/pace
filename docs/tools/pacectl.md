@@ -357,6 +357,8 @@ it as a length.
 $ pacectl node
 version                        0.2.0-125-g6ba32b30
 node-id                        -
+name                           buildhost-7
+name-source                    self-reported
 uptime-seconds                 15
 components                     cache-tier, worker
 conditions                     raised: scratch-root-unmappable (latched), enrollment-window-open (live)
@@ -373,6 +375,10 @@ last-registration-seconds-ago  -
 admin-port                     36742
 admin-tls                      false
 ```
+
+`name` is what a person knows the machine by, by the fleet page's own rule: the display name the cluster records
+for it (`name-source` reads `replicated`), else the hostname it reports for itself (`self-reported`); both are
+absent when neither says.
 
 A surface the node does not run gets **no field at all** rather than a zero port —
 a `0` renders as a dialable-looking number in every format, and an operator who

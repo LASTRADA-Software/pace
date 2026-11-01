@@ -4,6 +4,8 @@
 #include "McpUpstream.hpp"
 #include "NodeNameResolver.hpp"
 
+#include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Core/Ed25519.hpp>
 #include <Pace/Core/Json.hpp>
 #include <Pace/Protocol/Mcp/McpTool.hpp>
 
@@ -17,6 +19,8 @@
 #include <string>
 #include <string_view>
 #include <utility>
+
+#include <core/Ranges.hpp>
 
 /// @file McpToolSupport.hpp
 /// What every MCP tool of this node spells the same way: the JSON value builders, the provenance envelope every
@@ -135,24 +139,113 @@ inline constexpr std::string_view TermScope = "this-node";
 
 // ------------------------------------------------------------ the node argument
 
+// ------------------------------------------------------------ naming a machine
+
+/// A machine, as every answer that names one names it: its member id AND the display name the applied state records.
+///
+/// **The one way an MCP answer names a machine** (`AppendNaming`), whatever it was keyed by where the answer came from
+/// -- an id, a registration's endpoint, a requester's key -- so a model joining one tool's rows to another's joins on
+/// the same two fields. Absent is not empty: a machine the applied state cannot place has a null id and says so, and
+/// a member nobody named has a null display name; neither is ever guessed.
+struct MachineNaming
+{
+    std::optional<std::string> nodeId;      ///< The member's id; nothing when the state places no member here.
+    std::optional<std::string> displayName; ///< The member's display name; nothing when it has none or is not placed.
+
+    [[nodiscard]] friend bool operator==(MachineNaming const&, MachineNaming const&) = default;
+};
+
+/// What naming a member by an id the caller already holds says.
+/// @param state The applied state, or nothing on a node that applied none.
+/// @param id A member's id; empty is no member.
+/// @return The id, and the display name the state records for it.
+[[nodiscard]] inline MachineNaming NamingOfMember(std::optional<Cluster::ClusterState> const& state, std::string_view id)
+{
+    if (id.empty())
+        return MachineNaming {};
+    return MachineNaming { .nodeId = std::string { id },
+                           .displayName = state.has_value() ? DisplayNameIn(*state, id) : std::nullopt };
+}
+
+/// The member a predicate places, when exactly one does: several would be a guess, so they place nobody.
+/// @param state The applied state, or nothing.
+/// @param places Whether a member is the one meant.
+/// @return Its naming, or the empty one.
+template <typename Predicate>
+[[nodiscard]] MachineNaming NamingWhere(std::optional<Cluster::ClusterState> const& state, Predicate places)
+{
+    if (!state.has_value())
+        return MachineNaming {};
+    auto const matches = std::ranges::count_if(state->members, places);
+    if (matches != 1)
+        return MachineNaming {};
+    auto const* const member = core::findIfOrNull(state->members, places);
+    return NamingOfMember(state, member->id);
+}
+
+/// Name the machine a registration's endpoint answers at: the ONE member whose recorded `0xFC` endpoint
+/// (`ClusterMember::schedulerEndpoint`) is exactly @p endpoint, or nobody -- never a host match, never a guess.
+/// @param state The applied state, or nothing.
+/// @param endpoint A `host:port`.
+/// @return The member's naming, or the empty one.
+[[nodiscard]] inline MachineNaming NamingOfEndpoint(std::optional<Cluster::ClusterState> const& state,
+                                                    std::string_view endpoint)
+{
+    return NamingWhere(state, [endpoint](Cluster::ClusterMember const& member) {
+        return !endpoint.empty() && member.schedulerEndpoint == endpoint;
+    });
+}
+
+/// Name the machine an identity key's text belongs to: the member holding that key, exactly.
+/// @param state The applied state, or nothing.
+/// @param keyText A key as `FormatEd25519PublicKey` spells it.
+/// @return The member's naming, or the empty one.
+[[nodiscard]] inline MachineNaming NamingOfKeyText(std::optional<Cluster::ClusterState> const& state,
+                                                   std::string_view keyText)
+{
+    return NamingWhere(state, [keyText](Cluster::ClusterMember const& member) {
+        return !keyText.empty() && FormatEd25519PublicKey(member.publicKey) == keyText;
+    });
+}
+
+/// Add `node_id` and `display_name` to @p row: the two members every machine-naming row of every tool carries.
+/// @param row A result row.
+/// @param naming How the machine is named.
+/// @param prefix Prepended to both keys, for a row naming a machine other than its subject (`requester_`); empty
+///        for a row ABOUT the machine.
+inline void AppendNaming(Json::Object& row, MachineNaming const& naming, std::string_view prefix = {})
+{
+    row.emplace_back(std::format("{}node_id", prefix), StrOrNull(naming.nodeId));
+    row.emplace_back(std::format("{}display_name", prefix), StrOrNull(naming.displayName));
+}
+
+/// @param naming How a machine is named.
+/// @return Whether the applied state could not place it, which an answer says rather than leaving to inference.
+[[nodiscard]] inline bool Unplaced(MachineNaming const& naming) noexcept
+{
+    return !naming.nodeId.has_value();
+}
+
+/// @param unplaced How many machine rows the applied state could not place.
+/// @return The clause a tool's text adds when there were any: what a null `node_id` means, said rather than inferred.
+[[nodiscard]] inline std::string UnplacedNote(std::size_t unplaced)
+{
+    if (unplaced == 0)
+        return {};
+    return std::format("; {} machine(s) match no member's recorded 0xFC endpoint or key, so their node_id is null",
+                       unplaced);
+}
+
 /// Which node a call asks: this one, or the member the `node` argument names exactly.
 struct NodeTarget
 {
     std::string nodeId;               ///< The member's id; empty means this node.
     std::optional<std::string> asked; ///< The name as given, or nothing when none was.
 
-    /// The display name the applied state records for the node asked -- this one when `nodeId` is empty -- or nothing
-    /// when it records none or this node applied no state. **Resolved here, once, for every tool**, so every answer
-    /// that names a node names it by id AND display name through one door.
-    std::optional<std::string> displayName {};
+    /// The node asked, named as every answer names a machine: its id (this node's own when `nodeId` is empty) and the
+    /// display name the applied state records. Resolved here, once, for every tool.
+    MachineNaming naming {};
 };
-
-/// @param target Whom a call asked.
-/// @return Its `display_name` member's value: the name, or `null` when the cluster records none.
-[[nodiscard]] inline Json::Value DisplayNameValue(NodeTarget const& target)
-{
-    return target.displayName.has_value() ? Str(*target.displayName) : Null();
-}
 
 /// Resolve a `node` member, through `ResolveNodeName`: exactly, never by prefix.
 ///
@@ -168,9 +261,7 @@ struct NodeTarget
 {
     auto const state = cluster.AppliedState();
     if (node == nullptr || node->IsNull())
-        return NodeTarget { .nodeId = {},
-                            .asked = std::nullopt,
-                            .displayName = state.has_value() ? DisplayNameIn(*state, selfId) : std::nullopt };
+        return NodeTarget { .nodeId = {}, .asked = std::nullopt, .naming = NamingOfMember(state, selfId) };
     // Refused rather than ignored: a `node` this tool cannot read answered about THIS node would be an answer about
     // a machine nobody named.
     auto const* const name = node->AsString();
@@ -180,7 +271,7 @@ struct NodeTarget
     if (!state.has_value())
     {
         if (*name == selfId && !selfId.empty())
-            return NodeTarget { .nodeId = {}, .asked = *name, .displayName = std::nullopt };
+            return NodeTarget { .nodeId = {}, .asked = *name, .naming = NamingOfMember(state, selfId) };
         return std::unexpected { Error(std::format(
             "this node has applied no cluster state, so it can name no member but itself ({}); omit `node` to ask it",
             selfId.empty() ? std::string { "it has no id" } : selfId)) };
@@ -188,8 +279,8 @@ struct NodeTarget
     auto resolved = ResolveNodeName(*state, *name);
     if (!resolved.has_value())
         return std::unexpected { Error(std::move(resolved.error())) };
-    auto displayName = DisplayNameIn(*state, *resolved);
-    return NodeTarget { .nodeId = std::move(*resolved), .asked = *name, .displayName = std::move(displayName) };
+    auto naming = NamingOfMember(state, *resolved);
+    return NodeTarget { .nodeId = std::move(*resolved), .asked = *name, .naming = std::move(naming) };
 }
 
 /// Resolve a call's `node` argument, through `ResolveNodeName`: exactly, never by prefix.

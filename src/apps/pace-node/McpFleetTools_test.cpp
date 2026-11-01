@@ -4,6 +4,7 @@
 #include "McpUpstreamFakes.hpp"
 
 #include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Core/Ed25519.hpp>
 #include <Pace/Core/Json.hpp>
 #include <Pace/Distributed/FleetChart.hpp>
 #include <Pace/Distributed/FleetHistory.hpp>
@@ -27,12 +28,14 @@
 #include <utility>
 #include <vector>
 
+#include <core/Ranges.hpp>
 #include <tests/RaftPeerKeyFakes.hpp>
 #include <tests/Unwrap.hpp>
 
 using namespace Pace;
 using namespace Pace::Node;
 using Pace::Testing::Unwrap;
+using Pace::Testing::UnwrapMutable;
 
 namespace Wire = Pace::CompileCacheWire;
 namespace Dist = Pace::Distributed;
@@ -69,9 +72,13 @@ constexpr std::uint64_t TermHere = 7;
 /// @param name The tool.
 /// @param arguments Its arguments, as JSON text.
 /// @return What it answered.
-[[nodiscard]] Mcp::ToolResult Call(IMcpUpstream& upstream, std::string_view name, std::string_view arguments = "{}")
+[[nodiscard]] Mcp::ToolResult Call(IMcpUpstream& upstream,
+                                   std::string_view name,
+                                   std::string_view arguments = "{}",
+                                   std::optional<Cluster::ClusterState> state = std::nullopt)
 {
-    auto const tools = FleetReadTools(upstream);
+    McpFakes::FixedCluster const cluster { std::move(state) };
+    auto const tools = FleetReadTools(upstream, cluster);
     auto const args = Json::Parse(arguments);
     REQUIRE(args.has_value());
     return RowNamed(tools, name).handler(Mcp::ToolCall { .arguments = Unwrap(args), .clientName = "test" });
@@ -375,9 +382,9 @@ TEST_CASE("Every fleet tool reads the leader's fleet document and reports what i
             CHECK(Text(At(totals, state)) == Text(At(documentTotals, state)));
         CHECK(Text(At(totals, "oldest_wait_s")) == "4.2");
         CHECK(Text(At(totals, "per_worker")) == R"([{"worker":"local","count":1},{"worker":"w-7","count":1}])");
-        CHECK(
-            Text(At(totals, "per_requester"))
-            == R"([{"requester":"ws-1","requester_key":null,"count":2},{"requester":"ws-2","requester_key":null,"count":1}])");
+        CHECK(Text(At(totals, "per_requester"))
+              == R"([{"requester":"ws-1","requester_key":null,"node_id":null,"display_name":null,"count":2},)"
+                 R"({"requester":"ws-2","requester_key":null,"node_id":null,"display_name":null,"count":1}])");
         CHECK(At(totals, "per_counts_cover_every_ticket").AsBool() == std::optional { true });
         CHECK(Text(At(structured, "compiles_truncated")) == Text(At(document, "compiles-truncated")));
     }
@@ -418,6 +425,74 @@ TEST_CASE("Every fleet tool reads the leader's fleet document and reports what i
             for (auto const& [key, value]: *documentRows[index].AsObject())
                 if (key != "endpoint")
                     CHECK(Text(At(conditions[index], key)) == Text(value));
+    }
+}
+
+TEST_CASE("Every fleet tool names each machine by member id and display name, and never guesses one",
+          "[node][mcp][fleet-tools][display-name]")
+{
+    // One helper names a machine for every tool (`AppendNaming`): placed through the applied state -- a registration's
+    // endpoint by the member recording it as its 0xFC endpoint, a requester by the member holding its key -- and null,
+    // said in the text, where nothing places it.
+    auto snapshot = ScriptedFleet();
+    auto key = Ed25519PublicKey {};
+    key.fill(std::byte { 0x42 });
+    auto const rawKey = std::string(reinterpret_cast<char const*>(key.data()), key.size());
+    UnwrapMutable(snapshot.compiles).rows[0].compile.ticket.caller = rawKey;
+    auto const body = Dist::RenderFleetJson(snapshot, Dist::FleetHistoryView {});
+    auto upstream = LeaderUpstream();
+    upstream.AnswerOk(body);
+
+    auto state = Cluster::ClusterState {};
+    auto office = Member("n1", "10.0.0.1:6680", "10.0.0.1:6674");
+    office.displayName = "office-pc";
+    office.publicKey = key;
+    state.members = { office, Member("n2", "10.0.0.2:6680", "") };
+
+    SECTION("fleet_overview: each machine row")
+    {
+        auto const result = Call(upstream, "fleet_overview", "{}", state);
+        REQUIRE_FALSE(result.isError);
+        auto const& nodes = Elements(At(result.structured, "nodes"));
+        REQUIRE(nodes.size() == 3);
+        CHECK(Text(At(nodes[0], "node_id")) == R"("n1")");
+        CHECK(Text(At(nodes[0], "display_name")) == R"("office-pc")");
+        // n2 records no 0xFC endpoint, and nothing records 10.0.0.3's: null, never guessed from the host.
+        CHECK(At(nodes[1], "node_id").IsNull());
+        CHECK(At(nodes[2], "display_name").IsNull());
+        CHECK(result.text.contains("2 machine(s) match no member"));
+    }
+    SECTION("conditions: each machine")
+    {
+        auto const result = Call(upstream, "conditions", "{}", state);
+        REQUIRE_FALSE(result.isError);
+        auto const& machines = Elements(At(result.structured, "nodes"));
+        REQUIRE(machines.size() == 2);
+        CHECK(Text(At(machines[0], "node_id")) == R"("n1")");
+        CHECK(Text(At(machines[0], "display_name")) == R"("office-pc")");
+        CHECK(At(machines[1], "node_id").IsNull());
+    }
+    SECTION("running_compiles: each requester, by its key")
+    {
+        auto const result = Call(upstream, "running_compiles", "{}", state);
+        REQUIRE_FALSE(result.isError);
+        auto const& compiles = Elements(At(result.structured, "compiles"));
+        REQUIRE(compiles.size() == 3);
+        CHECK(Text(At(compiles[0], "requester_node_id")) == R"("n1")");
+        CHECK(Text(At(compiles[0], "requester_display_name")) == R"("office-pc")");
+        CHECK(At(compiles[1], "requester_node_id").IsNull());
+        auto const& perRequester = Elements(At(At(result.structured, "totals"), "per_requester"));
+        auto const* const named = core::findIfOrNull(
+            perRequester, [](Json::Value const& row) { return row.Find("node_id")->AsString() != nullptr; });
+        REQUIRE(named != nullptr);
+        CHECK(Text(At(*named, "display_name")) == R"("office-pc")");
+    }
+    SECTION("no applied state names nobody")
+    {
+        auto const result = Call(upstream, "fleet_overview");
+        REQUIRE_FALSE(result.isError);
+        for (auto const& node: Elements(At(result.structured, "nodes")))
+            CHECK(At(node, "node_id").IsNull());
     }
 }
 
@@ -462,7 +537,8 @@ TEST_CASE("An unreachable leader is a tool error naming the endpoint, and nothin
                                       std::format("{} at 10.0.0.9:6674: connection refused",
                                                   UpstreamFailureRowOf(UpstreamFailure::Unreachable).sentence) } };
 
-    for (auto const& row: FleetReadTools(upstream))
+    McpFakes::FixedCluster const noState { std::nullopt };
+    for (auto const& row: FleetReadTools(upstream, noState))
     {
         INFO(row.name);
         auto const arguments =

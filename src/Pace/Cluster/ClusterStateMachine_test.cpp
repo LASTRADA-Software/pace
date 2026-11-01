@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include <core/Ranges.hpp>
 #include <tests/PreviousClusterState.hpp>
 #include <tests/RaftPeerKeyFakes.hpp>
 #include <tests/Unwrap.hpp>
@@ -477,4 +478,35 @@ TEST_CASE("Whether a snapshot can be restored is asked without restoring it, in 
 
     CHECK(watched.machine.State() == before);
     CHECK(watched.published.size() == published);
+}
+
+TEST_CASE("An admission that clears a display name says so at Warn, naming both", "[cluster][statemachine][display-name]")
+{
+    // The operator who chose the name is about to find it gone, so the clearing is said once -- and only when it
+    // happened, never for an admission that shadowed nothing.
+    CapturingLogger logger;
+    ClusterStateMachine machine { logger, {} };
+    machine.Apply(Entry(1, Cmd(CommandKind::AddMember, "a3f5", "10.0.0.1:6675")));
+    machine.Apply(Entry(2,
+                        Command { .kind = CommandKind::SetDisplayName,
+                                  .key = "a3f5",
+                                  .value = "office-pc",
+                                  .schedulerEndpoint = {},
+                                  .publicKey = std::nullopt }));
+    machine.Apply(Entry(3, Cmd(CommandKind::AddMember, "n2", "10.0.0.2:6675")));
+    auto const warnings = [&logger] {
+        return std::ranges::count_if(logger.Snapshot(), [](auto const& record) { return record.level == LogLevel::Warn; });
+    };
+    CHECK(warnings() == 0);
+
+    machine.Apply(Entry(4, Cmd(CommandKind::AddLearner, "office-pc")));
+    // Held: a pointer into the copy `State()` returns would dangle the moment that temporary went.
+    auto const state = machine.State();
+    auto const* const holder = core::findOrNull(state.members, std::string_view { "a3f5" }, &ClusterMember::id);
+    REQUIRE(holder != nullptr);
+    CHECK(holder->displayName.empty());
+    REQUIRE(warnings() == 1);
+    CHECK(std::ranges::any_of(logger.Snapshot(), [](auto const& record) {
+        return record.level == LogLevel::Warn && record.message.contains("office-pc") && record.message.contains("a3f5");
+    }));
 }

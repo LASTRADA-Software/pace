@@ -3,6 +3,7 @@
 #include "McpToolSupport.hpp"
 
 #include <Pace/Core/Ed25519.hpp>
+#include <Pace/Distributed/ShownName.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
 #include <Pace/Protocol/NodeStatusView.hpp>
 
@@ -221,8 +222,23 @@ namespace
         auto result = Envelope(*answer);
         result.emplace_back("node", StrOrNull(target->asked));
         result.emplace_back("version", Str(NodeStatusView::ReadableText(fields.version)));
-        result.emplace_back("node_id", fields.nodeId.empty() ? Null() : Str(NodeStatusView::ReadableText(fields.nodeId)));
-        result.emplace_back("display_name", DisplayNameValue(*target));
+        // Named as every answer names a machine (`AppendNaming`): by the id the node REPORTED when it reported one -- it
+        // is the node that answered -- and the display name the applied state records for that id.
+        auto const naming = fields.nodeId.empty()
+                                ? target->naming
+                                : NamingOfMember(cluster.AppliedState(), NodeStatusView::ReadableText(fields.nodeId));
+        AppendNaming(result, naming);
+        // And the name a surface SHOWS, by the dashboard's own rule (`Distributed::NameShown`): the replicated name --
+        // as this node's applied state records it, else as the answering node's does -- else what the machine calls
+        // itself, with which of the two it is.
+        auto const replicated = naming.displayName.has_value() ? naming.displayName : runtime.displayName;
+        auto const shown = Distributed::NameShown(
+            replicated.has_value() ? std::string_view { *replicated } : std::string_view {},
+            runtime.hostName.has_value() ? std::string_view { *runtime.hostName } : std::string_view {});
+        result.emplace_back("name", shown.text.empty() ? Null() : Str(NodeStatusView::ReadableText(shown.text)));
+        result.emplace_back("name_source",
+                            shown.source.has_value() ? Str(std::string { Distributed::NameSourceWord(*shown.source) })
+                                                     : Null());
         result.emplace_back("public_key",
                             runtime.identityPublicKey.has_value()
                                 ? Str(FormatEd25519PublicKey(Ed25519PublicKey { *runtime.identityPublicKey }))
@@ -261,10 +277,10 @@ namespace
         R"("node":{"type":"string","description":"A member's id or replicated display name, matched exactly -- never by prefix. Omit it to ask this node."}},"additionalProperties":false})";
 
     constexpr std::string_view NodeStatusOutput =
-        R"({"type":"object","required":["answered_by","term","term_scope","node","version","node_id","display_name","public_key","uptime_s","components","consensus_standing","scheduler_role","toolchains","compile_slots","compiles_in_flight","compile_inflight_max_bytes","compile_request_max_bytes","cordon","slot_ceilings","tiers","surfaces","effective_config","budget_overrides"],"properties":{)"
+        R"({"type":"object","required":["answered_by","term","term_scope","node","version","node_id","display_name","name","name_source","public_key","uptime_s","components","consensus_standing","scheduler_role","toolchains","compile_slots","compiles_in_flight","compile_inflight_max_bytes","compile_request_max_bytes","cordon","slot_ceilings","tiers","surfaces","effective_config","budget_overrides"],"properties":{)"
         R"("answered_by":{"type":"string"},"term":{"type":["integer","null"]},"term_scope":{"const":"this-node"},)"
         R"("node":{"type":["string","null"],"description":"The name asked for; null when this node was asked."},)"
-        R"("version":{"type":"string"},"node_id":{"type":["string","null"]},"display_name":{"type":["string","null"],"description":"The display name the cluster records for the node; null when nobody named it."},"public_key":{"type":["string","null"]},)"
+        R"("version":{"type":"string"},"node_id":{"type":["string","null"]},"display_name":{"type":["string","null"],"description":"The display name the cluster records for the node; null when nobody named it."},"name":{"type":["string","null"],"description":"The name the dashboard shows: display_name, else the machine's own hostname; null when neither says."},"name_source":{"type":["string","null"],"description":"replicated or self-reported; null when there is no name."},"public_key":{"type":["string","null"]},)"
         R"("uptime_s":{"type":"integer"},"components":{"type":"array","items":{"type":"string"}},)"
         R"("consensus_standing":{"type":["string","null"]},"scheduler_role":{"type":["string","null"]},)"
         R"("toolchains":{"type":["object","null"]},)"

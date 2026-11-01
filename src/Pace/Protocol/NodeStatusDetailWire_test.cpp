@@ -57,6 +57,8 @@ namespace
     };
     runtime.budgetOverrides =
         std::vector { NodeBudgetOverrideFields { .tier = 1, .bytes = 1024, .baselineBytes = std::uint64_t { 512 } } };
+    runtime.displayName = "office-pc";
+    runtime.hostName = "buildhost-7";
     return runtime;
 }
 
@@ -92,7 +94,7 @@ TEST_CASE("The NODE-STATUS runtime record's positions 26 to 29 hold exactly thes
     auto const encoded = EncodeNodeRuntime(runtime);
     auto const parts = WireFields::SplitAll(encoded);
     REQUIRE(parts.has_value());
-    REQUIRE(Unwrap(parts).size() == 30);
+    REQUIRE(Unwrap(parts).size() == 32);
     auto const at = [&parts](std::size_t index) {
         return Unwrap(parts)[index];
     };
@@ -124,6 +126,9 @@ TEST_CASE("The NODE-STATUS runtime record's positions 26 to 29 hold exactly thes
     // An engaged EMPTY list -- no overrides -- is its count alone, never zero length.
     CHECK(std::ranges::equal(at(29), Bytes({ 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00 })));
     // clang-format on
+    // Positions 30 and 31, the display name and the host name: zero length, absent, when not stated.
+    CHECK(at(30).empty());
+    CHECK(at(31).empty());
 }
 
 TEST_CASE("The four detail records round-trip whole, and a record with none of them says nothing",
@@ -136,6 +141,9 @@ TEST_CASE("The four detail records round-trip whole, and a record with none of t
     CHECK(Unwrap(back).tiers == sent.tiers);
     CHECK(Unwrap(back).effectiveConfig == sent.effectiveConfig);
     CHECK(Unwrap(back).budgetOverrides == sent.budgetOverrides);
+    // And the two halves of the name a surface shows, positions 30 and 31.
+    CHECK(Unwrap(back).displayName == std::optional<std::string> { "office-pc" });
+    CHECK(Unwrap(back).hostName == std::optional<std::string> { "buildhost-7" });
 
     // ABSENT, all four, from a sender that stated none -- never a record of zeroes or an empty list.
     auto const silent = DecodeNodeRuntime(EncodeNodeRuntime(NodeRuntimeFields {}));
@@ -144,6 +152,8 @@ TEST_CASE("The four detail records round-trip whole, and a record with none of t
     CHECK_FALSE(Unwrap(silent).tiers.has_value());
     CHECK_FALSE(Unwrap(silent).effectiveConfig.has_value());
     CHECK_FALSE(Unwrap(silent).budgetOverrides.has_value());
+    CHECK_FALSE(Unwrap(silent).displayName.has_value());
+    CHECK_FALSE(Unwrap(silent).hostName.has_value());
 
     // And an engaged empty override list -- *no overrides* -- comes back engaged and empty.
     auto none = NodeRuntimeFields {};
@@ -159,7 +169,7 @@ TEST_CASE("A detail record this build cannot read refuses the reply, and an unna
     auto const replaced = [](std::size_t position, std::vector<std::byte> const& record) {
         auto emitted = EncodeNodeRuntime(NodeRuntimeFields {});
         auto parts = Unwrap(WireFields::SplitAll(emitted));
-        REQUIRE(parts.size() == 30);
+        REQUIRE(parts.size() == 32);
         parts[position] = record;
         return DecodeNodeRuntime(WireFields::Encode(WireFields::FieldList { parts }));
     };

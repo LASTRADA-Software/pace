@@ -10,6 +10,7 @@
 #include <Pace/Distributed/FleetText.hpp>
 #include <Pace/Distributed/FleetView.hpp>
 #include <Pace/Distributed/NodePolicy.hpp>
+#include <Pace/Distributed/ShownName.hpp>
 #include <Pace/Metrics/MetricsCatalog.hpp>
 
 #include <algorithm>
@@ -304,56 +305,6 @@ namespace
 
     // ------------------------------------------------------------ the name
 
-    /// Where a row's `name` came from: the cluster's record, or the machine's own word.
-    ///
-    /// Private: rendered as a word, never transmitted or persisted as an ordinal.
-    enum class NameSource : std::uint8_t
-    {
-        Replicated,   ///< `ClusterMember::displayName`: an operator named the member, and every node agrees.
-        SelfReported, ///< `WorkerInfo::displayName`: what the machine calls itself, its hostname.
-        Last,         ///< Not a source, and has no row: the length of a table keyed by one.
-    };
-
-    /// How one `NameSource` is spelled.
-    struct NameSourceRow
-    {
-        NameSource source;     ///< The source this row describes.
-        std::string_view word; ///< Its one spelling: a table cell and a JSON value alike.
-    };
-
-    /// One row per `NameSource`, in enumerator order.
-    constexpr EnumTable<NameSource, NameSourceRow> NameSourceTable { {
-        { .source = NameSource::Replicated, .word = "replicated" },
-        { .source = NameSource::SelfReported, .word = "self-reported" },
-    } };
-
-    static_assert(RowsInEnumeratorOrder(NameSourceTable, &NameSourceRow::source),
-                  "NameSourceTable must hold one row per NameSource, in enumerator order");
-
-    /// The name a row shows and where it came from: the replicated name when the cluster records one, else what the
-    /// machine calls itself -- or nothing, when neither says.
-    ///
-    /// **One rule for both tables**, so a member row and a machine row cannot disagree about which name wins. The
-    /// replicated name wins because an operator CHOSE it and every node agrees on it; the hostname is the machine's
-    /// own word, and only stands in where nobody named it.
-    struct ShownName
-    {
-        std::string_view text;            ///< The name; empty when there is none.
-        std::optional<NameSource> source; ///< Where it came from; absent exactly when `text` is empty.
-    };
-
-    /// @param replicated The cluster's record, or empty.
-    /// @param selfReported The machine's own word, or empty.
-    /// @return What a row shows.
-    [[nodiscard]] constexpr ShownName NameShown(std::string_view replicated, std::string_view selfReported) noexcept
-    {
-        if (!replicated.empty())
-            return ShownName { .text = replicated, .source = NameSource::Replicated };
-        if (!selfReported.empty())
-            return ShownName { .text = selfReported, .source = NameSource::SelfReported };
-        return ShownName { .text = {}, .source = std::nullopt };
-    }
-
     /// @param shown A row's name.
     /// @return The `name` cell: absent when nobody named the machine, never blank.
     [[nodiscard]] FleetCell NameCell(ShownName const& shown)
@@ -367,7 +318,7 @@ namespace
     {
         if (!shown.source.has_value())
             return FleetCell::Nothing();
-        return FleetCell::Of(std::string { NameSourceTable[static_cast<std::size_t>(*shown.source)].word });
+        return FleetCell::Of(std::string { NameSourceWord(*shown.source) });
     }
 
     /// What the `name` column says in a header, for both tables.
@@ -3484,12 +3435,10 @@ namespace
 
         for (auto const& [node, rows]: asking)
         {
-            out += std::format(
-                R"(<div class="machine-conditions"><h3>{}{}</h3>)",
-                EscapeHtml(node->endpoint),
-                NameShown(node->replicatedName, node->displayName).text.empty()
-                    ? std::string {}
-                    : std::format(" &middot; {}", EscapeHtml(NameShown(node->replicatedName, node->displayName).text)));
+            auto const shown = NameShown(node->replicatedName, node->displayName);
+            out += std::format(R"(<div class="machine-conditions"><h3>{}{}</h3>)",
+                               EscapeHtml(node->endpoint),
+                               shown.text.empty() ? std::string {} : std::format(" &middot; {}", EscapeHtml(shown.text)));
             for (auto const& row: *rows)
                 if (CompileCacheWire::AsksForAttention(row))
                     AppendRaisedCondition(out, row);

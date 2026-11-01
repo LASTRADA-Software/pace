@@ -2,6 +2,7 @@
 #pragma once
 
 #include "McpUpstream.hpp"
+#include "NodeNameResolver.hpp"
 
 #include <Pace/Core/Json.hpp>
 #include <Pace/Distributed/FleetView.hpp>
@@ -79,7 +80,9 @@ namespace McpFleet
 /// Each asks the leader through @p upstream on the MCP thread that calls it, and answers a tool EXECUTION error
 /// (`isError`) carrying the upstream's sentence when the leader could not be asked, or refused.
 /// @param upstream How the leader is reached; must outlive every row returned.
+/// @param cluster The applied state every machine row is named in (`McpSupport::AppendNaming`); must outlive every
+///        row returned.
 /// @return The rows, in the order `tools/list` presents them.
-[[nodiscard]] std::vector<Mcp::ToolRow> FleetReadTools(IMcpUpstream& upstream);
+[[nodiscard]] std::vector<Mcp::ToolRow> FleetReadTools(IMcpUpstream& upstream, IAppliedClusterView const& cluster);
 
 } // namespace Pace::Node

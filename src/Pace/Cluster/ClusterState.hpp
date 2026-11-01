@@ -972,6 +972,18 @@ struct Command
     [[nodiscard]] friend bool operator==(Command const&, Command const&) = default;
 };
 
+/// The member whose display name an admission's id would shadow, if any: an `AddMember`/`AddLearner` whose id is
+/// spelled exactly like ANOTHER member's display name.
+///
+/// **A label yields to an identity.** `Apply` clears that member's display name when the admission commits, so the
+/// state never holds a name and an id that a person could mean either way -- and an admission is never refused over a
+/// label, which decides nothing. One author for `Apply` and for whoever reports the clearing
+/// (`ClusterStateMachine::Apply` logs it at Warn, naming both).
+/// @param state The state the command applies to.
+/// @param command Any command; only an admission can yield anything.
+/// @return The id of the member whose name yields, or nullopt.
+[[nodiscard]] std::optional<std::string> DisplayNameYieldingTo(ClusterState const& state, Command const& command);
+
 /// Serialize a command for a log entry's payload.
 /// @param command The change.
 /// @return The bytes.

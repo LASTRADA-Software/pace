@@ -2030,6 +2030,42 @@ TEST_CASE("A re-admission keeps a member's display name, and a forget removes it
     Accepted(state, Named("n1", "build-box"));
 }
 
+TEST_CASE("An admission under an id spelled like a display name clears the name, and the state stays readable",
+          "[cluster][state][wire][display-name]")
+{
+    // A label yields to an identity: rename a3f5 to office-pc, then a machine started with --node-id=office-pc is
+    // admitted through the real Apply path. The admission is never refused over a label; the name is cleared, and the
+    // state encodes and decodes -- a snapshot of it restores.
+    ClusterState state;
+    Apply(state, Cmd(CommandKind::AddMember, "a3f5", "10.0.0.1:6675"));
+    Accepted(state, Named("a3f5", "office-pc"));
+    auto const admission = Cmd(CommandKind::AddLearner, "office-pc", {}, "10.0.0.9:6674");
+    REQUIRE(ValidateAgainst(state, admission).has_value());
+    CHECK(DisplayNameYieldingTo(state, admission) == std::optional<std::string> { "a3f5" });
+    Apply(state, admission);
+    CHECK(NameOf(state, "a3f5").empty());
+    CHECK(std::ranges::contains(state.members, std::string_view { "office-pc" }, &ClusterMember::id));
+    auto const decoded = DecodeState(Encode(state));
+    REQUIRE(decoded.has_value());
+    CHECK(*decoded == state);
+
+    // Nothing yields to an admission whose id no name spells, nor to a re-admission of the holder itself.
+    CHECK_FALSE(DisplayNameYieldingTo(ThreeMembers(), Cmd(CommandKind::AddMember, "n9", "10.0.0.9:6675")).has_value());
+    CHECK_FALSE(DisplayNameYieldingTo(state, Named("a3f5", "x")).has_value());
+}
+
+TEST_CASE("A state carrying a name spelled like another member's id decodes: a decoder never refuses over a label",
+          "[cluster][state][wire][display-name]")
+{
+    // Written past `Apply` -- what a node may hold from before the clearing reached it. Well formed, so read, never
+    // refused: refusing it would keep a node from restoring or starting over a label that decides nothing.
+    auto state = ThreeMembers();
+    state.members[0].displayName = "n2";
+    auto const decoded = DecodeState(Encode(state));
+    REQUIRE(decoded.has_value());
+    CHECK(NameOf(*decoded, "n1") == "n2");
+}
+
 TEST_CASE("A snapshot holding a display name Apply never records is refused rather than half-believed",
           "[cluster][state][wire][display-name]")
 {

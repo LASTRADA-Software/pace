@@ -7,11 +7,13 @@
 #include "NodeStatusText.hpp"
 
 #include <Pace/Cli/Duration.hpp>
+#include <Pace/Cli/MemberId.hpp>
 #include <Pace/Cluster/ClusterState.hpp>
 #include <Pace/Cluster/FleetPin.hpp>
 #include <Pace/Core/Ed25519.hpp>
 #include <Pace/Core/EnumTable.hpp>
 #include <Pace/Distributed/MembershipWire.hpp>
+#include <Pace/Distributed/ShownName.hpp>
 #include <Pace/Protocol/NodeStatusView.hpp>
 
 #include <algorithm>
@@ -1139,6 +1141,20 @@ namespace
         // an empty string renders as a value somebody could paste into `--cluster-admit`.
         record.push_back({ .name = "node-id", .value = fields.nodeId.empty() ? AbsentCell() : TextCell(fields.nodeId) });
 
+        // **The name a person knows the machine by**, beside the id it annotates, through the rule the fleet page's
+        // `name` column uses (`Distributed::NameShown`): the display name the cluster records for it, else what the
+        // machine calls itself, and which of the two it is. Absent, both cells, when neither says.
+        // Views into the record, which outlives `shown`: never into a temporary `value_or` would make.
+        auto const shown = Distributed::NameShown(
+            fields.runtime.displayName.has_value() ? std::string_view { *fields.runtime.displayName } : std::string_view {},
+            fields.runtime.hostName.has_value() ? std::string_view { *fields.runtime.hostName } : std::string_view {});
+        record.push_back(
+            { .name = "name", .value = shown.text.empty() ? AbsentCell() : TextCell(std::string { shown.text }) });
+        record.push_back({ .name = "name-source",
+                           .value = shown.source.has_value()
+                                        ? TextCell(std::string { Distributed::NameSourceWord(*shown.source) })
+                                        : AbsentCell() });
+
         // **The key this node proves who it is with** (#178), WHOLE, through the one encoder:
         // it is the string an operator holds against a roster or types after `@` in a
         // `--cluster-admit` token, and an abbreviation would be a display form somebody compares.
@@ -1893,6 +1909,14 @@ namespace
     /// @return The answer.
     [[nodiscard]] Answer ClusterName(VerbContext const& context)
     {
+        // The id by the rule `pace-node --cluster-name` holds it to (`ParseMemberId`), and never empty: an empty id names
+        // no member.
+        auto const id = ParseMemberId(context.operands[0]);
+        if (!id.has_value() || id->empty())
+            return Concluded(Outcome::Usage,
+                             std::format("`{}` is no member id: {}",
+                                         context.operands[0],
+                                         id.has_value() ? std::string { "it is empty" } : id.error().context));
         auto const name = context.operands.size() > 1 ? std::string_view { context.operands[1] } : std::string_view {};
         if (auto const refused = Cluster::RefuseDisplayName(name); refused.has_value())
             return Concluded(Outcome::Usage, *refused);

@@ -479,7 +479,7 @@ ConfiguredNodeStatus::ConfiguredNodeStatus(NodeConfig const& cfg,
     _version { std::move(version) },
     _nodeId { std::move(nodeId) },
     _components { components },
-    _sources { sources }
+    _sources { std::move(sources) }
 {
 }
 
@@ -751,6 +751,14 @@ CompileCacheWire::NodeStatusFields ConfiguredNodeStatus::Describe() const
     // like everything above, so an apply that moves the setting shows on the next answer.
     if (_sources.sharedCache != nullptr)
         fields.runtime.sharedCache = _sources.sharedCache->Report();
+
+    // The two halves of the name a surface shows (`Distributed::NameShown`): the display name the applied state records
+    // for this node, read per request so a rename shows on the next answer, and what the machine calls itself.
+    if (auto const state = _sources.cluster != nullptr ? _sources.cluster->AppliedState() : std::nullopt;
+        state.has_value() && !fields.nodeId.empty())
+        fields.runtime.displayName = DisplayNameIn(*state, fields.nodeId);
+    if (!_sources.hostName.empty())
+        fields.runtime.hostName = _sources.hostName;
 
     DescribeDetail(fields.runtime);
 

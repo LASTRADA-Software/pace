@@ -321,7 +321,11 @@ TEST_CASE("node_status resolves a member by its display name and names it by id 
     state.members[0].displayName = "my-laptop";
     state.members[1].displayName = "build-box";
     FixedCluster const cluster { state };
-    upstream.AnswerOk(Wire::EncodeNodeStatus(EveryDetail()));
+    // The answering node reports ITS id, which is the one the answer is named by.
+    auto beta = EveryDetail();
+    beta.nodeId = "node-beta";
+    beta.runtime.hostName = "beta-host";
+    upstream.AnswerOk(Wire::EncodeNodeStatus(beta));
 
     // Exactly: the display name resolves to the id asked; another case of it names nobody.
     auto const byName = CallNodeStatus(upstream, cluster, R"({"node":"build-box"})");
@@ -329,13 +333,18 @@ TEST_CASE("node_status resolves a member by its display name and names it by id 
     REQUIRE(upstream.calls.size() == 1);
     CHECK(upstream.calls.front().nodeIdOrEmpty == "node-beta");
     CHECK(*At(byName.structured, "node").AsString() == "build-box");
+    CHECK(*At(byName.structured, "node_id").AsString() == "node-beta");
     CHECK(*At(byName.structured, "display_name").AsString() == "build-box");
+    // The name the dashboard would show, by its rule: the replicated name wins over the hostname, and says so.
+    CHECK(*At(byName.structured, "name").AsString() == "build-box");
+    CHECK(*At(byName.structured, "name_source").AsString() == "replicated");
 
     auto const otherCase = CallNodeStatus(upstream, cluster, R"({"node":"Build-Box"})");
     CHECK(otherCase.isError);
     CHECK(upstream.calls.size() == 1);
 
     // This node, asked by default, is named by the display name the cluster records for it.
+    upstream.AnswerOk(Wire::EncodeNodeStatus(EveryDetail()));
     auto const self = CallNodeStatus(upstream, cluster);
     REQUIRE_FALSE(self.isError);
     CHECK(*At(self.structured, "display_name").AsString() == "my-laptop");
@@ -344,9 +353,13 @@ TEST_CASE("node_status resolves a member by its display name and names it by id 
     auto unnamed = state;
     unnamed.members[1].displayName.clear();
     FixedCluster const plain { unnamed };
+    upstream.AnswerOk(Wire::EncodeNodeStatus(beta));
     auto const nameless = CallNodeStatus(upstream, plain, R"({"node":"node-beta"})");
     REQUIRE_FALSE(nameless.isError);
     CHECK(At(nameless.structured, "display_name").IsNull());
+    // Nobody named it, so the dashboard's rule falls back to what the machine calls itself.
+    CHECK(*At(nameless.structured, "name").AsString() == "beta-host");
+    CHECK(*At(nameless.structured, "name_source").AsString() == "self-reported");
 }
 
 TEST_CASE("absent tier renders absent", "[mcp][node-status][node-status-detail]")

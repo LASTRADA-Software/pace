@@ -31,6 +31,7 @@
 #include <utility>
 #include <vector>
 
+#include <core/Ranges.hpp>
 #include <tests/Unwrap.hpp>
 
 using namespace Pace;
@@ -627,6 +628,38 @@ TEST_CASE("toolchain_diff pages two nodes across cursor boundaries and loses not
     CHECK(At(out, "inferred").AsBool() == std::optional { true });
     CHECK(TextAt(out, "verdict").value_or("").contains("inferred: likely a different libstdc++ package build"));
     CHECK(TextAt(At(out, "b"), "node") == "node-b");
+    // Each side names the member RESOLVED, not the text as asked: side a asked nothing and is this node.
+    CHECK(TextAt(At(out, "b"), "node_id") == "node-b");
+    CHECK(At(At(out, "a"), "node").IsNull());
+    CHECK(TextAt(At(out, "a"), "node_id") == std::string { SelfId });
+    CHECK(At(At(out, "a"), "display_name").IsNull());
+}
+
+TEST_CASE("toolchains names each machine by member id and display name, placed by its recorded endpoint",
+          "[pace-node][mcp][toolchains][display-name]")
+{
+    auto upstream = LeaderUpstream();
+    upstream.AnswerOk(DocumentWith(
+        { Entry("fp-13", "10.0.0.1:6674", "gcc", "gcc 13.2.0"), Entry("fp-13", "10.0.0.9:6674", "gcc", "gcc 13.2.0") }));
+    auto state = McpFakes::StateOf({ "n1" });
+    state.members[0].schedulerEndpoint = "10.0.0.1:6674";
+    state.members[0].displayName = "office-pc";
+    McpFakes::FixedCluster const cluster { state };
+    auto const tools = ToolchainTools(upstream, cluster, std::string { SelfId }, std::string { ThisVersion });
+    auto const* const row = core::findOrNull(tools, std::string_view { "toolchains" }, &Mcp::ToolRow::name);
+    REQUIRE(row != nullptr);
+    auto const result = row->handler(Mcp::ToolCall { .arguments = Unwrap(Json::Parse("{}")), .clientName = "test" });
+    INFO(result.text);
+    REQUIRE_FALSE(result.isError);
+
+    auto const& named = RowWhere(At(result.structured, "nodes"), "endpoint", "10.0.0.1:6674");
+    CHECK(TextAt(named, "node_id") == std::optional<std::string> { "n1" });
+    CHECK(TextAt(named, "display_name") == std::optional<std::string> { "office-pc" });
+    // An endpoint no member records: null, never guessed from the host, and said in the text.
+    auto const& unplaced = RowWhere(At(result.structured, "nodes"), "endpoint", "10.0.0.9:6674");
+    CHECK(At(unplaced, "node_id").IsNull());
+    CHECK(At(unplaced, "display_name").IsNull());
+    CHECK(result.text.contains("1 machine(s) match no member"));
 }
 
 TEST_CASE("toolchain_diff refuses stale inputs", "[pace-node][mcp][toolchain-diff]")

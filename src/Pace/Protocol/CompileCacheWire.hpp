@@ -7323,6 +7323,16 @@ struct NodeRuntimeFields
     /// The cache budgets this node applies from the cluster rather than its own flags (field 29). Declared and
     /// sent by nothing yet, so ABSENT everywhere: *does not say*, never *no overrides*.
     std::optional<std::vector<NodeBudgetOverrideFields>> budgetOverrides {};
+
+    /// The display name the cluster this node APPLIED records for it (`Cluster::ClusterMember::displayName`, field 30),
+    /// or disengaged when it records none, the node holds no cluster state, or the sender is too old to say. A label
+    /// that decides nothing; an engaged name is never empty.
+    std::optional<std::string> displayName {};
+
+    /// What this machine calls itself -- its hostname, the name a worker registers with (field 31) -- or disengaged
+    /// when it could not read one or the sender is too old to say. The self-reported half of the name a surface shows
+    /// (`Distributed::NameShown`); an engaged name is never empty.
+    std::optional<std::string> hostName {};
 };
 
 /// What an operator reads `NodeRuntimeFields::consensusEndpoint` under, as prose: the
@@ -7640,6 +7650,9 @@ inline constexpr std::size_t SharedCacheStatusFieldCount = 5;
         runtime.effectiveConfig.has_value() ? EncodeNodeSettings(*runtime.effectiveConfig) : std::vector<std::byte> {};
     auto const budgetOverrides = runtime.budgetOverrides.has_value() ? EncodeNodeBudgetOverrides(*runtime.budgetOverrides)
                                                                      : std::vector<std::byte> {};
+    // Absent as zero length; an engaged name is never empty -- see the members.
+    auto const displayName = runtime.displayName.has_value() ? AsBytes(*runtime.displayName) : std::span<std::byte const> {};
+    auto const hostName = runtime.hostName.has_value() ? AsBytes(*runtime.hostName) : std::span<std::byte const> {};
 
     // Positional, so the ORDER here is the wire contract for this record. Append only:
     // an insertion shifts every later field and every peer decodes one fact as the next.
@@ -7672,7 +7685,9 @@ inline constexpr std::size_t SharedCacheStatusFieldCount = 5;
                                 slotCeilings,
                                 tiers,
                                 effectiveConfig,
-                                budgetOverrides });
+                                budgetOverrides,
+                                displayName,
+                                hostName });
 }
 
 /// Read a runtime record back.
@@ -7889,6 +7904,13 @@ inline constexpr std::size_t SharedCacheStatusFieldCount = 5;
     if (!ReadNodeSlotCeilings(at(26), out.slotCeilings) || !ReadNodeTiers(at(27), out.tiers)
         || !ReadNodeSettings(at(28), out.effectiveConfig) || !ReadNodeBudgetOverrides(at(29), out.budgetOverrides))
         return std::nullopt;
+
+    // Fields 30 and 31, the two halves of the name a surface shows: empty is ABSENT, as for the consensus endpoint,
+    // and so is a record from a sender older than them.
+    if (auto const displayName = at(30); !displayName.empty())
+        out.displayName = std::string { AsStringView(displayName) };
+    if (auto const hostName = at(31); !hostName.empty())
+        out.hostName = std::string { AsStringView(hostName) };
 
     return out;
 }

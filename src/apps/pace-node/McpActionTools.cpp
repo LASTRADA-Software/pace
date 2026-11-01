@@ -641,7 +641,7 @@ namespace
         R"({"type":"object","required":["answered_by","term","term_scope","node_id","display_name","state"],"properties":{)"
         R"("answered_by":{"type":"string"},"term":{"type":["integer","null"]},"term_scope":{"const":"this-node"},)"
         R"("node_id":{"type":"string","description":"The member renamed, by its id."},)"
-        R"("display_name":{"type":["string","null"],"description":"The name asked for; null when it was cleared."},)"
+        R"("display_name":{"type":["string","null"],"description":"The name ASKED FOR, not confirmed as applied: the leader appended the change, and one that stops holding before it commits (the member forgotten, or the name taken by a rename judged first) is dropped there. Read fleet_overview or node_status to see the name in force. null when clearing was asked."},)"
         R"("state":{"const":"replicating","description":"Appended at the leader, not yet committed."}}})";
 
     constexpr std::string_view CordonInput =

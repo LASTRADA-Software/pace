@@ -9,6 +9,7 @@
 #include "LiveNodeConfig.hpp"
 #include "NodeConditions.hpp"
 #include "NodeMachineStanding.hpp"
+#include "NodeNameResolver.hpp"
 #include "NodeRoster.hpp"
 #include "SchedulingRedirect.hpp"
 #include "SharedCacheStatus.hpp"
@@ -626,6 +627,14 @@ struct NodeRuntimeSources
     /// This node's cache, for its tiers; null on a node that runs none, which reports the field ABSENT -- no
     /// cache -- rather than a cache whose every tier is empty.
     ITierStatsSource const* cacheTiers { nullptr };
+
+    /// The cluster state this node applied, where its display name is read per request (field 30); null where
+    /// nothing was wired, which reports the name ABSENT. Read per request so a rename shows on the next answer.
+    IAppliedClusterView const* cluster { nullptr };
+
+    /// What this machine calls itself -- its hostname, the name its worker registers with (field 31); empty when it
+    /// could not read one, which reports the field ABSENT. A fact of the process, so a value rather than a source.
+    std::string hostName {};
 };
 
 /// The production `INodeStatusSource`: config for the surfaces, a clock for the uptime.

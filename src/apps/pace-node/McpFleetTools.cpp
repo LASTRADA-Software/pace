@@ -196,6 +196,48 @@ namespace
         return elements != nullptr ? *elements : none;
     }
 
+    /// Name every machine row of a projected array, in place, as every tool names a machine (`AppendNaming`).
+    /// @param rows A projected array, or `null`.
+    /// @param state The applied state the machines are placed in.
+    /// @param namingOf How one row's machine is named.
+    /// @param prefix Prepended to the naming keys; empty when the row is about the machine.
+    /// @return How many rows the state could not place.
+    template <typename NamingOf>
+    std::size_t NameRows(Json::Value& rows,
+                         std::optional<Cluster::ClusterState> const& state,
+                         NamingOf namingOf,
+                         std::string_view prefix = {})
+    {
+        auto* const elements = std::get_if<Json::Array>(&rows.v);
+        if (elements == nullptr)
+            return 0;
+        auto unplaced = std::size_t { 0 };
+        for (auto& row: *elements)
+            if (auto* const members = std::get_if<Json::Object>(&row.v); members != nullptr)
+            {
+                auto const naming = namingOf(state, row);
+                unplaced += Unplaced(naming) ? 1U : 0U;
+                AppendNaming(*members, naming, prefix);
+            }
+        return unplaced;
+    }
+
+    /// @param state The applied state.
+    /// @param row A row carrying the machine's `endpoint`.
+    /// @return The machine's naming, by that endpoint.
+    [[nodiscard]] MachineNaming ByEndpoint(std::optional<Cluster::ClusterState> const& state, Json::Value const& row)
+    {
+        return NamingOfEndpoint(state, StringAt(row, "endpoint").value_or(std::string {}));
+    }
+
+    /// @param state The applied state.
+    /// @param row A row carrying the requester's `requester_key`.
+    /// @return The requesting machine's naming, by that key.
+    [[nodiscard]] MachineNaming ByRequesterKey(std::optional<Cluster::ClusterState> const& state, Json::Value const& row)
+    {
+        return NamingOfKeyText(state, StringAt(row, "requester_key").value_or(std::string {}));
+    }
+
     // ------------------------------------------------------------ fleet_overview
 
     /// Whether the fleet's machines run more than one build.
@@ -272,7 +314,9 @@ namespace
         return Arr(std::move(array));
     }
 
-    [[nodiscard]] Mcp::ToolResult FleetOverview(IMcpUpstream& upstream, Mcp::ToolCall const& /*call*/)
+    [[nodiscard]] Mcp::ToolResult FleetOverview(IMcpUpstream& upstream,
+                                                IAppliedClusterView const& cluster,
+                                                Mcp::ToolCall const& /*call*/)
     {
         auto document = AskFleetDocument(upstream);
         if (!document.has_value())
@@ -285,18 +329,21 @@ namespace
         if (!nodes.has_value())
             return Unreadable(*document, nodes.error());
 
+        // Every machine row named by its member id and display name, placed by its recorded `0xFC` endpoint.
+        auto const unplaced = NameRows(*nodes, cluster.AppliedState(), ByEndpoint);
         auto const skew = VersionsOf(ElementsOf(*nodes));
         auto const flag = SkewFlag(skew);
         auto const leader = StringAt(document->root, "leader");
         auto const flagText = SkewWord(flag.AsBool());
         auto text =
-            std::format("fleet led by {}: {} member(s), {} machine(s); versions {} ({}){}; {}",
+            std::format("fleet led by {}: {} member(s), {} machine(s); versions {} ({}){}{}; {}",
                         LeaderWords(leader, StringAt(document->root, "role"), document->reply),
                         members->IsNull() ? std::string { "no cluster" } : std::format("{}", ElementsOf(*members).size()),
                         ElementsOf(*nodes).size(),
                         skew.known.empty() ? std::string { "none reported" } : std::format("{}", skew.known),
                         flagText,
                         skew.unknown.empty() ? std::string {} : std::format("; no version from {}", skew.unknown),
+                        UnplacedNote(unplaced),
                         Provenance(document->reply));
 
         auto result = Envelope(document->reply);
@@ -347,7 +394,7 @@ namespace
 
     /// @param rows The projected compile rows, oldest first.
     /// @return The counts.
-    [[nodiscard]] CompileCounts CountCompiles(Json::Array const& rows)
+    [[nodiscard]] CompileCounts CountCompiles(Json::Array const& rows, std::optional<Cluster::ClusterState> const& state)
     {
         // Keyed by display name AND key: two machines may share a display name, and merging them would be a
         // wrong count presented as a right one.
@@ -367,14 +414,20 @@ namespace
         auto counts =
             CompileCounts { .perRequester = {}, .perWorker = {}, .oldestWait = oldest.has_value() ? Real(*oldest) : Null() };
         for (auto const& [who, count]: requesters)
-            counts.perRequester.push_back(Obj(
-                { { "requester", Str(who.first) }, { "requester_key", StrOrNull(who.second) }, { "count", Count(count) } }));
+        {
+            auto row = Json::Object { { "requester", Str(who.first) }, { "requester_key", StrOrNull(who.second) } };
+            AppendNaming(row, NamingOfKeyText(state, who.second.value_or(std::string {})));
+            row.emplace_back("count", Count(count));
+            counts.perRequester.push_back(Obj(std::move(row)));
+        }
         for (auto const& [worker, count]: workers)
             counts.perWorker.push_back(Obj({ { "worker", Str(worker) }, { "count", Count(count) } }));
         return counts;
     }
 
-    [[nodiscard]] Mcp::ToolResult RunningCompiles(IMcpUpstream& upstream, Mcp::ToolCall const& call)
+    [[nodiscard]] Mcp::ToolResult RunningCompiles(IMcpUpstream& upstream,
+                                                  IAppliedClusterView const& cluster,
+                                                  Mcp::ToolCall const& call)
     {
         auto document = AskFleetDocument(upstream);
         if (!document.has_value())
@@ -406,8 +459,11 @@ namespace
         if (totals == nullptr || totals->AsObject() == nullptr || !truncated.has_value())
             return Unreadable(*document, "a compile list without its totals");
 
+        // Each compile's requesting machine named by its member id and display name, placed by its identity key.
+        auto const state = cluster.AppliedState();
+        auto const unplaced = NameRows(*compiles, state, ByRequesterKey, "requester_");
         auto const& rows = ElementsOf(*compiles);
-        auto counts = CountCompiles(rows);
+        auto counts = CountCompiles(rows, state);
         auto listed = Json::Array {};
         for (auto const& row: rows)
             if (filter.Admits(row))
@@ -429,7 +485,7 @@ namespace
             return count.has_value() ? std::format("{}", *count) : std::string { "-" };
         };
         auto text = std::format("{} running, {} queued, {} waiting; oldest queued wait {}; {} of {} listed row(s) "
-                                "shown{}{}; {}",
+                                "shown{}{}{}; {}",
                                 countOf("running"),
                                 countOf("queued"),
                                 countOf("waiting"),
@@ -440,6 +496,7 @@ namespace
                                 filter.requester.has_value() || filter.worker.has_value() ? " after the filter" : "",
                                 *truncated == 0 ? std::string {}
                                                 : std::format("; {} more ticket(s) past the list's ceiling", *truncated),
+                                UnplacedNote(unplaced),
                                 Provenance(document->reply));
 
         result.emplace_back("compiles", Arr(std::move(listed)));
@@ -450,7 +507,9 @@ namespace
 
     // ------------------------------------------------------------ conditions
 
-    [[nodiscard]] Mcp::ToolResult Conditions(IMcpUpstream& upstream, Mcp::ToolCall const& /*call*/)
+    [[nodiscard]] Mcp::ToolResult Conditions(IMcpUpstream& upstream,
+                                             IAppliedClusterView const& cluster,
+                                             Mcp::ToolCall const& /*call*/)
     {
         auto document = AskFleetDocument(upstream);
         if (!document.has_value())
@@ -500,6 +559,8 @@ namespace
         auto machines = Json::Array {};
         auto notReported = std::vector<std::string> {};
         auto raisedLines = std::string {};
+        auto const state = cluster.AppliedState();
+        auto unplaced = std::size_t { 0 };
         for (auto const& endpoint: order)
         {
             if (unreported.contains(endpoint))
@@ -516,15 +577,21 @@ namespace
                                                StringAt(condition, "persistence").value_or(std::string { "-" }),
                                                StringAt(condition, "detail").value_or(std::string {}),
                                                StringAt(condition, "remedy").value_or(std::string {}));
-            machines.push_back(
-                Obj({ { "endpoint", Str(endpoint) }, { "conditions", Arr(std::move(perMachine[endpoint])) } }));
+            // Named by its member id and display name, placed by its recorded `0xFC` endpoint.
+            auto const naming = NamingOfEndpoint(state, endpoint);
+            unplaced += Unplaced(naming) ? 1U : 0U;
+            auto row = Json::Object { { "endpoint", Str(endpoint) } };
+            AppendNaming(row, naming);
+            row.emplace_back("conditions", Arr(std::move(perMachine[endpoint])));
+            machines.push_back(Obj(std::move(row)));
         }
 
-        auto text = std::format("{} condition(s) raised across {} machine(s) that reported{}; {}{}",
+        auto text = std::format("{} condition(s) raised across {} machine(s) that reported{}{}; {}{}",
                                 raised,
                                 machines.size(),
                                 notReported.empty() ? std::string {}
                                                     : std::format("; {} reported no conditions at all", notReported),
+                                UnplacedNote(unplaced),
                                 Provenance(document->reply),
                                 raisedLines);
         auto result = Envelope(document->reply);
@@ -826,7 +893,7 @@ namespace
         R"("answered_by":{"type":"string"},"term":{"type":["integer","null"]},"term_scope":{"const":"this-node"},)"
         R"("role":{"type":["string","null"]},"leader":{"type":["string","null"],"description":"The leader's 0xFC endpoint as /fleet.json names it: null while the answering node itself leads (role: leader) -- then answered_by is the leader -- or while none is known."},)"
         R"("members":{"type":["array","null"],"description":"/fleet.json members, snake_case; null when the answering node runs no cluster."},)"
-        R"("nodes":{"type":"array","description":"/fleet.json nodes, snake_case; heartbeat_age_s in seconds; null cells are absent, never 0."},)"
+        R"("nodes":{"type":"array","description":"/fleet.json nodes, snake_case; heartbeat_age_s in seconds; null cells are absent, never 0. Each also carries node_id and display_name, of the member whose recorded 0xFC endpoint is the row's endpoint -- both null when no member records it, never guessed."},)"
         R"("versions":{"type":"array","items":{"type":"string"}},"versions_unreported":{"type":"array","items":{"type":"string"}},)"
         R"("version_skew":{"type":["boolean","null"],"description":"true: two or more builds; false: one build everywhere; null: cannot be told."}}})";
 
@@ -838,15 +905,15 @@ namespace
     constexpr std::string_view RunningCompilesOutput =
         R"({"type":"object","required":["answered_by","term","term_scope","compiles","compiles_truncated","totals"],"properties":{)"
         R"("answered_by":{"type":"string"},"term":{"type":["integer","null"]},"term_scope":{"const":"this-node"},)"
-        R"("compiles":{"type":["array","null"],"description":"/fleet.json compiles rows, oldest first, after the filter; age_s and lease_expires_in_s in seconds; null when the answering node leads no queue."},)"
+        R"("compiles":{"type":["array","null"],"description":"/fleet.json compiles rows, oldest first, after the filter; age_s and lease_expires_in_s in seconds; each carries requester_node_id and requester_display_name, of the member holding requester_key (both null when no member holds it); null when the answering node leads no queue."},)"
         R"("compiles_truncated":{"type":["integer","null"]},)"
-        R"("totals":{"type":["object","null"],"description":"running/queued/waiting count EVERY ticket; oldest_wait_s, per_requester and per_worker are over the listed rows, before the filter, complete when per_counts_cover_every_ticket."}}})";
+        R"("totals":{"type":["object","null"],"description":"running/queued/waiting count EVERY ticket; oldest_wait_s, per_requester (each with node_id and display_name, by its key) and per_worker are over the listed rows, before the filter, complete when per_counts_cover_every_ticket."}}})";
 
     constexpr std::string_view ConditionsOutput =
         R"({"type":"object","required":["answered_by","term","term_scope","raised_count","nodes","not_reported"],"properties":{)"
         R"("answered_by":{"type":"string"},"term":{"type":["integer","null"]},"term_scope":{"const":"this-node"},)"
         R"("raised_count":{"type":"integer"},)"
-        R"("nodes":{"type":"array","description":"Every machine that reported a list, with each condition: condition, state, persistence, severity, detail, remedy."},)"
+        R"("nodes":{"type":"array","description":"Every machine that reported a list: endpoint; node_id and display_name of the member recording that 0xFC endpoint (both null when none does); and each condition: condition, state, persistence, severity, detail, remedy."},)"
         R"("not_reported":{"type":"array","items":{"type":"string"},"description":"Machines whose report carried no conditions at all: absent, not clear."}}})";
 
     /// The `history` tool's input schema: its `enum`s are the series and range tables' keys, composed once from
@@ -887,9 +954,10 @@ namespace
 
 } // namespace
 
-std::vector<Mcp::ToolRow> FleetReadTools(IMcpUpstream& upstream)
+std::vector<Mcp::ToolRow> FleetReadTools(IMcpUpstream& upstream, IAppliedClusterView const& cluster)
 {
     auto* const to = &upstream;
+    auto const* const in = &cluster;
     return {
         Mcp::ToolRow {
             .name = "fleet_overview",
@@ -901,7 +969,7 @@ std::vector<Mcp::ToolRow> FleetReadTools(IMcpUpstream& upstream)
             .inputSchema = NoArguments,
             .outputSchema = FleetOverviewOutput,
             .effect = Mcp::ToolEffect::ReadOnly,
-            .handler = [to](Mcp::ToolCall const& call) { return FleetOverview(*to, call); },
+            .handler = [to, in](Mcp::ToolCall const& call) { return FleetOverview(*to, *in, call); },
         },
         Mcp::ToolRow {
             .name = "running_compiles",
@@ -914,7 +982,7 @@ std::vector<Mcp::ToolRow> FleetReadTools(IMcpUpstream& upstream)
             .inputSchema = RunningCompilesInput,
             .outputSchema = RunningCompilesOutput,
             .effect = Mcp::ToolEffect::ReadOnly,
-            .handler = [to](Mcp::ToolCall const& call) { return RunningCompiles(*to, call); },
+            .handler = [to, in](Mcp::ToolCall const& call) { return RunningCompiles(*to, *in, call); },
         },
         Mcp::ToolRow {
             .name = "conditions",
@@ -926,7 +994,7 @@ std::vector<Mcp::ToolRow> FleetReadTools(IMcpUpstream& upstream)
             .inputSchema = NoArguments,
             .outputSchema = ConditionsOutput,
             .effect = Mcp::ToolEffect::ReadOnly,
-            .handler = [to](Mcp::ToolCall const& call) { return Conditions(*to, call); },
+            .handler = [to, in](Mcp::ToolCall const& call) { return Conditions(*to, *in, call); },
         },
         Mcp::ToolRow {
             .name = "history",

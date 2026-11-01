@@ -14,6 +14,7 @@
 
 #include <Pace/Cache/StorageTier.hpp>
 #include <Pace/Cli/Duration.hpp>
+#include <Pace/Cli/MemberId.hpp>
 #include <Pace/Cluster/ClusterState.hpp>
 #include <Pace/Cluster/FleetPin.hpp>
 #include <Pace/Cluster/ProvenFleet.hpp>
@@ -51,31 +52,12 @@ namespace Pace::Node
 
 namespace
 {
-    /// Why an id is refused for its length: the sentence every door that takes one says.
-    /// @param bytes How long the id was.
-    /// @return The reason, naming the bound.
-    [[nodiscard]] std::string IdTooLong(std::size_t bytes)
-    {
-        return std::format("is {} bytes, longer than the {} an id may be: every peer refuses a fleet summary naming "
-                           "a longer one",
-                           bytes,
-                           CompileCacheWire::MaxIdBytes);
-    }
-
-    /// An id typed on this command line -- this node's own, or the machine an enrollment verb names --
-    /// held to the ONE bound every reader of an id holds it to (`CompileCacheWire::MaxIdBytes`), and
-    /// to being text.
-    ///
-    /// Refused here, by name, because past it the id is no less valid to this node: it is every
-    /// PEER that refuses the fleet summary carrying it, silently, as malformed. Empty passes: an
-    /// empty `--node-id` is how a node asks to mint one.
+    /// An id typed on this command line: `Pace::ParseMemberId`, the rule `pacectl` holds an id to as well.
     /// @param sv The value text.
     /// @return The id, or why it is too long or not text.
     [[nodiscard]] std::expected<std::string, ConfigError> ParseId(std::string_view sv)
     {
-        if (sv.size() > CompileCacheWire::MaxIdBytes)
-            return std::unexpected(ArgvError(ConfigErrorCode::ParseError, std::format("value {}", IdTooLong(sv.size()))));
-        return ParseUtf8Text(sv);
+        return ParseMemberId(sv);
     }
 
     /// A port, refusing 0 rather than letting a bind fail with a confusing message.

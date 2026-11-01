@@ -405,16 +405,45 @@ std::optional<std::string> RefuseDisplayName(std::string_view name)
     return std::nullopt;
 }
 
+namespace
+{
+    /// Which OTHER member carries a display name equal to @p name under ASCII folding -- names alone, never ids.
+    ///
+    /// The half of `DisplayNameHolder` that only `SetDisplayName` can create, which is why it is also the one rule a
+    /// decoded state is held to: an admission never gives a member a name, so no apply path but the guarded rename can
+    /// produce two members answering to one name.
+    /// @param state The state.
+    /// @param name A non-empty display name.
+    /// @param except The member being named.
+    /// @return The holder's id, or nullopt.
+    [[nodiscard]] std::optional<std::string> FoldedNameHolder(ClusterState const& state,
+                                                              std::string_view name,
+                                                              std::string_view except)
+    {
+        auto const* const holder = core::findIfOrNull(state.members, [&](ClusterMember const& member) {
+            return member.id != except && AsciiFoldEquals(member.displayName, name);
+        });
+        return holder != nullptr ? std::optional { holder->id } : std::nullopt;
+    }
+} // namespace
+
 std::optional<std::string> DisplayNameHolder(ClusterState const& state, std::string_view name, std::string_view except)
 {
-    for (auto const& member: state.members)
-    {
-        if (member.id == except)
-            continue;
-        if (member.id == name || AsciiFoldEquals(member.displayName, name))
-            return member.id;
-    }
-    return std::nullopt;
+    auto const* const byId = core::findIfOrNull(
+        state.members, [&](ClusterMember const& member) { return member.id != except && member.id == name; });
+    if (byId != nullptr)
+        return byId->id;
+    return FoldedNameHolder(state, name, except);
+}
+
+std::optional<std::string> DisplayNameYieldingTo(ClusterState const& state, Command const& command)
+{
+    if (!SeatAdmittedBy(command.kind).has_value())
+        return std::nullopt;
+    auto const* const holder = core::findIfOrNull(state.members, [&command](ClusterMember const& member) {
+        return member.id != command.key && !member.displayName.empty() && member.displayName == command.key;
+    });
+    return holder != nullptr ? std::optional { holder->id } : std::nullopt;
 }
 
 std::vector<std::byte> Encode(Command const& command)
@@ -720,11 +749,14 @@ std::expected<ClusterState, ConsensusError> DecodeState(std::span<std::byte cons
 
     if (auto const broken = BrokenRosterRule(state); broken.has_value())
         return std::unexpected(MalformedWireFrame(*broken));
-    // And two members answering to one name, which `Apply` drops (`DisplayNameHolder`): a resolver would have to pick
-    // which machine a person meant.
+    // And two members answering to one name under ASCII folding, which only the guarded rename could create and
+    // `Apply` drops (`FoldedNameHolder`): a resolver would have to pick which machine a person meant. NOT a name
+    // spelled like another member's id: an admission may bring that id in after the name was given, and `Apply` then
+    // clears the name (`DisplayNameYieldingTo`) -- but a state another build or an older path wrote with the pair in
+    // it is well formed, and refusing it here would keep a node from restoring or starting over a label.
     for (auto const& member: state.members)
         if (!member.displayName.empty())
-            if (auto const holder = DisplayNameHolder(state, member.displayName, member.id); holder.has_value())
+            if (auto const holder = FoldedNameHolder(state, member.displayName, member.id); holder.has_value())
                 return std::unexpected(
                     MalformedWireFrame(std::format("members {} and {} answer to one display name", member.id, *holder)));
     return state;
@@ -780,6 +812,14 @@ namespace
                 // Update in place when the id is already known. One verb for "join" and
                 // "moved" because they are one intention, and removing first would leave a
                 // window in which the cluster has agreed the node does not exist.
+                // A label yields to an identity: a member whose display name is spelled like the id this admission
+                // brings in loses the name, deterministically and here, so no resolver ever has to choose between
+                // the two. Never the reverse -- an admission is never refused over a label, which decides nothing.
+                if (auto const yielding = DisplayNameYieldingTo(state, command); yielding.has_value())
+                    if (auto const holder = std::ranges::find(state.members, *yielding, &ClusterMember::id);
+                        holder != state.members.end())
+                        holder->displayName.clear();
+
                 auto const it = std::ranges::find(state.members, command.key, &ClusterMember::id);
 
                 // The endpoint is replaced wholesale and its HISTORY is not, which is what

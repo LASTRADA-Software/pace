@@ -31,10 +31,11 @@ struct NameMatchRow
     bool (*matches)(Cluster::ClusterMember const& member, std::string_view name); ///< Whether @p name names @p member.
 };
 
-/// Every way a name matches, in the order they are asked. The first way that matches ANY member decides: one
-/// match is the member, several are ambiguous. **A way of naming is a row here**, so the display name is one row
-/// after the id and the resolver does not change. An id wins over a display name spelled the same, which the leader
-/// refuses to record (`Cluster::DisplayNameHolder`) but an older state may hold.
+/// Every way a name matches. One member matched, by any of them, is the member; several are ambiguous. **A way of naming is
+/// a row here**, so the display name is one row after the id and the resolver does not change. The rows are POOLED: a name
+/// that is one member's id and another member's display name is ambiguous and refused naming both, never resolved by row
+/// order. The leader refuses to record such a name (`Cluster::DisplayNameHolder`) and clears one an admitted id would shadow
+/// (`Cluster::DisplayNameYieldingTo`), but a node may apply the pair for a moment between the two.
 inline constexpr std::array NameMatchers {
     NameMatchRow {
         .what = "id",

@@ -301,6 +301,10 @@ struct DirectSources
     INodeConfigSource const* config { nullptr };
     /// The cache's tiers; null is a node with no cache.
     ITierStatsSource const* cacheTiers { nullptr };
+    /// The applied cluster state, for this node's display name; null is nothing wired.
+    IAppliedClusterView const* cluster { nullptr };
+    /// What the machine calls itself; empty is a machine that could not read it.
+    std::string hostName {};
 };
 
 /// A `ConfiguredNodeStatus` beside the configuration it holds a reference to.
@@ -325,7 +329,7 @@ struct Fixture
             core::platform::IClock const& clock,
             NodeComponents components = {},
             std::optional<ToolchainReading> initial = std::nullopt,
-            DirectSources direct = {}):
+            DirectSources const& direct = {}):
         cfg { NodeConfigOf(shape) },
         runtime { initial.value_or(UnwiredSentinel) },
         status { cfg,
@@ -345,7 +349,9 @@ struct Fixture
                                       .raftEndpoint = direct.raftEndpoint,
                                       .schedulingLeader = direct.schedulingLeader,
                                       .config = direct.config,
-                                      .cacheTiers = direct.cacheTiers } }
+                                      .cacheTiers = direct.cacheTiers,
+                                      .cluster = direct.cluster,
+                                      .hostName = direct.hostName } }
     {
     }
 
@@ -571,6 +577,42 @@ TEST_CASE("The worker component BIT and the toolchain state answer different que
     REQUIRE(walkingFields.runtime.toolchains.has_value());
     REQUIRE(readyFields.runtime.toolchains.has_value());
     CHECK(walkingFields.runtime.toolchains != readyFields.runtime.toolchains);
+}
+
+TEST_CASE("A node reports the display name its applied state records for it, and its hostname, per request",
+          "[node][node-status][display-name]")
+{
+    core::platform::ManualClock clock;
+    auto state = Cluster::ClusterState {};
+    auto self = Cluster::ClusterMember {};
+    self.id = "node-a";
+    self.displayName = "office-pc";
+    state.members.push_back(self);
+
+    // A view whose state a case changes, so the second answer shows a rename the first did not.
+    struct Named final: IAppliedClusterView
+    {
+        std::optional<Cluster::ClusterState> state;
+        [[nodiscard]] std::optional<Cluster::ClusterState> AppliedState() const override
+        {
+            return state;
+        }
+    };
+    Named view;
+    view.state = state;
+    Fixture const fixture { {}, clock, {}, std::nullopt, DirectSources { .cluster = &view, .hostName = "buildhost-7" } };
+
+    auto const first = fixture.status.Describe();
+    CHECK(first.runtime.displayName == std::optional<std::string> { "office-pc" });
+    CHECK(first.runtime.hostName == std::optional<std::string> { "buildhost-7" });
+
+    view.state->members[0].displayName.clear();
+    CHECK_FALSE(fixture.status.Describe().runtime.displayName.has_value());
+
+    // Nothing wired, nothing said: ABSENT, never an empty name.
+    Fixture const bare { {}, clock };
+    CHECK_FALSE(bare.status.Describe().runtime.displayName.has_value());
+    CHECK_FALSE(bare.status.Describe().runtime.hostName.has_value());
 }
 
 TEST_CASE("A node that publishes no runtime facts reports them ABSENT, not as zeroes", "[node][node-status][toolchains]")

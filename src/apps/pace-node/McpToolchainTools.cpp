@@ -235,7 +235,9 @@ namespace
         return unserved;
     }
 
-    [[nodiscard]] Mcp::ToolResult Toolchains(IMcpUpstream& upstream, Mcp::ToolCall const& /*call*/)
+    [[nodiscard]] Mcp::ToolResult Toolchains(IMcpUpstream& upstream,
+                                             IAppliedClusterView const& cluster,
+                                             Mcp::ToolCall const& /*call*/)
     {
         auto document = McpFleet::AskFleetDocument(upstream);
         if (!document.has_value())
@@ -271,16 +273,22 @@ namespace
             toolchainRows.push_back(ToolchainJson(fingerprint, row));
         auto machineRows = Json::Array {};
         auto unservedWords = std::vector<std::string> {};
+        auto const state = cluster.AppliedState();
+        auto unplaced = std::size_t { 0 };
         for (auto const& [endpoint, served]: machines)
         {
             auto const unserved = UnservedBy(served, toolchains);
             if (unserved.has_value() && !unserved->empty())
                 unservedWords.push_back(std::format("{} lacks {}", endpoint, Joined(*unserved, ", ")));
-            machineRows.push_back(Obj(Json::Object {
-                { "endpoint", Str(endpoint) },
-                { "served", Strings(served) },
-                { "unserved", unserved.has_value() ? Strings(*unserved) : Null() },
-            }));
+            // A registration is keyed by the endpoint the worker answers at; the machine is named through the member
+            // recording that `0xFC` endpoint, or not at all.
+            auto const naming = NamingOfEndpoint(state, endpoint);
+            unplaced += Unplaced(naming) ? 1U : 0U;
+            auto row = Json::Object { { "endpoint", Str(endpoint) } };
+            AppendNaming(row, naming);
+            row.emplace_back("served", Strings(served));
+            row.emplace_back("unserved", unserved.has_value() ? Strings(*unserved) : Null());
+            machineRows.push_back(Obj(std::move(row)));
         }
         auto adviceRows = Json::Array {};
         auto adviceWords = std::vector<std::string> {};
@@ -292,13 +300,14 @@ namespace
 
         auto text = std::format(
             "{} toolchain(s) on {} machine(s); upgrade report (conservative -- check each basis): {}{}; unserved in "
-            "their families: {}; demand: not recorded; {}",
+            "their families: {}; demand: not recorded{}; {}",
             toolchains.size(),
             machines.size(),
             adviceWords.empty() ? std::string { "no toolchain of a known family" } : Joined(adviceWords, " | "),
             familyless.empty() ? std::string {}
                                : std::format("; {} registered no family and join none", Joined(familyless, ", ")),
             unservedWords.empty() ? std::string { "none" } : Joined(unservedWords, "; "),
+            UnplacedNote(unplaced),
             Provenance(document->reply));
 
         auto result = Envelope(document->reply);
@@ -636,7 +645,9 @@ namespace
     {
         return Obj(Json::Object {
             { "node", side.target.asked.has_value() ? Str(Readable(*side.target.asked)) : Null() },
-            { "display_name", DisplayNameValue(side.target) },
+            // The member RESOLVED, never the text as asked: `node` echoes the caller, these name the machine.
+            { "node_id", StrOrNull(side.target.naming.nodeId) },
+            { "display_name", StrOrNull(side.target.naming.displayName) },
             { "fingerprint", Str(side.fingerprint) },
             { "toolchain", side.toolchain.has_value() ? Str(Readable(*side.toolchain)) : Null() },
             { "answered_by", Str(record.answeredBy) },
@@ -825,7 +836,7 @@ namespace
     constexpr std::string_view ToolchainDiffOutput =
         R"({"type":"object","required":["term","term_scope","a","b","identical","same_fingerprint","recompute","complete","incomplete","skew","schema_differs","banner","grammar","only_a","only_b","content_differs","verdict","inferred"],"properties":{)"
         R"("term":{"type":["integer","null"]},"term_scope":{"const":"this-node"},)"
-        R"("a":{"type":"object","description":"node (null: this node), display_name (what the cluster records for it, or null), fingerprint, toolchain (what it was resolved from, or null), answered_by, version (its pace-node), schema, grammar, total_files."},"b":{"type":"object"},)"
+        R"("a":{"type":"object","description":"node (the name as asked; null: this node), node_id (the member resolved, null when this node has no id), display_name (what the cluster records for it, or null), fingerprint, toolchain (what it was resolved from, or null), answered_by, version (its pace-node), schema, grammar, total_files."},"b":{"type":"object"},)"
         R"("identical":{"type":"boolean"},"same_fingerprint":{"type":"boolean"},)"
         R"("recompute":{"enum":["passed","not-run","failed"],"description":"passed: both records recomputed to their fingerprints on this node before they were compared. failed: neither reproduced from identical inputs (see skew). not-run: a side was incomplete, so nothing was recomputed. A side that alone fails is refused as stale."},)"
         R"("complete":{"type":"boolean"},"incomplete":{"type":["string","null"],"description":"Why the files were not compared: a side passed the files, bytes or pages this tool reads per side. Only schema, banner and grammar are then compared, and inferred is false."},)"
@@ -842,7 +853,7 @@ namespace
         R"("toolchain_count":{"type":"integer","description":"Distinct fingerprints."},)"
         R"("machine_count":{"type":"integer","description":"Distinct worker endpoints: a machine serving two toolchains counts once."},)"
         R"("toolchains":{"type":"array","description":"Per fingerprint: label and version (\"unknown\" when the label does not parse) where its entries agree on one label, every label in labels, family as the node read it off the banner (null when none or disagreeing), driver (the label's compiler name without a version suffix, null when the label does not parse), and the machines serving it."},)"
-        R"("nodes":{"type":"array","description":"Per machine: the fingerprints it serves, and unserved -- the fleet's fingerprints in the same families it does not serve; null when it serves no toolchain of a known family (see unserved_note)."},)"
+        R"("nodes":{"type":"array","description":"Per machine: endpoint; node_id and display_name, of the member whose recorded 0xFC endpoint is that endpoint (both null when no member records it -- absent, never guessed); the fingerprints it serves, and unserved -- the fleet's fingerprints in the same families it does not serve; null when it serves no toolchain of a known family (see unserved_note)."},)"
         R"("unserved_note":{"type":"string"},"demand":{"type":"null","description":"Absent: no demand per toolchain is recorded yet."},"demand_note":{"type":"string"},)"
         R"("upgrade_report":{"type":"array","description":"Per banner-derived compiler family: recommended_version, and recommended_fingerprints -- an object from DRIVER (gcc, cc, g++: one install answers to several) to fingerprint, a driver absent when its builds of the version cannot be told apart, null when the ordering is unknown; basis (the versions compared and any demand), and machines placed by their highest version of the family: behind (lower: should upgrade), ahead (higher), same_version_other_fingerprint (the recommended version under another fingerprint for the SAME driver: ask toolchain_diff); ordering_unknown."}}})";
 
@@ -876,7 +887,7 @@ std::vector<Mcp::ToolRow> ToolchainTools(IMcpUpstream& upstream,
             .inputSchema = NoArguments,
             .outputSchema = ToolchainsOutput,
             .effect = Mcp::ToolEffect::ReadOnly,
-            .handler = [to](Mcp::ToolCall const& call) { return Toolchains(*to, call); },
+            .handler = [to, in](Mcp::ToolCall const& call) { return Toolchains(*to, *in, call); },
         },
         Mcp::ToolRow {
             .name = "toolchain_diff",

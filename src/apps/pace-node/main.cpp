@@ -748,15 +748,14 @@ class McpForwarding
     /// @param prover The identity prover; engaged on every start (`AdoptNodeKey`).
     /// @param identityKey This node's identity key: what a call to itself presents as proven.
     /// @param io The loop calls run on.
-    /// @param leader Where the leader answers, as last learned.
-    /// @param advertised This node's own `0xFC` endpoint, never dialled.
+    /// @param directory The applied-state directory every call resolves members in; declared above this and outlives it
+    ///        (`NODE-STATUS` reads it too, for this node's display name).
     McpForwarding(NodeConfig const& cfg,
                   std::optional<Node::NodeProofClient> const& prover,
                   std::optional<Ed25519KeyPair> const& identityKey,
                   Node::NodeIoLoop& io,
-                  Node::ISchedulingLeaderSource const& leader,
-                  Cc::IAdvertisedEndpointSource const& advertised):
-        _directory { cfg.nodeId, leader, advertised },
+                  Node::AppliedUpstreamDirectory& directory):
+        _directory { directory },
         _answerer { identityKey.has_value()
                         ? std::optional { ProvenIdentity { .id = cfg.nodeId, .key = identityKey->PublicKey() } }
                         : std::nullopt },
@@ -800,7 +799,7 @@ class McpForwarding
     }
 
     // Declaration order IS construction order: each borrows the ones above it.
-    Node::AppliedUpstreamDirectory _directory;
+    Node::AppliedUpstreamDirectory& _directory;
     Node::FrameRouterAnswerer _answerer;
     Node::ProvenSchedulerDialer _dialer;
     Node::NodeIoUpstream _upstream;
@@ -815,7 +814,7 @@ class McpForwarding
 /// @return The table.
 [[nodiscard]] std::vector<Mcp::ToolRow> McpToolTable(NodeConfig const& cfg, McpForwarding& forwarding, ILogger& logger)
 {
-    auto tools = Node::FleetReadTools(forwarding.Upstream());
+    auto tools = Node::FleetReadTools(forwarding.Upstream(), forwarding.Directory());
     std::ranges::move(
         Node::ToolchainTools(forwarding.Upstream(), forwarding.Directory(), cfg.nodeId, std::string { VersionString }),
         std::back_inserter(tools));
@@ -922,6 +921,11 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     //
     // Declared up here, above every component that reads it, so it outlives all of them.
     Node::AnnouncedEndpoint announced { advertise };
+
+    // The cluster state this node last applied, whole: where the MCP tools resolve a member and `NODE-STATUS` reads
+    // this node's display name. Told by the consensus tier's apply observer; declared up here, above the status
+    // responder and the MCP forwarding that read it, so it outlives both.
+    Node::AppliedUpstreamDirectory clusterDirectory { cfg.nodeId, knownSchedulingLeader, announced };
 
     // The descriptor travels to `StartNodeSurfaceOrExplain` below and is served
     // there. It used to be refused here, for the two months between the surfaces
@@ -1468,7 +1472,11 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
                                    // accepted reload shows on the next `node-status`, credentials redacted.
                                    .config = &endpointConfig,
                                    // Null on a node with no cache, which reports no tiers rather than empty ones.
-                                   .cacheTiers = cacheTier.get() },
+                                   .cacheTiers = cacheTier.get(),
+                                   // This node's display name, read per request from the state it applied.
+                                   .cluster = &clusterDirectory,
+                                   // What it calls itself: the name its worker registers with.
+                                   .hostName = QueryHostFacts().hostName },
     };
 
     // The operator verbs. Declared BEFORE the surface that routes to it and therefore
@@ -1607,7 +1615,7 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     AdmissionRelay admissionRelay;
     // And the MCP surface's way to the fleet, declared before the surface and the consensus tier for the reason
     // its class states.
-    McpForwarding mcpForwarding { cfg, prover, identityKey, nodeIo, knownSchedulingLeader, announced };
+    McpForwarding mcpForwarding { cfg, prover, identityKey, nodeIo, clusterDirectory };
     StartAdmissionRelay(admissionRelay,
                         AdmissionRelayParts { .cfg = cfg,
                                               .prover = prover,

@@ -150,6 +150,46 @@ namespace
 
 } // namespace
 
+TEST_CASE("`node` names the machine by the dashboard's rule: replicated name, else its hostname, and which",
+          "[cli][node][verbs][display-name]")
+{
+    struct Case
+    {
+        std::optional<std::string> displayName;
+        std::optional<std::string> hostName;
+        std::optional<std::string> name;
+        std::optional<std::string> source;
+    };
+    for (auto const& [displayName, hostName, name, source]:
+         { Case { .displayName = "office-pc", .hostName = "buildhost-7", .name = "office-pc", .source = "replicated" },
+           Case { .displayName = std::nullopt, .hostName = "buildhost-7", .name = "buildhost-7", .source = "self-reported" },
+           Case { .displayName = std::nullopt, .hostName = std::nullopt, .name = std::nullopt, .source = std::nullopt } })
+    {
+        CAPTURE(name);
+        auto fields = CacheWire::NodeStatusFields {};
+        fields.version = "1";
+        fields.nodeId = "node-a";
+        fields.runtime.displayName = displayName;
+        fields.runtime.hostName = hostName;
+        ScriptedNodeExchange node { { StatusReply(fields) } };
+        auto const answer = RunNodeVerb("node", node);
+        REQUIRE(answer.outcome == Outcome::Affirmative);
+        auto const& nameCell = RequiredCell(answer, "name");
+        auto const& sourceCell = RequiredCell(answer, "name-source");
+        if (name.has_value())
+        {
+            CHECK(nameCell.lexical == *name);
+            CHECK(std::optional { sourceCell.lexical } == source);
+        }
+        else
+        {
+            // Absent, both cells: neither said, which is not a machine called "".
+            CHECK(nameCell.kind == CellKind::Absent);
+            CHECK(sourceCell.kind == CellKind::Absent);
+        }
+    }
+}
+
 TEST_CASE("`node` reports what the endpoint is", "[cli][node][verbs]")
 {
     ScriptedNodeExchange node { { StatusReply(
@@ -3232,4 +3272,38 @@ TEST_CASE("`node` says a fleet id --fleet-id would refuse is not one to paste, r
     CHECK(cell.contains("--fleet-id refuses this as it stands"));
     CHECK(cell.contains(std::format("more than {} voter keys", Cluster::MaxPinnedVoterKeys)));
     CHECK(cell.contains("name at most"));
+}
+
+TEST_CASE("fleet shows a named member's display name and where it came from, as the leader rendered it",
+          "[cli][node][fleet][display-name]")
+{
+    // Rendered by the leader's own text renderer, so this asserts that `pacectl fleet` carries the name columns the
+    // dashboard draws, for a member and for a machine, with nothing hand-written in between.
+    Distributed::FleetSnapshot snapshot;
+    snapshot.role = Distributed::SchedulerRole::Leader;
+    snapshot.cluster = Cluster::ClusterState {};
+    auto named = Cluster::ClusterMember {};
+    named.id = "a3f5";
+    named.raftEndpoint = "10.0.0.1:6675";
+    named.displayName = "office-pc";
+    snapshot.cluster->members.push_back(named);
+    auto machine = Distributed::NodeReport {};
+    machine.endpoint = "10.0.0.1:6674";
+    machine.displayName = "buildhost-7";
+    machine.replicatedName = "office-pc";
+    snapshot.nodes = { machine };
+
+    for (auto const& [section, key]: { std::pair { Distributed::FleetSection::Members, std::string_view { "members" } },
+                                       std::pair { Distributed::FleetSection::Machines, std::string_view { "machines" } } })
+    {
+        CAPTURE(key);
+        auto const document = Distributed::RenderFleetText(snapshot, Distributed::FleetHistoryView {}, section);
+        ScriptedNodeExchange node { { FleetDocumentReply(document) } };
+        auto const answer = RunFleet(node, nullptr, { std::string { key } });
+        REQUIRE(answer.outcome == Outcome::Affirmative);
+        auto const& rows = RowsOf(answer);
+        REQUIRE(rows.size() == 1);
+        CHECK(rows[0][ColumnOf(answer, "name")].lexical == "office-pc");
+        CHECK(rows[0][ColumnOf(answer, "name-source")].lexical == "replicated");
+    }
 }

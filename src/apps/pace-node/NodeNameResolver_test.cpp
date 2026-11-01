@@ -101,9 +101,18 @@ TEST_CASE("A name resolves to the member whose replicated display name it is, ex
         CHECK_FALSE(ResolveNodeName(state, name).has_value());
     }
 
-    // An id wins over a display name spelled the same, which an older state may hold.
+    // A name that is one member's id and ANOTHER member's display name is ambiguous: refused naming both, never
+    // resolved by which row is asked first. The leader clears such a name when the id is admitted, but a node may
+    // apply the pair for a moment between the two.
     state.members[2].displayName = "a3f5c1";
-    CHECK(ResolveNodeName(state, "a3f5c1") == std::expected<Consensus::NodeId, std::string> { "a3f5c1" });
+    auto const ambiguous = ResolveNodeName(state, "a3f5c1");
+    REQUIRE_FALSE(ambiguous.has_value());
+    CHECK(ambiguous.error().contains("a3f5c1 (by id)"));
+    CHECK(ambiguous.error().contains("c0ffee (by display name)"));
+    CHECK(ambiguous.error().contains("names 2 members"));
+    // And a member whose own display name is its id is one member, matched twice.
+    state.members[2].displayName = "c0ffee";
+    CHECK(ResolveNodeName(state, "c0ffee") == std::expected<Consensus::NodeId, std::string> { "c0ffee" });
     CHECK(DisplayNameIn(state, "a3f5c1") == std::optional<std::string> { "office-pc" });
     CHECK_FALSE(DisplayNameIn(state, "nobody").has_value());
 }

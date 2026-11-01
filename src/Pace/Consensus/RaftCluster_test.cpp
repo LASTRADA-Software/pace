@@ -1235,6 +1235,40 @@ TEST_CASE("A member's display name reaches a restarted node's application from i
     RequireNoViolations(cluster);
 }
 
+TEST_CASE("An admission under an id a display name spells clears the name, and a restart recovers that state",
+          "[consensus][raft][cluster][snapshot][display-name]")
+{
+    // A label yields to an identity: n1 is named `office-pc`, then a machine whose id IS `office-pc` is admitted. The
+    // state that results must be one every node can snapshot and restore -- asserted on `Member::application` after
+    // a restart recovered from a snapshot covering both entries.
+    RaftClusterHarness cluster { { "n1", "n2", "n3" }, Members(), 1, CompactOften };
+    REQUIRE(SettleOnLeader(cluster));
+    auto lastCovered = LogIndex::BeforeFirst();
+    for (auto payload: { AdmitBytes("n1"), NameBytes("n1", "office-pc"), AdmitBytes("office-pc") })
+    {
+        lastCovered = Unwrap(cluster.ProposeOnLeader(std::move(payload)));
+        cluster.Run(5);
+    }
+    for (auto const* const id: { "n3", "n4", "n5", "n6" })
+    {
+        REQUIRE(cluster.ProposeOnLeader(AdmitBytes(id)).has_value());
+        cluster.Run(5);
+    }
+    cluster.Run(60);
+
+    REQUIRE(cluster.At("n2").driver->Node().SnapshotIndex() >= lastCovered);
+    REQUIRE(cluster.Restart("n2").has_value());
+
+    auto const restored = FoldClusterState(cluster.At("n2").application);
+    CHECK(NameIn(restored, "n1").empty());
+    CHECK(NameIn(restored, "office-pc").empty());
+    // And the state that resulted is one a node can snapshot and read back.
+    auto const decoded = Cluster::DecodeState(Cluster::Encode(restored));
+    REQUIRE(decoded.has_value());
+    CHECK(*decoded == restored);
+    RequireNoViolations(cluster);
+}
+
 TEST_CASE("A follower caught up by an installed snapshot holds in its application what the snapshot covered",
           "[consensus][raft][cluster][snapshot]")
 {

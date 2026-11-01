@@ -4066,7 +4066,7 @@ TEST_CASE("The consensus address rides the runtime record's variable arity, in b
     // that grew or shrank would move what "older" means -- which is how this case caught each
     // append, and the retirement of #1471's applied-tombstone count, rather than letting any of them
     // shift the cuts silently.
-    REQUIRE(Unwrap(parts).size() == 30);
+    REQUIRE(Unwrap(parts).size() == 32);
 
     SECTION("a record cut after field 13: the endpoint is absent, and the cordon still read")
     {
@@ -4282,7 +4282,7 @@ TEST_CASE("A fleet pin travels as three answers: pinned to an id, pinned to noth
     {
         auto emitted = EncodeNodeRuntime(NodeRuntimeFields {});
         auto parts = Unwrap(WireFields::SplitAll(emitted));
-        REQUIRE(parts.size() == 30);
+        REQUIRE(parts.size() == 32);
         parts[23] = record;
         CHECK_FALSE(DecodeNodeRuntime(WireFields::Encode(WireFields::FieldList { parts })).has_value());
     }
@@ -4314,7 +4314,7 @@ TEST_CASE("An identity key travels as its 32 bytes, absent as nothing, and any o
     {
         auto emitted = EncodeNodeRuntime(NodeRuntimeFields {});
         auto parts = Unwrap(WireFields::SplitAll(emitted));
-        REQUIRE(parts.size() == 30);
+        REQUIRE(parts.size() == 32);
         auto const wrong = std::vector<std::byte>(width, std::byte { 0x11 });
         parts[16] = wrong;
         CHECK_FALSE(DecodeNodeRuntime(WireFields::Encode(WireFields::FieldList { parts })).has_value());
@@ -4355,7 +4355,7 @@ TEST_CASE("A consensus standing travels as its pinned byte, and one this build c
     // `node_status` detail records behind those, while the
     // applied-tombstone count ahead of it was retired -- so the standing is the fifteenth field, and
     // the byte replaced below is the one under test.
-    REQUIRE(parts.size() == 30);
+    REQUIRE(parts.size() == 32);
     auto const unknown = std::array { std::byte { 0x7F } };
     parts[14] = unknown;
     auto const back = DecodeNodeRuntime(WireFields::Encode(WireFields::FieldList { parts }));
@@ -6013,7 +6013,7 @@ TEST_CASE("A shared-cache status is its five fields in this order, exactly these
 
 TEST_CASE("The NODE-STATUS runtime record's positions 17 to 25 hold exactly these bytes", "[wire][node-status]")
 {
-    // The record is 30 positions and read positionally, so WHERE each late field sits is the
+    // The record is 32 positions and read positionally, so WHERE each late field sits is the
     // contract: the roster record (17), the auto-approve seconds left (18), the state directory and
     // its reason (19, 20), the shared-cache status (21), the fleet id (22), the fleet pin (23), and
     // #1667's in-flight and per-request byte ceilings (24, 25).
@@ -6035,7 +6035,7 @@ TEST_CASE("The NODE-STATUS runtime record's positions 17 to 25 hold exactly thes
     auto const encoded = EncodeNodeRuntime(runtime);
     auto const parts = WireFields::SplitAll(encoded);
     REQUIRE(parts.has_value());
-    REQUIRE(Unwrap(parts).size() == 30);
+    REQUIRE(Unwrap(parts).size() == 32);
     auto const at = [&parts](std::size_t index) {
         return Unwrap(parts)[index];
     };

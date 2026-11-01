@@ -2,8 +2,12 @@
 #include <Pace/Cluster/ClusterStateMachine.hpp>
 
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
+#include <string>
 #include <utility>
+
+#include <core/Ranges.hpp>
 
 namespace Pace::Cluster
 {
@@ -58,11 +62,26 @@ void ClusterStateMachine::Apply(Consensus::AppliedEntry const& entry)
     }
 
     auto published = ClusterState {};
+    auto yielded = std::optional<std::string> {};
     {
         auto const guard = std::unique_lock { _mutex };
+        yielded = DisplayNameYieldingTo(_state, *command);
         Cluster::Apply(_state, *command);
         published = _state;
     }
+    // A label yielded to an identity (`DisplayNameYieldingTo`): said once, at Warn, naming both, because an operator
+    // who chose the name is about to find it gone -- and only when the admission actually committed.
+    if (yielded.has_value())
+        if (auto const* const holder = core::findOrNull(published.members, *yielded, &ClusterMember::id);
+            holder != nullptr && holder->displayName.empty()
+            && core::findOrNull(published.members, command->key, &ClusterMember::id) != nullptr)
+            _logger.Logf(LogLevel::Warn,
+                         "cluster: member {} was admitted under an id spelled like {}'s display name, so {} no longer "
+                         "carries it (a name yields to an identity); give {} another name with --cluster-name",
+                         command->key,
+                         *yielded,
+                         *yielded,
+                         *yielded);
     Publish(published);
 }
 

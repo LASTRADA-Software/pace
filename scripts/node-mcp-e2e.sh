@@ -385,7 +385,7 @@ member_reads_named() {
 }
 wait_until member_reads_named "the fleet document to show this member named e2e-box" "$action_pid" "${workdir}/node.log" 30
 json_check "node_status by display name" "$(call_action node_status '{"node":"e2e-box"}')" \
-    "${OK} and ${SC}['node_id'] == '${self_id}' and ${SC}['node'] == 'e2e-box' and ${SC}['display_name'] == 'e2e-box'"
+    "${OK} and ${SC}['node_id'] == '${self_id}' and ${SC}['node'] == 'e2e-box' and ${SC}['display_name'] == 'e2e-box' and ${SC}['name'] == 'e2e-box' and ${SC}['name_source'] == 'replicated'"
 json_check "node_status by another case of the name" "$(call_action node_status '{"node":"E2E-BOX"}')" \
     "d['result']['isError'] is True"
 json_check "set_display_name refuses a control byte" "$(call_action set_display_name "{\"node\":\"${self_id}\",\"name\":\"a\\tb\"}")" \
