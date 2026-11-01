@@ -54,8 +54,6 @@ constexpr std::uint64_t TermHere = 7;
                                         UpstreamFailure::NoLeaderKnown };
 }
 
-
-
 /// @param tools The table.
 /// @param name A tool's name.
 /// @return Its row.

@@ -48,8 +48,6 @@ constexpr std::string_view AnsweredAt = "10.0.0.2:6674";
                                         UpstreamFailure::Unreachable };
 }
 
-
-
 /// A cluster view holding one state, or none.
 class FixedCluster final: public IAppliedClusterView
 {

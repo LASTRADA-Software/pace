@@ -86,7 +86,7 @@ class ScriptedUpstream final: public IMcpUpstream
         AnswerOk(AsUpstreamText(payload));
     }
 
-    UpstreamResult answer;        ///< What every call answers; a case may set it whole.
+    UpstreamResult answer;           ///< What every call answers; a case may set it whole.
     std::vector<AskedCall> calls;    ///< Every call, in order.
     UpstreamParticipant participant; ///< Who every `Ok` names, and under which term.
 };

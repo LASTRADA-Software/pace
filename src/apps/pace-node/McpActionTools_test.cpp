@@ -48,14 +48,12 @@ constexpr std::string_view AnsweredAt = "10.0.0.2:6674";
 /// The client name every call states.
 constexpr std::string_view ClientName = "claude-code";
 
-
 /// @param bytes A frame or payload.
 /// @return It, as the upstream carries it.
 [[nodiscard]] std::string Text(std::vector<std::byte> const& bytes)
 {
     return std::string { reinterpret_cast<char const*>(bytes.data()), bytes.size() };
 }
-
 
 /// A cluster view holding one state.
 class FixedCluster final: public IAppliedClusterView
@@ -88,8 +86,8 @@ class FixedCluster final: public IAppliedClusterView
 struct Rig
 {
     McpFakes::ScriptedUpstream upstream { McpFakes::UpstreamParticipant { .answeredBy = std::string { AnsweredAt },
-                                                                         .term = std::uint64_t { 4 } },
-                                         UpstreamFailure::Unreachable };
+                                                                          .term = std::uint64_t { 4 } },
+                                          UpstreamFailure::Unreachable };
     FixedCluster cluster { std::string_view { SelfId }, std::string_view { "node-b" } };
     CapturingLogger logger;
     std::vector<Mcp::ToolRow> tools = ActionTools(upstream, cluster, std::string { SelfId }, logger);
