@@ -23,10 +23,11 @@ namespace
 {
     using namespace McpSupport;
 
-    /// What `unserved_note` says: why every machine's `unserved` is `null`.
+    /// What `unserved_note` says: what a machine's `unserved` lists, and what its `null` means.
     constexpr std::string_view UnservedNote =
-        "the fleet document lists the toolchains each machine serves and carries no list of toolchains a machine "
-        "identified but does not serve, so every machine's `unserved` is null (absent), not an empty list";
+        "a machine's `unserved` lists the fleet's toolchains in the families that machine serves which it does not "
+        "serve itself, derived from the leader's workers; it is null (absent, not empty) for a machine serving no "
+        "toolchain whose family is known, since a family is what decides which toolchains are its peers";
 
     /// What `demand_note` says: why `demand` is `null`.
     constexpr std::string_view DemandNote =
@@ -36,10 +37,21 @@ namespace
     /// The `workers` rows, as the upgrade report reads them.
     using WorkerRows = std::vector<Distributed::WorkerReport>;
 
-    /// Read the fleet document's `workers` rows: each one's fingerprint, endpoint and label.
+    /// @param row A `workers` row.
+    /// @param key A member that must be a string or `null`.
+    /// @return The member's string, empty for `null`, or nothing when it is absent or neither.
+    [[nodiscard]] std::optional<std::string> StringOrNullAt(Json::Value const& row, std::string_view key)
+    {
+        auto const* const member = row.Find(key);
+        if (member == nullptr || (!member->IsNull() && member->AsString() == nullptr))
+            return std::nullopt;
+        return member->IsNull() ? std::string {} : *member->AsString();
+    }
+
+    /// Read the fleet document's `workers` rows: each one's fingerprint, endpoint, label and family.
     ///
     /// A row this build cannot read refuses the whole answer rather than being skipped: a machine dropped from the
-    /// count would be a node silently absent from "nodes behind".
+    /// count would be a node silently absent from the upgrade report.
     /// @param root The fleet document.
     /// @return The rows, or why they could not be read.
     [[nodiscard]] std::expected<WorkerRows, std::string> WorkersOf(Json::Value const& root)
@@ -55,16 +67,16 @@ namespace
         {
             auto fingerprint = StringAt(row, "toolchain");
             auto endpoint = StringAt(row, "endpoint");
-            auto const* const compiler = row.Find("compiler");
-            if (!fingerprint.has_value() || !endpoint.has_value() || compiler == nullptr
-                || (!compiler->IsNull() && compiler->AsString() == nullptr))
-                return std::unexpected { std::string {
-                    "a \"workers\" row without a string toolchain and endpoint and a string-or-null compiler" } };
+            auto label = StringOrNullAt(row, "compiler");
+            auto family = StringOrNullAt(row, "family");
+            if (!fingerprint.has_value() || !endpoint.has_value() || !label.has_value() || !family.has_value())
+                return std::unexpected { std::string { "a \"workers\" row without a string toolchain and endpoint "
+                                                       "and a string-or-null compiler and family" } };
             auto worker = Distributed::WorkerReport {};
             worker.info.fingerprint = std::move(*fingerprint);
             worker.info.endpoint = std::move(*endpoint);
-            if (auto const* const label = compiler->AsString(); label != nullptr)
-                worker.info.toolchainLabel = *label;
+            worker.info.toolchainLabel = std::move(*label);
+            worker.info.toolchainFamily = std::move(*family);
             workers.push_back(std::move(worker));
         }
         return workers;
@@ -93,26 +105,34 @@ namespace
         return text;
     }
 
+    /// @param values A set.
+    /// @return Its one value, or nothing when it holds none or several.
+    [[nodiscard]] std::optional<std::string> OnlyOf(std::set<std::string> const& values)
+    {
+        return values.size() == 1 ? std::optional<std::string> { *values.begin() } : std::nullopt;
+    }
+
     /// One fingerprint, gathered across its registry entries.
     struct ToolchainRow
     {
         std::set<std::string> labels;    ///< Every distinct label its entries carry.
+        std::set<std::string> families;  ///< Every distinct family its entries registered.
         std::set<std::string> endpoints; ///< The machines serving it.
     };
 
     /// @param fingerprint The toolchain.
     /// @param row What its entries say.
-    /// @return Its `toolchains` row: the label, family and version only where the entries agree on ONE label.
+    /// @return Its `toolchains` row: the label and version only where the entries agree on ONE label, the family
+    ///         only where they agree on one family.
     [[nodiscard]] Json::Value ToolchainJson(std::string const& fingerprint, ToolchainRow const& row)
     {
-        auto const single = row.labels.size() == 1 ? std::optional<std::string> { *row.labels.begin() } : std::nullopt;
-        auto const family = single.has_value() ? Distributed::ToolchainFamilyOf(*single) : std::nullopt;
-        auto const parsed = single.has_value() ? Distributed::ParseToolchainLabel(*single) : std::nullopt;
+        auto const label = OnlyOf(row.labels);
+        auto const parsed = label.has_value() ? Distributed::ParseToolchainLabel(*label) : std::nullopt;
         return Obj(Json::Object {
             { "fingerprint", Str(fingerprint) },
-            { "label", StrOrNull(single) },
+            { "label", StrOrNull(label) },
             { "labels", Strings(row.labels) },
-            { "family", StrOrNull(family) },
+            { "family", StrOrNull(OnlyOf(row.families)) },
             { "version", Str(parsed.has_value() ? Distributed::VersionText(parsed->parts) : std::string { "unknown" }) },
             { "nodes", Strings(row.endpoints) },
         });
@@ -124,24 +144,58 @@ namespace
     {
         return Obj(Json::Object {
             { "family", Str(advice.family) },
+            { "recommended_version", StrOrNull(advice.recommendedVersion) },
             { "recommended_fingerprint", StrOrNull(advice.recommendedFingerprint) },
             { "basis", Str(advice.basis) },
-            { "nodes_behind", Strings(advice.nodesBehind) },
+            { "behind", Strings(advice.nodesBehind) },
+            { "ahead", Strings(advice.nodesAhead) },
+            { "same_version_other_fingerprint", Strings(advice.nodesSameVersionOtherFingerprint) },
             { "ordering_unknown", Bool(advice.orderingUnknown) },
         });
+    }
+
+    /// @param endpoints Some machines.
+    /// @return How the text lists them.
+    [[nodiscard]] std::string MachinesWords(std::vector<std::string> const& endpoints)
+    {
+        return endpoints.empty() ? std::string { "nobody" } : Joined(endpoints, ", ");
     }
 
     /// @param advice One family's advice.
     /// @return How the text says it.
     [[nodiscard]] std::string AdviceWords(Distributed::UpgradeAdvice const& advice)
     {
-        if (!advice.recommendedFingerprint.has_value())
+        if (!advice.recommendedVersion.has_value())
             return std::format("{}: no recommendation ({})", advice.family, advice.basis);
-        return std::format("{}: recommend {} ({}); behind: {}",
+        return std::format("{}: converge on {} ({}) -- behind: {}; ahead: {}; same version, other fingerprint (ask "
+                           "toolchain_diff): {} ({})",
                            advice.family,
-                           *advice.recommendedFingerprint,
-                           advice.basis,
-                           advice.nodesBehind.empty() ? std::string { "nobody" } : Joined(advice.nodesBehind, ", "));
+                           *advice.recommendedVersion,
+                           advice.recommendedFingerprint.value_or("no single fingerprint"),
+                           MachinesWords(advice.nodesBehind),
+                           MachinesWords(advice.nodesAhead),
+                           MachinesWords(advice.nodesSameVersionOtherFingerprint),
+                           advice.basis);
+    }
+
+    /// The fleet's toolchains in @p endpoint's families that it does not serve.
+    /// @param served The fingerprints the machine serves.
+    /// @param toolchains Every fingerprint, with its families.
+    /// @return The list, or nothing when the machine serves no toolchain whose family is known.
+    [[nodiscard]] std::optional<std::vector<std::string>> UnservedBy(std::set<std::string> const& served,
+                                                                     std::map<std::string, ToolchainRow> const& toolchains)
+    {
+        auto families = std::set<std::string> {};
+        for (auto const& fingerprint: served)
+            families.insert_range(toolchains.at(fingerprint).families);
+        if (families.empty())
+            return std::nullopt;
+        auto unserved = std::vector<std::string> {};
+        for (auto const& [fingerprint, row]: toolchains)
+            if (!served.contains(fingerprint)
+                && std::ranges::any_of(row.families, [&](std::string const& family) { return families.contains(family); }))
+                unserved.push_back(fingerprint);
+        return unserved;
     }
 
     [[nodiscard]] Mcp::ToolResult Toolchains(IMcpUpstream& upstream, Mcp::ToolCall const& /*call*/)
@@ -157,18 +211,20 @@ namespace
 
         auto toolchains = std::map<std::string, ToolchainRow> {};
         auto machines = std::map<std::string, std::set<std::string>> {};
-        auto unlabelled = std::set<std::string> {};
         for (auto const& worker: *workers)
         {
             auto& row = toolchains[worker.info.fingerprint];
             row.endpoints.insert(worker.info.endpoint);
             if (!worker.info.toolchainLabel.empty())
                 row.labels.insert(worker.info.toolchainLabel);
+            if (!worker.info.toolchainFamily.empty())
+                row.families.insert(worker.info.toolchainFamily);
             machines[worker.info.endpoint].insert(worker.info.fingerprint);
         }
+        auto familyless = std::set<std::string> {};
         for (auto const& [fingerprint, row]: toolchains)
-            if (row.labels.empty())
-                unlabelled.insert(fingerprint);
+            if (row.families.empty())
+                familyless.insert(fingerprint);
 
         // No demand is recorded yet: the report recommends on versions alone, and says so in every basis.
         auto const advice = Distributed::AdviseUpgrades(*workers, {});
@@ -177,12 +233,18 @@ namespace
         for (auto const& [fingerprint, row]: toolchains)
             toolchainRows.push_back(ToolchainJson(fingerprint, row));
         auto machineRows = Json::Array {};
+        auto unservedWords = std::vector<std::string> {};
         for (auto const& [endpoint, served]: machines)
+        {
+            auto const unserved = UnservedBy(served, toolchains);
+            if (unserved.has_value() && !unserved->empty())
+                unservedWords.push_back(std::format("{} lacks {}", endpoint, Joined(*unserved, ", ")));
             machineRows.push_back(Obj(Json::Object {
                 { "endpoint", Str(endpoint) },
                 { "served", Strings(served) },
-                { "unserved", Null() },
+                { "unserved", unserved.has_value() ? Strings(*unserved) : Null() },
             }));
+        }
         auto adviceRows = Json::Array {};
         auto adviceWords = std::vector<std::string> {};
         for (auto const& family: advice)
@@ -192,14 +254,14 @@ namespace
         }
 
         auto text = std::format(
-            "{} toolchain(s) on {} machine(s); upgrade report (conservative -- check each basis): {}{}; unserved "
-            "toolchains per machine: not reported ({}); demand: not recorded; {}",
+            "{} toolchain(s) on {} machine(s); upgrade report (conservative -- check each basis): {}{}; unserved in "
+            "their families: {}; demand: not recorded; {}",
             toolchains.size(),
             machines.size(),
-            adviceWords.empty() ? std::string { "no labelled toolchain" } : Joined(adviceWords, " | "),
-            unlabelled.empty() ? std::string {}
-                               : std::format("; {} carry no label and join no family", Joined(unlabelled, ", ")),
-            UnservedNote,
+            adviceWords.empty() ? std::string { "no toolchain of a known family" } : Joined(adviceWords, " | "),
+            familyless.empty() ? std::string {}
+                               : std::format("; {} registered no family and join none", Joined(familyless, ", ")),
+            unservedWords.empty() ? std::string { "none" } : Joined(unservedWords, "; "),
             Provenance(document->reply));
 
         auto result = Envelope(document->reply);
@@ -221,10 +283,10 @@ namespace
         R"("answered_by":{"type":"string"},"term":{"type":["integer","null"]},"term_scope":{"const":"this-node"},)"
         R"("toolchain_count":{"type":"integer","description":"Distinct fingerprints."},)"
         R"("machine_count":{"type":"integer","description":"Distinct worker endpoints: a machine serving two toolchains counts once."},)"
-        R"("toolchains":{"type":"array","description":"Per fingerprint: label, family and version (\"unknown\" when the label does not parse) where its entries agree on one label, every label in labels, and the machines serving it."},)"
-        R"("nodes":{"type":"array","description":"Per machine: the fingerprints it serves; unserved is null (absent, see unserved_note)."},)"
+        R"("toolchains":{"type":"array","description":"Per fingerprint: label and version (\"unknown\" when the label does not parse) where its entries agree on one label, every label in labels, family as the node read it off the banner (null when none or disagreeing), and the machines serving it."},)"
+        R"("nodes":{"type":"array","description":"Per machine: the fingerprints it serves, and unserved -- the fleet's fingerprints in the same families it does not serve; null when it serves no toolchain of a known family (see unserved_note)."},)"
         R"("unserved_note":{"type":"string"},"demand":{"type":"null","description":"Absent: no demand per toolchain is recorded yet."},"demand_note":{"type":"string"},)"
-        R"("upgrade_report":{"type":"array","description":"Per compiler family: recommended_fingerprint (null when the report cannot say), basis (the versions compared and any demand), nodes_behind, ordering_unknown."}}})";
+        R"("upgrade_report":{"type":"array","description":"Per banner-derived compiler family: recommended_version and recommended_fingerprint (null when the report cannot say), basis (the versions compared and any demand), and machines placed by their highest version of the family: behind (lower: should upgrade), ahead (higher), same_version_other_fingerprint (the recommended version built differently: ask toolchain_diff); ordering_unknown."}}})";
 
 } // namespace
 
@@ -237,14 +299,16 @@ std::vector<Mcp::ToolRow> ToolchainTools(IMcpUpstream& upstream)
             .title = "Toolchains",
             .description =
                 "Which compiler toolchains the fleet serves, from the leader's /fleet.json: per fingerprint its "
-                "label, compiler family (the label's compiler name), version as parsed or `unknown`, and the "
-                "machines serving it; per machine the fingerprints it serves. Machines are counted once however "
-                "many toolchains they serve. Includes a conservative upgrade report per family: it names a "
-                "recommended toolchain and the machines behind it only when every version in the family parses "
-                "unambiguously, never for `cc`/`c++` (a policy, not a product), and never between two fingerprints "
-                "of one version (ask toolchain_diff why they differ); every row carries its basis -- the versions "
-                "compared and the demand behind them -- so it can be checked. `unserved` and `demand` are null: "
-                "absent, not empty. `term` is the term THIS node holds.",
+                "label, compiler family (as the node read it off the compiler's banner, so Apple clang installed as "
+                "`gcc` is apple-clang, never gcc), version as parsed or `unknown`, and the machines serving it; per "
+                "machine the fingerprints it serves and the fleet's toolchains in its families it does not serve. "
+                "Machines are counted once however many toolchains they serve. Includes a conservative upgrade "
+                "report per family: it names a version to converge on only when every version in the family parses "
+                "unambiguously, and places each machine by its highest version -- behind (lower), ahead (higher), or "
+                "same_version_other_fingerprint (the same version built differently: ask toolchain_diff why); it "
+                "names no fingerprint between two of one version unless demand settles it. Every row carries its "
+                "basis -- the versions compared and the demand behind them -- so it can be checked. `demand` is "
+                "null: absent, not empty. `term` is the term THIS node holds.",
             .inputSchema = NoArguments,
             .outputSchema = ToolchainsOutput,
             .effect = Mcp::ToolEffect::ReadOnly,

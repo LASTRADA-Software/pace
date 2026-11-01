@@ -28,7 +28,7 @@ namespace
     }
 
     /// @param text A version: digits and dots.
-    /// @return Its parts, or nothing when a part is empty, is not all digits, or does not fit a part.
+    /// @return Its parts, or nothing when a part is empty, is not all digits, has a leading zero, or does not fit.
     [[nodiscard]] std::optional<std::vector<std::uint32_t>> VersionParts(std::string_view text)
     {
         // Splitting nothing yields no pieces, not one empty piece, so an empty version is refused here.
@@ -39,6 +39,10 @@ namespace
         {
             auto const part = std::string_view { piece.begin(), piece.end() };
             if (part.empty() || !std::ranges::all_of(part, [](char c) { return c >= '0' && c <= '9'; }))
+                return std::nullopt;
+            // `13.02` is `13.2` to one reader and something else to another; a version this report cannot read one
+            // way only is not read at all.
+            if (part.size() > 1 && part.front() == '0')
                 return std::nullopt;
             auto value = std::uint32_t {};
             auto const [end, error] = std::from_chars(part.data(), part.data() + part.size(), value);
@@ -56,20 +60,24 @@ namespace
         std::set<std::string> endpoints;       ///< The machines serving it.
         std::optional<CompilerVersion> parsed; ///< Its version, when every label parsed to one version.
         bool unordered {};                     ///< A label did not parse, or two labels disagree.
+        bool unlabelled {};                    ///< An entry stated no label at all, so its version is unknown.
     };
 
     /// One family, keyed by fingerprint.
     using Family = std::map<std::string, FamilyMember>;
 
-    /// @param family The family's name.
     /// @param members A family's fingerprints.
     /// @return Why the family cannot be ordered, or nothing when it can.
-    [[nodiscard]] std::optional<std::string> UnorderedBecause(std::string const& family, Family const& members)
+    [[nodiscard]] std::optional<std::string> UnorderedBecause(Family const& members)
     {
-        if (std::ranges::contains(PolicyDriverNames, std::string_view { family }))
-            return std::format("`{}` names a policy, not a product: the host decides which compiler answers to it, and "
-                               "the label cannot say which, so its versions are not compared",
-                               family);
+        auto unlabelled = std::vector<std::string> {};
+        for (auto const& [fingerprint, member]: members)
+            if (member.unlabelled)
+                unlabelled.push_back(fingerprint);
+        if (!unlabelled.empty())
+            return std::format("ordering unknown: {} carry no label, so their version is unknown and no version is "
+                               "compared",
+                               Joined(unlabelled));
 
         auto unparsed = std::vector<std::string> {};
         for (auto const& member: members | std::views::values)
@@ -80,7 +88,7 @@ namespace
             std::ranges::sort(unparsed);
             auto const [first, last] = std::ranges::unique(unparsed);
             unparsed.erase(first, last);
-            return std::format("ordering unknown: the label(s) {} do not state one `<family> <version>` per "
+            return std::format("ordering unknown: the label(s) {} do not state one `<tool> <version>` per "
                                "toolchain, so no version is compared",
                                Joined(unparsed));
         }
@@ -105,13 +113,11 @@ namespace
     /// @param family The family's name.
     /// @param members A family's fingerprints, every one parsed to a version of the same length.
     /// @param demandOf Compiles per fingerprint.
-    /// @param endpoints Every machine serving the family.
     /// @param anyDemandData Whether any demand was handed in at all, for any family.
     /// @return The advice for a family whose versions order.
     [[nodiscard]] UpgradeAdvice AdviseOrdered(std::string family,
                                               Family const& members,
                                               std::map<std::string, std::uint64_t> const& demandOf,
-                                              std::set<std::string> const& endpoints,
                                               bool anyDemandData)
     {
         auto const demandFor = [&](std::string const& fingerprint) {
@@ -131,9 +137,12 @@ namespace
         }
         if (byVersion.empty())
             return UpgradeAdvice { .family = std::move(family),
+                                   .recommendedVersion = std::nullopt,
                                    .recommendedFingerprint = std::nullopt,
                                    .basis = "ordering unknown: no version parsed",
                                    .nodesBehind = {},
+                                   .nodesAhead = {},
+                                   .nodesSameVersionOtherFingerprint = {},
                                    .orderingUnknown = true };
 
         auto familyDemand = std::uint64_t { 0 };
@@ -154,12 +163,17 @@ namespace
         auto const targetText = VersionText(target->first);
 
         auto advice = UpgradeAdvice { .family = std::move(family),
+                                      .recommendedVersion = targetText,
                                       .recommendedFingerprint = std::nullopt,
                                       .basis = {},
                                       .nodesBehind = {},
+                                      .nodesAhead = {},
+                                      .nodesSameVersionOtherFingerprint = {},
                                       .orderingUnknown = false };
+        // "Labelled": a toolchain whose node stated no label has no version to compare and leaves the whole family
+        // unordered before this point, so every version named here is one a label stated.
         if (familyDemand == 0)
-            advice.basis = std::format("{}; highest version served: {}; versions compared: {}",
+            advice.basis = std::format("{}; highest labelled version served: {}; versions compared: {}",
                                        anyDemandData ? "no demand data for this family" : "no demand data",
                                        targetText,
                                        Joined(compared));
@@ -201,10 +215,26 @@ namespace
                                             Joined(candidates));
         }
 
-        if (advice.recommendedFingerprint.has_value())
+        // Each machine is placed by the highest version of the family it serves, against the target: below is behind,
+        // above is ahead -- never "behind" for a machine that already runs something newer -- and at the target under
+        // another fingerprint only is the same version built differently.
+        auto servedBy = std::map<std::string, std::vector<std::string>> {};
+        for (auto const& [fingerprint, member]: members)
+            for (auto const& endpoint: member.endpoints)
+                servedBy[endpoint].push_back(fingerprint);
+        for (auto const& [endpoint, fingerprints]: servedBy)
         {
-            auto const& served = members.at(*advice.recommendedFingerprint).endpoints;
-            std::ranges::set_difference(endpoints, served, std::back_inserter(advice.nodesBehind));
+            auto highest = std::vector<std::uint32_t> {};
+            for (auto const& fingerprint: fingerprints)
+                if (auto const& parsed = members.at(fingerprint).parsed; parsed.has_value() && parsed->parts > highest)
+                    highest = parsed->parts;
+            if (highest < target->first)
+                advice.nodesBehind.push_back(endpoint);
+            else if (highest > target->first)
+                advice.nodesAhead.push_back(endpoint);
+            else if (advice.recommendedFingerprint.has_value()
+                     && !std::ranges::contains(fingerprints, *advice.recommendedFingerprint))
+                advice.nodesSameVersionOtherFingerprint.push_back(endpoint);
         }
         return advice;
     }
@@ -218,15 +248,7 @@ std::optional<CompilerVersion> ParseToolchainLabel(std::string_view label)
     auto parts = VersionParts(label.substr(space + 1));
     if (!parts.has_value())
         return std::nullopt;
-    return CompilerVersion { .family = std::string { label.substr(0, space) }, .parts = std::move(*parts) };
-}
-
-std::optional<std::string> ToolchainFamilyOf(std::string_view label)
-{
-    auto const family = label.substr(0, label.find(' '));
-    if (family.empty())
-        return std::nullopt;
-    return std::string { family };
+    return CompilerVersion { .tool = std::string { label.substr(0, space) }, .parts = std::move(*parts) };
 }
 
 std::string VersionText(std::span<std::uint32_t const> parts)
@@ -240,17 +262,21 @@ std::string VersionText(std::span<std::uint32_t const> parts)
 std::vector<UpgradeAdvice> AdviseUpgrades(std::span<WorkerReport const> workers, std::span<DemandRow const> demand)
 {
     auto families = std::map<std::string, Family> {};
-    auto endpointsOf = std::map<std::string, std::set<std::string>> {};
     for (auto const& worker: workers)
     {
-        auto const& label = worker.info.toolchainLabel;
-        auto family = ToolchainFamilyOf(label);
-        if (!family.has_value())
+        // The family the node read off the banner, never the label's tool name; none said, no family joined.
+        auto const& family = worker.info.toolchainFamily;
+        if (family.empty())
             continue;
-        auto& member = families[*family][worker.info.fingerprint];
-        member.labels.insert(label);
+        auto const& label = worker.info.toolchainLabel;
+        auto& member = families[family][worker.info.fingerprint];
         member.endpoints.insert(worker.info.endpoint);
-        endpointsOf[*family].insert(worker.info.endpoint);
+        if (label.empty())
+        {
+            member.unlabelled = true;
+            continue;
+        }
+        member.labels.insert(label);
 
         // A label that does not parse, or a second label stating another version for the same fingerprint, leaves
         // the fingerprint -- and so its family -- unordered.
@@ -269,16 +295,19 @@ std::vector<UpgradeAdvice> AdviseUpgrades(std::span<WorkerReport const> workers,
     advice.reserve(families.size());
     for (auto const& [family, members]: families)
     {
-        if (auto because = UnorderedBecause(family, members); because.has_value())
+        if (auto because = UnorderedBecause(members); because.has_value())
         {
             advice.push_back(UpgradeAdvice { .family = family,
+                                             .recommendedVersion = std::nullopt,
                                              .recommendedFingerprint = std::nullopt,
                                              .basis = std::move(*because),
                                              .nodesBehind = {},
+                                             .nodesAhead = {},
+                                             .nodesSameVersionOtherFingerprint = {},
                                              .orderingUnknown = true });
             continue;
         }
-        advice.push_back(AdviseOrdered(family, members, demandOf, endpointsOf.at(family), !demand.empty()));
+        advice.push_back(AdviseOrdered(family, members, demandOf, !demand.empty()));
     }
     return advice;
 }

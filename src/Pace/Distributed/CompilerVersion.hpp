@@ -3,7 +3,6 @@
 
 #include <Pace/Distributed/WorkerRegistry.hpp>
 
-#include <array>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -19,11 +18,10 @@
 /// toolchains is newer -- and refuses to answer it wherever the label cannot settle it. A wrong "upgrade to X"
 /// sends an operator to install a compiler, so **an unknown ordering is reported as unknown**, never guessed.
 ///
-/// **The family is the label's first token**: the compiler's normalized file name, as `Cc::ToolchainLabel`
-/// writes it (`gcc`, `cl`, `g++-13`, `aarch64-none-elf-gcc`). The fleet document carries nothing else that
-/// names a family -- no banner and no driver row travel -- so this is the field the family is read from, and
-/// two spellings of one product (`g++-13` and `g++-14`, `gcc` and `g++`) are two families, never compared.
-/// That errs toward saying less, which is the direction this report may err in.
+/// **The family is NOT read from the label.** The label's first token is the name the compiler was invoked by, and
+/// Apple clang installed as `gcc` is labelled `gcc 17.0.0`. The family is what the node read off the BANNER when it
+/// registered (`Cc::ToolchainFamily`, carried as `WorkerInfo::toolchainFamily`): `gcc`, `g++`, `clang`,
+/// `apple-clang`, `cl`. An entry that registered no family joins none and is advised on by nobody.
 
 namespace Pace::Distributed
 {
@@ -31,7 +29,9 @@ namespace Pace::Distributed
 /// A compiler version as a toolchain label states it.
 struct CompilerVersion
 {
-    std::string family;               ///< The label's first token: the compiler's normalized file name.
+    /// The label's first token: the name the compiler was invoked by (`gcc`, `g++-13`, `cl`). Display only -- the
+    /// upgrade report's family is the registration's banner-derived `toolchainFamily`, never this.
+    std::string tool;
     std::vector<std::uint32_t> parts; ///< The version, one number per dot-separated part, in order.
 };
 
@@ -43,57 +43,54 @@ struct DemandRow
 };
 
 /// What the upgrade report says about one compiler family.
+///
+/// Every machine list is of worker endpoints, sorted, and relative to `recommendedVersion`: a machine is placed by
+/// the HIGHEST version of the family it serves. All three are empty whenever the ordering is unknown.
 struct UpgradeAdvice
 {
-    std::string family; ///< The family, as `ToolchainFamilyOf` names it.
-    /// The toolchain the family should converge on, or nothing when the report cannot say which: an unknown
-    /// ordering, or one version served under several fingerprints that demand does not tell apart.
+    std::string family; ///< The banner-derived family key, as the registration carried it.
+    /// The version the family should converge on, or nothing when the ordering is unknown.
+    std::optional<std::string> recommendedVersion;
+    /// The toolchain that version should be, or nothing when the report cannot say which: an unknown ordering, or
+    /// the version served under several fingerprints that demand does not tell apart.
     std::optional<std::string> recommendedFingerprint;
     /// Why, in words a reader can check: the versions compared and, where there is any, the demand behind each.
     std::string basis;
-    /// The machines (worker endpoints) serving the family that lack the recommended toolchain, sorted. Empty
-    /// whenever nothing is recommended: nobody is behind a target the report could not name.
+    /// Machines whose highest version of the family is LOWER than the recommended one: these should upgrade.
     std::vector<std::string> nodesBehind;
+    /// Machines whose highest version of the family is HIGHER than the recommended one: ahead, never "behind".
+    std::vector<std::string> nodesAhead;
+    /// Machines serving the recommended version under another fingerprint, never the recommended one: the same
+    /// version built differently, which `toolchain_diff` explains. Empty when no fingerprint is recommended.
+    std::vector<std::string> nodesSameVersionOtherFingerprint;
     /// True when the family's versions cannot be ordered unambiguously, so nothing is recommended.
     bool orderingUnknown {};
 };
 
-/// The driver names that name a POLICY rather than a product.
-///
-/// `cc` and `c++` are whichever compiler the host installed under that name -- Apple clang on macOS, GNU on most
-/// Linux -- and `pace-cc` corrects the flavour from the banner for exactly these two
-/// (`ClassifyCompilerFromBanner`). The label keeps the name as invoked and the fleet document carries no banner,
-/// so a family of this name may hold two products whose version numbers mean nothing against each other.
-inline constexpr std::array<std::string_view, 2> PolicyDriverNames { "cc", "c++" };
-
 /// Parse a toolchain label of exactly the shape `Cc::ToolchainLabel` writes when the banner states a version:
-/// `<family> <digits>(.<digits>)*`, one space, nothing before or after.
+/// `<tool> <digits>(.<digits>)*`, one space, nothing before or after, and no part of more than one digit that
+/// starts with `0` (`13.02` could be read two ways, so it is read neither).
 /// @param label A label, as a registry entry carries it.
-/// @return The family and the version's parts, or nothing for any other text -- including the tool alone, which
-///         is what `ToolchainLabel` writes when the banner states no version.
+/// @return The tool and the version's parts, or nothing for any other text -- including the tool alone, which is
+///         what `ToolchainLabel` writes when the banner states no version.
 [[nodiscard]] std::optional<CompilerVersion> ParseToolchainLabel(std::string_view label);
-
-/// The family a label belongs to, whether or not its version parses.
-/// @param label A label.
-/// @return Its first space-separated token, or nothing when the label is empty or starts with a space.
-[[nodiscard]] std::optional<std::string> ToolchainFamilyOf(std::string_view label);
 
 /// @param parts A version's parts.
 /// @return The version as dotted text, e.g. `13.2.0`.
 [[nodiscard]] std::string VersionText(std::span<std::uint32_t const> parts);
 
-/// The conservative upgrade report: one row per labelled family, sorted by family.
+/// The conservative upgrade report: one row per registered family, sorted by family.
 ///
-/// Within a family, versions are ordered only when every label parses and every version has the same number of
-/// parts, and the family's name does not name a policy (`PolicyDriverNames`); otherwise `orderingUnknown`. The
-/// target version is the highest one the most demand uses (ties going to the higher version); with no demand
-/// for the family it is the highest version served, and the basis says "no demand data". A target version
-/// served under more than one fingerprint is recommended only when demand clearly favours one of them; otherwise
-/// the basis names the competitors and points at `toolchain_diff`.
+/// Within a family, versions are ordered only when every toolchain carries a label that parses, no toolchain is
+/// labelled with two versions, and every version has the same number of parts; otherwise `orderingUnknown`. The
+/// target version is the highest one the most demand uses (ties going to the higher version); with no demand for
+/// the family it is the highest labelled version served, and the basis says "no demand data". A target version
+/// served under more than one fingerprint names a fingerprint only when demand clearly favours one of them;
+/// otherwise the basis names the competitors and points at `toolchain_diff`.
 ///
 /// **A node is a machine**, counted by its worker endpoint: the registry keys on (fingerprint, endpoint), so a
-/// machine serving two toolchains is two entries and is listed behind at most once per family. An entry with no
-/// label belongs to no family and is behind in none.
+/// machine serving two toolchains is two entries and appears at most once per family. An entry with no family
+/// belongs to none.
 /// @param workers Every live registry entry.
 /// @param demand Compiles per fingerprint; empty when no demand is recorded.
 /// @return The advice per family.

@@ -47,18 +47,19 @@ constexpr std::uint64_t TermHere = 4;
                                         UpstreamFailure::NoLeaderKnown };
 }
 
-
 /// @param fingerprint The toolchain.
 /// @param endpoint The machine.
+/// @param family The family the node read off the banner; empty for none.
 /// @param label What the node called the toolchain; empty for none.
 /// @return One registry entry.
-[[nodiscard]] Dist::WorkerReport Entry(std::string fingerprint, std::string endpoint, std::string label)
+[[nodiscard]] Dist::WorkerReport Entry(std::string fingerprint, std::string endpoint, std::string family, std::string label)
 {
     auto report = Dist::WorkerReport {};
     report.info.id = fingerprint + "@" + endpoint;
     report.info.fingerprint = std::move(fingerprint);
     report.info.endpoint = std::move(endpoint);
     report.info.toolchainLabel = std::move(label);
+    report.info.toolchainFamily = std::move(family);
     report.info.slots = 2;
     return report;
 }
@@ -113,6 +114,16 @@ constexpr std::uint64_t TermHere = 4;
     return *member;
 }
 
+/// @param value An object.
+/// @param key A member.
+/// @return The member's string, or nothing when it is `null` or not a string -- so an absent value FAILS a
+///         comparison rather than being dereferenced; the case fails when the member is missing.
+[[nodiscard]] std::optional<std::string> TextAt(Json::Value const& value, std::string_view key)
+{
+    auto const* const text = At(value, key).AsString();
+    return text != nullptr ? std::optional<std::string> { *text } : std::nullopt;
+}
+
 /// @param value An array.
 /// @return Its elements; the case fails when it is not one.
 [[nodiscard]] Json::Array const& Elements(Json::Value const& value)
@@ -158,13 +169,15 @@ TEST_CASE("toolchains projects the leader's workers by fingerprint and counts ma
 {
     auto upstream = LeaderUpstream();
     upstream.AnswerOk(DocumentWith({
-        Entry("fp-12", "a:1", "gcc 12.3.0"),
-        Entry("fp-13", "b:1", "gcc 13.2.0"),
+        Entry("fp-12", "a:1", "gcc", "gcc 12.3.0"),
+        Entry("fp-13", "b:1", "gcc", "gcc 13.2.0"),
         // One machine with two toolchains: two registry entries, ONE machine.
-        Entry("fp-13", "c:1", "gcc 13.2.0"),
-        Entry("fp-clang", "c:1", "clang 18.1.8"),
-        // A node that stated no label: its toolchain joins no family.
-        Entry("fp-pinned", "d:1", ""),
+        Entry("fp-13", "c:1", "gcc", "gcc 13.2.0"),
+        Entry("fp-clang", "c:1", "clang", "clang 18.1.8"),
+        // A node that stated neither a label nor a family: its toolchain joins no family.
+        Entry("fp-pinned", "d:1", "", ""),
+        // Apple clang installed as `gcc`: labelled by the name, placed by the banner -- never in GNU gcc's family.
+        Entry("fp-apple", "e:1", "apple-clang", "gcc 17.0.0"),
     }));
 
     auto const result = CallToolchains(upstream);
@@ -176,40 +189,54 @@ TEST_CASE("toolchains projects the leader's workers by fingerprint and counts ma
     CHECK(FleetTextAsked(upstream).format == Wire::FleetTextFormat::Json);
     auto const& out = result.structured;
 
-    CHECK(*At(out, "answered_by").AsString() == LeaderAt);
+    CHECK(TextAt(out, "answered_by") == std::optional<std::string> { LeaderAt });
     CHECK(At(out, "term").AsInt() == std::optional<std::int64_t> { TermHere });
-    CHECK(*At(out, "term_scope").AsString() == "this-node");
-    CHECK(At(out, "machine_count").AsInt() == std::optional<std::int64_t> { 4 });
-    CHECK(At(out, "toolchain_count").AsInt() == std::optional<std::int64_t> { 4 });
+    CHECK(TextAt(out, "term_scope") == std::optional<std::string> { "this-node" });
+    CHECK(At(out, "machine_count").AsInt() == std::optional<std::int64_t> { 5 });
+    CHECK(At(out, "toolchain_count").AsInt() == std::optional<std::int64_t> { 5 });
 
     auto const& toolchains = At(out, "toolchains");
-    CHECK(Elements(toolchains).size() == 4);
+    CHECK(Elements(toolchains).size() == 5);
     auto const& gcc13 = RowWhere(toolchains, "fingerprint", "fp-13");
-    CHECK(*At(gcc13, "label").AsString() == "gcc 13.2.0");
-    CHECK(*At(gcc13, "family").AsString() == "gcc");
-    CHECK(*At(gcc13, "version").AsString() == "13.2.0");
+    CHECK(TextAt(gcc13, "label") == std::optional<std::string> { "gcc 13.2.0" });
+    CHECK(TextAt(gcc13, "family") == std::optional<std::string> { "gcc" });
+    CHECK(TextAt(gcc13, "version") == std::optional<std::string> { "13.2.0" });
     CHECK(StringsOf(At(gcc13, "nodes")) == std::vector<std::string> { "b:1", "c:1" });
 
     auto const& pinned = RowWhere(toolchains, "fingerprint", "fp-pinned");
     CHECK(At(pinned, "label").IsNull());
     CHECK(At(pinned, "family").IsNull());
-    CHECK(*At(pinned, "version").AsString() == "unknown");
+    CHECK(TextAt(pinned, "version") == std::optional<std::string> { "unknown" });
 
+    auto const& apple = RowWhere(toolchains, "fingerprint", "fp-apple");
+    CHECK(TextAt(apple, "family") == std::optional<std::string> { "apple-clang" });
+    CHECK(TextAt(apple, "version") == std::optional<std::string> { "17.0.0" });
+
+    // Unserved is the fleet's toolchains in the machine's own families that it does not serve: c:1 serves gcc 13
+    // and clang, and the fleet's other gcc is 12; a:1 lacks the 13; the Apple clang machine is alone in its family.
     auto const& machine = RowWhere(At(out, "nodes"), "endpoint", "c:1");
     CHECK(StringsOf(At(machine, "served")) == std::vector<std::string> { "fp-13", "fp-clang" });
-    // The fleet document carries no list of toolchains a machine identified but does not serve: absent, not empty.
-    CHECK(At(machine, "unserved").IsNull());
+    CHECK(StringsOf(At(machine, "unserved")) == std::vector<std::string> { "fp-12" });
+    CHECK(StringsOf(At(RowWhere(At(out, "nodes"), "endpoint", "a:1"), "unserved")) == std::vector<std::string> { "fp-13" });
+    CHECK(Elements(At(RowWhere(At(out, "nodes"), "endpoint", "e:1"), "unserved")).empty());
+    // A machine serving no toolchain of a known family has no peers to lack: absent, not empty.
+    CHECK(At(RowWhere(At(out, "nodes"), "endpoint", "d:1"), "unserved").IsNull());
     CHECK(At(out, "unserved_note").AsString() != nullptr);
     // No demand is recorded yet: absent, not zero.
     CHECK(At(out, "demand").IsNull());
 
     auto const& report = At(out, "upgrade_report");
     auto const& gcc = RowWhere(report, "family", "gcc");
-    CHECK(*At(gcc, "recommended_fingerprint").AsString() == "fp-13");
-    CHECK(StringsOf(At(gcc, "nodes_behind")) == std::vector<std::string> { "a:1" });
+    CHECK(TextAt(gcc, "recommended_version") == std::optional<std::string> { "13.2.0" });
+    CHECK(TextAt(gcc, "recommended_fingerprint") == std::optional<std::string> { "fp-13" });
+    CHECK(StringsOf(At(gcc, "behind")) == std::vector<std::string> { "a:1" });
+    CHECK(Elements(At(gcc, "ahead")).empty());
+    CHECK(Elements(At(gcc, "same_version_other_fingerprint")).empty());
     CHECK(At(gcc, "ordering_unknown").AsBool() == std::optional<bool> { false });
-    CHECK(At(gcc, "basis").AsString()->contains("no demand data; highest version served"));
-    CHECK(Elements(report).size() == 2);
+    CHECK(TextAt(gcc, "basis").value_or(std::string {}).contains("no demand data; highest labelled version served"));
+    // gcc, clang and apple-clang; the family-less toolchain advises nobody.
+    CHECK(Elements(report).size() == 3);
+    CHECK(Elements(At(RowWhere(report, "family", "apple-clang"), "behind")).empty());
 }
 
 TEST_CASE("toolchains reports an unparseable family as ordering unknown, recommending nothing",
@@ -217,17 +244,43 @@ TEST_CASE("toolchains reports an unparseable family as ordering unknown, recomme
 {
     auto upstream = LeaderUpstream();
     upstream.AnswerOk(DocumentWith({
-        Entry("fp-17", "a:1", "clang 17.0.6"),
-        Entry("fp-x", "b:1", "clang"),
+        Entry("fp-17", "a:1", "clang", "clang 17.0.6"),
+        Entry("fp-x", "b:1", "clang", "clang"),
     }));
     auto const result = CallToolchains(upstream);
     REQUIRE_FALSE(result.isError);
     auto const& clang = RowWhere(At(result.structured, "upgrade_report"), "family", "clang");
     CHECK(At(clang, "ordering_unknown").AsBool() == std::optional<bool> { true });
     CHECK(At(clang, "recommended_fingerprint").IsNull());
-    CHECK(Elements(At(clang, "nodes_behind")).empty());
-    CHECK(*At(RowWhere(At(result.structured, "toolchains"), "fingerprint", "fp-x"), "version").AsString() == "unknown");
+    CHECK(At(clang, "recommended_version").IsNull());
+    for (auto const key: { std::string_view { "behind" },
+                           std::string_view { "ahead" },
+                           std::string_view { "same_version_other_fingerprint" } })
+        CHECK(Elements(At(clang, key)).empty());
+    CHECK(TextAt(RowWhere(At(result.structured, "toolchains"), "fingerprint", "fp-x"), "version")
+          == std::optional<std::string> { "unknown" });
     CHECK(result.text.contains("ordering unknown"));
+}
+
+TEST_CASE("toolchains places a machine on a newer version ahead, and another build of the target apart",
+          "[pace-node][mcp][toolchains]")
+{
+    // Without demand the target is the highest labelled version, so nothing can be ahead of it; a same-version
+    // second build with no demand to separate them names no fingerprint. What the split must never do is call the
+    // newer machine "behind": here 14 is the target and the 13.2.0 builds are both behind it.
+    auto upstream = LeaderUpstream();
+    upstream.AnswerOk(DocumentWith({
+        Entry("fp-13-x", "a:1", "gcc", "gcc 13.2.0"),
+        Entry("fp-13-y", "b:1", "gcc", "gcc 13.2.0"),
+        Entry("fp-14", "c:1", "gcc", "gcc 14.1.0"),
+    }));
+    auto const result = CallToolchains(upstream);
+    REQUIRE_FALSE(result.isError);
+    auto const& gcc = RowWhere(At(result.structured, "upgrade_report"), "family", "gcc");
+    CHECK(TextAt(gcc, "recommended_fingerprint") == std::optional<std::string> { "fp-14" });
+    CHECK(StringsOf(At(gcc, "behind")) == std::vector<std::string> { "a:1", "b:1" });
+    CHECK(Elements(At(gcc, "ahead")).empty());
+    CHECK(result.text.contains("behind: a:1, b:1"));
 }
 
 TEST_CASE("toolchains on an empty fleet says so rather than failing", "[pace-node][mcp][toolchains]")
@@ -252,7 +305,8 @@ TEST_CASE("toolchains carries the upstream's failure as a tool error", "[pace-no
 
 TEST_CASE("toolchains refuses a worker row it cannot read rather than skipping it", "[pace-node][mcp][toolchains]")
 {
-    auto document = Unwrap(Json::Parse(DocumentWith({ Entry("fp", "a:1", "gcc 13.2.0") }), McpFleet::FleetDocumentLimits));
+    auto document =
+        Unwrap(Json::Parse(DocumentWith({ Entry("fp", "a:1", "gcc", "gcc 13.2.0") }), McpFleet::FleetDocumentLimits));
     auto* const members = std::get_if<Json::Object>(&document.v);
     REQUIRE(members != nullptr);
     auto const workers = std::ranges::find(*members, std::string_view { "workers" }, &Json::Member::first);

@@ -37,11 +37,12 @@
 #                                         action leaves in the node's log.
 #   2f. toolchains answers              — on that same scheduler, once its worker has
 #                                         registered what it identified: every toolchain
-#                                         served by this one machine, counted once, with
-#                                         unserved and demand ABSENT (null), and an upgrade
+#                                         served by this one machine, counted once, each
+#                                         family the banner's, unserved derived (EMPTY on
+#                                         one machine), demand ABSENT (null), and an upgrade
 #                                         report whose every row is consistent -- nothing
 #                                         recommended where the ordering is unknown, nobody
-#                                         behind on a one-machine fleet, a basis on each.
+#                                         behind or ahead on a one-machine fleet, a basis on each.
 #   3. A legacy client is answered      — `initialize` answers `2025-11-25`.
 #   4. It is not a scrape endpoint      — `GET /metrics` on the MCP port is a 404.
 #   5. A network address refuses        — `--mcp-listen=0.0.0.0:<port>` ends the
@@ -386,17 +387,20 @@ if command -v cc >/dev/null 2>&1 || command -v c++ >/dev/null 2>&1 || command -v
     # One machine, however many toolchains it serves; each toolchain served by exactly it.
     json_check "toolchains machines" "$toolchains_body" \
         "${OK} and ${SC}['answered_by'] == '${action_endpoint}' and ${SC}['term_scope'] == 'this-node' and ${SC}['machine_count'] == 1 and ${SC}['toolchain_count'] == len(${SC}['toolchains']) and all(t['nodes'] == ['${action_endpoint}'] for t in ${SC}['toolchains']) and [n['endpoint'] for n in ${SC}['nodes']] == ['${action_endpoint}'] and sorted(${SC}['nodes'][0]['served']) == sorted(t['fingerprint'] for t in ${SC}['toolchains'])"
-    # Absent, never empty or zero: the fleet document carries no unserved list, and no demand is recorded yet.
-    json_check "toolchains absences" "$toolchains_body" \
-        "${SC}['nodes'][0]['unserved'] is None and ${SC}['demand'] is None and isinstance(${SC}['unserved_note'], str) and isinstance(${SC}['demand_note'], str)"
-    # A version is parsed or the word `unknown`; a family is the label's first token.
-    json_check "toolchains versions" "$toolchains_body" \
-        "all((t['label'] is None and t['family'] is None and t['version'] == 'unknown') or (t['label'].split(' ')[0] == t['family'] and (t['version'] == 'unknown' or t['label'] == t['family'] + ' ' + t['version'])) for t in ${SC}['toolchains'])"
-    # The upgrade report, row by row: a policy name or an unknown ordering recommends nothing; a recommendation
-    # names a toolchain of its family; nobody is behind on a one-machine fleet; every row carries its basis.
+    # Unserved is derived: on a one-machine fleet this machine serves every toolchain of its own families, so the
+    # list is EMPTY -- and null only if none of its toolchains has a known family. No demand is recorded yet: absent.
+    json_check "toolchains unserved and demand" "$toolchains_body" \
+        "${SC}['nodes'][0]['unserved'] == ([] if any(t['family'] is not None for t in ${SC}['toolchains']) else None) and ${SC}['demand'] is None and isinstance(${SC}['unserved_note'], str) and isinstance(${SC}['demand_note'], str)"
+    # A version is parsed off the label or is the word `unknown`; a family is the banner's, one of the known keys
+    # -- never the label's tool name, so a `cc` that is GNU is in `gcc`.
+    json_check "toolchains versions and families" "$toolchains_body" \
+        "all((t['label'] is None and t['version'] == 'unknown') or t['version'] == 'unknown' or t['label'] == t['label'].split(' ')[0] + ' ' + t['version'] for t in ${SC}['toolchains']) and all(t['family'] in (None, 'gcc', 'g++', 'clang', 'clang++', 'apple-clang', 'apple-clang++', 'cl', 'clang-cl') for t in ${SC}['toolchains']) and any(t['family'] is not None for t in ${SC}['toolchains'])"
+    # The upgrade report, row by row: an unknown ordering recommends nothing; a known one names a version and, if a
+    # fingerprint, one of its own family; on a one-machine fleet nobody is behind, ahead or on another build; every
+    # row carries its basis.
     json_check "toolchains upgrade report" "$toolchains_body" \
-        "len(${SC}['upgrade_report']) > 0 and all(r['basis'] != '' and r['nodes_behind'] == [] and (r['recommended_fingerprint'] is None if (r['ordering_unknown'] or r['family'] in ('cc', 'c++')) else (r['recommended_fingerprint'] in [t['fingerprint'] for t in ${SC}['toolchains'] if any(l.split(' ')[0] == r['family'] for l in t['labels'])] and 'no demand data' in r['basis'])) for r in ${SC}['upgrade_report'])"
-    e2e_note "toolchains reported $(python3 -I -c "import json,sys; print(json.loads(sys.stdin.read())['result']['structuredContent']['toolchain_count'])" <<< "$toolchains_body") toolchain(s) on this one machine, with unserved and demand absent and a consistent upgrade report"
+        "len(${SC}['upgrade_report']) > 0 and all(r['basis'] != '' and r['behind'] == [] and r['ahead'] == [] and r['same_version_other_fingerprint'] == [] and ((r['recommended_version'] is None and r['recommended_fingerprint'] is None) if r['ordering_unknown'] else (r['recommended_version'] is not None and r['recommended_fingerprint'] in [None] + [t['fingerprint'] for t in ${SC}['toolchains'] if t['family'] == r['family']] and 'no demand data; highest labelled version served' in r['basis'])) for r in ${SC}['upgrade_report'])"
+    e2e_note "toolchains reported $(python3 -I -c "import json,sys; print(json.loads(sys.stdin.read())['result']['structuredContent']['toolchain_count'])" <<< "$toolchains_body") toolchain(s) on this one machine, unserved derived and empty, demand absent, and a consistent upgrade report"
 else
     e2e_note "no compiler on PATH, so the worker registers no toolchain: the toolchains content check was NOT run"
 fi
