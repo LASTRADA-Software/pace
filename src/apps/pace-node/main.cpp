@@ -32,6 +32,7 @@
 #include "LiveStatsResponder.hpp"
 #include "LiveStatsSources.hpp"
 #include "MachineBudget.hpp"
+#include "McpActionTools.hpp"
 #include "McpEndpoint.hpp"
 #include "McpFleetTools.hpp"
 #include "McpNodeTools.hpp"
@@ -794,14 +795,18 @@ class McpForwarding
     Node::LoopGatedUpstream _gated;
 };
 
-/// Every MCP tool this node serves, in the order `tools/list` presents them: the fleet tools, then the node tools.
+/// Every MCP tool this node serves, in the order `tools/list` presents them: the fleet tools, then the node tools,
+/// then the action tools.
 /// @param cfg The configuration the node runs under; its id is the one name a node with no applied state resolves.
 /// @param forwarding How the tools reach the fleet and resolve names; must outlive the MCP surface.
+/// @param logger Where each action an MCP client takes is recorded; must outlive the MCP surface.
 /// @return The table.
-[[nodiscard]] std::vector<Mcp::ToolRow> McpToolTable(NodeConfig const& cfg, McpForwarding& forwarding)
+[[nodiscard]] std::vector<Mcp::ToolRow> McpToolTable(NodeConfig const& cfg, McpForwarding& forwarding, ILogger& logger)
 {
     auto tools = Node::FleetReadTools(forwarding.Upstream());
     std::ranges::move(Node::NodeReadTools(forwarding.Upstream(), forwarding.Directory(), cfg.nodeId),
+                      std::back_inserter(tools));
+    std::ranges::move(Node::ActionTools(forwarding.Upstream(), forwarding.Directory(), cfg.nodeId, logger),
                       std::back_inserter(tools));
     return tools;
 }
@@ -1868,23 +1873,24 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
         Node::AdminSurface admin;
         std::unique_ptr<Node::McpEndpoint> mcp;
     };
-    auto surfaceOrRefusal = Node::StartAdminSurfaceOrExplain(cfg,
-                                                             *host,
-                                                             metrics,
-                                                             std::move(snapshotProvider),
-                                                             fleetSources,
-                                                             &sampler,
-                                                             dashboardCredential,
-                                                             logger,
-                                                             conditions,
-                                                             nodeIo.AcceptLoops())
-                                .and_then([&](Node::AdminSurface admin) {
-                                    return Node::StartMcpSurfaceOrExplain(
-                                               cfg, McpToolTable(cfg, mcpForwarding), metrics, logger, nodeIo.AcceptLoops())
-                                        .transform([&admin](std::unique_ptr<Node::McpEndpoint> mcp) {
-                                            return HttpSurfaces { .admin = std::move(admin), .mcp = std::move(mcp) };
-                                        });
-                                });
+    auto surfaceOrRefusal =
+        Node::StartAdminSurfaceOrExplain(cfg,
+                                         *host,
+                                         metrics,
+                                         std::move(snapshotProvider),
+                                         fleetSources,
+                                         &sampler,
+                                         dashboardCredential,
+                                         logger,
+                                         conditions,
+                                         nodeIo.AcceptLoops())
+            .and_then([&](Node::AdminSurface admin) {
+                return Node::StartMcpSurfaceOrExplain(
+                           cfg, McpToolTable(cfg, mcpForwarding, logger), metrics, logger, nodeIo.AcceptLoops())
+                    .transform([&admin](std::unique_ptr<Node::McpEndpoint> mcp) {
+                        return HttpSurfaces { .admin = std::move(admin), .mcp = std::move(mcp) };
+                    });
+            });
 
     // Fatal here and not in the daemon, which is a real difference between the two
     // binaries rather than a defect in either; the row says why

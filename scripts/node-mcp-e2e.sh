@@ -27,6 +27,14 @@
 #                                         with real content: its memory tier present and the
 #                                         disk tier ABSENT, the listen spec it runs by, and the
 #                                         `--requirepass` it holds redacted and nowhere in the body.
+#   2e. The actions act                 — on a one-node scheduler that runs a worker:
+#                                         `cordon` then `uncordon` of this node, each
+#                                         confirmed through `node_status`;
+#                                         `explain_admission` about the caller and about
+#                                         this node; `enrollment_auto_approve` armed for a
+#                                         minute and ended, each confirmed through
+#                                         `enrollment_status`; and the audit line each
+#                                         action leaves in the node's log.
 #   3. A legacy client is answered      — `initialize` answers `2025-11-25`.
 #   4. It is not a scrape endpoint      — `GET /metrics` on the MCP port is a 404.
 #   5. A network address refuses        — `--mcp-listen=0.0.0.0:<port>` ends the
@@ -254,6 +262,107 @@ fleet_round no-token
 printf 's3cret-dashboard-token\n' > "${workdir}/token"
 chmod 600 "${workdir}/token"
 fleet_round with-token --dashboard-token-file "${workdir}/token"
+
+# ------------------------------------------------------------ 2e. the actions act
+# A one-node scheduler that also runs a WORKER (`--slots=1`): a cordon governs a worker, and a node with none
+# answers the compile family's not-served sentence. It leads alone, so every leader-gated action is answered
+# in-process by this node as the loopback caller it is -- which holds an operator's standing there.
+readonly ACTION_CLIENT="node-mcp-e2e"
+readonly ACTION_META="\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"${MODERN}\",\"io.modelcontextprotocol/clientInfo\":{\"name\":\"${ACTION_CLIENT}\",\"version\":\"1\"},\"io.modelcontextprotocol/clientCapabilities\":{}}"
+action_node_port="$(free_port)"
+action_raft_port="$(free_port)"
+action_mcp_port="$(free_port)"
+"$node" \
+    --slots=1 \
+    --advertise "127.0.0.1:${action_node_port}" \
+    --listen-node "127.0.0.1:${action_node_port}" \
+    --listen-raft "127.0.0.1:${action_raft_port}" \
+    --raft-self 127.0.0.1 \
+    --discovery= \
+    --cluster-dir "${workdir}/actions" \
+    --mcp-listen "$action_mcp_port" \
+    > "${workdir}/node.log" 2>&1 &
+action_pid=$!
+node_pid="$action_pid"
+wait_for_node_ready 127.0.0.1 "$action_mcp_port" "$action_pid" "the acting scheduler's MCP surface" "${workdir}/node.log"
+wait_for_log "consensus: this node is now the leader" "$action_pid" "the node" "${workdir}/node.log"
+wait_for_log "this node's own cluster has recorded it" "$action_pid" "the node" "${workdir}/node.log"
+
+# Call one tool on the acting node and echo the BODY; fails the run on anything but a 200.
+# @param 1 the tool
+# @param 2 its arguments, as JSON
+call_action() {
+    local tool="$1" arguments="$2" response
+    response="$(curl -s -i -m 20 -X POST -H "Content-Type: application/json" \
+        -H "Accept: application/json, text/event-stream" -H "MCP-Protocol-Version: ${MODERN}" \
+        -H "Mcp-Method: tools/call" -H "Mcp-Name: ${tool}" \
+        --data "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"tools/call\",\"params\":{\"name\":\"${tool}\",\"arguments\":${arguments},${ACTION_META}}}" \
+        "http://127.0.0.1:${action_mcp_port}/mcp")" \
+        || fail "curl could not complete tools/call ${tool} ${arguments}"
+    [[ "$response" == HTTP/1.1\ 200* ]] || fail "tools/call ${tool} ${arguments} did not answer 200: ${response%%$'\r'*}"
+    body_of "$response"
+}
+readonly SC="d['result']['structuredContent']"
+readonly OK="d['result']['isError'] is False"
+
+# tools/list names every action, each NOT read-only, the reject destructive, and explain_admission read-only.
+listed="$(curl -s -i -m 20 -X POST -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
+    -H "MCP-Protocol-Version: ${MODERN}" -H "Mcp-Method: tools/list" \
+    --data "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"tools/list\",\"params\":{${ACTION_META}}}" \
+    "http://127.0.0.1:${action_mcp_port}/mcp")" || fail "curl could not complete tools/list on the acting node"
+json_check "tools/list actions" "$(body_of "$listed")" \
+    "(lambda a: all(a[t]['readOnlyHint'] is False for t in ['enrollment_approve','enrollment_reject','enrollment_auto_approve','cordon','uncordon']) and a['enrollment_reject']['destructiveHint'] is True and a['cordon']['destructiveHint'] is False and a['explain_admission']['readOnlyHint'] is True)({x['name']: x['annotations'] for x in d['result']['tools']})"
+e2e_note "tools/list names the actions, none read-only, the reject destructive"
+
+# The worker answers node_status with a cordon state only once it runs; wait on that STATE rather than a delay.
+cordon_reads_serving() {
+    local body
+    body="$(call_action node_status '{}')"
+    python3 -I -c "import json,sys; d=json.loads(sys.stdin.read()); sys.exit(0 if d['result']['isError'] is False and d['result']['structuredContent']['cordon'] == 'serving' else 1)" <<< "$body"
+}
+wait_until cordon_reads_serving "the worker to report cordon serving through node_status" "$action_pid" "${workdir}/node.log" 60
+
+cordoned="$(call_action cordon '{}')"
+json_check "cordon" "$cordoned" \
+    "${OK} and ${SC}['cordon'] in ('draining','drained') and isinstance(${SC}['compiles_in_flight'], int) and 'a restart of this node lifts it' in d['result']['content'][0]['text']"
+json_check "node_status after cordon" "$(call_action node_status '{}')" "${OK} and ${SC}['cordon'] in ('draining','drained')"
+uncordoned="$(call_action uncordon '{}')"
+json_check "uncordon" "$uncordoned" "${OK} and ${SC}['cordon'] == 'serving'"
+json_check "node_status after uncordon" "$(call_action node_status '{}')" "${OK} and ${SC}['cordon'] == 'serving'"
+e2e_note "cordon then uncordon of this node, each confirmed through node_status"
+
+self_id="$(python3 -I -c "import json,sys; print(json.loads(sys.stdin.read())['result']['structuredContent']['node_id'])" \
+    <<< "$(call_action node_status '{}')")" || fail "node_status named no node_id"
+json_check "explain_admission (caller)" "$(call_action explain_admission '{}')" \
+    "${OK} and ${SC}['machine'] is None and ${SC}['verdict'] == 'admitted' and 'loopback' in ${SC}['decided_by'] and ${SC}['standing'] is None"
+json_check "explain_admission (this node)" "$(call_action explain_admission "{\"machine\":\"${self_id}\"}")" \
+    "${OK} and ${SC}['machine'] == '${self_id}' and ${SC}['verdict'] == 'admitted' and ${SC}['standing'] == 'voter' and 'proven-key' in ${SC}['decided_by']"
+e2e_note "explain_admission answered about the caller (loopback) and about this node (a voter, by its key)"
+
+armed="$(call_action enrollment_auto_approve '{"minutes":1}')"
+json_check "enrollment_auto_approve minutes 1" "$armed" \
+    "${OK} and ${SC}['enrollment'] == 'auto-approve' and 0 < ${SC}['auto_approve_left_s'] <= 60"
+json_check "enrollment_status while armed" "$(call_action enrollment_status '{}')" \
+    "${OK} and ${SC}['enrollment'] == 'auto-approve' and 0 < ${SC}['auto_approve_left_s'] <= 60"
+ended="$(call_action enrollment_auto_approve '{"off":true}')"
+json_check "enrollment_auto_approve off" "$ended" "${OK} and ${SC}['enrollment'] == 'manual' and ${SC}['auto_approve_left_s'] is None"
+json_check "enrollment_status once ended" "$(call_action enrollment_status '{}')" \
+    "${OK} and ${SC}['enrollment'] == 'manual' and ${SC}['auto_approve_left_s'] is None"
+e2e_note "enrollment_auto_approve armed for a minute and ended, each confirmed through enrollment_status"
+
+# Every action left its audit line, naming the client; the read did not.
+for line in "mcp action cordon {\"node\":\"${self_id}\"} by ${ACTION_CLIENT} answered by" \
+            "mcp action uncordon {\"node\":\"${self_id}\"} by ${ACTION_CLIENT} answered by" \
+            "mcp action enrollment_auto_approve {\"minutes\":1} by ${ACTION_CLIENT} answered by" \
+            "mcp action enrollment_auto_approve {\"off\":true} by ${ACTION_CLIENT} answered by"; do
+    grep -qF -- "$line" "${workdir}/node.log" || fail "the node's log carries no audit line '${line}'"
+done
+if grep -qF -- "mcp action explain_admission" "${workdir}/node.log"; then
+    fail "explain_admission, a read, left an action audit line"
+fi
+e2e_note "each action left its audit line naming ${ACTION_CLIENT}; the read left none"
+stop_and_require_clean_exit "$action_pid" "the acting scheduler" 30 "${workdir}/node.log"
+node_pid=""
 
 # ----------------------------------------------------- 5. a network address refuses
 refusing_port="$(free_port)"

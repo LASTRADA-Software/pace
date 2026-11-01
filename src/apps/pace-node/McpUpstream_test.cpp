@@ -13,6 +13,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -547,6 +548,41 @@ TEST_CASE("mcp-upstream: a leader that refuses is Refused with its words", "[nod
     REQUIRE_FALSE(answer.has_value());
     CHECK(answer.error().first == UpstreamFailure::Refused);
     CHECK(answer.error().second.contains("this caller is not a member"));
+}
+
+TEST_CASE("mcp-upstream: a refusal of this node's standing is StandingRequired, by its code", "[node][mcp][mcp-upstream]")
+{
+    // Both codes the standing gate answers, and a control: any other refusal stays `Refused`, whatever its words say.
+    struct Case
+    {
+        Wire::ErrorCode code;
+        std::string_view words;
+        UpstreamFailure expected;
+    };
+    for (auto const& [code, words, expected]: std::array {
+             Case { .code = Wire::ErrorCode::OperatorStandingRequired,
+                    .words = "a learner's ticket decides nothing",
+                    .expected = UpstreamFailure::StandingRequired },
+             Case { .code = Wire::ErrorCode::IdentifiedCallerRequired,
+                    .words = "say who you are",
+                    .expected = UpstreamFailure::StandingRequired },
+             Case { .code = Wire::ErrorCode::NotAMember,
+                    .words = "operator standing required",
+                    .expected = UpstreamFailure::Refused },
+         })
+    {
+        CAPTURE(words);
+        Bridge bridge;
+        bridge.fleet.leader = LeaderA;
+        bridge.dialer.Place(std::string { LeaderA },
+                            Scripted { .script = Script::Answer,
+                                       .reply = Wire::EncodeErrorReply(code, std::string { words }),
+                                       .reason = {} });
+        auto const answer = bridge.upstream.Ask(UpstreamTarget::Leader, "", RequestFrame());
+        REQUIRE_FALSE(answer.has_value());
+        CHECK(answer.error().first == expected);
+        CHECK(answer.error().second.contains(words));
+    }
 }
 
 TEST_CASE("mcp-upstream: an endpoint nothing answers at is Unreachable", "[node][mcp][mcp-upstream]")

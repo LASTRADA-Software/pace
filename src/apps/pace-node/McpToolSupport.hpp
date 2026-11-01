@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <optional>
 #include <span>
@@ -19,8 +20,8 @@
 /// @file McpToolSupport.hpp
 /// What every MCP tool of this node spells the same way: the JSON value builders, the provenance envelope every
 /// forwarded answer opens with (`answered_by`, `term`, `term_scope`), the upstream-failure-to-`isError` mapping,
-/// and the frame and payload byte views. Shared rather than copied per tool file, so the fleet tools and the node
-/// tools cannot drift on how a failure or a term is said.
+/// how a `node` argument resolves, and the frame and payload byte views. Shared rather than copied per tool file,
+/// so the fleet, node and action tools cannot drift on how a failure, a term or a node name is read.
 
 namespace Pace::Node::McpSupport
 {
@@ -129,6 +130,48 @@ inline constexpr std::string_view TermScope = "this-node";
 [[nodiscard]] inline Mcp::ToolResult Error(std::string sentence)
 {
     return Mcp::ToolResult { .structured = Null(), .text = std::move(sentence), .isError = true };
+}
+
+// ------------------------------------------------------------ the node argument
+
+/// Which node a call asks: this one, or the member the `node` argument names exactly.
+struct NodeTarget
+{
+    std::string nodeId;               ///< The member's id; empty means this node.
+    std::optional<std::string> asked; ///< The name as given, or nothing when none was.
+};
+
+/// Resolve a call's `node` argument, through `ResolveNodeName`: exactly, never by prefix.
+/// @param call The call.
+/// @param cluster Where names resolve.
+/// @param selfId This node's id: the one name that resolves on a node that has applied no cluster state.
+/// @return Whom to ask, or the tool error naming why the argument names nobody.
+[[nodiscard]] inline std::expected<NodeTarget, Mcp::ToolResult> NodeTargetOf(Mcp::ToolCall const& call,
+                                                                             IAppliedClusterView const& cluster,
+                                                                             std::string const& selfId)
+{
+    auto const* const node = call.arguments.Find("node");
+    if (node == nullptr || node->IsNull())
+        return NodeTarget { .nodeId = {}, .asked = std::nullopt };
+    // Refused rather than ignored: a `node` this tool cannot read answered about THIS node would be an answer about
+    // a machine nobody named.
+    auto const* const name = node->AsString();
+    if (name == nullptr)
+        return std::unexpected { Error("`node` must be a string: a member's id, matched exactly") };
+
+    auto const state = cluster.AppliedState();
+    if (!state.has_value())
+    {
+        if (*name == selfId && !selfId.empty())
+            return NodeTarget { .nodeId = {}, .asked = *name };
+        return std::unexpected { Error(std::format(
+            "this node has applied no cluster state, so it can name no member but itself ({}); omit `node` to ask it",
+            selfId.empty() ? std::string { "it has no id" } : selfId)) };
+    }
+    auto resolved = ResolveNodeName(*state, *name);
+    if (!resolved.has_value())
+        return std::unexpected { Error(std::move(resolved.error())) };
+    return NodeTarget { .nodeId = std::move(*resolved), .asked = *name };
 }
 
 /// @param failure Why the upstream could not answer, and who and what happened.

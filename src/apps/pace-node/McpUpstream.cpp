@@ -217,7 +217,7 @@ namespace
             }
 
             if (outcome.kind == Cc::CacheOutcomeKind::Rejected)
-                co_return Failed(UpstreamFailure::Refused,
+                co_return Failed(RefusalFailureOf(outcome.code),
                                  std::format("{} refused the request: {}", endpoint, Cc::DescribeOutcome(outcome)));
 
             auto reply = UpstreamReply {

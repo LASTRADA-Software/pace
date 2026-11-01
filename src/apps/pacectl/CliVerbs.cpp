@@ -1470,115 +1470,17 @@ namespace
         return NodeConditionsAnswer(*fields, context.node->Address());
     }
 
-    /// What to call one admission verdict.
-    ///
-    /// The word an operator would use, not the enumerator: `refused` rather than `Outsider`,
-    /// which reads as a status this tool invented.
-    /// @param verdict The wire tag.
-    /// @return A stable lower-case name.
-    [[nodiscard]] std::string_view NameOfMembership(CompileCacheWire::WireMembership verdict) noexcept
-    {
-        switch (verdict)
-        {
-            case CompileCacheWire::WireMembership::Outsider:
-                return "refused";
-            case CompileCacheWire::WireMembership::Member:
-                return "admitted";
-            case CompileCacheWire::WireMembership::Forgotten:
-                return "forgotten";
-        }
-        // Unreachable for `NameOfCordonState`'s reason: `DecodeAdmissionExplanation` REFUSES a
-        // verdict this build cannot name rather than passing it through, because a verdict is
-        // the answer itself -- an unknown route can be counted, an unknown verdict cannot.
-        return "unknown";
-    }
-
-    /// One row of `AdmissionRouteNames`.
-    struct AdmissionRouteName
-    {
-        Distributed::MembershipParticipant route; ///< The route.
-        std::string_view name;                    ///< What an operator calls it.
-    };
-
-    /// How each admission route is spelled for a person.
-    ///
-    /// **The setting or the act, never the enumerator.** An operator told `fleet-open` knows which
-    /// setting to change; one told `OpenPolicy` has to go and look it up.
-    ///
-    /// Keyed on the PARTICIPANT rather than on the wire bit, and that is the guard rather than a
-    /// preference: a bitmask enum has no `Last`, so a table keyed on one cannot be checked for
-    /// completeness. Keyed here, `RowsInEnumeratorOrder` fails the build when a route is added
-    /// and not spelled -- where a bit-keyed array would compile and render the new route as *a
-    /// route this client cannot name*, blaming the node's version for this client's omission.
-    /// That is the confident wrong signal the verb exists to remove, arriving inside the verb.
-    constexpr EnumTable<Distributed::MembershipParticipant, AdmissionRouteName> AdmissionRouteNames { {
-        // Never printed: `Reserved` travels as no bit, so no answer can carry it.
-        { .route = Distributed::MembershipParticipant::Reserved, .name = "reserved" },
-        { .route = Distributed::MembershipParticipant::Loopback, .name = "loopback" },
-        { .route = Distributed::MembershipParticipant::OpenPolicy, .name = "fleet-open" },
-        { .route = Distributed::MembershipParticipant::ProvenIdentity, .name = "proven-key" },
-        { .route = Distributed::MembershipParticipant::MachineTicket, .name = "ticket" },
-        { .route = Distributed::MembershipParticipant::KeyTombstone, .name = "key-revoked" },
-    } };
-
-    static_assert(RowsInEnumeratorOrder(AdmissionRouteNames, &AdmissionRouteName::route),
-                  "AdmissionRouteNames must hold one row per MembershipParticipant, in enumerator order");
-
-    /// Every route in @p decidedBy, as an operator reads them.
-    ///
-    /// **A route this build cannot name is COUNTED, never dropped.** The node may be newer, and
-    /// under-reporting authorship during an upgrade would say *fewer things decided this than
-    /// did* -- which is the reading that sends somebody to change a route that was never
-    /// consulted. Counted, the operator knows to ask a client of the node's own version.
+    /// Every route in @p decidedBy, as an operator reads them: `Distributed::AdmissionRouteNames`, the one
+    /// derivation this verb and the MCP `explain_admission` tool share, joined.
     /// @param decidedBy The bitmask the node sent.
     /// @return The routes, joined, or empty when nothing decided.
     [[nodiscard]] std::string DescribeAdmissionRoutes(std::uint32_t decidedBy)
     {
         auto described = std::string {};
-        auto named = std::uint32_t { 0 };
-        for (auto const& row: Distributed::MembershipWireRoutes)
-        {
-            auto const bit = row.bit;
-            if ((decidedBy & bit) == 0)
-                continue;
-            named |= bit;
-            if (!described.empty())
-                described += ", ";
-            described += AdmissionRouteNames[static_cast<std::size_t>(row.route)].name;
-        }
-
-        // Each bit this build cannot name, as its NUMBER: the operator can then ask a client of the
-        // node's own version which route that is, which a count alone would not let them do.
-        for (auto const bit: std::views::iota(0U, 32U))
-        {
-            auto const value = std::uint32_t { 1 } << bit;
-            if ((decidedBy & ~named & value) == 0)
-                continue;
-            if (!described.empty())
-                described += ", ";
-            described += std::format("{:#x}", value);
-        }
+        for (auto const& name: Distributed::AdmissionRouteNames(decidedBy))
+            described += (described.empty() ? "" : ", ") + name;
         return described;
     }
-
-    /// One row of `MachineStandingNames`.
-    struct MachineStandingName
-    {
-        Distributed::MachineStanding standing; ///< The standing.
-        std::string_view name;                 ///< What an operator calls it.
-    };
-
-    /// How each standing is spelled for a person: the seat, or why there is none.
-    constexpr EnumTable<Distributed::MachineStanding, MachineStandingName> MachineStandingNames { {
-        { .standing = Distributed::MachineStanding::Voter, .name = "voter" },
-        { .standing = Distributed::MachineStanding::Learner, .name = "learner" },
-        { .standing = Distributed::MachineStanding::Pending, .name = "pending" },
-        { .standing = Distributed::MachineStanding::Revoked, .name = "revoked" },
-        { .standing = Distributed::MachineStanding::Unknown, .name = "unknown" },
-    } };
-
-    static_assert(RowsInEnumeratorOrder(MachineStandingNames, &MachineStandingName::standing),
-                  "MachineStandingNames must hold one row per MachineStanding, in enumerator order");
 
     /// `explain-admission [<machine-id|key>]` -- which routes admit or refuse a machine, or this
     /// very connection when no subject is given, as THIS node folds it.
@@ -1618,10 +1520,9 @@ namespace
         auto answer = Answered(RecordValue(
             { Field { .name = "subject", .value = TextCell(fields->subject) },
               Field { .name = "standing",
-                      .value = standing.has_value()
-                                   ? TextCell(std::string { MachineStandingNames[static_cast<std::size_t>(*standing)].name })
-                                   : AbsentCell() },
-              Field { .name = "verdict", .value = TextCell(std::string { NameOfMembership(fields->verdict) }) },
+                      .value = standing.has_value() ? TextCell(std::string { Distributed::StandingName(*standing) })
+                                                    : AbsentCell() },
+              Field { .name = "verdict", .value = TextCell(std::string { Distributed::VerdictName(fields->verdict) }) },
               // An empty set is a READING -- no route had an opinion -- so the field is present
               // and ABSENT, exactly as `leader` is when no leader is known. Dropping the field
               // would say this node cannot answer that half; a `0` or an empty string would read

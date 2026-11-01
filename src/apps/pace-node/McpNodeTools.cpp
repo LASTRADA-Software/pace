@@ -39,46 +39,6 @@ namespace
         return Str(std::string { text });
     }
 
-    /// Which node a call asks: this one, or the member the `node` argument names exactly.
-    struct Target
-    {
-        std::string nodeId;               ///< The member's id; empty means this node.
-        std::optional<std::string> asked; ///< The name as given, or nothing when none was.
-    };
-
-    /// @param call The call.
-    /// @param cluster Where names resolve.
-    /// @param selfId This node's id.
-    /// @return Whom to ask, or the tool error naming why the argument names nobody.
-    [[nodiscard]] std::expected<Target, Mcp::ToolResult> TargetOf(Mcp::ToolCall const& call,
-                                                                  IAppliedClusterView const& cluster,
-                                                                  std::string const& selfId)
-    {
-        auto const* const node = call.arguments.Find("node");
-        if (node == nullptr || node->IsNull())
-            return Target { .nodeId = {}, .asked = std::nullopt };
-        // Refused rather than ignored: a `node` this tool cannot read answered about THIS node would be an answer
-        // about a machine nobody named.
-        auto const* const name = node->AsString();
-        if (name == nullptr)
-            return std::unexpected { Error("`node` must be a string: a member's id, matched exactly") };
-
-        auto const state = cluster.AppliedState();
-        if (!state.has_value())
-        {
-            if (*name == selfId && !selfId.empty())
-                return Target { .nodeId = {}, .asked = *name };
-            return std::unexpected { Error(std::format(
-                "this node has applied no cluster state, so it can name no member but itself ({}); omit `node` to ask "
-                "it",
-                selfId.empty() ? std::string { "it has no id" } : selfId)) };
-        }
-        auto resolved = ResolveNodeName(*state, *name);
-        if (!resolved.has_value())
-            return std::unexpected { Error(std::move(resolved.error())) };
-        return Target { .nodeId = std::move(*resolved), .asked = *name };
-    }
-
     /// @param runtime The decoded record.
     /// @return The `slot_ceilings` member, read through `NodeStatusView::CeilingsOf` -- the view `pacectl node`
     ///         renders its ceiling cells from.
@@ -234,7 +194,7 @@ namespace
                                              std::string const& selfId,
                                              Mcp::ToolCall const& call)
     {
-        auto target = TargetOf(call, cluster, selfId);
+        auto target = NodeTargetOf(call, cluster, selfId);
         if (!target.has_value())
             return std::move(target.error());
 

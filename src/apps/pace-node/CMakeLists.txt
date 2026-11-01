@@ -44,6 +44,7 @@ add_executable(pace-node
     NodeLogging.cpp
     AdminEndpoint.cpp
     EffectiveConfig.cpp
+    McpActionTools.cpp
     McpEndpoint.cpp
     McpFleetTools.cpp
     McpNodeTools.cpp
@@ -149,6 +150,8 @@ if(PACE_BUILD_TESTS)
         McpEndpoint_test.cpp
         EffectiveConfig.cpp
         EffectiveConfig_test.cpp
+        McpActionTools.cpp
+        McpActionTools_test.cpp
         McpFleetTools.cpp
         McpFleetTools_test.cpp
         McpNodeTools.cpp
