@@ -1318,6 +1318,68 @@ TEST_CASE("cluster-members shows each member's key whole", "[cli][node][cluster]
     CHECK(rows[1][column].lexical == FormatEd25519PublicKey(MemberKey("node-c")));
 }
 
+TEST_CASE("cluster-members shows each member's display name, absent where nobody named it",
+          "[cli][node][cluster][display-name]")
+{
+    Cluster::ClusterState state;
+    for (auto const* const id: { "node-b", "node-c" })
+        Apply(state,
+              Cluster::Command { .kind = Cluster::CommandKind::AddMember,
+                                 .key = id,
+                                 .value = "10.0.0.8:6675",
+                                 .schedulerEndpoint = {},
+                                 .publicKey = MemberKey(id) });
+    Apply(state,
+          Cluster::Command { .kind = Cluster::CommandKind::SetDisplayName,
+                             .key = "node-c",
+                             .value = "build-box",
+                             .schedulerEndpoint = {},
+                             .publicKey = std::nullopt });
+    ScriptedNodeExchange node { { ClusterStatusReply(state) } };
+
+    auto const answer = RunNodeVerb("cluster-members", node);
+    CHECK(answer.outcome == Outcome::Affirmative);
+    auto const& rows = RowsOf(answer);
+    REQUIRE(rows.size() == 2);
+    auto const name = ColumnOf(answer, "name");
+    CHECK(rows[0][name].kind == CellKind::Absent);
+    CHECK(rows[1][name].lexical == "build-box");
+}
+
+TEST_CASE("cluster-name sends the member, the name and the edit, and refuses a name no member may carry",
+          "[cli][node][cluster][display-name]")
+{
+    std::vector<std::byte> const noPayload;
+    {
+        ScriptedNodeExchange node { { CacheWire::EncodeReply(CacheWire::Status::Ok, noPayload) } };
+        (void) RunNodeVerb("cluster-name", node, { "node-b", "build-box" });
+        REQUIRE(node.Sent().size() == 1);
+        auto const& frame = SentFrame(node);
+        auto const view =
+            Unwrap(CacheWire::DecodeMemberEditPayload(std::span { frame }.subspan(CacheWire::RequestHeaderSize)));
+        CHECK(view.verb == static_cast<std::uint8_t>(CacheWire::MemberEditVerb::SetDisplayName));
+        CHECK(CacheWire::AsStringView(view.memberId) == "node-b");
+        CHECK(CacheWire::AsStringView(view.value) == "build-box");
+    }
+    {
+        // No name clears it: an empty value.
+        ScriptedNodeExchange node { { CacheWire::EncodeReply(CacheWire::Status::Ok, noPayload) } };
+        (void) RunNodeVerb("cluster-name", node, { "node-b" });
+        REQUIRE(node.Sent().size() == 1);
+        auto const& frame = SentFrame(node);
+        auto const view =
+            Unwrap(CacheWire::DecodeMemberEditPayload(std::span { frame }.subspan(CacheWire::RequestHeaderSize)));
+        CHECK(CacheWire::AsStringView(view.value).empty());
+    }
+    {
+        // The leader's own rule, before anything is sent.
+        ScriptedNodeExchange node { { CacheWire::EncodeReply(CacheWire::Status::Ok, noPayload) } };
+        auto const answer = RunNodeVerb("cluster-name", node, { "node-b", "a\tb" });
+        CHECK(answer.outcome == Outcome::Usage);
+        CHECK(node.Sent().empty());
+    }
+}
+
 TEST_CASE("cluster-settings names every key this build knows, set or not", "[cli][node][cluster]")
 {
     // An operator's real question is usually *what CAN I set*, and a report listing only
@@ -1380,7 +1442,8 @@ TEST_CASE("a cluster change reports ACCEPTED, never committed", "[cli][node][clu
     // a verb quietly dropped from a loop is a verb nothing asserts about.
     for (auto const& spec:
          { std::pair { std::string_view { "cluster-set" }, std::vector<std::string> { "fleet-open", "1" } },
-           std::pair { std::string_view { "cluster-forget" }, std::vector<std::string> { "node-b" } } })
+           std::pair { std::string_view { "cluster-forget" }, std::vector<std::string> { "node-b" } },
+           std::pair { std::string_view { "cluster-name" }, std::vector<std::string> { "node-b", "build-box" } } })
     {
         INFO("verb: " << spec.first);
         // A typed empty payload: `{}` is ambiguous against `std::span`, and these two
@@ -1588,6 +1651,7 @@ TEST_CASE("the cluster verbs send the opcodes the wire table names", "[cli][node
            Expectation { .verb = "cluster-settings", .operands = {}, .op = CacheWire::Op::ClusterStatus },
            Expectation { .verb = "cluster-set", .operands = { "fleet-open", "1" }, .op = CacheWire::Op::ClusterSet },
            Expectation { .verb = "cluster-forget", .operands = { "node-b" }, .op = CacheWire::Op::ClusterForget },
+           Expectation { .verb = "cluster-name", .operands = { "node-b", "build-box" }, .op = CacheWire::Op::MemberEdit },
            Expectation {
                .verb = "cluster-admit", .operands = { "node-c", "10.0.0.9:6675" }, .op = CacheWire::Op::ClusterAdmit },
            Expectation { .verb = "cluster-admit-learner",

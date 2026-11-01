@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <Pace/Cli/Duration.hpp>
 #include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Cluster/Roster.hpp>
 #include <Pace/Core/Ed25519.hpp>
 #include <Pace/Core/WireFields.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
@@ -508,7 +509,7 @@ TEST_CASE("A truncated snapshot is refused rather than half-read", "[cluster][st
 
 TEST_CASE("A state another build encoded is refused by its version while a command keeps its own", "[cluster][state][wire]")
 {
-    // The dissolve order a healing split replicates moved the state's version again -- and the
+    // The members' display names moved the state's version again -- and the
     // byte is pinned as well as the refusal, because a symbol both ends spell can only test the
     // NAME of a wire constant. The version is the first field's only byte, after that
     // field's u32 length prefix.
@@ -516,33 +517,33 @@ TEST_CASE("A state another build encoded is refused by its version while a comma
     Apply(state, Cmd(CommandKind::AddMember, "n1", "10.0.0.1:6675", "10.0.0.1:7000"));
     auto bytes = Encode(state);
     REQUIRE(bytes.size() > 4);
-    CHECK(bytes[4] == std::byte { 10 });
+    CHECK(bytes[4] == std::byte { 11 });
 
     // A version the next build might write. Refused BY NAME, both versions stated, and
     // never as `MalformedFrame`: those bytes are intact, and *damaged* is what gets a
     // healthy snapshot deleted. The previous build's LAYOUT is the case below this one.
-    bytes[4] = std::byte { 11 };
+    bytes[4] = std::byte { 12 };
     auto const newerState = DecodeState(bytes);
     REQUIRE_FALSE(newerState.has_value());
     CHECK(newerState.error().code == ConsensusErrorCode::UnsupportedVersion);
-    CHECK(newerState.error().context.contains("version 11"));
-    CHECK(newerState.error().context.contains("reads 10"));
+    CHECK(newerState.error().context.contains("version 12"));
+    CHECK(newerState.error().context.contains("reads 11"));
 
     // #178 moved the COMMAND layout as well -- two fields, a key and a role -- and #1555 moved
     // the version again with the layout untouched, because it changed what a verb MEANS: a
     // node whose own log holds an older entry refuses to start by name (#1542) rather than
-    // replay it as something its writer never meant.
+    // replay it as something its writer never meant. The display names moved it once more, with the state.
     auto command = Encode(Cmd(CommandKind::AddMember, "n1", "10.0.0.1:6675", "10.0.0.1:7000"));
     REQUIRE(command.size() > 4);
-    CHECK(command[4] == std::byte { 6 });
+    CHECK(command[4] == std::byte { 7 });
 
     // And a command another build encoded is refused by ITS version, by name, never as damage.
-    command[4] = std::byte { 7 };
+    command[4] = std::byte { 8 };
     auto const newer = DecodeCommand(command);
     REQUIRE_FALSE(newer.has_value());
     CHECK(newer.error().code == ConsensusErrorCode::UnsupportedVersion);
-    CHECK(newer.error().context.contains("command encoding version 7"));
-    CHECK(newer.error().context.contains("reads 6"));
+    CHECK(newer.error().context.contains("command encoding version 8"));
+    CHECK(newer.error().context.contains("reads 7"));
 }
 
 TEST_CASE("A state the previous build wrote is refused as another build's, never as damage",
@@ -564,10 +565,14 @@ TEST_CASE("A state the previous build wrote is refused as another build's, never
     //   six -- a decoder judging the arity first calls it damage;
     // - v8: six header fields like this build's, but a principal count and a roster version where
     //   this build has the revoked and dissolve counts -- a decoder reading fields first MISREADS it.
+    // - v10, the last build before member display names: this build's header, but SIX fields per member where this
+    //   build writes seven, so a decoder judging the arity first calls an intact snapshot damage.
+    REQUIRE(Testing::NamelessClusterStateVersion == 10);
     REQUIRE(Testing::PrincipalEraClusterStateVersion == 9);
     REQUIRE(Testing::PreviousClusterStateVersion == 8);
     for (auto const& [older, version]:
-         { std::pair { Testing::EncodePrincipalEraClusterState(), Testing::PrincipalEraClusterStateVersion },
+         { std::pair { Testing::EncodeNamelessClusterState(), Testing::NamelessClusterStateVersion },
+           std::pair { Testing::EncodePrincipalEraClusterState(), Testing::PrincipalEraClusterStateVersion },
            std::pair { Testing::EncodePreviousClusterState(), Testing::PreviousClusterStateVersion } })
     {
         INFO("state version " << static_cast<unsigned>(version));
@@ -580,7 +585,7 @@ TEST_CASE("A state the previous build wrote is refused as another build's, never
         CHECK(refused.error().context.contains(std::format("version {}", version)));
         // The current version as a literal: it is private to the codec, and pinned by the
         // version case above.
-        CHECK(refused.error().context.contains("reads 10"));
+        CHECK(refused.error().context.contains("reads 11"));
     }
 }
 
@@ -602,8 +607,12 @@ TEST_CASE("A command the previous build wrote is refused by its version before i
     // pinned here against the enumerators they stand for.
     REQUIRE(static_cast<std::uint8_t>(CommandKind::AddMember) == 0);
     REQUIRE(static_cast<std::uint8_t>(CommandKind::Forget) == 1);
+    //
+    // A v6 command is this build's seven fields, written before the display names moved the version: refused by it.
+    REQUIRE(Testing::NamelessClusterCommandVersion == 6);
     for (auto const& [older, version]:
-         { std::pair { Testing::EncodeFourFieldClusterCommand(), Testing::FourFieldClusterCommandVersion },
+         { std::pair { Testing::EncodeNamelessClusterCommand(), Testing::NamelessClusterCommandVersion },
+           std::pair { Testing::EncodeFourFieldClusterCommand(), Testing::FourFieldClusterCommandVersion },
            std::pair { Testing::EncodePreviousClusterCommand(), Testing::PreviousClusterCommandVersion } })
     {
         INFO("command version " << static_cast<unsigned>(version));
@@ -611,7 +620,7 @@ TEST_CASE("A command the previous build wrote is refused by its version before i
         REQUIRE_FALSE(refused.has_value());
         CHECK(refused.error().code == ConsensusErrorCode::UnsupportedVersion);
         CHECK(refused.error().context.contains(std::format("version {}", version)));
-        CHECK(refused.error().context.contains("reads 6"));
+        CHECK(refused.error().context.contains("reads 7"));
     }
 }
 
@@ -1140,9 +1149,10 @@ TEST_CASE("The retired cluster verbs keep their bytes and are refused by name", 
     CHECK(byteOf(CommandKind::AddLearner) == 5U);
     CHECK(byteOf(CommandKind::RetiredAdmitPrincipal) == 6U);
     CHECK(static_cast<unsigned>(CommandKind::DissolveInto) == 7U); // the raw enumerator: the anchor
-    // And nothing above it: the next verb is 8, and until then an 8 is a verb this build does
+    CHECK(static_cast<unsigned>(CommandKind::SetDisplayName) == 8U);
+    // And nothing above it: the next verb is 9, and until then a 9 is a verb this build does
     // not know, skipped by name rather than applied as something else.
-    CHECK(static_cast<unsigned>(CommandKind::Last) == 8U);
+    CHECK(static_cast<unsigned>(CommandKind::Last) == 9U);
 
     // Refused by name at BOTH doors a command has. Its bytes, where every committed entry is
     // read -- as the verb it is, retired, never as one this build lacks and never as damage --
@@ -1332,9 +1342,10 @@ TEST_CASE("A member's seat survives a snapshot, and one this build cannot name i
     // The seat BYTE is pinned, not only the symbol: it is persisted, so a renumbering
     // that stayed consistent across this build would read every snapshot a fleet
     // already wrote as the other set. The last member's seat sits just before its key
-    // field -- a four-byte length and the 32-byte key -- which is the state's last field,
-    // since there are no settings or revoked keys.
-    auto const seatAt = bytes.size() - 1 - sizeof(std::uint32_t) - Ed25519PublicKeyBytes;
+    // field -- a four-byte length and the 32-byte key -- and its display name, an empty
+    // field of four length bytes, which is the state's last, since there are no settings
+    // or revoked keys.
+    auto const seatAt = bytes.size() - 1 - sizeof(std::uint32_t) - Ed25519PublicKeyBytes - sizeof(std::uint32_t);
     CHECK(bytes[seatAt] == std::byte { 1 });
     CHECK(static_cast<unsigned>(MemberSeat::Voter) == 0U);
     CHECK(static_cast<unsigned>(MemberSeat::Learner) == 1U);
@@ -1378,14 +1389,17 @@ TEST_CASE("A snapshot holding a member with no identity key, or the all-zero one
     // still can, since the field is a length-prefixed run like every other. A state holding
     // one is not one this build wrote, and read as it stands it would carry a member no forget
     // could revoke -- an address route that outlives every removal. It is refused as
-    // malformed, by name. Built from the bytes: n2's key is the state's last field, since
-    // there are no settings or revoked keys.
+    // malformed, by name. Built from the bytes: n2's key is the state's second-to-last field --
+    // its display name is the last -- since there are no settings or revoked keys.
     ClusterState state;
     Apply(state, Keyed(CommandKind::AddMember, "n1", KeyOf(0x11), "10.0.0.1:6675"));
     Apply(state, Keyed(CommandKind::AddMember, "n2", KeyOf(0x12), "10.0.0.2:6675"));
     auto const keyed = Encode(state);
     auto fields = Unwrap(WireFields::SplitAll(keyed));
-    REQUIRE(fields.back().size() == Ed25519PublicKeyBytes);
+    REQUIRE(fields.size() >= 2);
+    auto& keyOfN2 = fields[fields.size() - 2];
+    REQUIRE(keyOfN2.size() == Ed25519PublicKeyBytes);
+    REQUIRE(fields.back().empty()); // n2's display name: nobody named it
 
     // WHAT DISTINGUISHES: the fields re-encoded as they stand decode, so the emptied key field
     // is the whole cause of the refusal below.
@@ -1395,7 +1409,7 @@ TEST_CASE("A snapshot holding a member with no identity key, or the all-zero one
     for (auto const keyField: { std::span<std::byte const> {}, std::span<std::byte const> { zero } })
     {
         INFO("key field of " << keyField.size() << " bytes");
-        fields.back() = keyField;
+        keyOfN2 = keyField;
         auto const refused = DecodeState(WireFields::Encode(WireFields::FieldList { fields }));
         REQUIRE_FALSE(refused.has_value());
         CHECK(refused.error().code == ConsensusErrorCode::MalformedFrame);
@@ -1792,4 +1806,249 @@ TEST_CASE("The roster version moves with who may vouch for whom, and with nothin
     auto const decoded = DecodeState(Encode(state));
     REQUIRE(decoded.has_value());
     CHECK(Unwrap(decoded).rosterVersion == 6);
+}
+
+// --------------------------------------------------------------------------
+// Display names: a replicated label that decides nothing.
+
+namespace
+{
+/// @param id A member.
+/// @param name What to call it; empty clears.
+/// @return The `SetDisplayName` command.
+[[nodiscard]] Command Named(std::string id, std::string name)
+{
+    return Keyless(CommandKind::SetDisplayName, std::move(id), std::move(name));
+}
+
+/// A state recording voters `n1` and `n2` and learner `n3`, each under its own key and with a scheduler endpoint.
+/// @return The state.
+[[nodiscard]] ClusterState ThreeMembers()
+{
+    ClusterState state;
+    Apply(state, Cmd(CommandKind::AddMember, "n1", "10.0.0.1:6675", "10.0.0.1:6674"));
+    Apply(state, Cmd(CommandKind::AddMember, "n2", "10.0.0.2:6675", "10.0.0.2:6674"));
+    Apply(state, Cmd(CommandKind::AddLearner, "n3", {}, "10.0.0.3:6674"));
+    return state;
+}
+
+/// @param state A state.
+/// @param id A member it records.
+/// @return The member's display name.
+[[nodiscard]] std::string NameOf(ClusterState const& state, std::string_view id)
+{
+    auto const member = std::ranges::find(state.members, id, &ClusterMember::id);
+    REQUIRE(member != state.members.end());
+    return member->displayName;
+}
+
+/// Apply @p command after requiring the proposal be accepted against @p state.
+/// @param state The state.
+/// @param command The change.
+void Accepted(ClusterState& state, Command const& command)
+{
+    auto const allowed = ValidateAgainst(state, command);
+    INFO((allowed.has_value() ? std::string {} : allowed.error().context));
+    REQUIRE(allowed.has_value());
+    Apply(state, command);
+}
+} // namespace
+
+TEST_CASE("The display-name verb keeps its byte", "[cluster][state][wire][display-name]")
+{
+    // Transmitted and persisted: the byte a log entry keeps. Pinned on the raw enumerator.
+    CHECK(static_cast<std::uint8_t>(CommandKind::SetDisplayName) == 8);
+    CHECK(static_cast<std::uint8_t>(CommandKind::Last) == 9);
+}
+
+TEST_CASE("A display name survives a command's encoding and the state's snapshot", "[cluster][state][wire][display-name]")
+{
+    auto state = ThreeMembers();
+    Accepted(state, Named("n1", "office-pc"));
+    // Non-ASCII text a page can carry: "Büro" (C3 BC).
+    Accepted(state, Named("n2", "B\xC3\xBCro"));
+
+    auto const command = Named("n1", "office-pc");
+    auto const decodedCommand = DecodeCommand(Encode(command));
+    REQUIRE(decodedCommand.has_value());
+    CHECK(*decodedCommand == command);
+
+    auto const decoded = DecodeState(Encode(state));
+    REQUIRE(decoded.has_value());
+    CHECK(*decoded == state);
+    CHECK(NameOf(*decoded, "n1") == "office-pc");
+    CHECK(NameOf(*decoded, "n2") == "B\xC3\xBCro");
+    // A member nobody named carries none, and that survives too.
+    CHECK(NameOf(*decoded, "n3").empty());
+
+    // An empty name clears it.
+    Accepted(state, Named("n1", ""));
+    CHECK(NameOf(state, "n1").empty());
+    CHECK(NameOf(Unwrap(DecodeState(Encode(state))), "n1").empty());
+}
+
+TEST_CASE("A display name differing from another member's only in ASCII case is refused, by name",
+          "[cluster][state][display-name]")
+{
+    auto state = ThreeMembers();
+    Accepted(state, Named("n1", "Office-PC"));
+
+    auto const refused = RefusedAgainst(state, Named("n2", "office-pc"));
+    // WHICH refusal: its own code, naming the holder, and never the generic invalid change.
+    CHECK(refused.code == ConsensusErrorCode::DisplayNameTaken);
+    CHECK(refused.context.contains("n1 already answers to"));
+    CHECK(SubjectOf(refused.code) == RefusalSubject::Command);
+
+    // The guarantee as well as the courtesy: two renames judged against one state, the second committed after the
+    // first took the name, is dropped at commit.
+    auto racing = ThreeMembers();
+    REQUIRE(ValidateAgainst(racing, Named("n1", "lab")).has_value());
+    REQUIRE(ValidateAgainst(racing, Named("n2", "LAB")).has_value());
+    Apply(racing, Named("n1", "lab"));
+    Apply(racing, Named("n2", "LAB"));
+    CHECK(NameOf(racing, "n1") == "lab");
+    CHECK(NameOf(racing, "n2").empty());
+
+    // The member being renamed never holds its own name against itself: a case variant of its own name is allowed.
+    Accepted(state, Named("n1", "office-pc"));
+    CHECK(NameOf(state, "n1") == "office-pc");
+
+    // A name spelled like ANOTHER member's id is taken too: ids are matched first wherever a name is resolved, so
+    // the machine carrying it could never be named by it.
+    auto const asId = RefusedAgainst(state, Named("n2", "n3"));
+    CHECK(asId.code == ConsensusErrorCode::DisplayNameTaken);
+    CHECK(asId.context.contains("as its id"));
+}
+
+TEST_CASE("Display names above ASCII compare exactly, byte for byte", "[cluster][state][display-name]")
+{
+    // "Ärger" (C3 84) and "ärger" (C3 A4): one word to a person, two names to an ASCII-only fold -- deliberately, since
+    // folding Unicode would need tables this project does not carry. The ASCII letters beside them still fold.
+    auto state = ThreeMembers();
+    Accepted(state, Named("n1", "\xC3\x84rger"));
+    Accepted(state, Named("n2", "\xC3\xA4rger"));
+    CHECK(NameOf(state, "n2") == "\xC3\xA4rger");
+    CHECK(RefusedAgainst(state, Named("n3", "\xC3\x84RGER")).code == ConsensusErrorCode::DisplayNameTaken);
+}
+
+TEST_CASE("A display name that is not text every surface can render is refused, never repaired",
+          "[cluster][state][display-name]")
+{
+    SECTION("invalid UTF-8 is refused")
+    {
+        // A lone continuation byte, and an overlong '/'.
+        for (auto const& name: { std::string { "box\x80" }, std::string { "\xC0\xAF" } })
+        {
+            CAPTURE(name.size());
+            auto const reason = Refused(Named("n1", name));
+            CHECK(reason.contains("UTF-8"));
+        }
+    }
+    SECTION("a code point XML's Char production excludes is refused, though it is valid UTF-8")
+    {
+        // U+FFFE (EF BF BE) is well-formed UTF-8 and no markup may carry it: the fleet page and its SVG would not parse.
+        CHECK(Refused(Named("n1", "box\xEF\xBF\xBE")).contains("fleet page can carry"));
+    }
+    SECTION("a control byte is refused, the tab and the line break Char admits included")
+    {
+        for (auto const& name: { std::string { "a\tb" }, std::string { "a\nb" }, std::string { "a\x7F" } })
+            CHECK(Refused(Named("n1", name)).contains("control character"));
+    }
+    SECTION("past the byte bound is refused, and at it is accepted")
+    {
+        auto state = ThreeMembers();
+        CHECK(Refused(Named("n1", std::string(MaxDisplayNameBytes + 1, 'x'))).contains("at most 64 bytes"));
+        Accepted(state, Named("n1", std::string(MaxDisplayNameBytes, 'x')));
+    }
+    SECTION("a member the state does not record has nothing to name, and a commit for one is dropped")
+    {
+        auto state = ThreeMembers();
+        auto const refused = RefusedAgainst(state, Named("n9", "ghost"));
+        CHECK(refused.code == ConsensusErrorCode::InvalidConfiguration);
+        CHECK(refused.context.contains("no member"));
+        auto const before = state;
+        Apply(state, Named("n9", "ghost"));
+        CHECK(state == before);
+    }
+    SECTION("a display name carries no key and no scheduler endpoint")
+    {
+        auto keyed = Named("n1", "box");
+        keyed.publicKey = KeyOf(0x11);
+        CHECK(Refused(keyed).contains("carries no public key"));
+        auto withEndpoint = Named("n1", "box");
+        withEndpoint.schedulerEndpoint = "10.0.0.1:6674";
+        CHECK(Refused(withEndpoint).contains("no scheduler endpoint"));
+    }
+}
+
+TEST_CASE("A display name decides nothing: swapping two members' names changes no roster, route or redirect",
+          "[cluster][state][display-name][roster]")
+{
+    // The rule the hostname obeys: no admission, routing, key or redirect reads the name. WHAT DISTINGUISHES is the
+    // SWAP -- the same two labels on the other machines -- so a reader keying anything on a name answers differently.
+    auto named = ThreeMembers();
+    Accepted(named, Named("n1", "alpha"));
+    Accepted(named, Named("n2", "beta"));
+    auto swapped = named;
+    Accepted(swapped, Named("n1", "tmp"));
+    Accepted(swapped, Named("n2", "alpha"));
+    Accepted(swapped, Named("n1", "beta"));
+    REQUIRE(NameOf(swapped, "n1") == "beta");
+    REQUIRE(NameOf(swapped, "n2") == "alpha");
+
+    // Admission reads the roster (every key it holds, every seat), and naming never moved its version.
+    CHECK(ProjectRoster(swapped) == ProjectRoster(named));
+    CHECK(swapped.rosterVersion == named.rosterVersion);
+    CHECK(named.rosterVersion == ThreeMembers().rosterVersion);
+    for (auto const* const id: { "n1", "n2", "n3" })
+    {
+        INFO(id);
+        // Routing and the redirect read the endpoints; identity reads the key; the quorum reads the seat.
+        CHECK(swapped.SchedulerEndpointOf(id) == named.SchedulerEndpointOf(id));
+        CHECK(swapped.RaftEndpointOf(id) == named.RaftEndpointOf(id));
+        CHECK(LiveKeyOf(swapped, id) == LiveKeyOf(named, id));
+        CHECK(RecordedSeatOf(swapped, id) == RecordedSeatOf(named, id));
+        CHECK(swapped.HolderOf(Unwrap(LiveKeyOf(named, id))) == std::optional<std::string> { id });
+    }
+}
+
+TEST_CASE("A re-admission keeps a member's display name, and a forget removes it with the record",
+          "[cluster][state][display-name]")
+{
+    auto state = ThreeMembers();
+    Accepted(state, Named("n2", "build-box"));
+
+    // An announced move and a promotion are re-proposed records stating no name: the name stays.
+    Apply(state, Cmd(CommandKind::AddMember, "n2", "10.0.0.22:6675", "10.0.0.22:6674"));
+    CHECK(NameOf(state, "n2") == "build-box");
+    Apply(state, Keyless(CommandKind::AddLearner, "n2", "10.0.0.22:6675"));
+    CHECK(NameOf(state, "n2") == "build-box");
+
+    // A forget is one act: the record goes, its name with it, and the name is free again.
+    Apply(state, Cmd(CommandKind::Forget, "n2"));
+    CHECK(std::ranges::find(state.members, "n2", &ClusterMember::id) == state.members.end());
+    Accepted(state, Named("n1", "build-box"));
+}
+
+TEST_CASE("A snapshot holding a display name Apply never records is refused rather than half-believed",
+          "[cluster][state][wire][display-name]")
+{
+    auto const decodeWithNames = [](std::string const& first, std::string const& second) {
+        auto state = ThreeMembers();
+        // Written past `Apply`, which is the point: these are bytes a writer `Apply` constrains never produced.
+        state.members[0].displayName = first;
+        state.members[1].displayName = second;
+        return DecodeState(Encode(state));
+    };
+    CHECK(decodeWithNames("alpha", "beta").has_value());
+
+    auto const shared = decodeWithNames("Alpha", "alpha");
+    REQUIRE_FALSE(shared.has_value());
+    CHECK(shared.error().code == ConsensusErrorCode::MalformedFrame);
+    CHECK(shared.error().context.contains("one display name"));
+
+    auto const notText = decodeWithNames("a\nb", "beta");
+    REQUIRE_FALSE(notText.has_value());
+    CHECK(notText.error().code == ConsensusErrorCode::MalformedFrame);
+    CHECK(notText.error().context.contains("display name"));
 }

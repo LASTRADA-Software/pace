@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <Pace/Cli/Duration.hpp>
 #include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Core/AsciiFold.hpp>
 #include <Pace/Core/Ed25519.hpp>
 #include <Pace/Core/EnumTable.hpp>
 #include <Pace/Core/HostPort.hpp>
+#include <Pace/Core/Markup.hpp>
 #include <Pace/Core/Utf8.hpp>
 #include <Pace/Core/WireFields.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
@@ -22,6 +24,8 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+
+#include <core/Ranges.hpp>
 
 namespace Pace::Cluster
 {
@@ -128,7 +132,13 @@ namespace
     /// 6 removed the sixth field, the principal's role, with `AdmitPrincipal` (principal mode is
     /// retired): a v5 entry is a different arrangement, and reading it as this one would take its
     /// creation time for a leader key.
-    constexpr std::uint8_t CommandVersion = 6;
+    ///
+    /// 7 left the layout alone and moved with the state's 11, which gave each member a display name
+    /// (`SetDisplayName`). The new verb alone would not have moved it -- an older build refuses its byte by name -- and
+    /// the move is taken here, once, so the member-record changes this branch lands on top (the per-node budget
+    /// overrides) extend 7 rather than spending a second bump: the version marks one release's arrangement, and a node
+    /// whose own log a 6 wrote refuses to start by name (#1542) as every earlier move made it.
+    constexpr std::uint8_t CommandVersion = 7;
 
     /// Fields in an encoded command: the header, then key, value, scheduler endpoint,
     /// public key, creation time and leader key.
@@ -145,17 +155,18 @@ namespace
     /// 8 removed the client and forgotten-host groups (spec §7): a machine is admitted and
     /// forgotten by its key alone. 9 added the dissolve order a healing split replicates, as a
     /// group of zero or one. 10 removed the principals group and its count (principal mode is
-    /// retired: every machine that joins is a learner member).
-    constexpr std::uint8_t StateVersion = 10;
+    /// retired: every machine that joins is a learner member). 11 added each member's display name, a
+    /// seventh member field.
+    constexpr std::uint8_t StateVersion = 11;
 
     /// Fields one member occupies in an encoded state: id, Raft, scheduler, the
-    /// scheduler endpoint's history, the seat, and the public key.
+    /// scheduler endpoint's history, the seat, the public key, and the display name.
     ///
-    /// Named because the decoder's arithmetic is otherwise six unexplained sixes,
+    /// Named because the decoder's arithmetic is otherwise seven unexplained sevens,
     /// and getting one of them wrong reads every member's scheduler endpoint as the
     /// next member's id -- which decodes, and produces a state nothing would report as
     /// wrong.
-    constexpr std::size_t MemberFields = 6;
+    constexpr std::size_t MemberFields = 7;
 
     /// Fields one setting occupies: name, value.
     constexpr std::size_t SettingFields = 2;
@@ -372,6 +383,40 @@ std::optional<Ed25519PublicKey> LiveKeyOf(ClusterState const& state, std::string
     return member->publicKey;
 }
 
+std::optional<std::string> RefuseDisplayName(std::string_view name)
+{
+    if (name.size() > MaxDisplayNameBytes)
+        return std::format(
+            "a display name is at most {} bytes, and this one is {}; a shorter label still tells the machine apart",
+            MaxDisplayNameBytes,
+            name.size());
+    // Where, never the bytes themselves: what follows is not text a terminal can be trusted with.
+    if (auto const at = FirstUncarriableByte(name); at.has_value())
+        return std::format("a display name must be UTF-8 text the fleet page can carry, and byte {} of this one is not",
+                           *at);
+    // The `Char` production admits a tab and a line break; a table row and a log line do not.
+    auto const* const control = core::findIfOrNull(name, [](char ch) {
+        auto const byte = static_cast<unsigned char>(ch);
+        return byte < 0x20U || byte == 0x7FU;
+    });
+    if (control != nullptr)
+        return std::format("a display name carries no control character, and byte {} of this one is one",
+                           control - name.data());
+    return std::nullopt;
+}
+
+std::optional<std::string> DisplayNameHolder(ClusterState const& state, std::string_view name, std::string_view except)
+{
+    for (auto const& member: state.members)
+    {
+        if (member.id == except)
+            continue;
+        if (member.id == name || AsciiFoldEquals(member.displayName, name))
+            return member.id;
+    }
+    return std::nullopt;
+}
+
 std::vector<std::byte> Encode(Command const& command)
 {
     auto const header = std::array { static_cast<std::byte>(CommandVersion), static_cast<std::byte>(command.kind) };
@@ -513,6 +558,7 @@ std::vector<std::byte> Encode(ClusterState const& state)
         fields.push_back(cursor.first(1));
         fields.push_back(cursor.subspan(1, 1));
         fields.emplace_back(member.publicKey);
+        fields.push_back(WireFields::AsBytes(member.displayName));
         cursor = cursor.subspan(2);
     }
     for (auto const& setting: state.settings)
@@ -622,7 +668,13 @@ std::expected<ClusterState, ConsensusError> DecodeState(std::span<std::byte cons
                                       .schedulerEndpoint = at(index + 2),
                                       .schedulerEndpointHistory = *history,
                                       .seat = *seat,
-                                      .publicKey = **publicKey };
+                                      .publicKey = **publicKey,
+                                      .displayName = at(index + 6) };
+
+        // A name `Apply` would never have recorded -- not text a page can carry, too long, a control byte -- is read
+        // as it stands by every renderer, so it is refused here rather than half-believed, as the roster's rules are.
+        if (auto const refused = RefuseDisplayName(member.displayName); refused.has_value())
+            return std::unexpected(MalformedWireFrame(std::format("member {}'s display name: {}", member.id, *refused)));
 
         // The one combination `Apply` never produces. Read as it stands it would be a
         // member holding an endpoint it reports never having announced, and every
@@ -668,6 +720,13 @@ std::expected<ClusterState, ConsensusError> DecodeState(std::span<std::byte cons
 
     if (auto const broken = BrokenRosterRule(state); broken.has_value())
         return std::unexpected(MalformedWireFrame(*broken));
+    // And two members answering to one name, which `Apply` drops (`DisplayNameHolder`): a resolver would have to pick
+    // which machine a person meant.
+    for (auto const& member: state.members)
+        if (!member.displayName.empty())
+            if (auto const holder = DisplayNameHolder(state, member.displayName, member.id); holder.has_value())
+                return std::unexpected(
+                    MalformedWireFrame(std::format("members {} and {} answer to one display name", member.id, *holder)));
     return state;
 }
 
@@ -740,7 +799,10 @@ namespace
                                     .seat = SeatAdmittedBy(command.kind).value_or(MemberSeat::Voter),
                                     // No opinion keeps what is recorded: a machine that moves
                                     // keeps its identity, and only `Forget` takes one away.
-                                    .publicKey = *key };
+                                    .publicKey = *key,
+                                    // Kept, never restated: no admission carries a name, and the
+                                    // next announced endpoint would otherwise wipe one an operator set.
+                                    .displayName = it != state.members.end() ? it->displayName : std::string {} };
                 if (it != state.members.end())
                 {
                     // Wholesale, both endpoints. A record is re-proposed only when it has
@@ -807,6 +869,18 @@ namespace
                                                       .createdAtUnixSeconds = *command.createdAtUnixSeconds,
                                                       .leaderKey = *command.leaderKey };
                 return;
+
+            case CommandKind::SetDisplayName: {
+                // Dropped when the member is gone, or the name was taken since the command was judged --
+                // `ValidateAgainst`'s rule, through the same function, for two renames judged against one state.
+                auto const it = std::ranges::find(state.members, command.key, &ClusterMember::id);
+                if (it == state.members.end())
+                    return;
+                if (!command.value.empty() && DisplayNameHolder(state, command.value, command.key).has_value())
+                    return;
+                it->displayName = command.value;
+                return;
+            }
 
             case CommandKind::SetSetting: {
                 auto const it = std::ranges::find(state.settings, command.key, &Setting::name);
@@ -945,6 +1019,13 @@ namespace
         { .name = "a cluster setting's value", .project = [](Command const& c) -> std::string_view { return c.value; } },
     } };
 
+    /// What `SetDisplayName` records: the member it names, and the name -- which `Validate` then holds to
+    /// `RefuseDisplayName`'s stricter rule.
+    constexpr std::array<TextField<Command>, 2> DisplayNameText { {
+        { .name = "a member id", .project = [](Command const& c) -> std::string_view { return c.key; } },
+        { .name = "a member's display name", .project = [](Command const& c) -> std::string_view { return c.value; } },
+    } };
+
     /// What `DissolveInto` records: the survivor's id and its leader's endpoint, which every member
     /// then dials and every renderer of the state prints.
     constexpr std::array<TextField<Command>, 2> DissolveText { {
@@ -1031,6 +1112,12 @@ namespace
           .publicKey = FieldUse::Required,
           .createdAt = FieldUse::Required,
           .leaderKey = FieldUse::Required },
+        { .kind = CommandKind::SetDisplayName,
+          .noun = "a display name",
+          .fields = DisplayNameText,
+          .publicKey = FieldUse::Refused,
+          .createdAt = FieldUse::Refused,
+          .leaderKey = FieldUse::Refused },
     } };
 
     static_assert(RowsInEnumeratorOrder(CommandShapes, &CommandShapeRow::kind),
@@ -1178,6 +1265,19 @@ std::expected<void, ConsensusError> Validate(Command const& command)
                 return std::unexpected(InvalidConfiguration("a dissolve names a leader endpoint nobody can dial"));
             return {};
 
+        // The name a person reads on every surface, so held to the rule every surface can render
+        // (`RefuseDisplayName`), and the id to the one id bound.
+        case CommandKind::SetDisplayName:
+            if (!command.schedulerEndpoint.empty())
+                return std::unexpected(InvalidConfiguration("a display name carries no scheduler endpoint"));
+            if (command.key.size() > CompileCacheWire::MaxIdBytes)
+                return std::unexpected(InvalidConfiguration(
+                    std::format("a display name names a member id past the {} bytes every id is held to",
+                                CompileCacheWire::MaxIdBytes)));
+            if (auto reason = RefuseDisplayName(command.value); reason.has_value())
+                return std::unexpected(InvalidConfiguration(*std::move(reason)));
+            return {};
+
         // The count rather than a verb; falls out to the refusal below.
         case CommandKind::Last:
             break;
@@ -1280,6 +1380,28 @@ std::expected<void, ConsensusError> ValidateAgainst(ClusterState const& state, C
 
         case CommandKind::DissolveInto:
             return {};
+
+        case CommandKind::SetDisplayName: {
+            // A member the state does not record has nothing to name: `Apply` would drop it, so it is refused where an
+            // operator reads the answer.
+            if (std::ranges::find(state.members, command.key, &ClusterMember::id) == state.members.end())
+                return std::unexpected(InvalidConfiguration(
+                    std::format("{} is no member of this cluster, so there is nothing to name; the members are listed by "
+                                "--cluster-status",
+                                command.key)));
+            if (command.value.empty())
+                return {};
+            if (auto const holder = DisplayNameHolder(state, command.value, command.key); holder.has_value())
+                return std::unexpected(DisplayNameTaken(std::format(
+                    "{} already answers to \"{}\"{} -- names are compared with ASCII letters folded to one case -- so it "
+                    "cannot also be {}'s; rename {} first, or choose another name",
+                    *holder,
+                    command.value,
+                    *holder == command.value ? " as its id" : "",
+                    command.key,
+                    *holder)));
+            return {};
+        }
 
         // `Validate` refused them above; named rather than swept up by a `default`, for the
         // reason `Apply` names it.

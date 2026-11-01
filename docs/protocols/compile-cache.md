@@ -277,6 +277,25 @@ both clear by themselves, so asking again shortly helps. A node running no worke
 `dispatch-not-permitted`. No request ever starts a walk: a node answers from what its survey and
 its one capture walk recorded.
 
+### MEMBER-EDIT
+
+`0x26`, three fields: the **edit** (one byte), the member's **id**, and the edit's **value**. An operator's
+control verb, answered by the leader -- any other node answers `not-leader` naming it, as for `CLUSTER-SET` -- and
+only to a caller with an operator's standing (`identified-caller-required` for a caller only `--fleet-open`
+admits, `operator-standing-required` for a learner's ticket or key). `Ok` and empty: the change is
+**appended, not committed**.
+
+| Edit | Byte | Value |
+| --- | --- | --- |
+| set-display-name | `0x00` | The member's display name, at most 64 bytes of UTF-8 a fleet page can carry and no control byte; empty clears it. |
+
+An edit byte this build does not know is refused `invalid-cluster-change`, naming the byte, never read as another
+edit. A display name decides nothing -- no admission, route, key or redirect reads it -- and is unique across the
+members, compared with ASCII letters folded to one case and every other byte exactly; a name spelled like another
+member's id is taken too. A taken name is refused `invalid-cluster-change`, naming the member that holds it.
+`pacectl cluster-name <member-id> [<name>]`, `pace-node --cluster-name=<id>=<name>` and the MCP
+`set_display_name` tool all send this verb.
+
 ### FLEET-SUMMARY
 
 ```
@@ -362,9 +381,9 @@ heartbeats the same machine-wide in-flight count, so the entries fill up togethe
 and the pool behaves as one rather than advertising N times the machine.
 
 `REGISTER`, `HEARTBEAT`, `LEASE` and `RELEASE` go to the scheduler, along with the
-four cluster-administration verbs (`CLUSTER-STATUS` `0x08`, `CLUSTER-SET` `0x09`,
-`CLUSTER-FORGET` `0x0a`, `CLUSTER-ADMIT` `0x0b`), which the **leader** answers and
-only to a member. `COMPILE` goes to a worker on the **same** `--listen-node` port
+cluster-administration verbs (`CLUSTER-STATUS` `0x08`, `CLUSTER-SET` `0x09`,
+`CLUSTER-FORGET` `0x0a`, `CLUSTER-ADMIT` `0x0b`, [`MEMBER-EDIT`](#member-edit) `0x26`),
+which the **leader** answers and only to a member. `COMPILE` goes to a worker on the **same** `--listen-node` port
 that carries its cache verbs and, where the node's mode serves them, the scheduler's:
 [#290](https://github.com/LASTRADA-Software/pace/issues/290) merged what were
 three ports into one `0xFC` surface, so the listener is no longer the policy. Which

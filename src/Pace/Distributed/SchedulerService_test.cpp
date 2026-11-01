@@ -2439,6 +2439,63 @@ TEST_CASE("The two verbs that share Offer answer exactly as they did", "[distrib
     CHECK_FALSE(admit.payload.empty());
 }
 
+TEST_CASE("A member edit proposes the command its verb names, and is refused as the state refuses it",
+          "[distributed][scheduler][member-edit][display-name]")
+{
+    // MEMBER-EDIT through `Offer`, the door every cluster control verb shares: the leader proposes the replicated
+    // command, and `ValidateAgainst` is the refusal the operator reads -- a taken name included, by name.
+    Admitting fleet;
+    Cluster::Apply(fleet.cluster.state,
+                   Cluster::Command { .kind = Cluster::CommandKind::AddMember,
+                                      .key = "node-a",
+                                      .value = "10.0.0.1:6675",
+                                      .schedulerEndpoint = {},
+                                      .publicKey = Testing::TestKeyPair("node-a").PublicKey() });
+    Cluster::Apply(fleet.cluster.state,
+                   Cluster::Command { .kind = Cluster::CommandKind::AddMember,
+                                      .key = "node-b",
+                                      .value = "10.0.0.2:6675",
+                                      .schedulerEndpoint = {},
+                                      .publicKey = Testing::TestKeyPair("node-b").PublicKey() });
+    Cluster::Apply(fleet.cluster.state,
+                   Cluster::Command { .kind = Cluster::CommandKind::SetDisplayName,
+                                      .key = "node-a",
+                                      .value = "Office",
+                                      .schedulerEndpoint = {},
+                                      .publicKey = std::nullopt });
+    auto constexpr SetName = static_cast<std::uint8_t>(Wire::MemberEditVerb::SetDisplayName);
+
+    auto const named = fleet.Service().MemberEdit(Insider, SetName, "node-b", "build-box");
+    REQUIRE(named.status == Wire::Status::Ok);
+    CHECK(named.payload.empty());
+    REQUIRE(fleet.cluster.proposed.size() == 1);
+    CHECK(fleet.cluster.proposed[0].kind == Cluster::CommandKind::SetDisplayName);
+    CHECK(fleet.cluster.proposed[0].key == "node-b");
+    CHECK(fleet.cluster.proposed[0].value == "build-box");
+
+    // Taken, compared with ASCII letters folded: refused before anything is proposed, naming the holder.
+    auto const taken = fleet.Service().MemberEdit(Insider, SetName, "node-b", "office");
+    REQUIRE(taken.status == Wire::Status::Error);
+    CHECK(taken.error == Wire::ErrorCode::InvalidClusterChange);
+    CHECK(taken.message.contains("node-a already answers to"));
+    CHECK(fleet.cluster.proposed.size() == 1);
+
+    // An edit this build does not know is refused by name, never read as the edit its byte aliases.
+    auto const unknown =
+        fleet.Service().MemberEdit(Insider, static_cast<std::uint8_t>(Wire::MemberEditVerb::Last), "node-b", "x");
+    REQUIRE(unknown.status == Wire::Status::Error);
+    CHECK(unknown.error == Wire::ErrorCode::InvalidClusterChange);
+    CHECK(unknown.message.contains("member-edit verb 1"));
+    CHECK(fleet.cluster.proposed.size() == 1);
+
+    // A follower answers as it does for every control verb: `NotLeader`, naming the leader to redirect to.
+    fleet.cluster.refusal = Pace::NotLeader(std::string { "10.0.0.1:6674" });
+    auto const follower = fleet.Service().MemberEdit(Insider, SetName, "node-b", "lab");
+    REQUIRE(follower.status == Wire::Status::Error);
+    CHECK(follower.error == Wire::ErrorCode::NotLeader);
+    CHECK(follower.message == "10.0.0.1:6674");
+}
+
 TEST_CASE("An admission proposes the verb its seat names, and no opinion keeps the recorded seat",
           "[distributed][scheduler][cluster-admit][learner]")
 {

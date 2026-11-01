@@ -1122,7 +1122,7 @@ every other node answers those verbs `not-shared-cache` (see [the named
 machine](#the-named-machine)).
 
 "Fleet" here is what the scheduler **serves** -- a lease, a status. What **decides** the fleet --
-`--cluster-admit` in every form, `--cluster-forget`, `--cluster-set`, and the enrollment decisions
+`--cluster-admit` in every form, `--cluster-forget`, `--cluster-set`, `--cluster-name`, and the enrollment decisions
 (`--enroll-approve`, `--enroll-reject`, auto-approval, the list) -- is answered only to a caller
 with an operator's standing: a process on this machine, or a **voter** of the cluster, by its
 proven key or the machine ticket its node mints. A caller that only `--fleet-open` admits is
@@ -2038,8 +2038,16 @@ pace-node --scheduler=10.0.0.1:6675 --cluster-status
 pace-node --scheduler=10.0.0.1:6675 --cluster-set=fleet-open=1
 pace-node --scheduler=10.0.0.1:6675 --cluster-admit=n4=10.0.0.4:6680
 pace-node --scheduler=10.0.0.1:6675 --cluster-admit-learner=laptop=10.0.0.9:6680
+pace-node --scheduler=10.0.0.1:6675 --cluster-name=n4=build-box
 pace-node --scheduler=10.0.0.1:6675 --cluster-forget=n3
 ```
+
+`--cluster-name=<id>=<name>` gives a member a **display name** -- `--cluster-name=<id>=` clears it -- which every
+node, the fleet page (`name`, with `name-source` saying `replicated` or `self-reported`), `pacectl` and every MCP
+answer show, and which MCP tools accept wherever they accept a node id. A label that decides nothing: no admission,
+route, key or redirect reads it. At most 64 bytes of UTF-8 with no control byte, and unique across the members with
+ASCII letters compared in one case; the leader refuses a taken one, naming the member that holds it. A re-admission
+keeps it, and `--cluster-forget` removes it with the record.
 
 `--cluster-status` prints the members — each with the `seat` it was admitted into,
 `voter` or `learner` (see [admitting a learner](#a-machine-that-is-usually-away-admitting-a-learner))

@@ -313,6 +313,42 @@ TEST_CASE("a prefix of an id is not a match", "[mcp][node-status][node-name]")
     CHECK(upstream.calls.size() == 1);
 }
 
+TEST_CASE("node_status resolves a member by its display name and names it by id and display name",
+          "[mcp][node-status][node-name][display-name]")
+{
+    auto upstream = NodeUpstream();
+    auto state = StateOf({ std::string_view { SelfId }, "node-beta" });
+    state.members[0].displayName = "my-laptop";
+    state.members[1].displayName = "build-box";
+    FixedCluster const cluster { state };
+    upstream.AnswerOk(Wire::EncodeNodeStatus(EveryDetail()));
+
+    // Exactly: the display name resolves to the id asked; another case of it names nobody.
+    auto const byName = CallNodeStatus(upstream, cluster, R"({"node":"build-box"})");
+    REQUIRE_FALSE(byName.isError);
+    REQUIRE(upstream.calls.size() == 1);
+    CHECK(upstream.calls.front().nodeIdOrEmpty == "node-beta");
+    CHECK(*At(byName.structured, "node").AsString() == "build-box");
+    CHECK(*At(byName.structured, "display_name").AsString() == "build-box");
+
+    auto const otherCase = CallNodeStatus(upstream, cluster, R"({"node":"Build-Box"})");
+    CHECK(otherCase.isError);
+    CHECK(upstream.calls.size() == 1);
+
+    // This node, asked by default, is named by the display name the cluster records for it.
+    auto const self = CallNodeStatus(upstream, cluster);
+    REQUIRE_FALSE(self.isError);
+    CHECK(*At(self.structured, "display_name").AsString() == "my-laptop");
+
+    // And a member nobody named carries a null, never an empty string or its id.
+    auto unnamed = state;
+    unnamed.members[1].displayName.clear();
+    FixedCluster const plain { unnamed };
+    auto const nameless = CallNodeStatus(upstream, plain, R"({"node":"node-beta"})");
+    REQUIRE_FALSE(nameless.isError);
+    CHECK(At(nameless.structured, "display_name").IsNull());
+}
+
 TEST_CASE("absent tier renders absent", "[mcp][node-status][node-status-detail]")
 {
     auto upstream = NodeUpstream();

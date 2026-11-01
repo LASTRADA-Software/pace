@@ -4,6 +4,7 @@
 #include "McpActionTools.hpp"
 #include "McpToolSupport.hpp"
 
+#include <Pace/Cluster/ClusterState.hpp>
 #include <Pace/Core/Ed25519.hpp>
 #include <Pace/Core/EnumTable.hpp>
 #include <Pace/Core/PeerText.hpp>
@@ -464,6 +465,56 @@ namespace
                                   Provenance(*reply)));
     }
 
+    // ------------------------------------------------------------ set_display_name
+
+    constexpr std::array DisplayNameArguments { std::string_view { "node" }, std::string_view { "name" } };
+
+    [[nodiscard]] Mcp::ToolResult SetDisplayName(ActionContext const& context, Mcp::ToolCall const& call)
+    {
+        if (auto unknown = UnknownArgument(call, DisplayNameArguments); unknown.has_value())
+            return std::move(*unknown);
+        // REQUIRED, unlike a read's `node`: renaming is a decision about one machine, and a rename that fell back to
+        // this node because the argument was forgotten would rename a machine nobody named.
+        if (call.arguments.Find("node") == nullptr)
+            return Error("`node` must name the member to rename: its id or its current display name, matched exactly");
+        auto target = NodeTargetOf(call, *context.cluster, context.selfId);
+        if (!target.has_value())
+            return std::move(target.error());
+        auto const nodeId = target->nodeId.empty() ? context.selfId : target->nodeId;
+        if (nodeId.empty())
+            return Error("this node has no id, so it cannot name itself; give `node` as a member's id");
+
+        auto const* const nameValue = call.arguments.Find("name");
+        auto const* const name = nameValue != nullptr ? nameValue->AsString() : nullptr;
+        if (name == nullptr)
+            return Error(R"(`name` must be a string: the display name, or "" to clear it)");
+        // The leader's own rule, asked here so a name no member may carry is refused before anything is sent -- and
+        // never a second copy of it that could refuse what the leader accepts.
+        if (auto const refused = Cluster::RefuseDisplayName(*name); refused.has_value())
+            return Error(std::format("`name` cannot be a display name: {}", *refused));
+
+        auto reply = Ask(context,
+                         UpstreamTarget::Leader,
+                         Wire::EncodeMemberEdit(Wire::MemberEditRequest {
+                             .verb = Wire::MemberEditVerb::SetDisplayName, .memberId = nodeId, .value = *name }),
+                         "member-edit");
+        if (!reply.has_value())
+            return std::move(reply.error());
+        Audit(context, call, "set_display_name", { { "node", Str(nodeId) }, { "name", Str(*name) } }, *reply);
+
+        auto result = Envelope(*reply);
+        result.emplace_back("node_id", Str(nodeId));
+        result.emplace_back("display_name", name->empty() ? Null() : Str(*name));
+        result.emplace_back("state", Str("replicating"));
+        // Appended, never committed: the leader cannot know the difference until a majority answers.
+        return Answer(std::move(result),
+                      std::format("{}: the leader appended the change, which is replicating (not yet committed); read "
+                                  "`fleet_overview` to see it in force; {}",
+                                  name->empty() ? std::format("{}'s display name cleared", nodeId)
+                                                : std::format("{} named \"{}\"", nodeId, *name),
+                                  Provenance(*reply)));
+    }
+
     // ------------------------------------------------------------ explain_admission
 
     constexpr std::array ExplainArguments { std::string_view { "machine" } };
@@ -572,6 +623,26 @@ namespace
               R"("oneOf":[{"required":["minutes"]},{"required":["off"]}],"additionalProperties":false})";
         return schema;
     }
+
+    /// @return `set_display_name`'s input schema, its byte bound taken from `Cluster::MaxDisplayNameBytes`.
+    [[nodiscard]] std::string_view DisplayNameInput()
+    {
+        static std::string const schema =
+            R"({"type":"object","properties":{)"
+            R"("node":{"type":"string","description":"The member to rename: its id or its current display name, matched exactly -- never by prefix."},)"
+            R"("name":{"type":"string","description":"The new display name, at most )"
+            + std::to_string(Cluster::MaxDisplayNameBytes)
+            + R"( bytes of text with no control character; \"\" clears it. Unique across the fleet, with ASCII letters compared in one case."}},)"
+              R"("required":["node","name"],"additionalProperties":false})";
+        return schema;
+    }
+
+    constexpr std::string_view DisplayNameOutput =
+        R"({"type":"object","required":["answered_by","term","term_scope","node_id","display_name","state"],"properties":{)"
+        R"("answered_by":{"type":"string"},"term":{"type":["integer","null"]},"term_scope":{"const":"this-node"},)"
+        R"("node_id":{"type":"string","description":"The member renamed, by its id."},)"
+        R"("display_name":{"type":["string","null"],"description":"The name asked for; null when it was cleared."},)"
+        R"("state":{"const":"replicating","description":"Appended at the leader, not yet committed."}}})";
 
     constexpr std::string_view CordonInput =
         R"({"type":"object","properties":{)"
@@ -688,6 +759,21 @@ std::vector<Mcp::ToolRow> ActionTools(IMcpUpstream& upstream,
             .outputSchema = AutoApproveOutput,
             .effect = Mcp::ToolEffect::Mutating,
             .handler = [context](Mcp::ToolCall const& call) { return EnrollmentAutoApprove(context, call); },
+        },
+        Mcp::ToolRow {
+            .name = "set_display_name",
+            .title = "Set display name",
+            .description = "Give a member a display name every surface shows -- the fleet page, pacectl, every MCP "
+                           "answer -- or clear it with an empty `name`. Replicated: the leader proposes it, and every "
+                           "node agrees. A label that decides nothing: no admission, route, key or redirect reads it. "
+                           "Unique across the fleet, compared with ASCII letters folded to one case (other bytes "
+                           "exactly). Tools accept the name wherever they accept a node id. Needs this node to hold an "
+                           "operator's standing at the leader (a voter's seat, or being the leader). The same change "
+                           "as `pacectl cluster-name` and `pace-node --cluster-name`.",
+            .inputSchema = DisplayNameInput(),
+            .outputSchema = DisplayNameOutput,
+            .effect = Mcp::ToolEffect::Mutating,
+            .handler = [context](Mcp::ToolCall const& call) { return SetDisplayName(context, call); },
         },
         Mcp::ToolRow {
             .name = "cordon",

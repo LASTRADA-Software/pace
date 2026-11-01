@@ -22,6 +22,14 @@ inline constexpr std::uint8_t PreviousClusterStateVersion = 8;
 /// principal mode retired holds on disk.
 inline constexpr std::uint8_t PrincipalEraClusterStateVersion = 9;
 
+/// The `ClusterState` version the last build before member display names wrote: SIX fields per member where this
+/// build writes seven. What the one installation holds on disk before this build.
+inline constexpr std::uint8_t NamelessClusterStateVersion = 10;
+
+/// The `Command` version the last build before member display names wrote: this build's seven-field layout under the
+/// version the state's display names moved past.
+inline constexpr std::uint8_t NamelessClusterCommandVersion = 6;
+
 /// The `Command` version the build before the replicated dissolve wrote: six fields, no age.
 inline constexpr std::uint8_t PreviousClusterCommandVersion = 4;
 
@@ -119,6 +127,60 @@ inline constexpr std::uint8_t FourFieldClusterCommandVersion = 2;
                                 WireFields::AsBytes(std::string_view { "w9" }),
                                 std::span<std::byte const> { principalKey },
                                 std::span<std::byte const> { workerRole } });
+}
+
+/// A one-member cluster state, encoded as the last build before member display names laid it out.
+///
+/// For `EncodePreviousClusterState`'s reason: version 10 wrote this build's six header fields and SIX fields per
+/// member -- no display name -- so a decoder that judged the arity before the version would call an intact snapshot
+/// damage, and one that read the fields first would take the next member's id for this one's name.
+///
+/// Member `n1` at `10.0.0.1:6675`, a voter that never announced a scheduler endpoint, keyed `0x11`; no setting, no
+/// revoked key, no dissolve order.
+/// @return The encoded state.
+[[nodiscard]] inline std::vector<std::byte> EncodeNamelessClusterState()
+{
+    auto const count = [](std::uint32_t value) {
+        auto const bytes = WireFields::ToBigEndian<std::uint32_t>(value);
+        return std::vector<std::byte> { bytes.begin(), bytes.end() };
+    };
+    auto const version = std::array { std::byte { NamelessClusterStateVersion } };
+    auto const one = count(1);
+    auto const none = count(0);
+    auto const rosterVersionBytes = WireFields::ToBigEndian<std::uint64_t>(1);
+    auto const rosterVersion = std::vector<std::byte> { rosterVersionBytes.begin(), rosterVersionBytes.end() };
+    auto const neverAnnounced = std::array { std::byte { 0 } };
+    auto const voter = std::array { std::byte { 0 } };
+    auto memberKey = std::vector<std::byte>(32);
+    std::ranges::fill(memberKey, std::byte { 0x11 });
+    return WireFields::Encode({ std::span<std::byte const> { version },
+                                std::span<std::byte const> { one },  // members
+                                std::span<std::byte const> { none }, // settings
+                                std::span<std::byte const> { none }, // revoked keys
+                                std::span<std::byte const> { rosterVersion },
+                                std::span<std::byte const> { none }, // dissolve orders
+                                WireFields::AsBytes(std::string_view { "n1" }),
+                                WireFields::AsBytes(std::string_view { "10.0.0.1:6675" }),
+                                WireFields::AsBytes(std::string_view {}),
+                                std::span<std::byte const> { neverAnnounced },
+                                std::span<std::byte const> { voter },
+                                std::span<std::byte const> { memberKey } }); // no display name
+}
+
+/// A command forgetting member `n1`, encoded as the last build before member display names wrote it: seven fields,
+/// this build's layout, under version 6. What a node's own log holds before this build, which it refuses to start on
+/// by name (#1542).
+/// @return The encoded command.
+[[nodiscard]] inline std::vector<std::byte> EncodeNamelessClusterCommand()
+{
+    auto const header = std::array { std::byte { NamelessClusterCommandVersion }, std::byte { 1 } };
+    return WireFields::Encode({ std::span<std::byte const> { header },
+                                WireFields::AsBytes(std::string_view { "n1" }),
+                                WireFields::AsBytes(std::string_view {}),
+                                WireFields::AsBytes(std::string_view {}),
+                                std::span<std::byte const> {},    // no key
+                                std::span<std::byte const> {},    // no creation time
+                                std::span<std::byte const> {} }); // no leader key
 }
 
 /// A command forgetting member `n1`, encoded as the build before the replicated dissolve wrote it.

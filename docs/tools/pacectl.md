@@ -142,7 +142,7 @@ the help renders `Verbs()` grouped by `WireSpec::heading`, and
 | Read (memcached) | `gat`, `gats`, `inspect`, `mc-stats` |
 | Write (memcached) | `touch`, `add`, `replace`, `append`, `prepend`, `cas`, `cache-memlimit` |
 | Node (`0xFC`) | `node`, `node-conditions`, `node-metrics`, `fleet`, `cordon`, `uncordon`, `explain-admission` |
-| Cluster (`0xFC`) | `cluster-members`, `cluster-settings`, `cluster-set`, `cluster-forget`, `cluster-admit`, `cluster-admit-learner` |
+| Cluster (`0xFC`) | `cluster-members`, `cluster-settings`, `cluster-set`, `cluster-name`, `cluster-forget`, `cluster-admit`, `cluster-admit-learner` |
 
 ### The fleet verb
 
@@ -260,6 +260,11 @@ says which: `announced`, `never-announced` (a member that has announced none, su
 as a bootstrap peer before its first announcement), or `cleared` (a record re-proposed
 with none wiped the endpoint it had; it returns when that member next announces).
 
+`name` is the member's **display name**, absent when nobody named it: a label an operator chose with
+`cluster-name <member-id> [<name>]` (no name clears it), replicated so every node, the fleet page and every MCP
+answer show the same one, and deciding nothing -- no admission, route or key reads it. It is unique across the
+members, compared with ASCII letters folded to one case; the leader refuses a taken one, naming who holds it.
+
 `seat` is `voter` or `learner`: the set the member was **admitted into**, which is
 the record the leader moves consensus towards one change at a time. A learner is
 replicated to and counted by no quorum, and never stands for election, so a machine
@@ -279,7 +284,7 @@ scheduler endpoint — every member's record carries the endpoint its join state
 moves when it announces a new one — so that cell reads as absent rather than as an
 address nothing answers at.
 
-Two of the three changing verbs report **accepted**, never committed. The leader
+Every changing verb but `cluster-admit` reports **accepted**, never committed. The leader
 cannot know the difference until a majority answers.
 
 `cluster-admit` reports more, and the extra is deliberate rather than a courtesy.
@@ -320,7 +325,7 @@ settles — so the symptom points at consensus rather than at the character that
 mistyped, and one address costs an afternoon.
 
 The same verbs are also spelled `pace-node --cluster-status`,
-`--cluster-set`, `--cluster-forget`, `--cluster-admit` and `--cluster-admit-learner`. Either works:
+`--cluster-set`, `--cluster-name`, `--cluster-forget`, `--cluster-admit` and `--cluster-admit-learner`. Either works:
 the node's verbs ask this machine's own node unless `--scheduler` names another, and a node
 that serves is refused `--scheduler`, so it never ends up in a unit file.
 

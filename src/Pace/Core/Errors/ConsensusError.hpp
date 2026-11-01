@@ -44,6 +44,15 @@ enum class ConsensusErrorCode : std::uint8_t
     /// `SchedulerService`'s `WireCodeFor`, which fails the build until it has a row.
     KeyRevoked,
 
+    /// The command would give a member a display name another member already carries, compared with ASCII-only case
+    /// folding (`Cluster::DisplayNameHolder`).
+    ///
+    /// Its own code rather than `InvalidConfiguration`, so the producer states WHICH rule refused rather than a sentence
+    /// alone: a name is a label that decides nothing, and an operator renaming a machine is told that the label is in
+    /// use, by whom, rather than that the change is malformed. A COMMAND in `RefusalSubjects`: the same command is
+    /// refused identically until somebody renames the holder, which nothing re-offering it would do.
+    DisplayNameTaken,
+
     NotLeader,      ///< Only a leader may accept a proposal; see `knownLeader`.
     StorageFailure, ///< Durable state could not be written or read back.
 
@@ -137,6 +146,8 @@ inline constexpr EnumTable<ConsensusErrorCode, RefusalSubjectRow> RefusalSubject
     // shortened, so the command is refused identically at every future instant. A caller
     // re-offering it next interval would be the #159 trap; skipping it is right.
     { .code = ConsensusErrorCode::KeyRevoked, .subject = RefusalSubject::Command },
+    // About the command: refused identically until the holder is renamed, which no re-offer does.
+    { .code = ConsensusErrorCode::DisplayNameTaken, .subject = RefusalSubject::Command },
     { .code = ConsensusErrorCode::NotLeader, .subject = RefusalSubject::Moment },
     { .code = ConsensusErrorCode::StorageFailure, .subject = RefusalSubject::Moment },
     // About this NODE, like `StorageFailure`: it refuses the node's start, so no
@@ -248,6 +259,16 @@ struct ConsensusError
 [[nodiscard]] inline ConsensusError KeyRevoked(std::string_view context)
 {
     return ConsensusError { .code = ConsensusErrorCode::KeyRevoked,
+                            .context = std::string { context },
+                            .knownLeader = std::nullopt };
+}
+
+/// Build a `DisplayNameTaken` error.
+/// @param context Which name, which member holds it, and what to do instead.
+/// @return The error.
+[[nodiscard]] inline ConsensusError DisplayNameTaken(std::string_view context)
+{
+    return ConsensusError { .code = ConsensusErrorCode::DisplayNameTaken,
                             .context = std::string { context },
                             .knownLeader = std::nullopt };
 }

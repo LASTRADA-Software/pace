@@ -378,6 +378,8 @@ TEST_CASE("mcp-action: learner standing refusal message", "[node][mcp][mcp-actio
                          std::format(R"({{"node_id":"n4","public_key":"{}"}})", key) },
              std::pair { std::string_view { "enrollment_reject" }, std::string { R"({"node_id":"n4"})" } },
              std::pair { std::string_view { "enrollment_auto_approve" }, std::string { R"({"minutes":5})" } },
+             // A learner asking the leader to rename a member: the refusal the leader's OperatorStanding gate answers.
+             std::pair { std::string_view { "set_display_name" }, std::string { R"({"node":"node-b","name":"lab"})" } },
          })
     {
         CAPTURE(tool);
@@ -496,6 +498,7 @@ TEST_CASE("mcp-action: tools/list shows readOnlyHint false on every action", "[n
         { .name = "enrollment_approve", .readOnly = false, .destructive = false },
         { .name = "enrollment_reject", .readOnly = false, .destructive = true },
         { .name = "enrollment_auto_approve", .readOnly = false, .destructive = false },
+        { .name = "set_display_name", .readOnly = false, .destructive = false },
         { .name = "cordon", .readOnly = false, .destructive = false },
         { .name = "uncordon", .readOnly = false, .destructive = false },
         { .name = "explain_admission", .readOnly = true, .destructive = false },
@@ -513,4 +516,118 @@ TEST_CASE("mcp-action: tools/list shows readOnlyHint false on every action", "[n
     // The auto-approve ceiling is the flag's, derived: the schema states it as the maximum.
     auto const& minutes = *tools[2].Find("inputSchema")->Find("properties")->Find("minutes");
     CHECK(minutes.Find("maximum")->AsInt() == McpAction::MaxAutoApproveMinutes);
+}
+
+// --------------------------------------------------------------------------
+// set_display_name
+
+namespace
+{
+/// A cluster holding this node and `node-b`, which an operator named `build-box`.
+[[nodiscard]] Cluster::ClusterState NamedState()
+{
+    auto state = McpFakes::StateOf({ SelfId, "node-b" });
+    state.members[1].displayName = "build-box";
+    return state;
+}
+} // namespace
+
+TEST_CASE("mcp-action: set_display_name asks the leader one MEMBER-EDIT it built, naming the member by its id",
+          "[node][mcp][mcp-action][display-name]")
+{
+    Rig rig;
+    FixedCluster named { NamedState() };
+    auto const tools = ActionTools(rig.upstream, named, std::string { SelfId }, rig.logger);
+    auto const call = [&tools](std::string_view arguments) {
+        auto const* const row = core::findOrNull(tools, std::string_view { "set_display_name" }, &Mcp::ToolRow::name);
+        REQUIRE(row != nullptr);
+        return row->handler(Mcp::ToolCall { .arguments = Unwrap(Json::Parse(arguments)), .clientName = ClientName });
+    };
+    rig.upstream.AnswerOk(std::string {});
+
+    SECTION("by its current display name, resolved exactly to the id the frame carries")
+    {
+        auto const result = call(R"({"node":"build-box","name":"Lab Box"})");
+        INFO(result.text);
+        REQUIRE_FALSE(result.isError);
+        REQUIRE(rig.upstream.calls.size() == 1);
+        CHECK(rig.upstream.calls[0].target == UpstreamTarget::Leader);
+        // The id, never the name it was found by: the leader names members by id.
+        CHECK(rig.upstream.calls[0].frame
+              == Text(Wire::EncodeMemberEdit(Wire::MemberEditRequest {
+                  .verb = Wire::MemberEditVerb::SetDisplayName, .memberId = "node-b", .value = "Lab Box" })));
+        CHECK(*At(result, "node_id").AsString() == "node-b");
+        CHECK(*At(result, "display_name").AsString() == "Lab Box");
+        CHECK(*At(result, "state").AsString() == "replicating");
+        CHECK(*At(result, "answered_by").AsString() == AnsweredAt);
+        // The audit line, with the VALIDATED arguments and who answered.
+        auto const lines = rig.InfoLines();
+        REQUIRE(lines.size() == 1);
+        CHECK(lines[0]
+              == std::format(R"(mcp action set_display_name {{"node":"node-b","name":"Lab Box"}} by {} answered by {})",
+                             ClientName,
+                             AnsweredAt));
+    }
+    SECTION("an empty name clears it, and the answer says so with a null")
+    {
+        auto const result = call(R"({"node":"node-b","name":""})");
+        REQUIRE_FALSE(result.isError);
+        REQUIRE(rig.upstream.calls.size() == 1);
+        CHECK(rig.upstream.calls[0].frame
+              == Text(Wire::EncodeMemberEdit(Wire::MemberEditRequest {
+                  .verb = Wire::MemberEditVerb::SetDisplayName, .memberId = "node-b", .value = "" })));
+        CHECK(At(result, "display_name").IsNull());
+    }
+    SECTION("a prefix of a name names nobody, and nothing is sent")
+    {
+        auto const result = call(R"({"node":"build","name":"x"})");
+        CHECK(result.isError);
+        CHECK(result.text.contains("never by prefix"));
+        CHECK(rig.upstream.calls.empty());
+    }
+}
+
+TEST_CASE("mcp-action: set_display_name refuses what the leader would, before anything is sent",
+          "[node][mcp][mcp-action][display-name]")
+{
+    Rig rig;
+    rig.upstream.AnswerOk(std::string {});
+    for (auto const& [arguments, says]: {
+             std::pair { std::string_view { R"({"name":"lab"})" }, std::string_view { "`node` must name the member" } },
+             std::pair { std::string_view { R"({"node":"node-b"})" }, std::string_view { "`name` must be a string" } },
+             std::pair { std::string_view { R"({"node":"node-b","name":7})" },
+                         std::string_view { "`name` must be a string" } },
+             std::pair { std::string_view { R"({"node":"node-b","name":"a\nb"})" },
+                         std::string_view { "no control character" } },
+             std::pair { std::string_view { R"({"node":"node-b","name":"lab","extra":1})" },
+                         std::string_view { "no argument `extra`" } },
+         })
+    {
+        CAPTURE(arguments);
+        auto const result = rig.Call("set_display_name", arguments);
+        CHECK(result.isError);
+        CHECK(result.text.contains(says));
+    }
+    // Past the byte bound: the leader's own rule, never a copy.
+    auto const tooLong =
+        rig.Call("set_display_name",
+                 std::format(R"({{"node":"node-b","name":"{}"}})", std::string(Cluster::MaxDisplayNameBytes + 1, 'x')));
+    CHECK(tooLong.isError);
+    CHECK(tooLong.text.contains("at most 64 bytes"));
+    CHECK(rig.upstream.calls.empty());
+    CHECK(rig.InfoLines().empty());
+}
+
+TEST_CASE("mcp-action: a taken name is the leader's refusal, reported as it says it and recorded as nothing",
+          "[node][mcp][mcp-action][display-name]")
+{
+    Rig rig;
+    rig.upstream.answer = std::unexpected { std::pair {
+        UpstreamFailure::Refused,
+        std::string { "10.0.0.1:6674 refused the request: invalid-cluster-change: node-self already answers to "
+                      "\"lab\"" } } };
+    auto const result = rig.Call("set_display_name", R"({"node":"node-b","name":"LAB"})");
+    CHECK(result.isError);
+    CHECK(result.text.contains("already answers to"));
+    CHECK(rig.InfoLines().empty());
 }

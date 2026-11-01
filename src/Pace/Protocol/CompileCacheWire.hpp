@@ -870,6 +870,19 @@ enum class Op : std::uint8_t
     /// toolchain holds thousands of headers -- so nothing is ever cut short in silence: a page says where the next
     /// one starts and how many files there are in all. `Ok | Error` only, so no version moved.
     FingerprintInputs = 0x25,
+
+    /// An operator editing one member's replicated record: which edit is the first field
+    /// (`MemberEditVerb`), the member's id the second, and the edit's value the third -- for
+    /// `SetDisplayName`, the name, empty to clear it.
+    ///
+    /// **One verb for every edit of a member record that is not an admission**, with the edit a
+    /// TRANSMITTED enum inside it, so the next edit (a per-node budget override) is a row of
+    /// `MemberEditVerbTable` rather than another opcode, another `RelocatedVerbs` row and another
+    /// switch arm in two binaries. A control verb (`OperatorStanding`), answered by the LEADER, which
+    /// proposes the replicated command; any other node answers `NotLeader` naming the leader, as
+    /// CLUSTER-SET does. `Ok` and empty: the change is appended, not committed. A new verb within
+    /// version 17 -- `Ok | Error` only, and a build that predates it refuses the opcode by name.
+    MemberEdit = 0x26,
 };
 
 /// Reply status, the first byte of every reply.
@@ -2478,6 +2491,17 @@ inline constexpr std::array OpTable {
                    .maxReply = ReplyBoundedTo(MaxReportReply),
                    .family = VerbFamily::Scheduler,
                    .identity = IdentityRequirement::OperatorStanding },
+    // With the cluster control verbs and for their reason: it changes what every node believes,
+    // so the leader's scheduler answers it, behind the same gate and the same standing.
+    OpDescriptor { .code = Op::MemberEdit,
+                   .name = "member-edit",
+                   .fieldCount = 3, // edit (`MemberEditVerb`, one byte), member id, value
+                   .legalStatuses = static_cast<std::uint8_t>(StatusBit(Status::Ok) | StatusBit(Status::Error)),
+                   .preAuth = RequiresAuth,
+                   .maxPayload = BoundedTo(MaxControlPayload),
+                   .maxReply = ReplyBoundedTo(MaxReportReply),
+                   .family = VerbFamily::Scheduler,
+                   .identity = IdentityRequirement::OperatorStanding },
     // The fleet cache verbs: their twins' shapes -- the same objects -- and their own family,
     // which is where their policy lives. `AddressAdmits` because admission is the fold's answer
     // (a proven key, a ticket, loopback), never a column of this table.
@@ -2862,7 +2886,7 @@ static_assert(JoiningVerbsNeedAnIdentity(),
 
 /// Whether exactly an operator's CONTROL verbs require an operator's standing.
 ///
-/// The cluster verbs that change the fleet -- admit, admit as a learner, forget, set -- and the
+/// The cluster verbs that change the fleet -- admit, admit as a learner, forget, set, edit a member -- and the
 /// enrollment decisions (`EnrollControl`: approve, reject, arm or disarm auto-approval,
 /// clear, and the list that names the joiners' keys). Both directions: a control verb left at
 /// `AddressAdmits` is one an anonymous caller on a `--fleet-open` node sends, and any other verb
@@ -2870,20 +2894,22 @@ static_assert(JoiningVerbsNeedAnIdentity(),
 /// `MintTicket` are not rows: each already answers this machine alone, a narrower rule its
 /// responder enforces. And no verb names `IdentifiedCaller`, which is only `OperatorStanding`'s
 /// prerequisite: a verb that named it would let a learner's ticket decide the fleet again.
-/// @return True when the column names exactly those five.
+/// @return True when the column names exactly those six.
 [[nodiscard]] constexpr bool ControlVerbsNeedOperatorStanding() noexcept
 {
     return std::ranges::all_of(OpTable, [](OpDescriptor const& row) {
         auto const control = row.code == Op::ClusterSet || row.code == Op::ClusterForget || row.code == Op::ClusterAdmit
-                             || row.code == Op::ClusterAdmitLearner || row.code == Op::EnrollControl;
+                             || row.code == Op::ClusterAdmitLearner || row.code == Op::EnrollControl
+                             || row.code == Op::MemberEdit;
         return control == (row.identity == IdentityRequirement::OperatorStanding)
                && row.identity != IdentityRequirement::IdentifiedCaller;
     });
 }
 
-static_assert(ControlVerbsNeedOperatorStanding(),
-              "exactly the cluster control verbs and EnrollControl require an operator's standing, and no verb names "
-              "IdentifiedCaller -- see IdentityRequirement");
+static_assert(
+    ControlVerbsNeedOperatorStanding(),
+    "exactly the cluster control verbs, MemberEdit and EnrollControl require an operator's standing, and no verb names "
+    "IdentifiedCaller -- see IdentityRequirement");
 
 /// Whether asking again, UNCHANGED, may be answered differently -- with nobody acting on the
 /// request in between.
@@ -6092,6 +6118,85 @@ struct ClusterSetView
     if (!fields.has_value())
         return std::nullopt;
     return (*fields)[0];
+}
+
+/// Which edit of a member's record a MEMBER-EDIT asks for: its first field, one byte.
+///
+/// **TRANSMITTED**: explicit values, append-only, and `Last` never travels -- a byte at or past it
+/// is an edit this build does not know (`DecodeMemberEditVerb`), refused by name rather than read
+/// as whichever edit it aliases.
+enum class MemberEditVerb : std::uint8_t
+{
+    SetDisplayName = 0, ///< Give the member a display name, or clear it with an empty value.
+    Last = 1,           ///< Not an edit, and never travels: the length of a table keyed by one.
+};
+
+/// How one `MemberEditVerb` is spelled.
+struct MemberEditVerbRow
+{
+    MemberEditVerb verb;   ///< The edit this row describes.
+    std::string_view name; ///< Its one spelling, for a log line and a refusal.
+};
+
+/// One row per `MemberEditVerb`, in enumerator order. Adding an edit is adding a row.
+inline constexpr EnumTable<MemberEditVerb, MemberEditVerbRow> MemberEditVerbTable { {
+    { .verb = MemberEditVerb::SetDisplayName, .name = "set-display-name" },
+} };
+
+static_assert(RowsInEnumeratorOrder(MemberEditVerbTable, &MemberEditVerbRow::verb),
+              "MemberEditVerbTable must hold one row per MemberEditVerb, in enumerator order");
+
+/// The edit @p raw names, if this build knows it.
+/// @param raw The edit byte, as received.
+/// @return The edit, or nullopt for a byte at or past `MemberEditVerb::Last`.
+[[nodiscard]] constexpr std::optional<MemberEditVerb> DecodeMemberEditVerb(std::uint8_t raw) noexcept
+{
+    if (raw >= static_cast<std::uint8_t>(MemberEditVerb::Last))
+        return std::nullopt;
+    return static_cast<MemberEditVerb>(raw);
+}
+
+/// An operator editing one member's replicated record.
+struct MemberEditRequest
+{
+    MemberEditVerb verb;       ///< Which edit.
+    std::string_view memberId; ///< The member, by its id exactly.
+    std::string_view value;    ///< The edit's value: for `SetDisplayName`, the name, empty to clear.
+};
+
+/// The same, as views into a received payload. The edit stays a RAW byte here, so a byte this build
+/// does not know reaches whoever refuses it by name (`DecodeMemberEditVerb`) rather than reading as a
+/// malformed frame.
+struct MemberEditView
+{
+    std::uint8_t verb {};                ///< The edit byte, as received.
+    std::span<std::byte const> memberId; ///< The member's id.
+    std::span<std::byte const> value;    ///< The edit's value.
+};
+
+/// Frame a MEMBER-EDIT request.
+/// @param request The edit, the member and the value.
+/// @param version Version to advertise.
+/// @return The framed request.
+[[nodiscard]] inline std::vector<std::byte> EncodeMemberEdit(MemberEditRequest const& request,
+                                                             WireVersion version = CurrentVersion)
+{
+    auto const verb = std::array { static_cast<std::byte>(request.verb) };
+    return Detail::EncodeRequest(
+        version, Op::MemberEdit, { std::span<std::byte const> { verb }, AsBytes(request.memberId), AsBytes(request.value) });
+}
+
+/// Split a MEMBER-EDIT payload.
+/// @param payload The bytes following the request header.
+/// @return The fields, or nullopt when malformed -- three fields, the first exactly one byte.
+[[nodiscard]] inline std::optional<MemberEditView> DecodeMemberEditPayload(std::span<std::byte const> payload)
+{
+    auto const fields = SplitFields(payload, OpFieldCount(Op::MemberEdit));
+    if (!fields.has_value() || (*fields)[0].size() != 1)
+        return std::nullopt;
+    return MemberEditView { .verb = static_cast<std::uint8_t>((*fields)[0][0]),
+                            .memberId = (*fields)[1],
+                            .value = (*fields)[2] };
 }
 
 /// An operator adding a member to the cluster, or moving one.

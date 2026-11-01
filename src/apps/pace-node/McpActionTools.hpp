@@ -26,7 +26,7 @@ namespace Pace::Node
 ///
 /// **Only fixed frames.** Every tool builds its one request from arguments it has validated, through the wire's
 /// own encoders (`EncodeEnrollApprove`, `EncodeEnrollControl`, `EncodeEnrollAutoApprove`, `EncodeCordonRequest`,
-/// `EncodeExplainAdmissionRequest`), and no caller-supplied byte is passed through: the self-call path
+/// `EncodeExplainAdmissionRequest`, `EncodeMemberEdit`), and no caller-supplied byte is passed through: the self-call path
 /// (`FrameRouterAnswerer`) presents this node's proven identity and skips the surface's size ceilings, so a tool
 /// that relayed a frame would hand the model every verb this node may send.
 ///
@@ -73,8 +73,8 @@ namespace McpAction
 /// @return The sentence, with its remedy; nothing for a failure that is not about this node as the caller.
 [[nodiscard]] std::optional<std::string> CallerRefusalSentence(UpstreamFailure failure, std::string const& selfId);
 
-/// The action tools: `enrollment_approve`, `enrollment_reject`, `enrollment_auto_approve`, `cordon`, `uncordon`
-/// and `explain_admission`.
+/// The action tools: `enrollment_approve`, `enrollment_reject`, `enrollment_auto_approve`, `set_display_name`,
+/// `cordon`, `uncordon` and `explain_admission`.
 /// @param upstream How the leader and this node are asked; must outlive every row returned.
 /// @param cluster The state a `node` argument resolves in; must outlive every row returned.
 /// @param selfId This node's id: the one `node` a cordon may name, and the node a standing refusal names.

@@ -302,32 +302,130 @@ namespace
         return FleetCell::OfShare(static_cast<double>(*cache.hits) / static_cast<double>(total));
     }
 
+    // ------------------------------------------------------------ the name
+
+    /// Where a row's `name` came from: the cluster's record, or the machine's own word.
+    ///
+    /// Private: rendered as a word, never transmitted or persisted as an ordinal.
+    enum class NameSource : std::uint8_t
+    {
+        Replicated,   ///< `ClusterMember::displayName`: an operator named the member, and every node agrees.
+        SelfReported, ///< `WorkerInfo::displayName`: what the machine calls itself, its hostname.
+        Last,         ///< Not a source, and has no row: the length of a table keyed by one.
+    };
+
+    /// How one `NameSource` is spelled.
+    struct NameSourceRow
+    {
+        NameSource source;     ///< The source this row describes.
+        std::string_view word; ///< Its one spelling: a table cell and a JSON value alike.
+    };
+
+    /// One row per `NameSource`, in enumerator order.
+    constexpr EnumTable<NameSource, NameSourceRow> NameSourceTable { {
+        { .source = NameSource::Replicated, .word = "replicated" },
+        { .source = NameSource::SelfReported, .word = "self-reported" },
+    } };
+
+    static_assert(RowsInEnumeratorOrder(NameSourceTable, &NameSourceRow::source),
+                  "NameSourceTable must hold one row per NameSource, in enumerator order");
+
+    /// The name a row shows and where it came from: the replicated name when the cluster records one, else what the
+    /// machine calls itself -- or nothing, when neither says.
+    ///
+    /// **One rule for both tables**, so a member row and a machine row cannot disagree about which name wins. The
+    /// replicated name wins because an operator CHOSE it and every node agrees on it; the hostname is the machine's
+    /// own word, and only stands in where nobody named it.
+    struct ShownName
+    {
+        std::string_view text;            ///< The name; empty when there is none.
+        std::optional<NameSource> source; ///< Where it came from; absent exactly when `text` is empty.
+    };
+
+    /// @param replicated The cluster's record, or empty.
+    /// @param selfReported The machine's own word, or empty.
+    /// @return What a row shows.
+    [[nodiscard]] constexpr ShownName NameShown(std::string_view replicated, std::string_view selfReported) noexcept
+    {
+        if (!replicated.empty())
+            return ShownName { .text = replicated, .source = NameSource::Replicated };
+        if (!selfReported.empty())
+            return ShownName { .text = selfReported, .source = NameSource::SelfReported };
+        return ShownName { .text = {}, .source = std::nullopt };
+    }
+
+    /// @param shown A row's name.
+    /// @return The `name` cell: absent when nobody named the machine, never blank.
+    [[nodiscard]] FleetCell NameCell(ShownName const& shown)
+    {
+        return shown.text.empty() ? FleetCell::Nothing() : FleetCell::Of(std::string { shown.text });
+    }
+
+    /// @param shown A row's name.
+    /// @return The `name-source` cell: absent exactly where the name is.
+    [[nodiscard]] FleetCell NameSourceCell(ShownName const& shown)
+    {
+        if (!shown.source.has_value())
+            return FleetCell::Nothing();
+        return FleetCell::Of(std::string { NameSourceTable[static_cast<std::size_t>(*shown.source)].word });
+    }
+
+    /// What the `name` column says in a header, for both tables.
+    constexpr std::string_view NameHelp =
+        "What an operator calls this machine: the display name the cluster records for it, else the name the machine "
+        "reports for itself. A label: nothing routes, admits or dispatches by it. Absent when neither says.";
+
+    /// What the `name-source` column says in a header, for both tables.
+    constexpr std::string_view NameSourceHelp =
+        "Where the name came from: replicated (an operator named it, and every node agrees) or self-reported (what "
+        "the machine calls itself). Absent when there is no name.";
+
     // ------------------------------------------------------------ the tables
 
+    /// One member row: the record, and what the machine holding the member's key calls itself -- which only the
+    /// fleet's machine rows know, so the join is made once, by `MemberRowsOf`, before any renderer reads a column.
+    struct MemberRow
+    {
+        Cluster::ClusterMember member; ///< What the cluster records.
+        std::string selfReportedName;  ///< What the machine proving the member's key calls itself; empty when none.
+    };
+
     /// What a member row shows.
-    constexpr std::array<FleetColumn<Cluster::ClusterMember>, 4> MemberColumns {
-        FleetColumn<Cluster::ClusterMember> {
-            .name = "id",
-            .help = "The member's stable identity: what consensus counts.",
+    constexpr std::array<FleetColumn<MemberRow>, 6> MemberColumns {
+        FleetColumn<MemberRow> { .name = "id",
+                                 .help = "The member's stable identity: what consensus counts.",
+                                 .format = CellFormat::Text,
+                                 .keep = ColumnKeep::Identity,
+                                 .project = [](MemberRow const& r) { return FleetCell::Of(r.member.id); } },
+        // Right after the id it annotates, as on a machine row: the pair an operator reads together.
+        FleetColumn<MemberRow> {
+            .name = "name",
+            .help = NameHelp,
             .format = CellFormat::Text,
-            .keep = ColumnKeep::Identity,
-            .project = [](Cluster::ClusterMember const& m) { return FleetCell::Of(m.id); } },
-        FleetColumn<Cluster::ClusterMember> {
-            .name = "raft-endpoint",
-            .help = "Where its consensus port answers. Always present.",
+            .project = [](MemberRow const& r) { return NameCell(NameShown(r.member.displayName, r.selfReportedName)); } },
+        FleetColumn<MemberRow> {
+            .name = "name-source",
+            .help = NameSourceHelp,
             .format = CellFormat::Text,
-            .project = [](Cluster::ClusterMember const& m) { return FleetCell::Of(m.raftEndpoint); } },
-        FleetColumn<Cluster::ClusterMember> {
-            .name = "scheduler-endpoint",
-            .help = "Where this member's 0xFC port answers. Absent until it has announced one.",
-            .format = CellFormat::Text,
-            // Absent, not an empty string presented as a fact: a member that has
-            // announced none has not said, which is a state rather than a fault.
+            .keep = ColumnKeep::Detail,
             .project =
-                [](Cluster::ClusterMember const& m) {
-                    return m.schedulerEndpoint.empty() ? FleetCell::Nothing() : FleetCell::Of(m.schedulerEndpoint);
-                } },
-        FleetColumn<Cluster::ClusterMember> {
+                [](MemberRow const& r) { return NameSourceCell(NameShown(r.member.displayName, r.selfReportedName)); } },
+        FleetColumn<MemberRow> { .name = "raft-endpoint",
+                                 .help = "Where its consensus port answers. Always present.",
+                                 .format = CellFormat::Text,
+                                 .project = [](MemberRow const& r) { return FleetCell::Of(r.member.raftEndpoint); } },
+        FleetColumn<MemberRow> { .name = "scheduler-endpoint",
+                                 .help = "Where this member's 0xFC port answers. Absent until it has announced one.",
+                                 .format = CellFormat::Text,
+                                 // Absent, not an empty string presented as a fact: a member that has
+                                 // announced none has not said, which is a state rather than a fault.
+                                 .project =
+                                     [](MemberRow const& r) {
+                                         return r.member.schedulerEndpoint.empty()
+                                                    ? FleetCell::Nothing()
+                                                    : FleetCell::Of(r.member.schedulerEndpoint);
+                                     } },
+        FleetColumn<MemberRow> {
             .name = "scheduler-endpoint-state",
             .help = "Whether that endpoint is announced, never announced, or cleared by a record re-proposed with "
                     "none; it returns when the member next announces.",
@@ -336,10 +434,32 @@ namespace
             // cell, so that cell stays an address or absent in the JSON (#1340). Spelled
             // from the table `--cluster-status` and `cluster-members` read too.
             .project =
-                [](Cluster::ClusterMember const& m) {
-                    return FleetCell::Of(std::string { Cluster::SchedulerEndpointStateName(m) });
+                [](MemberRow const& r) {
+                    return FleetCell::Of(std::string { Cluster::SchedulerEndpointStateName(r.member) });
                 } },
     };
+
+    /// The member rows of @p snapshot: each record joined, by the identity key it holds, to what the machine proving
+    /// that key calls itself. Empty when the node runs no cluster.
+    /// @param snapshot The fleet.
+    /// @return The rows, in the state's (id) order.
+    [[nodiscard]] std::vector<MemberRow> MemberRowsOf(FleetSnapshot const& snapshot)
+    {
+        auto rows = std::vector<MemberRow> {};
+        if (!snapshot.cluster.has_value())
+            return rows;
+        rows.reserve(snapshot.cluster->members.size());
+        for (auto const& member: snapshot.cluster->members)
+        {
+            auto const key = AsStringView(std::span<std::byte const> { member.publicKey });
+            auto const* const machine = core::findIfOrNull(snapshot.nodes, [key](NodeReport const& node) {
+                return !node.identityKey.empty() && node.identityKey == key;
+            });
+            rows.push_back(MemberRow { .member = member,
+                                       .selfReportedName = machine != nullptr ? machine->displayName : std::string {} });
+        }
+        return rows;
+    }
 
     /// What a revoked-key row shows: whose it was, and the key.
     ///
@@ -679,26 +799,28 @@ namespace
     };
 
     /// What a node row shows, before its per-tier cache columns.
-    constexpr std::array<FleetColumn<NodeReport>, 12> NodeColumns {
+    constexpr std::array<FleetColumn<NodeReport>, 13> NodeColumns {
         FleetColumn<NodeReport> { .name = "endpoint",
                                   .help = "host:port the machine answers on.",
                                   .format = CellFormat::Text,
                                   .keep = ColumnKeep::Identity,
                                   .project = [](NodeReport const& n) { return FleetCell::Of(n.endpoint); } },
-        FleetColumn<NodeReport> { .name = "name",
-                                  .help = "What this machine calls itself, as an operator would recognise it. Advisory: "
-                                          "nothing routes, admits or dispatches by it, and it need not be unique. Absent "
-                                          "when the node predates the field or would not say.",
-                                  .format = CellFormat::Text,
-                                  // Second, right after the endpoint it annotates, because that is the pair
-                                  // an operator reads together: the address is what a machine ANSWERS on and
-                                  // this is what they call it when they go and look at it. Absent rather than
-                                  // blank, for the reason `version` gives below -- a node too old to say is
-                                  // not a node with nothing interesting about it.
-                                  .project =
-                                      [](NodeReport const& n) {
-                                          return n.displayName.empty() ? FleetCell::Nothing() : FleetCell::Of(n.displayName);
-                                      } },
+        FleetColumn<NodeReport> {
+            .name = "name",
+            .help = NameHelp,
+            .format = CellFormat::Text,
+            // Second, right after the endpoint it annotates, because that is the pair
+            // an operator reads together: the address is what a machine ANSWERS on and
+            // this is what they call it when they go and look at it. Absent rather than
+            // blank, for the reason `version` gives below -- a node too old to say is
+            // not a node with nothing interesting about it.
+            .project = [](NodeReport const& n) { return NameCell(NameShown(n.replicatedName, n.displayName)); } },
+        FleetColumn<NodeReport> {
+            .name = "name-source",
+            .help = NameSourceHelp,
+            .format = CellFormat::Text,
+            .keep = ColumnKeep::Detail,
+            .project = [](NodeReport const& n) { return NameSourceCell(NameShown(n.replicatedName, n.displayName)); } },
         FleetColumn<NodeReport> {
             .name = "version",
             .help = "Which build of pace-node this machine is running. Absent "
@@ -1279,35 +1401,49 @@ namespace
         return out.empty() ? std::string { "unknown" } : out;
     }
 
-    /// A machine's display name: the one its worker registered with, else the short form of its key.
+    /// A machine's display name: the one the cluster records for the member holding its key, else the one its worker
+    /// registered with, else the short form of its key -- `NameShown`'s preference, with the key as the last resort.
     /// @param key The machine's identity key.
     /// @param workers The registry entries, which carry the key and the name.
+    /// @param cluster The replicated state, or null on a node that holds none.
     /// @return The name; never empty.
-    [[nodiscard]] std::string MachineNameOf(std::string_view key, std::vector<WorkerReport> const& workers)
+    [[nodiscard]] std::string MachineNameOf(std::string_view key,
+                                            std::vector<WorkerReport> const& workers,
+                                            Cluster::ClusterState const* cluster)
     {
-        auto const named = std::ranges::find_if(workers, [key](WorkerReport const& worker) {
-            return worker.info.identityKey == key && !worker.info.displayName.empty();
+        auto const* const member =
+            cluster == nullptr ? nullptr
+                               : core::findIfOrNull(cluster->members, [key](Cluster::ClusterMember const& candidate) {
+                                     return AsStringView(std::span<std::byte const> { candidate.publicKey }) == key;
+                                 });
+        auto const* const worker = core::findIfOrNull(workers, [key](WorkerReport const& candidate) {
+            return candidate.info.identityKey == key && !candidate.info.displayName.empty();
         });
-        return named != workers.end() ? named->info.displayName : ShortMachineName(key);
+        auto const shown =
+            NameShown(member != nullptr ? std::string_view { member->displayName } : std::string_view {},
+                      worker != nullptr ? std::string_view { worker->info.displayName } : std::string_view {});
+        return shown.text.empty() ? ShortMachineName(key) : std::string { shown.text };
     }
 
     /// The queue's own view, with machines named for a person and the rows put in a stable order.
     /// @param view The queue, or none when this node leads none.
     /// @param workers Where the names come from.
+    /// @param cluster The replicated state, or null on a node that holds none.
     /// @return The section, or none.
     [[nodiscard]] std::optional<AdmissionSection> AdmissionSectionOf(std::optional<QueueView> const& view,
-                                                                     std::vector<WorkerReport> const& workers)
+                                                                     std::vector<WorkerReport> const& workers,
+                                                                     Cluster::ClusterState const* cluster)
     {
         if (!view.has_value())
             return std::nullopt;
         AdmissionSection section { .depth = view->depth, .clients = {}, .machines = {} };
         for (auto const& client: view->clients)
-            section.clients.push_back(AdmissionClientRow { .machine = MachineNameOf(client.machine, workers),
+            section.clients.push_back(AdmissionClientRow { .machine = MachineNameOf(client.machine, workers, cluster),
                                                            .tree = client.tree,
                                                            .running = client.running,
                                                            .queued = client.queued });
         for (auto const& machine: view->machines)
-            section.machines.push_back(AdmissionMachineRow { .machine = MachineNameOf(machine.machine, workers),
+            section.machines.push_back(AdmissionMachineRow { .machine = MachineNameOf(machine.machine, workers, cluster),
                                                              .chargedBytes = machine.chargedBytes,
                                                              .inUseBytes = machine.inUseBytes,
                                                              .budgetBytes = machine.budgetBytes });
@@ -1321,9 +1457,11 @@ namespace
     /// The scheduler's joined tickets, oldest first, counted in full and listed up to the ceiling.
     /// @param tickets The rows, or none when this node leads no queue.
     /// @param workers Where the requesters' names come from.
+    /// @param cluster The replicated state, or null on a node that holds none.
     /// @return The section, or none.
     [[nodiscard]] std::optional<CompileSection> CompileSectionOf(std::optional<std::vector<CompileRow>> tickets,
-                                                                 std::vector<WorkerReport> const& workers)
+                                                                 std::vector<WorkerReport> const& workers,
+                                                                 Cluster::ClusterState const* cluster)
     {
         if (!tickets.has_value())
             return std::nullopt;
@@ -1342,7 +1480,7 @@ namespace
         section.rows.reserve(keep);
         for (auto& row: *tickets | std::views::take(keep))
         {
-            auto requester = MachineNameOf(row.ticket.caller, workers);
+            auto requester = MachineNameOf(row.ticket.caller, workers, cluster);
             section.rows.push_back(FleetCompile { .compile = std::move(row), .requester = std::move(requester) });
         }
         return section;
@@ -1390,7 +1528,20 @@ FleetSnapshot CollectFleet(FleetSources const& sources)
     // has no replicated state at all, which is not the same claim as a cluster that
     // has agreed on nobody.
     if (sources.cluster != nullptr)
+    {
         snapshot.cluster = sources.cluster->ClusterState();
+        // Each machine's replicated name, joined by the key it PROVED -- for the display name alone, which decides
+        // nothing; the member rows make the converse join from the same two facts (`MemberRowsOf`).
+        for (auto& node: snapshot.nodes)
+        {
+            auto const* const member =
+                core::findIfOrNull(snapshot.cluster->members, [&node](Cluster::ClusterMember const& candidate) {
+                    return !node.identityKey.empty()
+                           && AsStringView(std::span<std::byte const> { candidate.publicKey }) == node.identityKey;
+                });
+            node.replicatedName = member != nullptr ? member->displayName : std::string {};
+        }
+    }
 
     if (sources.metrics != nullptr)
     {
@@ -1405,8 +1556,9 @@ FleetSnapshot CollectFleet(FleetSources const& sources)
 
     // ONE read for both sections, so the queue's depth and the compile totals beside it are one sample.
     auto report = sources.scheduler->AdmissionReportNow();
-    snapshot.admission = AdmissionSectionOf(report.queue, snapshot.workers);
-    snapshot.compiles = CompileSectionOf(std::move(report.compiles), snapshot.workers);
+    auto const* const cluster = snapshot.cluster.has_value() ? &*snapshot.cluster : nullptr;
+    snapshot.admission = AdmissionSectionOf(report.queue, snapshot.workers, cluster);
+    snapshot.compiles = CompileSectionOf(std::move(report.compiles), snapshot.workers, cluster);
 
     return snapshot;
 }
@@ -1731,7 +1883,7 @@ std::string RenderFleetJson(FleetSnapshot const& snapshot, FleetHistoryView cons
     Json::AppendString(out, "members");
     out += ':';
     if (snapshot.cluster.has_value())
-        AppendJsonRows(out, MemberColumns, snapshot.cluster->members);
+        AppendJsonRows(out, MemberColumns, MemberRowsOf(snapshot));
     else
         out += "null"; // Runs no cluster at all -- not "a cluster with no members".
 
@@ -1972,10 +2124,7 @@ namespace
                 // different fact -- but one the JSON spells `null` and a TSV table has
                 // no room for, so the marker line in the full document is what carries
                 // it: a reader sees the section, its header, and no rows.
-                AppendTextRows(out,
-                               MemberColumns,
-                               snapshot.cluster.has_value() ? snapshot.cluster->members
-                                                            : std::vector<Cluster::ClusterMember> {});
+                AppendTextRows(out, MemberColumns, MemberRowsOf(snapshot));
                 return;
             case FleetSection::Revoked:
                 // Empty where the node runs no cluster, exactly as `Members` is: the marker
@@ -3335,10 +3484,12 @@ namespace
 
         for (auto const& [node, rows]: asking)
         {
-            out += std::format(R"(<div class="machine-conditions"><h3>{}{}</h3>)",
-                               EscapeHtml(node->endpoint),
-                               node->displayName.empty() ? std::string {}
-                                                         : std::format(" &middot; {}", EscapeHtml(node->displayName)));
+            out += std::format(
+                R"(<div class="machine-conditions"><h3>{}{}</h3>)",
+                EscapeHtml(node->endpoint),
+                NameShown(node->replicatedName, node->displayName).text.empty()
+                    ? std::string {}
+                    : std::format(" &middot; {}", EscapeHtml(NameShown(node->replicatedName, node->displayName).text)));
             for (auto const& row: *rows)
                 if (CompileCacheWire::AsksForAttention(row))
                     AppendRaisedCondition(out, row);
@@ -3657,7 +3808,7 @@ std::string RenderFleetHtml(FleetSnapshot const& snapshot, FleetHistoryView cons
     if (snapshot.cluster.has_value())
     {
         out += R"(<div class="panel wrap">)";
-        AppendHtmlRows(out, MemberColumns, snapshot.cluster->members);
+        AppendHtmlRows(out, MemberColumns, MemberRowsOf(snapshot));
         out += "</div>";
     }
     else

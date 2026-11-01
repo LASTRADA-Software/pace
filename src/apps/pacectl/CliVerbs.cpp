@@ -1762,9 +1762,12 @@ namespace
                              member.raftEndpoint.empty() ? AbsentCell() : TextCell(member.raftEndpoint),
                              member.schedulerEndpoint.empty() ? AbsentCell() : TextCell(member.schedulerEndpoint),
                              TextCell(std::string { Cluster::SchedulerEndpointStateName(member) }),
-                             TextCell(FormatEd25519PublicKey(member.publicKey)) });
+                             TextCell(FormatEd25519PublicKey(member.publicKey)),
+                             // ABSENT when nobody named it, never an empty text cell: a label that decides nothing,
+                             // last so the columns an operator compares keep their places.
+                             member.displayName.empty() ? AbsentCell() : TextCell(member.displayName) });
 
-        return TableValue({ "id", "seat", "raft", "scheduler", "scheduler-state", "key" }, std::move(rows));
+        return TableValue({ "id", "seat", "raft", "scheduler", "scheduler-state", "key", "name" }, std::move(rows));
     }
 
     /// Every setting this build knows, with what the cluster has agreed for it.
@@ -1876,6 +1879,27 @@ namespace
         auto const reply = AskNode(context,
                                    CompileCacheWire::EncodeClusterSet(CompileCacheWire::ClusterSetRequest {
                                        .name = context.operands[0], .value = context.operands[1] }));
+        if (!reply.has_value())
+            return reply.error();
+        return Answered(ClusterChangeAccepted());
+    }
+
+    /// `cluster-name <id> [<name>]` -- give a member a display name, or clear it with no name.
+    ///
+    /// The name is held to the leader's own rule (`Cluster::RefuseDisplayName`) before anything is sent, so a name no
+    /// member may carry is a usage error in front of the command that typed it; uniqueness is the leader's to judge,
+    /// since only the state it holds can answer it.
+    /// @param context What to run against.
+    /// @return The answer.
+    [[nodiscard]] Answer ClusterName(VerbContext const& context)
+    {
+        auto const name = context.operands.size() > 1 ? std::string_view { context.operands[1] } : std::string_view {};
+        if (auto const refused = Cluster::RefuseDisplayName(name); refused.has_value())
+            return Concluded(Outcome::Usage, *refused);
+        auto const reply = AskNode(
+            context,
+            CompileCacheWire::EncodeMemberEdit(CompileCacheWire::MemberEditRequest {
+                .verb = CompileCacheWire::MemberEditVerb::SetDisplayName, .memberId = context.operands[0], .value = name }));
         if (!reply.has_value())
             return reply.error();
         return Answered(ClusterChangeAccepted());
@@ -2517,6 +2541,18 @@ namespace
           .protocolCommand = "cluster-set",
           .modifiers = Modifier::None,
           .handler = &ClusterSet,
+          .nodeFallback = nullptr,
+          .session = nullptr },
+        { .name = "cluster-name",
+          .wire = Wire::Node,
+          .minOperands = 1,
+          .maxOperands = 2,
+          .operands = " <member-id> [<name>]",
+          .summary = "give a member a display name every surface shows, or\n"
+                     "clear it with no name; unique, ASCII case folded",
+          .protocolCommand = "member-edit",
+          .modifiers = Modifier::None,
+          .handler = &ClusterName,
           .nodeFallback = nullptr,
           .session = nullptr },
         { .name = "cluster-forget",

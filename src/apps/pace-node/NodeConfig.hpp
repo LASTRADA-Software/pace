@@ -59,6 +59,9 @@ enum class ClusterAction : std::uint8_t
     /// quorum, never a candidate. On a voter this demotes it; `Admit` on a learner
     /// promotes it.
     AdmitLearner,
+
+    /// Give a member a display name, or clear it: MEMBER-EDIT's `SetDisplayName`.
+    Name,
 };
 
 /// One cluster-administration request, as parsed from the command line.
@@ -66,12 +69,12 @@ struct ClusterRequest
 {
     ClusterAction action { ClusterAction::None };
 
-    /// The setting name for `Set`, the member id for `Forget`, `Admit` and
-    /// `AdmitLearner`.
+    /// The setting name for `Set`, the member id for `Forget`, `Admit`, `AdmitLearner`
+    /// and `Name`.
     std::string key;
 
     /// The setting's new value for `Set`, the consensus endpoint for `Admit` and
-    /// `AdmitLearner`, empty otherwise.
+    /// `AdmitLearner`, the display name for `Name` (empty clears it), empty otherwise.
     std::string value;
 
     /// The member's identity key for `Admit` and `AdmitLearner` when the operator typed

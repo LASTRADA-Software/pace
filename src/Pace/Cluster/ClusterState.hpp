@@ -159,8 +159,44 @@ struct ClusterMember
     /// (`CommandKind::Forget`).
     Ed25519PublicKey publicKey {};
 
+    /// What an operator calls this member, e.g. `office-pc`; empty when nobody has named it.
+    ///
+    /// **A label that decides nothing**, under the rule the self-reported hostname
+    /// (`WorkerInfo::displayName`) obeys: no admission, route, key, redirect or identity reads it -- the id and the key
+    /// decide all of those -- so `RosterDiffers` leaves it out and naming a member never moves `rosterVersion`. It
+    /// exists because an id is MINTED (`a3f5...`), and a person needs something to recognise the machine by.
+    ///
+    /// Replicated rather than per machine, so every node, the fleet page and every MCP answer call one machine by one
+    /// name. Written by `CommandKind::SetDisplayName` alone, and KEPT across a re-admission -- `AddMember` and
+    /// `AddLearner` apply the endpoints wholesale and not this, which no admission states -- while a forget removes it
+    /// with the record. Held to `RefuseDisplayName`'s rule, and unique across the members under ASCII-only case folding
+    /// (`DisplayNameHolder`).
+    std::string displayName {};
+
     [[nodiscard]] friend bool operator==(ClusterMember const&, ClusterMember const&) = default;
 };
+
+/// The longest display name a member may carry, in bytes.
+///
+/// Bytes rather than characters, because every reader bounds bytes -- the wire's control payload, a fleet page cell,
+/// an MCP answer -- and a name of 64 multi-byte characters would be four times what a column was sized for. Long
+/// enough for any host-like label, short enough to sit in a table beside the id it annotates.
+inline constexpr std::size_t MaxDisplayNameBytes = 64;
+
+/// Refuse a display name no member may carry, or nothing when it may.
+///
+/// **One rule, asked by every door a name enters by** -- `Validate` on the leader, and each client before it sends,
+/// `pacectl cluster-name`, `pace-node --cluster-name` and the MCP `set_display_name` -- so a client refusing early can
+/// never refuse what the leader accepts, nor the reverse. Empty is accepted: it CLEARS the name.
+///
+/// The name is rendered by `/fleet.json` (JSON, which RFC 8259 holds to UTF-8), by the fleet page and its SVG charts
+/// (XML, whose `Char` production excludes most control code points) and by plain-text tables and logs, so it must be
+/// all three: valid UTF-8, every code point one markup may carry (`FirstUncarriableByte`), and no control byte at all
+/// -- the `Char` production admits a tab and a line break, and a name carrying one would forge a row in `/fleet.txt`.
+/// REFUSED and never repaired: a name rewritten on the way in is one the operator did not choose.
+/// @param name The name as typed.
+/// @return Why no member may carry it, or nullopt when one may.
+[[nodiscard]] std::optional<std::string> RefuseDisplayName(std::string_view name);
 
 /// A key the cluster will never admit again, and whose it was (#178).
 ///
@@ -644,6 +680,24 @@ struct ClusterState
     [[nodiscard]] std::optional<std::string> HolderOf(Ed25519PublicKey const& key) const;
 };
 
+/// Which OTHER member already answers to @p name, if one does.
+///
+/// A name is taken by a member whose display name equals it under ASCII-only case folding (`AsciiFoldEquals`: `Office`
+/// and `office` are one name, `Ä` and `ä` are two), or whose ID is exactly @p name -- a name spelled like another
+/// member's id would be shadowed by that id wherever a tool resolves a name (ids are matched first), so the machine
+/// carrying it could never be named by it. The member @p except is never the holder, so renaming a member to a case
+/// variant of its own name is allowed.
+///
+/// The one author of the rule `ValidateAgainst` refuses by (`DisplayNameTaken`) and `Apply` drops by, so the courtesy
+/// and the guarantee cannot disagree about what a taken name is.
+/// @param state The state.
+/// @param name A non-empty display name.
+/// @param except The member being named, which never holds its own name against itself.
+/// @return The holder's id, or nullopt when nobody else answers to @p name.
+[[nodiscard]] std::optional<std::string> DisplayNameHolder(ClusterState const& state,
+                                                           std::string_view name,
+                                                           std::string_view except);
+
 /// The key `id` holds LIVE as a member.
 ///
 /// Members only: every fleet machine is admitted as a member, voter or learner, so a machine
@@ -755,6 +809,16 @@ enum class CommandKind : std::uint8_t
     /// (`createdAtUnixSeconds`) -- the one field no earlier verb had, which is why `CommandVersion`
     /// moved with it.
     DissolveInto,
+
+    /// Give a member a display name, or clear it (`ClusterMember::displayName`): `key` is the member's id and `value`
+    /// the name, empty to clear. MEMBER-EDIT's `SetDisplayName`, proposed by the leader.
+    ///
+    /// A verb of its own rather than a field on `AddMember`, because a name is not part of an admission: every route
+    /// that re-proposes a record -- an approval, an announced endpoint, a leader's own word -- states the endpoints and
+    /// the key and has no opinion about a label, so a name riding `AddMember` would be wiped by the next announcement.
+    /// It decides nothing, so it never moves `rosterVersion`. Dropped at commit when its member is gone or its name has
+    /// been taken since it was judged (`DisplayNameHolder`), as every verb is when its preconditions stop holding.
+    SetDisplayName,
 
     Last, ///< Not a verb, and has no row: the length of a table keyed by one.
 };
@@ -871,10 +935,11 @@ struct Command
 {
     CommandKind kind { CommandKind::AddMember };
     /// The member id for `AddMember`/`AddLearner`, the setting name for `SetSetting`, the
-    /// member's id for `Forget`, and the survivor's id for `DissolveInto`.
+    /// member's id for `Forget` and `SetDisplayName`, and the survivor's id for `DissolveInto`.
     std::string key;
-    /// The consensus endpoint for `AddMember`/`AddLearner`, the value for `SetSetting`,
-    /// empty otherwise.
+    /// The consensus endpoint for `AddMember`/`AddLearner`, the value for `SetSetting`, the
+    /// survivor's leader endpoint for `DissolveInto`, the display name for `SetDisplayName`
+    /// (empty clears it), empty otherwise.
     std::string value;
 
     /// `AddMember`/`AddLearner` only: where this member's `0xFC` port answers.
@@ -985,7 +1050,8 @@ void Apply(ClusterState& state, Command const& command);
 
 /// Whether `command` may be proposed against the state as it stands (#178).
 ///
-/// `Validate`, and then the rules only the state can answer, which are all about KEYS: a
+/// `Validate`, and then the rules only the state can answer. A display name must name a recorded member and
+/// one no other member answers to (`DisplayNameTaken`, through `DisplayNameHolder`). The rest are about KEYS: a
 /// revoked key is never admitted again (`KeyRevoked`, a refusal of the command -- nothing
 /// the state can later do un-revokes it); a key is held by one id at a time; and a member is
 /// never admitted with NO key, stated

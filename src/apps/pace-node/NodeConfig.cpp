@@ -317,7 +317,7 @@ namespace
             request.action = Action;
 
             if constexpr (Action == ClusterAction::Admit || Action == ClusterAction::AdmitLearner
-                          || Action == ClusterAction::Set)
+                          || Action == ClusterAction::Set || Action == ClusterAction::Name)
             {
                 // These two COMMIT their operand through consensus: an admitted
                 // member's id and endpoint land in every peer's `ClusterState` and
@@ -349,6 +349,25 @@ namespace
                 if (value.empty())
                     return std::unexpected(ArgvError(ConfigErrorCode::ParseError, "names no member"));
                 request.key = std::string { value };
+            }
+            else if constexpr (Action == ClusterAction::Name)
+            {
+                // `<node>=<name>`, split at the FIRST `=`: an id holds none (`ParseMemberSpec` splits there too),
+                // and a name may. The name is held to the leader's own rule here, so an operator is told in front of
+                // the command they typed rather than by the leader's refusal.
+                auto const split = value.find('=');
+                if (split == std::string_view::npos || split == 0)
+                    return std::unexpected(
+                        ArgvError(ConfigErrorCode::ParseError,
+                                  std::format("not <node-id>=<name> (an empty name clears it): {}", value)));
+                auto bounded = ParseId(value.substr(0, split));
+                if (!bounded.has_value())
+                    return std::unexpected(std::move(bounded).error());
+                auto const name = value.substr(split + 1);
+                if (auto refused = Cluster::RefuseDisplayName(name); refused.has_value())
+                    return std::unexpected(ArgvError(ConfigErrorCode::ParseError, *std::move(refused)));
+                request.key = *std::move(bounded);
+                request.value = std::string { name };
             }
             else if constexpr (Action == ClusterAction::Admit || Action == ClusterAction::AdmitLearner)
             {
@@ -1499,6 +1518,16 @@ std::span<OptionSpec<NodeConfig> const> NodeOptions() noexcept
                          "--cluster-admit on it promotes it; the same token\n"
                          "as --cluster-admit, and the member must likewise\n"
                          "be waiting to be admitted." },
+        { .primary = "--cluster-name",
+          .arity = Arity::Value,
+          .operand = "=<node-id>=<name>",
+          .apply = SelectClusterAction<ClusterAction::Name>(),
+          .description = "give a member a display name and exit; an empty\n"
+                         "name clears it. Replicated, so every node, the\n"
+                         "fleet page and pacectl show it; unique across the\n"
+                         "fleet with ASCII letters compared in one case, at\n"
+                         "most 64 bytes of text. A label that decides\n"
+                         "nothing: no admission, route or key reads it." },
         { .primary = "--cluster-forget",
           .arity = Arity::Value,
           .operand = "=<node-id>",
@@ -2237,6 +2266,7 @@ std::span<OptionSpec<NodeConfig> const> NodeOptions() noexcept
         { .kind = FileExclusion::Verb, .flag = "--uncordon", .reason = "lifts the running worker's cordon and exits" },
         { .kind = FileExclusion::Verb, .flag = "--cluster-status", .reason = "asks a running cluster a question and exits" },
         { .kind = FileExclusion::Verb, .flag = "--cluster-set", .reason = "changes a running cluster's settings and exits" },
+        { .kind = FileExclusion::Verb, .flag = "--cluster-name", .reason = "names a member of a running cluster and exits" },
         { .kind = FileExclusion::Verb, .flag = "--cluster-admit", .reason = "admits a member and exits" },
         { .kind = FileExclusion::Verb,
           .flag = "--cluster-admit-learner",

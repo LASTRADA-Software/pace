@@ -636,6 +636,7 @@ namespace
     {
         return Obj(Json::Object {
             { "node", side.target.asked.has_value() ? Str(Readable(*side.target.asked)) : Null() },
+            { "display_name", DisplayNameValue(side.target) },
             { "fingerprint", Str(side.fingerprint) },
             { "toolchain", side.toolchain.has_value() ? Str(Readable(*side.toolchain)) : Null() },
             { "answered_by", Str(record.answeredBy) },
@@ -818,13 +819,13 @@ namespace
 
     constexpr std::string_view ToolchainDiffInput =
         R"({"type":"object","required":["a","b"],"properties":{)"
-        R"("a":{"type":"object","description":"One side: node (a member's id, matched exactly; omit for this node) and exactly one of fingerprint or toolchain (a served toolchain's label, e.g. \"gcc 13.2.0\", or its compiler path, matched exactly).","properties":{"node":{"type":"string"},"fingerprint":{"type":"string"},"toolchain":{"type":"string"}},"additionalProperties":false},)"
+        R"("a":{"type":"object","description":"One side: node (a member's id or display name, matched exactly; omit for this node) and exactly one of fingerprint or toolchain (a served toolchain's label, e.g. \"gcc 13.2.0\", or its compiler path, matched exactly).","properties":{"node":{"type":"string"},"fingerprint":{"type":"string"},"toolchain":{"type":"string"}},"additionalProperties":false},)"
         R"("b":{"type":"object","description":"The other side, in the same shape as a.","properties":{"node":{"type":"string"},"fingerprint":{"type":"string"},"toolchain":{"type":"string"}},"additionalProperties":false}},"additionalProperties":false})";
 
     constexpr std::string_view ToolchainDiffOutput =
         R"({"type":"object","required":["term","term_scope","a","b","identical","same_fingerprint","recompute","complete","incomplete","skew","schema_differs","banner","grammar","only_a","only_b","content_differs","verdict","inferred"],"properties":{)"
         R"("term":{"type":["integer","null"]},"term_scope":{"const":"this-node"},)"
-        R"("a":{"type":"object","description":"node (null: this node), fingerprint, toolchain (what it was resolved from, or null), answered_by, version (its pace-node), schema, grammar, total_files."},"b":{"type":"object"},)"
+        R"("a":{"type":"object","description":"node (null: this node), display_name (what the cluster records for it, or null), fingerprint, toolchain (what it was resolved from, or null), answered_by, version (its pace-node), schema, grammar, total_files."},"b":{"type":"object"},)"
         R"("identical":{"type":"boolean"},"same_fingerprint":{"type":"boolean"},)"
         R"("recompute":{"enum":["passed","not-run","failed"],"description":"passed: both records recomputed to their fingerprints on this node before they were compared. failed: neither reproduced from identical inputs (see skew). not-run: a side was incomplete, so nothing was recomputed. A side that alone fails is refused as stale."},)"
         R"("complete":{"type":"boolean"},"incomplete":{"type":["string","null"],"description":"Why the files were not compared: a side passed the files, bytes or pages this tool reads per side. Only schema, banner and grammar are then compared, and inferred is false."},)"

@@ -17,8 +17,10 @@ namespace Pace::Node
 /// @file NodeNameResolver.hpp
 /// Which member a person means by a name: what the MCP node-scope tools resolve their `node` argument through.
 ///
-/// **Exact, and only exact.** A name matches a member's id exactly, then -- once members carry one -- its display
-/// name exactly; **there is no prefix matching on ids**, because a prefix that matches one member today matches
+/// **Exact, and only exact.** A name matches a member's id exactly, then its replicated display name
+/// (`ClusterMember::displayName`) exactly -- byte for byte, never case folded: uniqueness is folded so two names cannot
+/// differ only in case, and resolving exactly is what keeps a name a person typed meaning one spelling. **There is no
+/// prefix matching on ids**, because a prefix that matches one member today matches
 /// two after the next join, and the tool would then answer about a machine nobody named. An ambiguous or unknown
 /// name is an error listing the members it could have meant, never a guess.
 
@@ -30,13 +32,24 @@ struct NameMatchRow
 };
 
 /// Every way a name matches, in the order they are asked. The first way that matches ANY member decides: one
-/// match is the member, several are ambiguous. **A way of naming is a row here**, so the display name lands as
-/// one row after the id and the resolver does not change.
+/// match is the member, several are ambiguous. **A way of naming is a row here**, so the display name is one row
+/// after the id and the resolver does not change. An id wins over a display name spelled the same, which the leader
+/// refuses to record (`Cluster::DisplayNameHolder`) but an older state may hold.
 inline constexpr std::array NameMatchers {
     NameMatchRow {
         .what = "id",
         .matches = [](Cluster::ClusterMember const& member, std::string_view name) { return member.id == name; } },
+    NameMatchRow {
+        .what = "display name",
+        .matches = [](Cluster::ClusterMember const& member,
+                      std::string_view name) { return !member.displayName.empty() && member.displayName == name; } },
 };
+
+/// The replicated display name of member @p id, when @p state records one.
+/// @param state The applied cluster state.
+/// @param id A member's id.
+/// @return Its display name; nothing when the state does not record the member or nobody named it.
+[[nodiscard]] std::optional<std::string> DisplayNameIn(Cluster::ClusterState const& state, std::string_view id);
 
 /// The most members an error lists by id; the rest are counted.
 inline constexpr std::size_t MaxListedCandidates = 32;

@@ -34,7 +34,9 @@
 #                                         this node; `enrollment_auto_approve` armed for a
 #                                         minute and ended, each confirmed through
 #                                         `enrollment_status`; and the audit line each
-#                                         action leaves in the node's log.
+#                                         action leaves in the node's log; `set_display_name`
+#                                         of this node, read back from the fleet document's
+#                                         member row and by `node_status` resolving that name.
 #   2f. toolchains answers              — on that same scheduler, once its worker has
 #                                         registered what it identified: every toolchain
 #                                         served by this one machine, counted once, each
@@ -331,7 +333,7 @@ listed="$(curl -s -i -m 20 -X POST -H "Content-Type: application/json" -H "Accep
     --data "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"tools/list\",\"params\":{${ACTION_META}}}" \
     "http://127.0.0.1:${action_mcp_port}/mcp")" || fail "curl could not complete tools/list on the acting node"
 json_check "tools/list actions" "$(body_of "$listed")" \
-    "(lambda a: all(a[t]['readOnlyHint'] is False for t in ['enrollment_approve','enrollment_reject','enrollment_auto_approve','cordon','uncordon']) and a['enrollment_reject']['destructiveHint'] is True and a['cordon']['destructiveHint'] is False and a['explain_admission']['readOnlyHint'] is True)({x['name']: x['annotations'] for x in d['result']['tools']})"
+    "(lambda a: all(a[t]['readOnlyHint'] is False for t in ['enrollment_approve','enrollment_reject','enrollment_auto_approve','set_display_name','cordon','uncordon']) and a['enrollment_reject']['destructiveHint'] is True and a['cordon']['destructiveHint'] is False and a['explain_admission']['readOnlyHint'] is True)({x['name']: x['annotations'] for x in d['result']['tools']})"
 e2e_note "tools/list names the actions, none read-only, the reject destructive"
 
 # The worker answers node_status with a cordon state only once it runs; wait on that STATE rather than a delay.
@@ -370,8 +372,29 @@ json_check "enrollment_status once ended" "$(call_action enrollment_status '{}')
     "${OK} and ${SC}['enrollment'] == 'manual' and ${SC}['auto_approve_left_s'] is None"
 e2e_note "enrollment_auto_approve armed for a minute and ended, each confirmed through enrollment_status"
 
+# set_display_name, then the name read back where every surface reads it: the fleet document's member row (once the
+# entry COMMITS -- the answer says only that it was appended, so the wait is on the STATE), and node_status resolving
+# the node BY that name, exactly.
+named="$(call_action set_display_name "{\"node\":\"${self_id}\",\"name\":\"e2e-box\"}")"
+json_check "set_display_name" "$named" \
+    "${OK} and ${SC}['node_id'] == '${self_id}' and ${SC}['display_name'] == 'e2e-box' and ${SC}['state'] == 'replicating'"
+member_reads_named() {
+    local body
+    body="$(call_action fleet_overview '{}')"
+    python3 -I -c "import json,sys; d=json.loads(sys.stdin.read()); sys.exit(0 if d['result']['isError'] is False and any(m['id'] == '${self_id}' and m['name'] == 'e2e-box' and m['name_source'] == 'replicated' for m in d['result']['structuredContent']['members']) else 1)" <<< "$body"
+}
+wait_until member_reads_named "the fleet document to show this member named e2e-box" "$action_pid" "${workdir}/node.log" 30
+json_check "node_status by display name" "$(call_action node_status '{"node":"e2e-box"}')" \
+    "${OK} and ${SC}['node_id'] == '${self_id}' and ${SC}['node'] == 'e2e-box' and ${SC}['display_name'] == 'e2e-box'"
+json_check "node_status by another case of the name" "$(call_action node_status '{"node":"E2E-BOX"}')" \
+    "d['result']['isError'] is True"
+json_check "set_display_name refuses a control byte" "$(call_action set_display_name "{\"node\":\"${self_id}\",\"name\":\"a\\tb\"}")" \
+    "d['result']['isError'] is True and 'control character' in d['result']['content'][0]['text']"
+e2e_note "set_display_name named this node e2e-box, shown replicated in the fleet document, and node_status resolved it by that name"
+
 # Every action left its audit line, naming the client; the read did not.
-for line in "mcp action cordon {\"node\":\"${self_id}\"} by ${ACTION_CLIENT} answered by" \
+for line in "mcp action set_display_name {\"node\":\"${self_id}\",\"name\":\"e2e-box\"} by ${ACTION_CLIENT} answered by" \
+            "mcp action cordon {\"node\":\"${self_id}\"} by ${ACTION_CLIENT} answered by" \
             "mcp action uncordon {\"node\":\"${self_id}\"} by ${ACTION_CLIENT} answered by" \
             "mcp action enrollment_auto_approve {\"minutes\":1} by ${ACTION_CLIENT} answered by" \
             "mcp action enrollment_auto_approve {\"off\":true} by ${ACTION_CLIENT} answered by"; do

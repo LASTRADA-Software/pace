@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <Pace/Cli/Duration.hpp>
 #include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Core/Bytes.hpp>
 #include <Pace/Core/Ed25519.hpp>
 #include <Pace/Core/EnumTable.hpp>
 #include <Pace/Core/HostPort.hpp>
@@ -336,6 +337,9 @@ namespace
         // stands*, and the sentence carries which key and whose it was. The permanence is
         // stated where it is decided -- `RefusalSubjects` -- which is what a reconciler reads.
         { .code = ConsensusErrorCode::KeyRevoked, .reported = Wire::ErrorCode::InvalidClusterChange },
+        // `KeyRevoked`'s reasoning: no client acts differently on a taken name than on any other change that will not
+        // be accepted as it stands, and the sentence names the name and its holder.
+        { .code = ConsensusErrorCode::DisplayNameTaken, .reported = Wire::ErrorCode::InvalidClusterChange },
         { .code = ConsensusErrorCode::NotLeader, .reported = Wire::ErrorCode::NotLeader },
         { .code = ConsensusErrorCode::StorageFailure, .reported = Wire::ErrorCode::StorageWriteFailed },
         // A store another build wrote is judged when the node STARTS, which it then
@@ -903,6 +907,52 @@ SchedulerReply SchedulerService::ClusterSet(CallerContext const& caller, std::st
                                     .publicKey = std::nullopt });
 }
 
+namespace
+{
+    /// The replicated command one member edit proposes.
+    struct MemberEditCommandRow
+    {
+        Wire::MemberEditVerb verb; ///< The edit.
+        Cluster::CommandKind
+            kind; ///< The command the leader proposes for it: the member's id as `key`, the value as `value`.
+    };
+
+    /// One row per `MemberEditVerb`, in enumerator order: the next edit is a row here and a row of the wire's table.
+    constexpr EnumTable<Wire::MemberEditVerb, MemberEditCommandRow> MemberEditCommands { {
+        { .verb = Wire::MemberEditVerb::SetDisplayName, .kind = Cluster::CommandKind::SetDisplayName },
+    } };
+
+    static_assert(RowsInEnumeratorOrder(MemberEditCommands, &MemberEditCommandRow::verb),
+                  "MemberEditCommands must hold one row per MemberEditVerb, in enumerator order");
+} // namespace
+
+SchedulerReply SchedulerService::MemberEdit(CallerContext const& caller,
+                                            std::uint8_t verb,
+                                            std::string_view memberId,
+                                            std::string_view value)
+{
+    if (auto refusal = Gate(caller); refusal.has_value())
+        return std::move(*refusal);
+    if (_admin == nullptr)
+        return Refuse(Wire::ErrorCode::NoCluster);
+
+    // An edit this build does not know is a client newer than this leader: refused by name, never read as whichever
+    // edit its byte aliases, and as a change that will not be accepted as it stands -- the answer an unknown setting
+    // gets.
+    auto const edit = Wire::DecodeMemberEditVerb(verb);
+    if (!edit.has_value())
+        return Refuse(Wire::ErrorCode::InvalidClusterChange,
+                      std::format("member-edit verb {} is one this leader's build does not know; upgrade it to the "
+                                  "client's build",
+                                  static_cast<unsigned>(verb)));
+
+    return Offer(Cluster::Command { .kind = MemberEditCommands[static_cast<std::size_t>(*edit)].kind,
+                                    .key = std::string { memberId },
+                                    .value = std::string { value },
+                                    .schedulerEndpoint = {},
+                                    .publicKey = std::nullopt });
+}
+
 SchedulerReply SchedulerService::ClusterForget(CallerContext const& caller, std::string_view memberId)
 {
     if (auto refusal = Gate(caller); refusal.has_value())
@@ -1218,7 +1268,10 @@ SchedulerReply SchedulerService::AnnounceNode(CallerContext const& caller,
                              presence.capacity,
                              presence.load,
                              std::string { presence.version },
-                             presence.conditions);
+                             presence.conditions,
+                             caller.provenKey.has_value()
+                                 ? std::string { AsStringView(std::span<std::byte const> { *caller.provenKey }) }
+                                 : std::string {});
 
     // Filed under the ENDPOINT, exactly as a worker's batch is. The node's cursor advances only
     // because this verb was accepted, which is the rule `Heartbeat` already follows.

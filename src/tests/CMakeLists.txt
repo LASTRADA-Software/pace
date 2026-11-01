@@ -8138,7 +8138,7 @@ if(TARGET PaceTest)
         # the assertion that could not have failed while this ticket was open: 69
         # cases ran, and 69 is non-zero.
         #
-        # 292 = 207 (CompileCacheWire) + 26 (RaftWire) + 17 (ClusterState)
+        # 296 = 208 (CompileCacheWire) + 26 (RaftWire) + 20 (ClusterState)
         #     + 23 (DiscoveryWire) + 9 (FingerprintInputsWire) + 5 (NodeStatusDetailWire)
         #     + 1 (RaftTypes) + 1 (SchedulerService) + 1 (MachineTicket)
         #     + 1 (MachineStanding) + 1 (IdentityKeyLabel), read off `PaceTest "[wire]"
@@ -8152,7 +8152,10 @@ if(TARGET PaceTest)
         # file of five wire cases (+5). From 283 to 291: FingerprintInputsWire, a new file
         # of eight wire cases -- the FINGERPRINT-INPUTS opcode byte and row, and its
         # request, page and index grammars (+8). From 291 to 292: the 0x34
-        # fingerprint-inputs-unrecorded byte pin in FingerprintInputsWire (+1).
+        # fingerprint-inputs-unrecorded byte pin in FingerprintInputsWire (+1). From 292
+        # to 296: the MEMBER-EDIT opcode, edit and frame in CompileCacheWire (+1), and in
+        # ClusterState the SetDisplayName verb byte, a display name's round trip through a
+        # command and a snapshot, and a snapshot holding a name Apply never records (+3).
         #
         # `[(]` rather than `\(`: CMake reads `\(` in a quoted argument as an escape
         # and stores a bare `(`, which its regex engine then takes as a capture group
@@ -8164,7 +8167,7 @@ if(TARGET PaceTest)
         # anything matches nothing. No `SKIP_RETURN_CODE` here: every selected case
         # must PASS for the count to be the count, so a run that skipped is a failure
         # of this check, never a state to report.
-        PASS_REGULAR_EXPRESSION "All tests passed [(][0-9]+ assertions in 292 test cases[)]"
+        PASS_REGULAR_EXPRESSION "All tests passed [(][0-9]+ assertions in 296 test cases[)]"
         LABELS "hygiene"
         TIMEOUT 300
     )

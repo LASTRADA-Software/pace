@@ -222,6 +222,7 @@ namespace
         result.emplace_back("node", StrOrNull(target->asked));
         result.emplace_back("version", Str(NodeStatusView::ReadableText(fields.version)));
         result.emplace_back("node_id", fields.nodeId.empty() ? Null() : Str(NodeStatusView::ReadableText(fields.nodeId)));
+        result.emplace_back("display_name", DisplayNameValue(*target));
         result.emplace_back("public_key",
                             runtime.identityPublicKey.has_value()
                                 ? Str(FormatEd25519PublicKey(Ed25519PublicKey { *runtime.identityPublicKey }))
@@ -257,13 +258,13 @@ namespace
 
     constexpr std::string_view NodeStatusInput =
         R"({"type":"object","properties":{)"
-        R"("node":{"type":"string","description":"A member's id, matched exactly -- never by prefix. Omit it to ask this node."}},"additionalProperties":false})";
+        R"("node":{"type":"string","description":"A member's id or replicated display name, matched exactly -- never by prefix. Omit it to ask this node."}},"additionalProperties":false})";
 
     constexpr std::string_view NodeStatusOutput =
-        R"({"type":"object","required":["answered_by","term","term_scope","node","version","node_id","public_key","uptime_s","components","consensus_standing","scheduler_role","toolchains","compile_slots","compiles_in_flight","compile_inflight_max_bytes","compile_request_max_bytes","cordon","slot_ceilings","tiers","surfaces","effective_config","budget_overrides"],"properties":{)"
+        R"({"type":"object","required":["answered_by","term","term_scope","node","version","node_id","display_name","public_key","uptime_s","components","consensus_standing","scheduler_role","toolchains","compile_slots","compiles_in_flight","compile_inflight_max_bytes","compile_request_max_bytes","cordon","slot_ceilings","tiers","surfaces","effective_config","budget_overrides"],"properties":{)"
         R"("answered_by":{"type":"string"},"term":{"type":["integer","null"]},"term_scope":{"const":"this-node"},)"
         R"("node":{"type":["string","null"],"description":"The name asked for; null when this node was asked."},)"
-        R"("version":{"type":"string"},"node_id":{"type":["string","null"]},"public_key":{"type":["string","null"]},)"
+        R"("version":{"type":"string"},"node_id":{"type":["string","null"]},"display_name":{"type":["string","null"],"description":"The display name the cluster records for the node; null when nobody named it."},"public_key":{"type":["string","null"]},)"
         R"("uptime_s":{"type":"integer"},"components":{"type":"array","items":{"type":"string"}},)"
         R"("consensus_standing":{"type":["string","null"]},"scheduler_role":{"type":["string","null"]},)"
         R"("toolchains":{"type":["object","null"]},)"

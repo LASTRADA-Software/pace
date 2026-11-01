@@ -441,6 +441,7 @@ TEST_CASE("NodeConfig: every flag that is worker state reaches the supervisor", 
         // decision at every boot, forever.
         "--cluster-status",
         "--cluster-set",
+        "--cluster-name",
         "--cluster-forget",
         "--cluster-admit",
         // Same rule, and the consequence is a flap (#1449): a registration carrying it

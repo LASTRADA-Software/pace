@@ -2,6 +2,7 @@
 #pragma once
 
 #include "McpUpstream.hpp"
+#include "NodeNameResolver.hpp"
 
 #include <Pace/Core/Json.hpp>
 #include <Pace/Protocol/Mcp/McpTool.hpp>
@@ -139,7 +140,19 @@ struct NodeTarget
 {
     std::string nodeId;               ///< The member's id; empty means this node.
     std::optional<std::string> asked; ///< The name as given, or nothing when none was.
+
+    /// The display name the applied state records for the node asked -- this one when `nodeId` is empty -- or nothing
+    /// when it records none or this node applied no state. **Resolved here, once, for every tool**, so every answer
+    /// that names a node names it by id AND display name through one door.
+    std::optional<std::string> displayName {};
 };
+
+/// @param target Whom a call asked.
+/// @return Its `display_name` member's value: the name, or `null` when the cluster records none.
+[[nodiscard]] inline Json::Value DisplayNameValue(NodeTarget const& target)
+{
+    return target.displayName.has_value() ? Str(*target.displayName) : Null();
+}
 
 /// Resolve a `node` member, through `ResolveNodeName`: exactly, never by prefix.
 ///
@@ -153,19 +166,21 @@ struct NodeTarget
                                                                                IAppliedClusterView const& cluster,
                                                                                std::string const& selfId)
 {
+    auto const state = cluster.AppliedState();
     if (node == nullptr || node->IsNull())
-        return NodeTarget { .nodeId = {}, .asked = std::nullopt };
+        return NodeTarget { .nodeId = {},
+                            .asked = std::nullopt,
+                            .displayName = state.has_value() ? DisplayNameIn(*state, selfId) : std::nullopt };
     // Refused rather than ignored: a `node` this tool cannot read answered about THIS node would be an answer about
     // a machine nobody named.
     auto const* const name = node->AsString();
     if (name == nullptr)
-        return std::unexpected { Error("`node` must be a string: a member's id, matched exactly") };
+        return std::unexpected { Error("`node` must be a string: a member's id or display name, matched exactly") };
 
-    auto const state = cluster.AppliedState();
     if (!state.has_value())
     {
         if (*name == selfId && !selfId.empty())
-            return NodeTarget { .nodeId = {}, .asked = *name };
+            return NodeTarget { .nodeId = {}, .asked = *name, .displayName = std::nullopt };
         return std::unexpected { Error(std::format(
             "this node has applied no cluster state, so it can name no member but itself ({}); omit `node` to ask it",
             selfId.empty() ? std::string { "it has no id" } : selfId)) };
@@ -173,7 +188,8 @@ struct NodeTarget
     auto resolved = ResolveNodeName(*state, *name);
     if (!resolved.has_value())
         return std::unexpected { Error(std::move(resolved.error())) };
-    return NodeTarget { .nodeId = std::move(*resolved), .asked = *name };
+    auto displayName = DisplayNameIn(*state, *resolved);
+    return NodeTarget { .nodeId = std::move(*resolved), .asked = *name, .displayName = std::move(displayName) };
 }
 
 /// Resolve a call's `node` argument, through `ResolveNodeName`: exactly, never by prefix.

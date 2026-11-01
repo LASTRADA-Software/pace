@@ -510,7 +510,8 @@ void WorkerRegistry::NoteNodePresent(std::string endpoint,
                                      NodeCapacity const& capacity,
                                      NodeLoad const& load,
                                      std::string version,
-                                     std::optional<std::vector<CompileCacheWire::NodeConditionFields>> conditions)
+                                     std::optional<std::vector<CompileCacheWire::NodeConditionFields>> conditions,
+                                     std::string identityKey)
 {
     std::scoped_lock const guard { _mutex };
     auto& slot = _present[std::move(endpoint)];
@@ -518,6 +519,7 @@ void WorkerRegistry::NoteNodePresent(std::string endpoint,
     slot.load = load;
     slot.version = std::move(version);
     slot.conditions = std::move(conditions);
+    slot.identityKey = std::move(identityKey);
     slot.lastSeen = _clock.now();
 }
 
@@ -552,7 +554,8 @@ std::vector<NodeReport> WorkerRegistry::NodeReports() const
                                                                       .fleetJobsInFlight = entry.info.inFlight,
                                                                       .heartbeatAge = AgeOf(entry.lastSeen, now),
                                                                       .version = entry.info.version,
-                                                                      .displayName = entry.info.displayName },
+                                                                      .displayName = entry.info.displayName,
+                                                                      .identityKey = entry.info.identityKey },
                                                .lastSeen = entry.lastSeen,
                                                .contributorSaysCache = SaysAnything(entry.info.load.cache) });
         if (inserted)
@@ -599,6 +602,7 @@ std::vector<NodeReport> WorkerRegistry::NodeReports() const
             // the whole row one entry's account rather than a blend of several.
             held.report.version = entry.info.version;
             held.report.displayName = entry.info.displayName;
+            held.report.identityKey = entry.info.identityKey;
             held.lastSeen = entry.lastSeen;
             held.contributorSaysCache = saysCache;
         }
@@ -639,6 +643,8 @@ std::vector<NodeReport> WorkerRegistry::NodeReports() const
                                                               .heartbeatAge = AgeOf(presence.lastSeen, now),
                                                               .version = presence.version,
                                                               .displayName = {},
+                                                              .identityKey = presence.identityKey,
+                                                              .replicatedName = {},
                                                               .conditions = presence.conditions },
                                        .lastSeen = presence.lastSeen,
                                        .contributorSaysCache = SaysAnything(presence.load.cache) });

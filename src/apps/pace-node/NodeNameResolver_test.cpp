@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <expected>
 #include <format>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -80,4 +81,29 @@ TEST_CASE("An empty name, an empty fleet and a long list each say what they are"
     REQUIRE_FALSE(tooLong.has_value());
     CHECK(tooLong.error().find(longName) == std::string::npos);
     CHECK(tooLong.error().find(std::format("a name of {} bytes", longName.size())) != std::string::npos);
+}
+
+TEST_CASE("A name resolves to the member whose replicated display name it is, exactly", "[node-name][display-name]")
+{
+    auto state = StateOf({ "a3f5c1", "b77e02", "c0ffee" });
+    state.members[0].displayName = "office-pc";
+    state.members[1].displayName = "build-box";
+    CHECK(ResolveNodeName(state, "office-pc") == std::expected<Consensus::NodeId, std::string> { "a3f5c1" });
+    CHECK(ResolveNodeName(state, "build-box") == std::expected<Consensus::NodeId, std::string> { "b77e02" });
+    // The id still resolves beside it.
+    CHECK(ResolveNodeName(state, "c0ffee") == std::expected<Consensus::NodeId, std::string> { "c0ffee" });
+
+    // Exactly: not another case (uniqueness is folded; resolution is not), not a prefix, and never an unnamed member
+    // by an empty name.
+    for (auto const name: { std::string_view { "Office-PC" }, std::string_view { "office" } })
+    {
+        INFO(name);
+        CHECK_FALSE(ResolveNodeName(state, name).has_value());
+    }
+
+    // An id wins over a display name spelled the same, which an older state may hold.
+    state.members[2].displayName = "a3f5c1";
+    CHECK(ResolveNodeName(state, "a3f5c1") == std::expected<Consensus::NodeId, std::string> { "a3f5c1" });
+    CHECK(DisplayNameIn(state, "a3f5c1") == std::optional<std::string> { "office-pc" });
+    CHECK_FALSE(DisplayNameIn(state, "nobody").has_value());
 }

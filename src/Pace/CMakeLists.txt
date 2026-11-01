@@ -236,6 +236,7 @@ target_sources(Pace
             Core/Errors/ProtocolError.hpp
             Core/Errors/StorageError.hpp
             Core/Errors/ConfigError.hpp
+            Core/AsciiFold.hpp
             Core/Bytes.hpp
             Core/SecureBytes.hpp
             Core/Compression.hpp

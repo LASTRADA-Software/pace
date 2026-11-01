@@ -186,6 +186,7 @@ constexpr std::array NonStartVerbs {
     NonStartVerb { .flag = "--migrate-cache", .why = "converts a store and exits" },
     NonStartVerb { .flag = "--cluster-status", .why = "a cluster admin verb: asks the leader and exits" },
     NonStartVerb { .flag = "--cluster-set", .why = "a cluster admin verb: changes one replicated setting and exits" },
+    NonStartVerb { .flag = "--cluster-name", .why = "a cluster admin verb: names one member and exits" },
     NonStartVerb { .flag = "--cluster-admit", .why = "a cluster admin verb: proposes a member and exits" },
     NonStartVerb { .flag = "--cluster-forget", .why = "a cluster admin verb: proposes a removal and exits" },
     // The enrollment verbs. The three operator ones are the cluster-admin rows above in

@@ -1168,7 +1168,7 @@ TEST_CASE("An operator's control verb is refused a learner's ticket and a learne
     std::ranges::copy_if(Wire::OpTable, std::back_inserter(controlVerbs), [](Wire::OpDescriptor const& row) {
         return row.identity == Wire::IdentityRequirement::OperatorStanding && row.family == Wire::VerbFamily::Scheduler;
     });
-    REQUIRE(controlVerbs.size() == 4); // admit, admit-learner, forget, set (admit-worker is retired)
+    REQUIRE(controlVerbs.size() == 5); // admit, admit-learner, forget, set, member-edit (admit-worker is retired)
     auto const counted = [&fixture] {
         return fixture.metrics.Read(IMetricsSink::Counter::SchedulerRequestsRefusedOperatorStandingRequired);
     };

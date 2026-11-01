@@ -342,7 +342,7 @@ TEST_CASE("A snapshot the previous build wrote, in its own layout, is refused by
     CHECK(std::ranges::any_of(records, [](auto const& record) {
         return record.message.contains("cannot decode")
                && record.message.contains(std::format("version {}", Testing::PreviousClusterStateVersion))
-               && record.message.contains("reads 10");
+               && record.message.contains("reads 11");
     }));
 }
 
@@ -411,7 +411,19 @@ TEST_CASE("Whether a command can be applied is asked without applying it, in the
         REQUIRE_FALSE(refused.has_value());
         CHECK(refused.error().code == ConsensusErrorCode::UnsupportedFormatVersion);
         CHECK(refused.error().context.contains(std::format("version {}", Testing::PreviousClusterCommandVersion)));
-        CHECK(refused.error().context.contains("reads 6"));
+        CHECK(refused.error().context.contains("reads 7"));
+    }
+
+    SECTION("the last build before display names wrote a command this build refuses to replay, by its version")
+    {
+        // This build's layout under the version the display names moved past: a store a node kept across that upgrade
+        // is another build's format, never damage.
+        auto const refused = watched.machine.CanRead(Testing::EncodeNamelessClusterCommand());
+        REQUIRE_FALSE(refused.has_value());
+        CHECK(refused.error().code == ConsensusErrorCode::UnsupportedFormatVersion);
+        CHECK(refused.error().context.contains(std::format("version {}", Testing::NamelessClusterCommandVersion)));
+        CHECK(refused.error().context.contains("reads 7"));
+        CHECK(watched.published.empty());
     }
 
     SECTION("bytes that are no command at all are damage")
@@ -444,6 +456,7 @@ TEST_CASE("Whether a snapshot can be restored is asked without restoring it, in 
     {
         // The principal era's layout (what the one installation holds) and the one before it.
         auto const [older, version] = GENERATE(table<std::vector<std::byte>, std::uint8_t>({
+            { Testing::EncodeNamelessClusterState(), Testing::NamelessClusterStateVersion },
             { Testing::EncodePrincipalEraClusterState(), Testing::PrincipalEraClusterStateVersion },
             { Testing::EncodePreviousClusterState(), Testing::PreviousClusterStateVersion },
         }));
@@ -452,7 +465,7 @@ TEST_CASE("Whether a snapshot can be restored is asked without restoring it, in 
         REQUIRE_FALSE(refused.has_value());
         CHECK(refused.error().code == ConsensusErrorCode::UnsupportedFormatVersion);
         CHECK(refused.error().context.contains(std::format("version {}", version)));
-        CHECK(refused.error().context.contains("reads 10"));
+        CHECK(refused.error().context.contains("reads 11"));
     }
 
     SECTION("bytes that are no state at all are damage")

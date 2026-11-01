@@ -1590,9 +1590,23 @@ TEST_CASE("A node whose own consensus state this build cannot read refuses to st
         CHECK(refusal.contains(directory.string()));
         CHECK(refusal.contains("the snapshot as of log entry 3"));
         CHECK(refusal.contains(std::format("cluster state encoding version {}", Testing::PreviousClusterStateVersion)));
-        CHECK(refusal.contains("reads 10"));
+        CHECK(refusal.contains("reads 11"));
         CHECK(refusal.contains("it is intact, and there is no conversion"));
         CHECK(refusal.contains(Consensus::UnreadableStateRemedy));
+        CHECK(published->load() == 0);
+    }
+
+    SECTION("a snapshot the last build before display names wrote refuses the start as another build's format")
+    {
+        PlantConsensusState(directory, Testing::EncodeNamelessClusterState(), currentCommand);
+        auto const started = start();
+        REQUIRE_FALSE(started.has_value());
+        CHECK(started.error().cause == NodeRefusalCause::ConsensusState);
+        auto const& refusal = started.error().reason;
+        CAPTURE(refusal);
+        CHECK(refusal.contains(std::format("cluster state encoding version {}", Testing::NamelessClusterStateVersion)));
+        CHECK(refusal.contains("reads 11"));
+        CHECK(refusal.contains("it is intact, and there is no conversion"));
         CHECK(published->load() == 0);
     }
 
@@ -1609,7 +1623,7 @@ TEST_CASE("A node whose own consensus state this build cannot read refuses to st
         CHECK(refusal.contains(directory.string()));
         CHECK(refusal.contains("log entry 4"));
         CHECK(refusal.contains(std::format("cluster command encoding version {}", Testing::PreviousClusterCommandVersion)));
-        CHECK(refusal.contains("reads 6"));
+        CHECK(refusal.contains("reads 7"));
         CHECK(refusal.contains(Consensus::UnreadableStateRemedy));
         CHECK(published->load() == 0);
     }
@@ -1943,7 +1957,7 @@ TEST_CASE("A running tier offered a snapshot it cannot read raises unreadable-le
         CHECK(row->detail.contains("leader n1"));
         CHECK(row->detail.contains("log entry 3"));
         CHECK(row->detail.contains(std::format("version {}", Testing::PreviousClusterStateVersion)));
-        CHECK(row->detail.contains("reads 10"));
+        CHECK(row->detail.contains("reads 11"));
 
         // Nothing taken on: not the previous build's member, not a moved commit index.
         CHECK_FALSE(tier->ClusterState().RaftEndpointOf("n1").has_value());

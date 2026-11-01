@@ -613,6 +613,47 @@ TEST_CASE("The credential kinds keep the bytes they were assigned", "[wire][auth
     CHECK(OpFieldCount(Op::Auth) == 3);
 }
 
+TEST_CASE("MEMBER-EDIT keeps its bytes: the opcode, the edit, and a frame that decodes to what was asked",
+          "[wire][member-edit][display-name]")
+{
+    // The raw enumerators -- the anchor, not a smell: a symbol both ends spell tests only its name.
+    CHECK(static_cast<std::uint8_t>(Op::MemberEdit) == 0x26);
+    CHECK(static_cast<std::uint8_t>(MemberEditVerb::SetDisplayName) == 0);
+    CHECK(static_cast<std::uint8_t>(MemberEditVerb::Last) == 1);
+    REQUIRE(FindOp(0x26) != nullptr);
+    CHECK(FindOp(0x26)->code == Op::MemberEdit);
+
+    auto const* const row = FindOp(static_cast<std::uint8_t>(Op::MemberEdit));
+    REQUIRE(row != nullptr);
+    CHECK(row->name == "member-edit");
+    CHECK(row->fieldCount == 3);
+    CHECK(row->family == VerbFamily::Scheduler);
+    CHECK(row->identity == IdentityRequirement::OperatorStanding);
+    CHECK(row->maxPayload.Bytes() == MaxControlPayload);
+
+    // The frame: the header, then the edit byte, the member and the value -- read back as asked.
+    auto const frame =
+        EncodeMemberEdit(MemberEditRequest { .verb = MemberEditVerb::SetDisplayName, .memberId = "n2", .value = "lab" });
+    REQUIRE(frame.size() > RequestHeaderSize);
+    CHECK(static_cast<std::uint8_t>(frame[2]) == 0x26);
+    auto const view = Unwrap(DecodeMemberEditPayload(std::span { frame }.subspan(RequestHeaderSize)));
+    CHECK(view.verb == 0);
+    CHECK(AsStringView(view.memberId) == "n2");
+    CHECK(AsStringView(view.value) == "lab");
+
+    // An edit byte this build does not know decodes as a byte -- refused by name further in, never as a malformed
+    // frame -- and `DecodeMemberEditVerb` knows exactly the rows of the table.
+    CHECK(DecodeMemberEditVerb(0) == std::optional { MemberEditVerb::SetDisplayName });
+    CHECK_FALSE(DecodeMemberEditVerb(1).has_value());
+    CHECK_FALSE(DecodeMemberEditVerb(0xFF).has_value());
+
+    // An edit field that is not exactly one byte is malformed.
+    auto const twoByteEdit = std::array { std::byte { 0 }, std::byte { 0 } };
+    auto const malformed = WireFields::Encode(
+        { std::span<std::byte const> { twoByteEdit }, AsBytes(std::string_view { "n2" }), AsBytes(std::string_view {}) });
+    CHECK_FALSE(DecodeMemberEditPayload(malformed).has_value());
+}
+
 TEST_CASE("An operator's control verb is refused an unidentified caller under its own byte", "[wire][admission]")
 {
     // The byte and the name, both: a symbol both ends spell tests only the first.
@@ -624,7 +665,8 @@ TEST_CASE("An operator's control verb is refused an unidentified caller under it
     // The column, asked of the rows one at a time so a failure names the verb; the set itself is
     // `ControlVerbsNeedOperatorStanding`'s, a build failure. An unidentified caller is refused on
     // the way there: `IdentifiedCaller` is `OperatorStanding`'s prerequisite.
-    for (auto const op: { Op::ClusterSet, Op::ClusterForget, Op::ClusterAdmit, Op::ClusterAdmitLearner, Op::EnrollControl })
+    for (auto const op:
+         { Op::ClusterSet, Op::ClusterForget, Op::ClusterAdmit, Op::ClusterAdmitLearner, Op::EnrollControl, Op::MemberEdit })
     {
         auto const* const row = FindOp(static_cast<std::uint8_t>(op));
         REQUIRE(row != nullptr);

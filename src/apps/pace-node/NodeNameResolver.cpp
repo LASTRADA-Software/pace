@@ -32,6 +32,14 @@ namespace
     }
 } // namespace
 
+std::optional<std::string> DisplayNameIn(Cluster::ClusterState const& state, std::string_view id)
+{
+    auto const member = std::ranges::find(state.members, id, &Cluster::ClusterMember::id);
+    if (member == state.members.end() || member->displayName.empty())
+        return std::nullopt;
+    return member->displayName;
+}
+
 std::expected<Consensus::NodeId, std::string> ResolveNodeName(Cluster::ClusterState const& state,
                                                               std::string_view idOrDisplayName)
 {

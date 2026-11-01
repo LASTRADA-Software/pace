@@ -6,6 +6,7 @@
 #include <Pace/Core/Json.hpp>
 #include <Pace/Core/Logger.hpp>
 #include <Pace/Distributed/FleetView.hpp>
+#include <Pace/Distributed/IClusterAdmin.hpp>
 #include <Pace/Distributed/LeaseToken.hpp>
 #include <Pace/Distributed/SchedulerService.hpp>
 #include <Pace/Metrics/IMetricsSink.hpp>
@@ -17,6 +18,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <functional>
 #include <latch>
@@ -768,6 +770,95 @@ TEST_CASE("SchedulerAdmission.a-late-queue-settle-counts-released-late-and-an-ab
         fleet.service.AbandonAdmission(ticket);
         CHECK(releasedLate(fleet) == 0);
         CHECK(DispatchCountsOf(fleet) == DispatchCounts { .granted = 1, .released = 0 });
+    }
+}
+
+namespace
+{
+/// A cluster that has agreed one state, for the fleet page to read; it proposes nothing.
+class AgreedCluster final: public IClusterAdmin
+{
+  public:
+    /// @param state What the cluster has agreed.
+    explicit AgreedCluster(Cluster::ClusterState state):
+        _state { std::move(state) }
+    {
+    }
+
+    [[nodiscard]] Cluster::ClusterState ClusterState() const override
+    {
+        return _state;
+    }
+
+    [[nodiscard]] std::expected<void, ConsensusError> ProposeToCluster(Cluster::Command const& /*command*/) override
+    {
+        return std::unexpected { InvalidConfiguration("this cluster proposes nothing") };
+    }
+
+    void NoteAnnouncedEndpoint(Consensus::NodeId const& /*member*/, std::string /*endpoint*/) override {}
+
+  private:
+    Cluster::ClusterState _state;
+};
+} // namespace
+
+TEST_CASE("SchedulerAdmission.dashboard-shows-the-replicated-name-and-says-where-a-name-came-from",
+          "[distributed][admission][scheduler][fleetview][display-name]")
+{
+    // The page joins a machine to its member record by the key the machine PROVED -- for the label alone -- and
+    // prefers the name an operator chose over the one the machine reports for itself, saying which it showed.
+    Fleet fleet;
+    auto const reply = fleet.service.Register(
+        fleet.Worker(),
+        WorkerRegistration {
+            .fingerprint = Toolchain, .endpoint = WorkerEndpoint, .displayName = "build-7", .slots = 1, .codecs = {} });
+    REQUIRE(reply.status == Wire::Status::Ok);
+
+    auto state = Cluster::ClusterState {};
+    for (auto const& [id, key]: { std::pair { std::string { "w1" }, fleet.workerKey.PublicKey() },
+                                  std::pair { std::string { "w2" }, Testing::TestKeyPair("w2").PublicKey() } })
+        Cluster::Apply(state,
+                       Cluster::Command { .kind = Cluster::CommandKind::AddLearner,
+                                          .key = id,
+                                          .value = {},
+                                          .schedulerEndpoint = {},
+                                          .publicKey = key });
+
+    SECTION("nobody named it: the machine's own word, marked self-reported, on both rows")
+    {
+        AgreedCluster const cluster { state };
+        auto const snapshot = CollectFleet({ .scheduler = &fleet.service, .cluster = &cluster, .metrics = &fleet.metrics });
+        auto const json = RenderFleetJson(snapshot, FleetHistoryView {});
+        INFO(json);
+        CHECK(json.contains(R"("name":"build-7","name-source":"self-reported")"));
+        CHECK(json.contains(R"("id":"w1","name":"build-7","name-source":"self-reported")"));
+        // A member no machine of the fleet speaks for, and nobody named, renders absent at the cell.
+        CHECK(json.contains(R"("id":"w2","name":null,"name-source":null)"));
+    }
+    SECTION("an operator named it: the replicated name wins, marked replicated, on both rows and in the queue")
+    {
+        Cluster::Apply(state,
+                       Cluster::Command { .kind = Cluster::CommandKind::SetDisplayName,
+                                          .key = "w1",
+                                          .value = "lab-box",
+                                          .schedulerEndpoint = {},
+                                          .publicKey = std::nullopt });
+        AgreedCluster const cluster { state };
+        fleet.Report(MachineOf(fleet.workerKey.PublicKey()), 1024 * MiB, 1);
+        auto const snapshot = CollectFleet({ .scheduler = &fleet.service, .cluster = &cluster, .metrics = &fleet.metrics });
+        REQUIRE(snapshot.nodes.size() == 1);
+        CHECK(snapshot.nodes.front().replicatedName == "lab-box");
+        auto const json = RenderFleetJson(snapshot, FleetHistoryView {});
+        INFO(json);
+        CHECK(json.contains(R"("name":"lab-box","name-source":"replicated")"));
+        CHECK(json.contains(R"("id":"w1","name":"lab-box","name-source":"replicated")"));
+        CHECK_FALSE(json.contains("build-7"));
+        // The page and the text document say it too: one column table, one spelling.
+        CHECK(RenderFleetHtml(snapshot, FleetHistoryView {}, 0).contains("lab-box"));
+        CHECK(RenderFleetText(snapshot, FleetHistoryView {}, FleetSection::Members).contains("w1\tlab-box\treplicated"));
+        // And a machine the admission queue names is named by it.
+        REQUIRE(snapshot.admission.has_value());
+        CHECK(std::ranges::contains(Unwrap(snapshot.admission).machines, "lab-box", &AdmissionMachineRow::machine));
     }
 }
 

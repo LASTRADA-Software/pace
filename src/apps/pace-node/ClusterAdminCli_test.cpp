@@ -1220,3 +1220,52 @@ TEST_CASE("A cluster command that reached nobody is transient, and one the sched
         CHECK(refused.error().ending == CommandEnding::Failed);
     }
 }
+
+TEST_CASE("The cluster-name flag names a member, splitting at the first separator, and refuses what no member may carry",
+          "[node][clusteradmin][display-name]")
+{
+    auto const named = ParsedFrom({ "--cluster-name=n3=build box=2" });
+    CHECK(named.cluster.action == ClusterAction::Name);
+    CHECK(named.cluster.key == "n3");
+    // Split at the FIRST `=`: an id holds none, and a name may.
+    CHECK(named.cluster.value == "build box=2");
+
+    // An empty name is how it is cleared.
+    auto const cleared = ParsedFrom({ "--cluster-name=n3=" });
+    CHECK(cleared.cluster.action == ClusterAction::Name);
+    CHECK(cleared.cluster.value.empty());
+
+    // Refused where the operator is watching, in the leader's own words: no member, no name, a control byte, too long.
+    auto const longName = std::format("--cluster-name=n3={}", std::string(Cluster::MaxDisplayNameBytes + 1, 'x'));
+    for (auto const* const bad: { "--cluster-name=n3", "--cluster-name==box", "--cluster-name=n3=a\tb", longName.c_str() })
+    {
+        INFO(bad);
+        NodeConfig cfg;
+        auto const args = std::vector<char const*> { bad };
+        CHECK_FALSE(ParseOptionsInto(NodeOptions(), std::span<char const* const> { args }, cfg).has_value());
+    }
+}
+
+TEST_CASE("A name reaches the cluster as SetDisplayName, and a status report shows each member's",
+          "[node][clusteradmin][display-name]")
+{
+    Fixture fixture;
+    FakeCluster cluster;
+    cluster.state = Agreed();
+    fixture.service.AdministerWith(cluster);
+
+    CHECK(StatusOf(fixture.Ask(Ask(ClusterAction::Name, "n2", "build-box"))) == Wire::Status::Ok);
+    REQUIRE(cluster.proposed.size() == 1);
+    CHECK(cluster.proposed[0] == Cmd(Cluster::CommandKind::SetDisplayName, "n2", "build-box"));
+
+    // Appended, never committed: reported as every other change is.
+    CHECK(InterpretClusterReply(ClusterAction::Name, {})
+          == std::expected<std::string, std::string> { "accepted; the change is replicating\n" });
+
+    auto state = Agreed();
+    Apply(state, Cmd(Cluster::CommandKind::SetDisplayName, "n2", "build-box"));
+    auto const rendered = RenderClusterState(state);
+    CHECK(rendered.contains("name=build-box"));
+    // A member nobody named shows the dash, never an empty `name=`.
+    CHECK(rendered.contains("name=-"));
+}

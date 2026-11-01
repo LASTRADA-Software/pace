@@ -1096,6 +1096,19 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     /// @return `Ok` once the entry is appended, or a refusal.
     [[nodiscard]] SchedulerReply ClusterSet(CallerContext const& caller, std::string_view name, std::string_view value);
 
+    /// Edit one member's replicated record: MEMBER-EDIT, proposed by the leader as the command its edit names
+    /// (`SetDisplayName` today), through `Offer` as every cluster control verb is -- so a non-leader answers `NotLeader`
+    /// naming the leader, and every rule `Cluster::ValidateAgainst` holds is the refusal the operator reads.
+    /// @param caller Who is asking.
+    /// @param verb The edit byte as received; one this build does not know is refused by name.
+    /// @param memberId The member, by its id exactly.
+    /// @param value The edit's value: for a display name, the name, empty to clear it.
+    /// @return `Ok` once the entry is appended, or a refusal.
+    [[nodiscard]] SchedulerReply MemberEdit(CallerContext const& caller,
+                                            std::uint8_t verb,
+                                            std::string_view memberId,
+                                            std::string_view value);
+
     /// Forget a machine: remove the id's member record and revoke the key it was admitted
     /// under (#1555).
     ///
