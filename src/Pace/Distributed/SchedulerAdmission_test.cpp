@@ -946,6 +946,52 @@ TEST_CASE("SchedulerAdmission.a-machine-is-named-as-a-member-by-the-key-it-prove
     CHECK(std::ranges::all_of(alone.workers, [](WorkerReport const& worker) { return worker.memberId.empty(); }));
 }
 
+TEST_CASE("SchedulerAdmission.two-members-registering-under-one-endpoint-name-nobody-on-the-machine-row",
+          "[distributed][admission][scheduler][fleetview][display-name]")
+{
+    // One machine row folds every registration at an endpoint. When two MEMBERS' proven keys meet there, the row is
+    // no one member's account: `node-id` is null on it -- the answer `fleet_overview` reads -- just as the MCP
+    // `toolchains` tool names nobody for registrations that disagree. Each worker row keeps its own key's member.
+    Fleet fleet;
+    constexpr std::string_view Shared = "10.0.0.7:6674";
+    auto const otherKey = Testing::TestKeyPair("w2");
+    auto other = fleet.Worker();
+    other.provenNodeId = "w2";
+    other.provenKey = otherKey.PublicKey();
+    for (auto const& [caller, fingerprint]:
+         { std::pair { fleet.Worker(), std::string { "gcc-14" } }, std::pair { other, std::string { "clang-18" } } })
+        REQUIRE(
+            fleet.service
+                .Register(caller,
+                          WorkerRegistration { .fingerprint = fingerprint, .endpoint = Shared, .slots = 1, .codecs = {} })
+                .status
+            == Wire::Status::Ok);
+
+    auto state = Cluster::ClusterState {};
+    for (auto const& [id, key]: { std::pair { std::string { "w1" }, fleet.workerKey.PublicKey() },
+                                  std::pair { std::string { "w2" }, otherKey.PublicKey() } })
+        Cluster::Apply(state,
+                       Cluster::Command { .kind = Cluster::CommandKind::AddLearner,
+                                          .key = id,
+                                          .value = {},
+                                          .schedulerEndpoint = {},
+                                          .publicKey = key });
+    AgreedCluster const cluster { state };
+    auto const snapshot = CollectFleet({ .scheduler = &fleet.service, .cluster = &cluster, .metrics = &fleet.metrics });
+    REQUIRE(snapshot.nodes.size() == 1);
+    CHECK(snapshot.nodes.front().fingerprints.size() == 2);
+    CHECK(snapshot.nodes.front().memberId.empty());
+    // Each registration still names its own member: the disagreement is the ROW's, never invented per worker.
+    auto workerIds = std::vector<std::string> {};
+    for (auto const& worker: snapshot.workers)
+        workerIds.push_back(worker.memberId);
+    std::ranges::sort(workerIds);
+    CHECK(workerIds == std::vector<std::string> { "w1", "w2" });
+    auto const json = RenderFleetJson(snapshot, FleetHistoryView {});
+    INFO(json);
+    CHECK(json.contains(R"("name-source":null,"node-id":null)"));
+}
+
 TEST_CASE("SchedulerAdmission.a-granted-ticket-lease-carries-its-ticket-id",
           "[distributed][admission][scheduler][fleetview]")
 {

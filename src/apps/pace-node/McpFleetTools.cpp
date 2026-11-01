@@ -229,12 +229,26 @@ namespace
         return unplaced;
     }
 
-    /// @param state The applied state, for the display name.
-    /// @param row A machine row carrying the leader's `node_id` cell: the member holding the key the machine PROVED.
-    /// @return The machine's naming, by that id -- never by the endpoint the row also carries, which is a claim.
-    [[nodiscard]] MachineNaming ByNodeId(std::optional<Cluster::ClusterState> const& state, Json::Value const& row)
+    /// A machine row named from ITSELF: the leader's `node_id` cell (the member holding the key the machine PROVED) and,
+    /// as that member's display name, the row's own `name` when its `name_source` says `replicated` -- one document,
+    /// one state, so a lagging node never prints the leader's name beside an older or absent one of its own (the rule
+    /// `node_status` follows for its two fields). Never by the endpoint the row also carries, which is a claim.
+    /// @param row A projected machine row.
+    /// @return The machine's naming.
+    [[nodiscard]] MachineNaming NamingOfFleetRow(Json::Value const& row)
     {
-        return NamingOfMember(state, StringAt(row, "node_id").value_or(std::string {}));
+        auto id = StringAt(row, "node_id");
+        if (!id.has_value() || id->empty())
+            return MachineNaming {};
+        auto const replicated = StringAt(row, "name_source") == std::optional<std::string> { "replicated" };
+        return MachineNaming { .nodeId = std::move(id), .displayName = replicated ? StringAt(row, "name") : std::nullopt };
+    }
+
+    /// @param row A machine row of the fleet document.
+    /// @return Its naming, from the row alone (`NamingOfFleetRow`); the applied state is not consulted.
+    [[nodiscard]] MachineNaming ByNodeId(std::optional<Cluster::ClusterState> const& /*state*/, Json::Value const& row)
+    {
+        return NamingOfFleetRow(row);
     }
 
     /// @param state The applied state.
@@ -322,7 +336,7 @@ namespace
     }
 
     [[nodiscard]] Mcp::ToolResult FleetOverview(IMcpUpstream& upstream,
-                                                IAppliedClusterView const& cluster,
+                                                IAppliedClusterView const& /*cluster*/,
                                                 Mcp::ToolCall const& /*call*/)
     {
         auto document = AskFleetDocument(upstream);
@@ -336,8 +350,9 @@ namespace
         if (!nodes.has_value())
             return Unreadable(*document, nodes.error());
 
-        // Every machine row named by its member id and display name, the id the leader joined by the PROVEN key.
-        auto const unplaced = NameRows(*nodes, cluster.AppliedState(), ByNodeId);
+        // Every machine row named by its member id and display name, both from the row itself (`NamingOfFleetRow`):
+        // the id the leader joined by the PROVEN key and the name its own applied state records for that member.
+        auto const unplaced = NameRows(*nodes, std::nullopt, ByNodeId);
         auto const skew = VersionsOf(ElementsOf(*nodes));
         auto const flag = SkewFlag(skew);
         auto const leader = StringAt(document->root, "leader");
@@ -515,7 +530,7 @@ namespace
     // ------------------------------------------------------------ conditions
 
     [[nodiscard]] Mcp::ToolResult Conditions(IMcpUpstream& upstream,
-                                             IAppliedClusterView const& cluster,
+                                             IAppliedClusterView const& /*cluster*/,
                                              Mcp::ToolCall const& /*call*/)
     {
         auto document = AskFleetDocument(upstream);
@@ -544,12 +559,12 @@ namespace
         // Each machine's member id as the LEADER joined its row, by the key the machine proved (`node-id`). The
         // endpoint is only this document's row key, which ties a condition row to its machine row; it never names a
         // member.
-        auto memberIds = std::map<std::string, std::string, std::less<>> {};
+        auto namings = std::map<std::string, MachineNaming, std::less<>> {};
         for (auto const& node: ElementsOf(*nodes))
         {
             auto const endpoint = StringAt(node, "endpoint").value_or(std::string {});
             std::ignore = visit(endpoint);
-            memberIds.try_emplace(endpoint, StringAt(node, "node_id").value_or(std::string {}));
+            namings.try_emplace(endpoint, NamingOfFleetRow(node));
         }
         auto raised = std::size_t { 0 };
         for (auto const& row: ElementsOf(*rows))
@@ -574,7 +589,6 @@ namespace
         auto machines = Json::Array {};
         auto notReported = std::vector<std::string> {};
         auto raisedLines = std::string {};
-        auto const state = cluster.AppliedState();
         auto unplaced = std::size_t { 0 };
         for (auto const& endpoint: order)
         {
@@ -593,8 +607,7 @@ namespace
                                                StringAt(condition, "detail").value_or(std::string {}),
                                                StringAt(condition, "remedy").value_or(std::string {}));
             // Named by its member id and display name, the id its machine row carries.
-            auto const naming =
-                NamingOfMember(state, memberIds.contains(endpoint) ? memberIds.at(endpoint) : std::string {});
+            auto const naming = namings.contains(endpoint) ? namings.at(endpoint) : MachineNaming {};
             unplaced += Unplaced(naming) ? 1U : 0U;
             auto row = Json::Object { { "endpoint", Str(endpoint) } };
             AppendNaming(row, naming);
@@ -909,7 +922,7 @@ namespace
         R"("answered_by":{"type":"string"},"term":{"type":["integer","null"]},"term_scope":{"const":"this-node"},)"
         R"("role":{"type":["string","null"]},"leader":{"type":["string","null"],"description":"The leader's 0xFC endpoint as /fleet.json names it: null while the answering node itself leads (role: leader) -- then answered_by is the leader -- or while none is known."},)"
         R"("members":{"type":["array","null"],"description":"/fleet.json members, snake_case; null when the answering node runs no cluster."},)"
-        R"("nodes":{"type":"array","description":"/fleet.json nodes, snake_case; heartbeat_age_s in seconds; null cells are absent, never 0. Each also carries node_id and display_name, of the member holding the identity key the machine PROVED (the leader's node-id column), never matched by the row's endpoint, which the machine only claims -- both null when no member holds it, never guessed."},)"
+        R"("nodes":{"type":"array","description":"/fleet.json nodes, snake_case; heartbeat_age_s in seconds; null cells are absent, never 0. Each also carries node_id -- the member holding the identity key the machine PROVED (the leader's node-id column), never matched by the row's endpoint, which the machine only claims -- and display_name, that member's name as the same document records it (the row's name when name_source is replicated); both null when no member holds the key, never guessed."},)"
         R"("versions":{"type":"array","items":{"type":"string"}},"versions_unreported":{"type":"array","items":{"type":"string"}},)"
         R"("version_skew":{"type":["boolean","null"],"description":"true: two or more builds; false: one build everywhere; null: cannot be told."}}})";
 
@@ -929,7 +942,7 @@ namespace
         R"({"type":"object","required":["answered_by","term","term_scope","raised_count","nodes","not_reported"],"properties":{)"
         R"("answered_by":{"type":"string"},"term":{"type":["integer","null"]},"term_scope":{"const":"this-node"},)"
         R"("raised_count":{"type":"integer"},)"
-        R"("nodes":{"type":"array","description":"Every machine that reported a list: endpoint; node_id and display_name of the member holding the key that machine proved, as its fleet machine row says (both null when none does); and each condition: condition, state, persistence, severity, detail, remedy."},)"
+        R"("nodes":{"type":"array","description":"Every machine that reported a list: endpoint; node_id and display_name of the member holding the key that machine proved, as its fleet machine row says (both null when none does); a machine's conditions are shown only when the announcement carrying them proved that same key; and each condition: condition, state, persistence, severity, detail, remedy."},)"
         R"("not_reported":{"type":"array","items":{"type":"string"},"description":"Machines whose report carried no conditions at all: absent, not clear."}}})";
 
     /// The `history` tool's input schema: its `enum`s are the series and range tables' keys, composed once from

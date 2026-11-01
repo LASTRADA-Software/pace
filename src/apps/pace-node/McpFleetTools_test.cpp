@@ -439,6 +439,8 @@ TEST_CASE("Every fleet tool names each machine by member id and display name, an
     // fleet's always is -- a member records no loopback endpoint. 10.0.0.3 proved no member's key and CLAIMS the
     // endpoint n2 records: an endpoint join would name it n2.
     snapshot.nodes[0].memberId = "n1";
+    // And the name the LEADER's state records for n1, which the row renders as `name` / `replicated`.
+    snapshot.nodes[0].replicatedName = "office-pc";
     auto key = Ed25519PublicKey {};
     key.fill(std::byte { 0x42 });
     auto const rawKey = std::string(reinterpret_cast<char const*>(key.data()), key.size());
@@ -501,19 +503,39 @@ TEST_CASE("Every fleet tool names each machine by member id and display name, an
         REQUIRE(named != nullptr);
         CHECK(Text(At(*named, "display_name")) == R"("office-pc")");
     }
-    SECTION("no applied state here: the leader's id stands, and no display name is invented")
+    SECTION("no applied state here: the row names itself, id and name from the leader's one document")
     {
-        // The id is the LEADER's join, by the key the machine proved, so it does not need this node's state; the
-        // display name does, and with none applied here it is null rather than guessed.
+        // The id is the LEADER's join, by the key the machine proved, and the display name is the row's own
+        // replicated name: neither needs this node's state.
         auto const result = Call(upstream, "fleet_overview");
         REQUIRE_FALSE(result.isError);
         auto const& nodes = Elements(At(result.structured, "nodes"));
         REQUIRE(nodes.size() == 3);
         CHECK(Text(At(nodes[0], "node_id")) == R"("n1")");
-        for (auto const& node: nodes)
-            CHECK(At(node, "display_name").IsNull());
+        CHECK(Text(At(nodes[0], "display_name")) == R"("office-pc")");
         CHECK(At(nodes[1], "node_id").IsNull());
+        CHECK(At(nodes[1], "display_name").IsNull());
         CHECK(At(nodes[2], "node_id").IsNull());
+    }
+    SECTION("this node LAGS the leader: a row's display_name is the row's own name, never this node's older one")
+    {
+        // This node's state still records n1 under an older name (or none); the leader's row says office-pc,
+        // replicated. One row, one state: display_name agrees with name, in fleet_overview and in conditions.
+        for (auto const& older: { std::string { "old-name" }, std::string {} })
+        {
+            INFO("this node's name for n1: '" << older << "'");
+            auto lagging = state;
+            lagging.members[0].displayName = older;
+            auto const overview = Call(upstream, "fleet_overview", "{}", lagging);
+            REQUIRE_FALSE(overview.isError);
+            auto const& row = Elements(At(overview.structured, "nodes"))[0];
+            CHECK(Text(At(row, "name")) == R"("office-pc")");
+            CHECK(Text(At(row, "name_source")) == R"("replicated")");
+            CHECK(Text(At(row, "display_name")) == R"("office-pc")");
+            auto const conditions = Call(upstream, "conditions", "{}", lagging);
+            REQUIRE_FALSE(conditions.isError);
+            CHECK(Text(At(Elements(At(conditions.structured, "nodes"))[0], "display_name")) == R"("office-pc")");
+        }
     }
 }
 

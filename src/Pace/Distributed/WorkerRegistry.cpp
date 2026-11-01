@@ -536,6 +536,11 @@ std::vector<NodeReport> WorkerRegistry::NodeReports() const
         NodeReport report;
         core::platform::SteadyTimePoint lastSeen {};
         bool contributorSaysCache { false };
+        /// Whether the entries folded into this row proved DIFFERENT identity keys (one proving none counts). Then
+        /// the row is no one machine's account and its key is left empty, never one contributor's -- the rule the
+        /// MCP `toolchains` tool applies to the same registrations.
+        bool keysDisagree { false };
+        std::string firstKey {}; ///< The key the row's first contributor proved, which `keysDisagree` compares with.
     };
     std::map<std::string, Candidate> byEndpoint;
 
@@ -557,11 +562,16 @@ std::vector<NodeReport> WorkerRegistry::NodeReports() const
                                                                       .displayName = entry.info.displayName,
                                                                       .identityKey = entry.info.identityKey },
                                                .lastSeen = entry.lastSeen,
-                                               .contributorSaysCache = SaysAnything(entry.info.load.cache) });
+                                               .contributorSaysCache = SaysAnything(entry.info.load.cache),
+                                               .keysDisagree = false,
+                                               .firstKey = entry.info.identityKey });
         if (inserted)
             continue;
 
         auto& held = slot->second;
+        // Compared against the FIRST contributor's key, which the "better" choice below may overwrite: any entry
+        // differing from any other makes the row disagree, whichever of them ends up contributing.
+        held.keysDisagree = held.keysDisagree || entry.info.identityKey != held.firstKey;
 
         // The only field that ADDS across a machine's sibling entries is the list
         // of toolchains, because that is the one thing the entries genuinely differ
@@ -608,6 +618,12 @@ std::vector<NodeReport> WorkerRegistry::NodeReports() const
         }
     }
 
+    // A row whose registrations proved different keys is not ONE proven machine: no key, so nothing joins it to a
+    // member (`CollectFleet`), rather than whichever contributor happened to win the choice above.
+    for (auto& [endpoint, candidate]: byEndpoint)
+        if (candidate.keysDisagree)
+            candidate.report.identityKey.clear();
+
     // Every machine that announced itself, for the endpoints no live worker covers. The
     // worker entries WIN where both exist: they carry what can be leased, and a machine that
     // runs a worker must render exactly as it did before #1440 -- so this loop adds rows and
@@ -626,7 +642,13 @@ std::vector<NodeReport> WorkerRegistry::NodeReports() const
             // exception is forced: `NodeAnnounce` is the only verb that carries a machine's
             // conditions (#1364), so a worker entry has none to offer and the row would read
             // ABSENT on every machine that runs a worker. Nothing else is taken from here.
-            held->second.report.conditions = presence.conditions;
+            //
+            // And only from the SAME proven machine: an endpoint is a claim, so an announcement attaches its
+            // conditions to a worker-owned row only when the key that announcement proved is the row's own, both
+            // non-empty. Conservative by choice: a row with no key (unproven, or registrations that disagree) takes
+            // none and reads ABSENT -- "said nothing" -- rather than another machine's conditions under its name.
+            if (!presence.identityKey.empty() && presence.identityKey == held->second.report.identityKey)
+                held->second.report.conditions = presence.conditions;
             continue;
         }
 
@@ -647,7 +669,9 @@ std::vector<NodeReport> WorkerRegistry::NodeReports() const
                                                               .replicatedName = {},
                                                               .conditions = presence.conditions },
                                        .lastSeen = presence.lastSeen,
-                                       .contributorSaysCache = SaysAnything(presence.load.cache) });
+                                       .contributorSaysCache = SaysAnything(presence.load.cache),
+                                       .keysDisagree = false,
+                                       .firstKey = presence.identityKey });
     }
 
     std::vector<NodeReport> out;
