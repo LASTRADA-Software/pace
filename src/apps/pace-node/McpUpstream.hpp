@@ -125,7 +125,8 @@ enum class UpstreamFailure : std::uint8_t
     Timeout,          ///< No answer within `McpUpstream::CallDeadline`; the flow was cancelled on the loop.
     TooManyRedirects, ///< The leader moved more often than `MaxLeaderRedirects` follows.
     Refused,          ///< The authority answered, with a refusal.
-    StandingRequired, ///< The authority answered that THIS node lacks the standing the verb requires.
+    StandingRequired, ///< The authority answered that THIS node, identified, holds no operator's standing there.
+    NotIdentified,    ///< The authority answered that it could not identify THIS node as the caller at all.
     LoopNotRunning,   ///< This node's `0xFC` I/O loop is not turning, so nothing could be asked at all.
     Last,             ///< Not a failure.
 };
@@ -173,8 +174,13 @@ inline constexpr EnumTable<UpstreamFailure, UpstreamFailureRow> UpstreamFailureT
     { .failure = UpstreamFailure::Refused, .name = "refused", .sentence = "the node asked refused the request" },
     { .failure = UpstreamFailure::StandingRequired,
       .name = "standing-required",
-      .sentence = "the node asked refused the request for want of this node's standing: the verb answers only a "
-                  "caller it can identify that holds a voter's seat, or a caller on its own machine" },
+      .sentence = "the node asked identified this node and refused it an operator's standing: the verb answers a "
+                  "caller on that node's own machine, or an identified machine that holds a voter's seat" },
+    { .failure = UpstreamFailure::NotIdentified,
+      .name = "not-identified",
+      .sentence = "the node asked could not identify this node as the caller: the verb answers a caller on that "
+                  "node's own machine, or one that proved a node key its roster records or presented a machine "
+                  "ticket -- an address alone, --fleet-open included, identifies nobody" },
     { .failure = UpstreamFailure::LoopNotRunning,
       .name = "loop-not-running",
       .sentence = "this node's 0xFC I/O loop is not running -- it serves no 0xFC surface (an empty --listen-node), "
@@ -216,8 +222,9 @@ static_assert(RowsInEnumeratorOrder(OpeningFaultTable, &OpeningFaultRow::fault),
 ///
 /// **Typed, never read off the words**: a tool that tells a person to go and find a voter does so because the
 /// authority answered a CODE that means it, not because a sentence happened to contain the word. Both codes the
-/// standing gate answers are rows -- `IdentifiedCallerRequired` is `OperatorStanding`'s prerequisite, asked first
-/// (`IdentityRequirement`).
+/// standing gate answers are rows, and they are TWO failures: `IdentifiedCallerRequired` is `OperatorStanding`'s
+/// prerequisite, asked first (`IdentityRequirement`), and the wire says a caller refused it must be told to
+/// identify itself rather than to go and find a voter -- one failure for both would say the wrong one.
 struct RefusalFailureRow
 {
     CompileCacheWire::ErrorCode code; ///< What the authority answered.
@@ -229,7 +236,7 @@ inline constexpr std::array RefusalFailureTable {
     RefusalFailureRow { .code = CompileCacheWire::ErrorCode::OperatorStandingRequired,
                         .failure = UpstreamFailure::StandingRequired },
     RefusalFailureRow { .code = CompileCacheWire::ErrorCode::IdentifiedCallerRequired,
-                        .failure = UpstreamFailure::StandingRequired },
+                        .failure = UpstreamFailure::NotIdentified },
 };
 
 /// @param code A refusal's code.

@@ -550,9 +550,12 @@ TEST_CASE("mcp-upstream: a leader that refuses is Refused with its words", "[nod
     CHECK(answer.error().second.contains("this caller is not a member"));
 }
 
-TEST_CASE("mcp-upstream: a refusal of this node's standing is StandingRequired, by its code", "[node][mcp][mcp-upstream]")
+TEST_CASE("mcp-upstream: a refusal of this node as the caller is classified by its code, one failure per code",
+          "[node][mcp][mcp-upstream]")
 {
-    // Both codes the standing gate answers, and a control: any other refusal stays `Refused`, whatever its words say.
+    // Both codes the standing gate answers, each its OWN failure -- the wire says a caller refused for want of an
+    // identity must not be sent looking for a voter -- and a control: any other refusal stays `Refused`, whatever its
+    // words say.
     struct Case
     {
         Wire::ErrorCode code;
@@ -565,7 +568,7 @@ TEST_CASE("mcp-upstream: a refusal of this node's standing is StandingRequired, 
                     .expected = UpstreamFailure::StandingRequired },
              Case { .code = Wire::ErrorCode::IdentifiedCallerRequired,
                     .words = "say who you are",
-                    .expected = UpstreamFailure::StandingRequired },
+                    .expected = UpstreamFailure::NotIdentified },
              Case { .code = Wire::ErrorCode::NotAMember,
                     .words = "operator standing required",
                     .expected = UpstreamFailure::Refused },

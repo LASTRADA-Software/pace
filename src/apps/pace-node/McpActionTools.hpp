@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -33,7 +34,7 @@ namespace Pace::Node
 /// `pacectl cordon`: an enrollment decision needs an operator's STANDING at the leader (`OperatorStanding`:
 /// loopback there, or an identified machine holding a voter's seat), and a cordon is answered only from the machine
 /// it cordons (`CompileResponder::RefusePeer`, `CordonNotLocal`). So a cordon tool names THIS node or nothing, and a
-/// refusal of this node's standing is reported by name with its remedy (`StandingRefusalSentence`).
+/// refusal of this node as the caller is reported by name with its remedy (`CallerRefusalSentence`).
 ///
 /// **Every successful action is logged** at Info by this node, naming the tool, its validated arguments, the MCP
 /// client's self-reported name and who answered -- after the answer, so the log records what happened rather than
@@ -61,10 +62,16 @@ namespace McpAction
     inline constexpr std::size_t MaxAuditClientNameBytes = 128;
 } // namespace McpAction
 
-/// What a tool answers when the authority refused THIS node's standing (`UpstreamFailure::StandingRequired`).
-/// @param selfId This node's id: the node whose standing was judged.
-/// @return The one sentence, with its remedy.
-[[nodiscard]] std::string StandingRefusalSentence(std::string const& selfId);
+/// What a tool answers when the authority refused THIS node as the caller -- for want of an operator's standing
+/// (`UpstreamFailure::StandingRequired`) or because it could not identify it (`UpstreamFailure::NotIdentified`).
+///
+/// Two sentences, one per failure, because the remedies differ: a node without standing is told to find a voter or
+/// be promoted, while a node that was not identified is told to identify itself -- the wire's own instruction for
+/// `IdentifiedCallerRequired`, whose caller must not be sent looking for a voter.
+/// @param failure Why the upstream did not answer.
+/// @param selfId This node's id: the node that was judged.
+/// @return The sentence, with its remedy; nothing for a failure that is not about this node as the caller.
+[[nodiscard]] std::optional<std::string> CallerRefusalSentence(UpstreamFailure failure, std::string const& selfId);
 
 /// The action tools: `enrollment_approve`, `enrollment_reject`, `enrollment_auto_approve`, `cordon`, `uncordon`
 /// and `explain_admission`.

@@ -304,6 +304,33 @@ TEST_CASE("mcp-action: auto_approve rejects 0 minutes", "[node][mcp][mcp-action]
     CHECK(rig.upstream.calls.empty());
 }
 
+TEST_CASE("mcp-action: minutes takes a whole number, and a whole real is that number", "[node][mcp][mcp-action]")
+{
+    Rig rig;
+    rig.upstream.AnswerOk(ReportWith(Wire::EnrollmentDecision::Pending));
+
+    // A fraction, a string and null are not whole numbers, and nothing is sent for any of them.
+    for (auto const arguments: { std::string_view { R"({"minutes":5.5})" },
+                                 std::string_view { R"({"minutes":"5"})" },
+                                 std::string_view { R"({"minutes":null})" } })
+    {
+        CAPTURE(arguments);
+        auto const result = rig.Call("enrollment_auto_approve", arguments);
+        CHECK(result.isError);
+        CHECK(result.text == "`minutes` must be a whole number");
+    }
+    CHECK(rig.upstream.calls.empty());
+
+    // 5.0 is the envelope's `integer` too, and it arms exactly what 5 arms: five minutes, three hundred seconds.
+    auto const result = rig.Call("enrollment_auto_approve", R"({"minutes":5.0})");
+    REQUIRE_FALSE(result.isError);
+    REQUIRE(rig.upstream.calls.size() == 1);
+    CHECK(rig.upstream.calls[0].frame == Text(Wire::EncodeEnrollAutoApprove(std::chrono::minutes { 5 })));
+    CHECK(rig.InfoLines()
+          == std::vector<std::string> { std::format(
+              R"(mcp action enrollment_auto_approve {{"minutes":5}} by {} answered by {})", ClientName, AnsweredAt) });
+}
+
 TEST_CASE("mcp-action: cordon and uncordon ask this node, in-process", "[node][mcp][mcp-action]")
 {
     Rig rig;
@@ -420,6 +447,31 @@ TEST_CASE("mcp-action: learner standing refusal message", "[node][mcp][mcp-actio
     CHECK(rig.InfoLines().empty());
 }
 
+TEST_CASE("mcp-action: a caller the authority could not identify is told to identify itself, never to find a voter",
+          "[node][mcp][mcp-action]")
+{
+    Rig rig;
+    rig.upstream.answer = std::unexpected { std::pair {
+        UpstreamFailure::NotIdentified,
+        std::string { "10.0.0.1:6674 refused the request: rejected (identified-caller-required): say who you are" } } };
+
+    for (auto const& [tool, arguments]: {
+             std::pair { std::string_view { "enrollment_reject" }, std::string_view { R"({"node_id":"n4"})" } },
+             std::pair { std::string_view { "enrollment_auto_approve" }, std::string_view { R"({"off":true})" } },
+         })
+    {
+        CAPTURE(tool);
+        auto const result = rig.Call(tool, arguments);
+        CHECK(result.isError);
+        CHECK(result.text
+              == "node-self could not be identified as the caller of this control verb by the node that answers it: "
+                 "no key it proved is one that node's roster records; run it on that node's own machine, or from a "
+                 "member whose key the fleet has recorded");
+        CHECK_FALSE(result.text.contains("voter"));
+    }
+    CHECK(rig.InfoLines().empty());
+}
+
 TEST_CASE("mcp-action: any other failure is reported as the upstream says it", "[node][mcp][mcp-action]")
 {
     Rig rig;
@@ -443,6 +495,19 @@ TEST_CASE("mcp-action: action logs the audit line", "[node][mcp][mcp-action]")
     CHECK(rig.InfoLines()
           == std::vector<std::string> {
               std::format(R"(mcp action cordon {{"node":"{}"}} by {} answered by {})", SelfId, ClientName, AnsweredAt) });
+}
+
+TEST_CASE("mcp-action: an empty machine is refused, never answered about the caller", "[node][mcp][mcp-action]")
+{
+    Rig rig;
+    rig.upstream.AnswerOk(Wire::EncodeAdmissionExplanation(Wire::AdmissionExplanationFields {}));
+
+    // The wire spells "this caller's own connection" as an EMPTY subject, so "" sent on would answer a question the
+    // model did not ask.
+    auto const result = rig.Call("explain_admission", R"({"machine":""})");
+    CHECK(result.isError);
+    CHECK(result.text.contains("`machine` is empty, which names no machine"));
+    CHECK(rig.upstream.calls.empty());
 }
 
 TEST_CASE("mcp-action: an argument the tool does not take is refused, never ignored", "[node][mcp][mcp-action]")

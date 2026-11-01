@@ -107,8 +107,8 @@ namespace
         auto answer = context.upstream->Ask(target, {}, FrameText(frame));
         if (!answer.has_value())
         {
-            if (answer.error().first == UpstreamFailure::StandingRequired)
-                return std::unexpected { Error(StandingRefusalSentence(context.selfId)) };
+            if (auto sentence = CallerRefusalSentence(answer.error().first, context.selfId); sentence.has_value())
+                return std::unexpected { Error(std::move(*sentence)) };
             return std::unexpected { UpstreamError(answer.error()) };
         }
         if (answer->status != Wire::Status::Ok)
@@ -476,8 +476,14 @@ namespace
         // machine still waiting, or one whose key was revoked -- none of which a member list names, and each of
         // which the node answers by its standing (`pending`, `revoked`, `unknown`). The node matches it exactly.
         auto const machine = StringAt(call.arguments, "machine").value_or(std::string {});
-        if (call.arguments.Find("machine") != nullptr && StringAt(call.arguments, "machine") == std::nullopt)
+        auto const asked = call.arguments.Find("machine") != nullptr;
+        if (asked && StringAt(call.arguments, "machine") == std::nullopt)
             return Error("`machine` must be a string: a machine's id or its key's text");
+        // An EMPTY subject is the wire's spelling of "this caller's own connection", so `"machine": ""` sent on
+        // would answer about the caller while the model believes it asked about a machine. Refused, naming both.
+        if (asked && machine.empty())
+            return Error("`machine` is empty, which names no machine: give a machine's id or its key's text, or omit "
+                         "`machine` to ask about this caller's own connection");
         if (machine.size() > McpAction::MaxExplainSubjectBytes)
             return Error(std::format("`machine` is {} bytes; neither an id nor a key's text is longer than {}",
                                      machine.size(),
@@ -600,11 +606,36 @@ namespace
 
 } // namespace
 
-std::string StandingRefusalSentence(std::string const& selfId)
+namespace
 {
-    return std::format("{} lacks operator standing (it is not a voter); run it from a voter's machine, or promote this "
-                       "node",
-                       selfId.empty() ? std::string { "this node" } : selfId);
+    /// One refusal of this node as the caller, and what a tool says for it.
+    struct CallerRefusalRow
+    {
+        UpstreamFailure failure;   ///< The failure.
+        std::string_view sentence; ///< What the model reads; the `{}` is this node's id.
+    };
+
+    /// The failures that refuse THIS node as the caller, each with its own remedy.
+    constexpr std::array CallerRefusals {
+        CallerRefusalRow {
+            .failure = UpstreamFailure::StandingRequired,
+            .sentence = "{} lacks operator standing (it is not a voter); run it from a voter's machine, or promote this "
+                        "node" },
+        CallerRefusalRow {
+            .failure = UpstreamFailure::NotIdentified,
+            .sentence = "{} could not be identified as the caller of this control verb by the node that answers it: no "
+                        "key it proved is one that node's roster records; run it on that node's own machine, or from a "
+                        "member whose key the fleet has recorded" },
+    };
+} // namespace
+
+std::optional<std::string> CallerRefusalSentence(UpstreamFailure failure, std::string const& selfId)
+{
+    auto const* const row = core::findOrNull(CallerRefusals, failure, &CallerRefusalRow::failure);
+    if (row == nullptr)
+        return std::nullopt;
+    auto const node = selfId.empty() ? std::string { "this node" } : selfId;
+    return std::vformat(row->sentence, std::make_format_args(node));
 }
 
 std::vector<Mcp::ToolRow> ActionTools(IMcpUpstream& upstream,
