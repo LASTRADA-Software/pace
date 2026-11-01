@@ -235,7 +235,7 @@ using WireVersion = std::uint8_t;
 /// **17 lets FLEET-TEXT carry the fleet JSON** (the MCP surface): the request gained a trailing
 /// `format` field, and the reply for `Json` is `/fleet.json`'s body byte for byte. `WireSurface`
 /// also gained `Mcp`. A version-16 request has three fields where this build reads four, so it is
-/// refused by number, naming the range, before any field is read.
+/// refused `UnsupportedVersion`, naming the range, by `FleetTextResponder` before any field is read.
 inline constexpr WireVersion CurrentVersion = 17;
 
 /// The oldest version this build still accepts. Equal to `CurrentVersion` while
@@ -403,8 +403,9 @@ inline constexpr WireVersion CurrentVersion = 17;
 /// transport failure. Its request is refused by number, naming the range, before a byte is sent.
 ///
 /// Version 17 moves it for version 3's reason: FLEET-TEXT's field count is part of the grammar, and
-/// a version-16 request would otherwise be refused as a malformed frame, a confident wrong
-/// diagnosis for a version mismatch.
+/// a version-16 request would otherwise be answered as a malformed frame, a confident wrong
+/// diagnosis for a version mismatch. `FleetTextResponder` judges the version itself, because
+/// nothing earlier on the Fleet family's path does.
 inline constexpr WireVersion MinSupportedVersion = 17;
 
 /// Size of the fixed request header: magic, version, op, payload length.

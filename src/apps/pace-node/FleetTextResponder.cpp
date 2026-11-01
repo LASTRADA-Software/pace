@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <format>
 #include <utility>
 
 namespace Pace::Node
@@ -51,6 +52,13 @@ namespace
         .code = Wire::ErrorCode::UnknownFleetSelector,
         .rationale = "a typo or a client of another build, seen by whoever typed it in the keys the refusal lists; a "
                      "rise is nothing an operator acts on",
+    };
+
+    /// A request framed at a version this build does not read.
+    constexpr Cc::UncountedRefusal VersionNotSupported {
+        .code = Wire::ErrorCode::UnsupportedVersion,
+        .rationale = "a client of another build, told the range this one speaks and seen by whoever ran it; a rise "
+                     "is a fleet mid-upgrade, which is not a condition an operator acts on",
     };
 
     /// A verb routed here that this component does not own.
@@ -173,6 +181,15 @@ core::async::Task<FrameReply> FleetTextResponder::Answer(std::span<std::byte con
     if (!header.has_value())
         // Not this protocol at all; empty is CLOSE.
         co_return std::vector<std::byte> {};
+
+    // The version is judged HERE, before the payload is read, because this verb's field count is part
+    // of its grammar: nothing earlier on the Fleet family's path asks `IsSupported`, and a version-16
+    // three-field request would otherwise be answered as a malformed frame, a confident wrong diagnosis.
+    if (!Wire::IsSupported(header->version))
+        co_return Cc::RefuseWithoutCounter(VersionNotSupported,
+                                           std::format("supported versions {}..{}",
+                                                       static_cast<unsigned>(Wire::MinSupportedVersion),
+                                                       static_cast<unsigned>(Wire::CurrentVersion)));
 
     if (header->opRaw != static_cast<std::uint8_t>(Wire::Op::FleetText))
         co_return Cc::RefuseWithoutCounter(NotThisComponentsVerb, "this node serves no component for that verb");
