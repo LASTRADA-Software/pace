@@ -255,6 +255,26 @@ namespace
         co_return co_await Cc::ExchangeFramed(upstream, &notice, std::move(frame), NoCredential(), &window);
     }
 
+    /// The fault an ANSWERED handshake that did not prove amounts to.
+    /// @param result What the proof came to; never `Proved`.
+    /// @return Its row.
+    [[nodiscard]] UpstreamOpeningFault OpeningFaultOf(NodeProofResult result) noexcept
+    {
+        switch (result)
+        {
+            case NodeProofResult::Deferred:
+                return UpstreamOpeningFault::ProofDeferred;
+            case NodeProofResult::NotOffered:
+                return UpstreamOpeningFault::ProofNotOffered;
+            case NodeProofResult::Untrusted:
+                return UpstreamOpeningFault::PeerUntrusted;
+            case NodeProofResult::Proved:
+            case NodeProofResult::Refused:
+                break;
+        }
+        return UpstreamOpeningFault::ProofRefused;
+    }
+
     /// Words for the client when the leader's grant did not decode.
     /// @param endpoint The leader's endpoint.
     /// @return The detail of the refusal.
@@ -302,18 +322,32 @@ core::async::Task<UpstreamOpening> ProvenSchedulerDialer::Open(std::string endpo
     auto sealed = std::make_unique<SealedFrameSocket>(std::move(raw), SealedFrameEnd::Caller, _maxReplyBytes, nullptr);
 
     auto attempt = NodeProofAttempt {};
+    auto expired = false;
     {
         // Bounds the handshake alone; each exchange over the session arms its own.
         core::net::SocketDeadlineTarget deadline { .socket = sealed.get() };
         auto const bound = core::net::armSocketDeadline(&_reactor, _budget.handshakeTimeout, &deadline);
         attempt = co_await _prover.ProveAsync(sealed.get(), &_prover.DefaultTrust());
+        expired = deadline.expired;
     }
     if (attempt.result != NodeProofResult::Proved)
+    {
+        // A handshake nobody answered is not a refusal, whatever result the client filed it under.
+        if (expired || attempt.exchange == ProofExchange::Incomplete)
+            co_return UpstreamOpening {
+                .socket = nullptr,
+                .reason = expired ? std::format("the proof handshake with {} did not complete within {} ms",
+                                                endpoint,
+                                                _budget.handshakeTimeout.count())
+                                  : std::format("the connection to {} was lost during the proof handshake", endpoint),
+                .fault = UpstreamOpeningFault::HandshakeIncomplete
+            };
         co_return UpstreamOpening { .socket = nullptr,
                                     .reason = attempt.reason.empty()
                                                   ? std::format("{} did not accept this node's proof", endpoint)
                                                   : std::move(attempt.reason),
-                                    .fault = UpstreamOpeningFault::ProofRefused };
+                                    .fault = OpeningFaultOf(attempt.result) };
+    }
     co_return UpstreamOpening { .socket = std::move(sealed), .reason = {} };
 }
 

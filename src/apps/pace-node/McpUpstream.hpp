@@ -112,8 +112,11 @@ enum class UpstreamFailure : std::uint8_t
 {
     NoLeaderKnown,    ///< No leader is known here, or the leader asked answered that none is.
     UnknownNode,      ///< No member of the applied cluster state has the id asked for.
-    Unreachable,      ///< Nothing answered at the endpoint, or the connection was lost before the answer.
-    ProofRefused,     ///< Something answered, and this node's proof of its identity did not complete.
+    Unreachable,      ///< Nothing answered, the proof handshake went unanswered, or the answer was lost.
+    NotReady,         ///< The node asked cannot judge this node's proof yet: transient, ask again shortly.
+    NoProofOffered,   ///< The node asked serves no proof: it runs no consensus, so it is no member scheduler.
+    PeerUntrusted,    ///< THIS node declined to prove itself: the key the node asked presented is not trusted.
+    ProofRefused,     ///< The node asked answered, and refused this node's proof of its identity.
     Timeout,          ///< No answer within `McpUpstream::CallDeadline`; the flow was cancelled on the loop.
     TooManyRedirects, ///< The leader moved more often than `MaxLeaderRedirects` follows.
     Refused,          ///< The authority answered, with a refusal.
@@ -138,7 +141,19 @@ inline constexpr EnumTable<UpstreamFailure, UpstreamFailureRow> UpstreamFailureT
       .sentence = "no member of this fleet has that node id" },
     { .failure = UpstreamFailure::Unreachable,
       .name = "unreachable",
-      .sentence = "the node asked could not be reached, or was lost before it answered" },
+      .sentence = "the node asked could not be reached, did not complete the handshake, or was lost before it "
+                  "answered" },
+    { .failure = UpstreamFailure::NotReady,
+      .name = "not-ready",
+      .sentence = "the node asked cannot judge this node's identity yet, since its consensus has not caught up; "
+                  "ask again shortly" },
+    { .failure = UpstreamFailure::NoProofOffered,
+      .name = "no-proof-offered",
+      .sentence = "the node asked serves no identity proof: it runs no consensus, so it is not a scheduler of "
+                  "this fleet" },
+    { .failure = UpstreamFailure::PeerUntrusted,
+      .name = "peer-untrusted",
+      .sentence = "this node declined to prove its identity to the node asked, whose key it does not trust" },
     { .failure = UpstreamFailure::ProofRefused,
       .name = "proof-refused",
       .sentence = "the node asked did not accept this node's proof of its identity" },
@@ -159,6 +174,27 @@ static_assert(RowsInEnumeratorOrder(UpstreamFailureTable, &UpstreamFailureRow::f
 {
     return UpstreamFailureTable[static_cast<std::size_t>(failure)];
 }
+
+/// How each way a dial can fail is reported: one row per `UpstreamOpeningFault`.
+struct OpeningFaultRow
+{
+    UpstreamOpeningFault fault; ///< The dial's fault.
+    UpstreamFailure failure;    ///< What `Ask` reports for it.
+};
+
+/// The dial's faults, as `Ask` reports them. **A handshake nobody answered is `Unreachable`, never
+/// `ProofRefused`**: telling a person their node was refused, when the peer was only busy or restarting,
+/// is a confident wrong signal.
+inline constexpr EnumTable<UpstreamOpeningFault, OpeningFaultRow> OpeningFaultTable { {
+    { .fault = UpstreamOpeningFault::Unreached, .failure = UpstreamFailure::Unreachable },
+    { .fault = UpstreamOpeningFault::HandshakeIncomplete, .failure = UpstreamFailure::Unreachable },
+    { .fault = UpstreamOpeningFault::ProofDeferred, .failure = UpstreamFailure::NotReady },
+    { .fault = UpstreamOpeningFault::ProofNotOffered, .failure = UpstreamFailure::NoProofOffered },
+    { .fault = UpstreamOpeningFault::PeerUntrusted, .failure = UpstreamFailure::PeerUntrusted },
+    { .fault = UpstreamOpeningFault::ProofRefused, .failure = UpstreamFailure::ProofRefused },
+} };
+static_assert(RowsInEnumeratorOrder(OpeningFaultTable, &OpeningFaultRow::fault),
+              "OpeningFaultTable must hold one row per UpstreamOpeningFault, in enumerator order");
 
 /// What `IMcpUpstream::Ask` answers: the reply, or the failure and the words saying who and why.
 using UpstreamResult = std::expected<UpstreamReply, std::pair<UpstreamFailure, std::string>>;

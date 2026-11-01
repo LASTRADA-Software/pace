@@ -63,15 +63,21 @@ inline constexpr std::size_t MaxForwardReplyBytes = SchedulingRedirectResponder:
 static_assert(MaxForwardReplyBytes >= CompileCacheWire::MaxRefusalReply,
               "a relayed refusal must fit the relay's ceiling, or the leader's explanation reads as a lost leader");
 
-/// Which half of opening a connection to the leader failed.
+/// Why opening a connection to the leader failed, one row per remedy.
 ///
-/// **PRIVATE: persisted and transmitted nowhere.** No explicit values. Two answers because their remedies
-/// differ: nothing answering is a network or a dead node, while a proof that did not complete is a
-/// roster question -- this machine is not, or is no longer, one the other end admits.
+/// **PRIVATE: persisted and transmitted nowhere.** No explicit values; `Last` is the length of a table
+/// keyed by one. The admission relay reads none of this -- every fault fails open the same way -- while a
+/// caller that reports the failure to a person (`McpUpstream`) must not call a busy or restarting peer a
+/// refusal: each row has a different remedy.
 enum class UpstreamOpeningFault : std::uint8_t
 {
-    Unreached,    ///< Nothing answered at the endpoint: the connect failed or ran out of time.
-    ProofRefused, ///< Something answered, and the proof did not complete: refused, untrusted, not offered or deferred.
+    Unreached,           ///< Nothing answered at the endpoint: the connect failed or ran out of time.
+    HandshakeIncomplete, ///< Connected, and the proof exchange was not answered: lost, closed, or past its deadline.
+    ProofDeferred,       ///< The peer cannot judge the proof YET: its consensus has not applied its log.
+    ProofNotOffered,     ///< The peer serves no proof: it runs no consensus.
+    PeerUntrusted,       ///< THIS node declined to prove itself: the peer's key is not one it trusts.
+    ProofRefused,        ///< The peer answered, and refused this node's proof.
+    Last,                ///< Not a fault.
 };
 
 /// What opening the connection to the leader came to.

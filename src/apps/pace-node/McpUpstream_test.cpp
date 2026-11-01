@@ -141,10 +141,9 @@ class CloseCountingSocket final: public core::net::testing::SocketDecorator
 /// What a scripted endpoint does when it is dialled.
 enum class Script : std::uint8_t
 {
-    Answer,       ///< Connects, and answers the first request with the scripted reply.
-    Silent,       ///< Connects, and never answers.
-    Unreached,    ///< Nothing answers at it.
-    ProofRefused, ///< Something answers, and refuses this node's proof with the scripted reason.
+    Answer, ///< Connects, and answers the first request with the scripted reply.
+    Silent, ///< Connects, and never answers.
+    Fails,  ///< The dial fails with the scripted fault and reason.
 };
 
 /// One endpoint's script.
@@ -153,6 +152,7 @@ struct Scripted
     Script script { Script::Answer };
     std::vector<std::byte> reply;
     std::string reason;
+    UpstreamOpeningFault fault { UpstreamOpeningFault::Unreached }; ///< For `Fails`.
 };
 
 /// A dialer over in-memory pairs: each dial runs on the loop (it is a coroutine the flow awaits there),
@@ -174,7 +174,7 @@ class ScriptedDialer final: public IUpstreamDialer
     /// @copydoc IUpstreamDialer::Open
     [[nodiscard]] core::async::Task<UpstreamOpening> Open(std::string endpoint) override
     {
-        auto scripted = Scripted { .script = Script::Unreached, .reply = {}, .reason = "nothing is scripted there" };
+        auto scripted = Scripted { .script = Script::Fails, .reply = {}, .reason = "nothing is scripted there" };
         {
             auto const guard = std::scoped_lock { _mutex };
             _dialled.push_back(endpoint);
@@ -184,14 +184,8 @@ class ScriptedDialer final: public IUpstreamDialer
         }
         switch (scripted.script)
         {
-            case Script::Unreached:
-                co_return UpstreamOpening { .socket = nullptr,
-                                            .reason = scripted.reason,
-                                            .fault = UpstreamOpeningFault::Unreached };
-            case Script::ProofRefused:
-                co_return UpstreamOpening { .socket = nullptr,
-                                            .reason = scripted.reason,
-                                            .fault = UpstreamOpeningFault::ProofRefused };
+            case Script::Fails:
+                co_return UpstreamOpening { .socket = nullptr, .reason = scripted.reason, .fault = scripted.fault };
             case Script::Answer:
             case Script::Silent:
                 break;
@@ -552,7 +546,7 @@ TEST_CASE("mcp-upstream: an endpoint nothing answers at is Unreachable", "[node]
     Bridge bridge;
     bridge.fleet.leader = LeaderA;
     bridge.dialer.Place(std::string { LeaderA },
-                        Scripted { .script = Script::Unreached, .reply = {}, .reason = "connection refused" });
+                        Scripted { .script = Script::Fails, .reply = {}, .reason = "connection refused" });
 
     auto const answer = bridge.upstream.Ask(UpstreamTarget::Leader, "", RequestFrame());
     REQUIRE_FALSE(answer.has_value());
@@ -566,7 +560,10 @@ TEST_CASE("mcp-upstream: a proof refusal surfaces ProofRefused with the peer's r
     Bridge bridge;
     bridge.fleet.leader = LeaderA;
     bridge.dialer.Place(std::string { LeaderA },
-                        Scripted { .script = Script::ProofRefused, .reply = {}, .reason = "key revoked by the cluster" });
+                        Scripted { .script = Script::Fails,
+                                   .reply = {},
+                                   .reason = "key revoked by the cluster",
+                                   .fault = UpstreamOpeningFault::ProofRefused });
 
     auto const answer = bridge.upstream.Ask(UpstreamTarget::Leader, "", RequestFrame());
     REQUIRE_FALSE(answer.has_value());
@@ -615,6 +612,88 @@ TEST_CASE("mcp-upstream: the production dialer reports a refused proof as ProofR
         CHECK(answer.error().first == UpstreamFailure::Refused);
         CHECK(answer.error().second.contains("unknown-opcode"));
     }
+}
+
+TEST_CASE("mcp-upstream: each way a dial fails is reported by its own remedy", "[node][mcp][mcp-upstream]")
+{
+    // One case per fault, each asserting WHICH failure comes back: a handshake nobody answered and a peer
+    // that is not ready yet must never read as a refusal.
+    for (auto const fault: Enumerators<UpstreamOpeningFault>())
+    {
+        CAPTURE(static_cast<int>(fault));
+        Bridge bridge;
+        bridge.fleet.leader = LeaderA;
+        bridge.dialer.Place(
+            std::string { LeaderA },
+            Scripted { .script = Script::Fails, .reply = {}, .reason = "the dialer's words", .fault = fault });
+
+        auto const answer = bridge.upstream.Ask(UpstreamTarget::Leader, "", RequestFrame());
+        REQUIRE_FALSE(answer.has_value());
+        CHECK(answer.error().first == OpeningFaultTable[static_cast<std::size_t>(fault)].failure);
+        CHECK(answer.error().second.contains("the dialer's words"));
+    }
+    CHECK(OpeningFaultTable[static_cast<std::size_t>(UpstreamOpeningFault::HandshakeIncomplete)].failure
+          == UpstreamFailure::Unreachable);
+    CHECK(OpeningFaultTable[static_cast<std::size_t>(UpstreamOpeningFault::ProofDeferred)].failure
+          == UpstreamFailure::NotReady);
+    CHECK(OpeningFaultTable[static_cast<std::size_t>(UpstreamOpeningFault::ProofNotOffered)].failure
+          == UpstreamFailure::NoProofOffered);
+    CHECK(OpeningFaultTable[static_cast<std::size_t>(UpstreamOpeningFault::PeerUntrusted)].failure
+          == UpstreamFailure::PeerUntrusted);
+}
+
+TEST_CASE("mcp-upstream: a proof handshake nobody answers is Unreachable and never ProofRefused",
+          "[node][mcp][mcp-upstream]")
+{
+    // A listener that never accepts: the kernel completes the connect from its backlog, and nothing ever
+    // answers the challenge -- an overloaded or wedged leader, as the production dialer meets it.
+    using namespace AdmissionFixture;
+    auto const silent = BlockingListener::Bind("127.0.0.1", 0);
+    REQUIRE(silent != nullptr);
+    REQUIRE(silent->IsBound());
+    auto const endpoint = EndpointOf(silent->boundPort());
+
+    Follower node { endpoint, QuickPulse, Queue::ForwardingMachine };
+    std::ignore = node.Serve();
+    ProvenSchedulerDialer dialer {
+        UnwrapMutable(node.proof),
+        node.io->Connector(),
+        node.io->Reactor(),
+        ForwardDialBudget { .connectTimeout = 1s, .handshakeTimeout = 200ms, .keepAlive = core::net::KeepAlive::No }
+    };
+    PlacedFleet fleet;
+    fleet.leader = endpoint;
+    ScriptedSelf self { OkReply("unused") };
+    NodeIoUpstream upstream { node.io->Loop(), dialer, fleet, self };
+
+    auto const answer = upstream.Ask(UpstreamTarget::Leader, "", RequestFrame());
+    REQUIRE_FALSE(answer.has_value());
+    CHECK(answer.error().first == UpstreamFailure::Unreachable);
+    CHECK(answer.error().second.contains("did not complete within 200 ms"));
+    CHECK(answer.error().second.contains(endpoint));
+}
+
+TEST_CASE("mcp-upstream: a leader that cannot judge a proof yet is NotReady and never ProofRefused",
+          "[node][mcp][mcp-upstream]")
+{
+    // The production fold, behind: a key the roster lacks may only not be applied yet, so the leader
+    // answers `RosterNotYetApplied` -- a restarting leader, which a moment later will judge it.
+    using namespace AdmissionFixture;
+    ProvenLeader leader;
+    leader.consensus.Set(AppliedStateReading::Behind);
+    auto const leaderPort = leader.Serve();
+
+    Follower node { EndpointOf(leaderPort), QuickPulse, std::string_view { "stranger" } };
+    std::ignore = node.Serve();
+    PlacedFleet fleet;
+    fleet.leader = EndpointOf(leaderPort);
+    ScriptedSelf self { OkReply("unused") };
+    NodeIoUpstream upstream { node.io->Loop(), UnwrapMutable(node.provenDialer), fleet, self };
+
+    auto const answer = upstream.Ask(UpstreamTarget::Leader, "", RequestFrame());
+    REQUIRE_FALSE(answer.has_value());
+    CHECK(answer.error().first == UpstreamFailure::NotReady);
+    CHECK(answer.error().second.contains(fleet.leader));
 }
 
 TEST_CASE("mcp-upstream: a self target answers in-process without dialling", "[node][mcp][mcp-upstream]")

@@ -248,6 +248,18 @@ enum class OwnRecord : std::uint8_t
 /// loop share one client -- so at `RecordAwaitedInterval` it is well under a minute.
 inline constexpr std::size_t OwnRecordPatience = 15;
 
+/// Whether the exchange that ended a handshake was answered at all.
+///
+/// **PRIVATE: persisted and transmitted nowhere.** No explicit values. `NodeProofResult::Refused` covers
+/// both a server that refused and an exchange that never completed -- a lost or closed connection, a
+/// handshake deadline -- and the two have opposite remedies: a roster question, and a network or a busy
+/// peer. A caller that reports which (`ProvenSchedulerDialer`) reads this; one that does not is unchanged.
+enum class ProofExchange : std::uint8_t
+{
+    Answered,   ///< The server answered; whatever it said decided the result.
+    Incomplete, ///< The connection failed or was closed before the server answered.
+};
+
 /// What the attempt learned, and what to say about it.
 struct NodeProofAttempt
 {
@@ -260,6 +272,10 @@ struct NodeProofAttempt
     /// What the trust said about the server: engaged whenever the server's signature verified and
     /// the trust was asked, so a caller can tell "proved ANOTHER key" apart from "did not complete".
     std::optional<ServerStanding> standing {};
+
+    /// Whether the exchange that ended the handshake was answered; `Incomplete` only for a `Refused`
+    /// attempt whose exchange never got an answer.
+    ProofExchange exchange { ProofExchange::Answered };
 };
 
 /// This machine's identity, as it proves it on every connection to a scheduler.

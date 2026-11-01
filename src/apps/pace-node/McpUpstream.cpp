@@ -135,8 +135,7 @@ namespace
         auto opened = co_await with.dialer->Open(endpoint);
         if (opened.socket == nullptr)
         {
-            auto const failure = opened.fault == UpstreamOpeningFault::ProofRefused ? UpstreamFailure::ProofRefused
-                                                                                    : UpstreamFailure::Unreachable;
+            auto const failure = OpeningFaultTable[static_cast<std::size_t>(opened.fault)].failure;
             co_return std::unexpected { std::pair {
                 failure, std::format("{} at {}: {}", UpstreamFailureRowOf(failure).sentence, endpoint, opened.reason) } };
         }
