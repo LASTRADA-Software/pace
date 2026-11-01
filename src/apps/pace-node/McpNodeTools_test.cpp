@@ -48,25 +48,7 @@ constexpr std::string_view AnsweredAt = "10.0.0.2:6674";
                                         UpstreamFailure::Unreachable };
 }
 
-/// A cluster view holding one state, or none.
-class FixedCluster final: public IAppliedClusterView
-{
-  public:
-    /// @param state The state applied, or nothing.
-    explicit FixedCluster(std::optional<Cluster::ClusterState> state):
-        _state { std::move(state) }
-    {
-    }
-
-    /// @copydoc IAppliedClusterView::AppliedState
-    [[nodiscard]] std::optional<Cluster::ClusterState> AppliedState() const override
-    {
-        return _state;
-    }
-
-  private:
-    std::optional<Cluster::ClusterState> _state;
-};
+using McpFakes::FixedCluster;
 
 /// A configuration source that answers one configuration.
 class FixedConfig final: public INodeConfigSource
@@ -88,19 +70,7 @@ class FixedConfig final: public INodeConfigSource
     NodeConfig _cfg;
 };
 
-/// @param ids Member ids.
-/// @return A state recording exactly those members.
-[[nodiscard]] Cluster::ClusterState StateOf(std::initializer_list<std::string_view> ids)
-{
-    auto state = Cluster::ClusterState {};
-    for (auto const id: ids)
-    {
-        auto member = Cluster::ClusterMember {};
-        member.id = std::string { id };
-        state.members.push_back(std::move(member));
-    }
-    return state;
-}
+using McpFakes::StateOf;
 
 /// Run `node_status` with @p arguments.
 /// @param upstream What it asks.

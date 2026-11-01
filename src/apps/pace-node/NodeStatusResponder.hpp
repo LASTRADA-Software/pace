@@ -4,6 +4,7 @@
 #include "CompileCapacity.hpp"
 #include "ConsensusStanding.hpp"
 #include "EnrollmentWindow.hpp"
+#include "FingerprintInputsResponder.hpp"
 #include "FrameEndpoint.hpp"
 #include "LiveNodeConfig.hpp"
 #include "NodeConditions.hpp"
@@ -22,6 +23,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <span>
@@ -122,16 +124,20 @@ class NodeStatusResponder final: public IFrameResponder
     /// @param standing Where `explain-admission <machine>` reads a machine's standing: the roster
     ///        this node holds and its enrollment window. Must outlive this.
     /// @param metrics Where a refusal is counted; must outlive this.
+    /// @param fingerprintInputs What answers `FingerprintInputs` once this gate admits its caller; null where nothing
+    ///        was wired, which answers the verb as a node running no worker does. Must outlive this.
     NodeStatusResponder(INodeStatusSource const& identity,
                         ILiveStatsSources const& readings,
                         Distributed::IMembershipOracle const& membership,
                         IMachineStandingSource const& standing,
-                        IMetricsSink& metrics) noexcept:
+                        IMetricsSink& metrics,
+                        FingerprintInputsResponder const* fingerprintInputs = nullptr) noexcept:
         _identity { identity },
         _readings { readings },
         _membership { membership },
         _standing { standing },
-        _metrics { metrics }
+        _metrics { metrics },
+        _fingerprintInputs { fingerprintInputs }
     {
     }
 
@@ -290,6 +296,7 @@ class NodeStatusResponder final: public IFrameResponder
     Distributed::IMembershipOracle const& _membership;
     IMachineStandingSource const& _standing;
     IMetricsSink& _metrics;
+    FingerprintInputsResponder const* _fingerprintInputs;
 };
 
 /// What this node runs, as `main` observes it.
@@ -388,7 +395,7 @@ struct SlotCeilingsReading
 /// some state -- is a reading nobody took. The first honest reading exists before this
 /// object does, because the cheap half of the survey has already run by then, so there
 /// is no moment this has to invent one.
-class NodeRuntimeState
+class NodeRuntimeState final: public IServedInputsSource
 {
   public:
     /// @param initial What is true before any survey has finished -- ordinarily
@@ -403,7 +410,25 @@ class NodeRuntimeState
     NodeRuntimeState(NodeRuntimeState&&) = delete;
     NodeRuntimeState& operator=(NodeRuntimeState const&) = delete;
     NodeRuntimeState& operator=(NodeRuntimeState&&) = delete;
-    ~NodeRuntimeState() = default;
+    ~NodeRuntimeState() override = default;
+
+    /// Record what the survey now serves, inputs included, for `FINGERPRINT-INPUTS`.
+    ///
+    /// Called from the heartbeat thread whenever the served map is replaced, so a reactor reads the same
+    /// toolchains the worker serves without ever touching the map.
+    /// @param served Every served toolchain; shared and immutable, so nothing is copied to publish it.
+    void PublishServedInputs(std::shared_ptr<ServedInputs const> served)
+    {
+        std::scoped_lock const guard { _mutex };
+        _servedInputs = std::move(served);
+    }
+
+    /// @copydoc IServedInputsSource::ServedInputsNow
+    [[nodiscard]] std::shared_ptr<ServedInputs const> ServedInputsNow() const override
+    {
+        std::scoped_lock const guard { _mutex };
+        return _servedInputs;
+    }
 
     /// Record what the survey now says.
     ///
@@ -492,6 +517,9 @@ class NodeRuntimeState
 
     /// Disengaged until the first heartbeat round has sampled the host -- see `SlotCeilings()`.
     std::optional<SlotCeilingsReading> _slotCeilings {};
+
+    /// Null until a survey concludes -- see `ServedInputsNow()`.
+    std::shared_ptr<ServedInputs const> _servedInputs {};
 };
 
 /// Where `ConfiguredNodeStatus` reads this node's LIVE facts from.

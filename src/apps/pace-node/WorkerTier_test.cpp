@@ -780,7 +780,8 @@ TEST_CASE("A toolchain label a scheduler would refuse is withheld from the regis
         INFO(why);
         CapturingLogger logger;
         auto const registered = RegisteredToolchainLabel(
-            ServedToolchain { .compiler = "/opt/cross/bin/g++", .label = label, .family = {}, .witness = std::nullopt },
+            ServedToolchain {
+                .compiler = "/opt/cross/bin/g++", .label = label, .family = {}, .witness = std::nullopt, .inputs = nullptr },
             logger);
         CHECK(registered == sent);
 
@@ -811,8 +812,11 @@ TEST_CASE("RegistrarsFor asks RegisteredToolchainLabel rather than sending a lab
 
     auto const served = std::map<std::string, ServedToolchain> {
         { "fp-cross",
-          ServedToolchain {
-              .compiler = "/opt/cross/bin/g++", .label = "g++ \xff 14.2.0", .family = {}, .witness = std::nullopt } },
+          ServedToolchain { .compiler = "/opt/cross/bin/g++",
+                            .label = "g++ \xff 14.2.0",
+                            .family = {},
+                            .witness = std::nullopt,
+                            .inputs = nullptr } },
     };
     auto const registrars = tier.value()->RegistrarsFor(served);
     CHECK(registrars.size() == 1);
@@ -878,9 +882,14 @@ TEST_CASE("A served toolchain's family reaches the REGISTER frame's capacity rec
 
     auto const served = std::map<std::string, ServedToolchain> {
         { "fp-apple",
+          ServedToolchain { .compiler = "/usr/bin/gcc",
+                            .label = "gcc 17.0.0",
+                            .family = "apple-clang",
+                            .witness = std::nullopt,
+                            .inputs = nullptr } },
+        { "fp-pinned",
           ServedToolchain {
-              .compiler = "/usr/bin/gcc", .label = "gcc 17.0.0", .family = "apple-clang", .witness = std::nullopt } },
-        { "fp-pinned", ServedToolchain { .compiler = "/opt/none/g++", .label = {}, .family = {}, .witness = std::nullopt } },
+              .compiler = "/opt/none/g++", .label = {}, .family = {}, .witness = std::nullopt, .inputs = nullptr } },
     };
     auto registrars = tier.value()->RegistrarsFor(served);
     REQUIRE(registrars.size() == 2);

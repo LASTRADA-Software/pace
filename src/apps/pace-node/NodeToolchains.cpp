@@ -6,6 +6,8 @@
 #include <atomic>
 #include <cstddef>
 #include <functional>
+#include <map>
+#include <memory>
 #include <optional>
 #include <ranges>
 #include <string>
@@ -89,6 +91,10 @@ namespace
         /// because a probed toolchain that cannot be stamped is ALSO empty and is a
         /// different fact. It is `identity.evidence` verbatim.
         std::optional<Cc::ToolchainEvidence> witness;
+
+        /// What the digest was computed from in this survey; null for a cache hit or an override. It is
+        /// `identity.inputs`, moved.
+        std::shared_ptr<Cc::FingerprintInputs const> inputs;
     };
 
     /// Compute every entry's identity, several at a time.
@@ -118,7 +124,8 @@ namespace
                                                                 Cc::IToolchainHost& host,
                                                                 core::platform::IClock const& clock,
                                                                 ILogger& logger,
-                                                                SurveyVoice voice)
+                                                                SurveyVoice voice,
+                                                                FingerprintWalk walk)
     {
         std::vector<SurveyedToolchain> fingerprints(entries.size());
         std::atomic<std::size_t> next { 0 };
@@ -229,7 +236,8 @@ namespace
                     // is why one disengaged `optional` carries both.
                     fingerprints[index].identity = Cc::ToolchainIdentity { .fingerprint = entry.fingerprint,
                                                                            .defect = Cc::IdentityDefect::None,
-                                                                           .evidence = std::nullopt };
+                                                                           .evidence = std::nullopt,
+                                                                           .inputs = std::nullopt };
                     continue;
                 }
 
@@ -274,8 +282,8 @@ namespace
                                 "cannot classify {} as any known driver, so every compile dispatched to it will be "
                                 "refused (worker-compiler-unclassified); check this node's --toolchain",
                                 entry.compiler);
-                fingerprints[index].identity =
-                    Cc::CachedToolchainFingerprint(runner, host, entry.compiler, banner, spec, announcing);
+                fingerprints[index].identity = Cc::CachedToolchainFingerprint(
+                    runner, host, entry.compiler, banner, spec, announcing, walk == FingerprintWalk::Always);
                 logger.Logf(NarrationLevel(voice), "computed the toolchain fingerprint for {}", entry.compiler);
 
                 // The evidence this identity rests on, kept so that noticing it has
@@ -305,6 +313,14 @@ namespace
                 //
                 // Copied rather than moved: the identity is read again below.
                 fingerprints[index].witness = fingerprints[index].identity.evidence;
+
+                // The digest's own argument list, kept beside the identity it produced -- moved, because nothing
+                // reads it from the identity again, and a record runs to thousands of files.
+                if (auto& inputs = fingerprints[index].identity.inputs; inputs.has_value())
+                {
+                    fingerprints[index].inputs = std::make_shared<Cc::FingerprintInputs const>(*std::move(inputs));
+                    inputs.reset();
+                }
 
                 // Derived from the banner that was just computed, rather than by
                 // asking the compiler a second time: the digest is a hash OF this
@@ -456,7 +472,8 @@ SurveyResult FingerprintToolchains(DiscoveredToolchains const& discovered,
                                    core::platform::IClock const& clock,
                                    ILogger& logger,
                                    std::stop_token const& stop,
-                                   SurveyVoice voice)
+                                   SurveyVoice voice,
+                                   FingerprintWalk walk)
 {
     auto const& entries = discovered.entries;
 
@@ -493,7 +510,7 @@ SurveyResult FingerprintToolchains(DiscoveredToolchains const& discovered,
     // Warm starts read the cache and are instant, so this buys nothing on any boot
     // after the first; it is the first one that decides whether the feature looks
     // like it works.
-    auto fingerprints = FingerprintAll(stop, entries, runner, host, clock, logger, voice);
+    auto fingerprints = FingerprintAll(stop, entries, runner, host, clock, logger, voice, walk);
 
     // Asked after the walk rather than instead of it: the check inside skips the work
     // per file, so a cancelled survey returns promptly carrying entries that were
@@ -571,7 +588,8 @@ SurveyResult FingerprintToolchains(DiscoveredToolchains const& discovered,
                                ServedToolchain { .compiler = entry.compiler,
                                                  .label = std::move(fingerprints[index].label),
                                                  .family = std::move(fingerprints[index].family),
-                                                 .witness = std::move(fingerprints[index].witness) });
+                                                 .witness = std::move(fingerprints[index].witness),
+                                                 .inputs = std::move(fingerprints[index].inputs) });
         if (inserted)
             logger.Logf(NarrationLevel(voice), "serving {} as {}", entry.compiler, fingerprint);
         else
@@ -712,6 +730,30 @@ std::vector<std::string> StaleToolchains(std::map<std::string, ServedToolchain> 
     return stale;
 }
 
+std::shared_ptr<ServedInputs const> ServedInputsOf(std::map<std::string, ServedToolchain> const& served)
+{
+    auto rows = ServedInputs {};
+    rows.reserve(served.size());
+    for (auto const& [fingerprint, toolchain]: served)
+        rows.push_back(ServedToolchainInputs { .fingerprint = fingerprint,
+                                               .label = toolchain.label,
+                                               .compiler = toolchain.compiler,
+                                               .inputs = toolchain.inputs });
+    return std::make_shared<ServedInputs const>(std::move(rows));
+}
+
+void CarryInputsForward(std::map<std::string, ServedToolchain> const& previous, std::map<std::string, ServedToolchain>& next)
+{
+    for (auto& [fingerprint, toolchain]: next)
+    {
+        if (toolchain.inputs != nullptr)
+            continue;
+        auto const held = previous.find(fingerprint);
+        if (held != previous.end())
+            toolchain.inputs = held->second.inputs;
+    }
+}
+
 ToolchainRefresh RefreshToolchains(std::map<std::string, ServedToolchain> const& served,
                                    NodeConfig const& cfg,
                                    Cc::IToolchainDiscovery* discovery,
@@ -744,6 +786,10 @@ ToolchainRefresh RefreshToolchains(std::map<std::string, ServedToolchain> const&
     // nothing is the correct answer -- every lease is then refused and every client
     // compiles locally -- and it is the one answer that is never a wrong object.
     auto next = std::move(refreshed).value_or(std::map<std::string, ServedToolchain> {});
+
+    // A toolchain this survey took from the cache walked nothing, so it brought no inputs; the walk that first
+    // fingerprinted it did, under the same key.
+    CarryInputsForward(served, next);
 
     // Only the REMOVALS are announced here. `ResolveToolchains` has just logged a
     // "serving {} as {}" line for everything it kept, so naming the additions again

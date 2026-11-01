@@ -13,6 +13,7 @@
 #include <Pace/Cluster/FleetPin.hpp>
 #include <Pace/Cluster/NodeMode.hpp>
 #include <Pace/Cluster/Roster.hpp>
+#include <Pace/CompileCache/ToolchainFingerprint.hpp>
 #include <Pace/Core/Ed25519.hpp>
 #include <Pace/Core/WireFrame.hpp>
 #include <Pace/Distributed/MembershipOracle.hpp>
@@ -20,6 +21,7 @@
 #include <Pace/Metrics/StatsReading.hpp>
 #include <Pace/Metrics/StatsReadingCodec.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/FingerprintInputsWire.hpp>
 #include <Pace/Protocol/LeaderRedirect.hpp>
 #include <Pace/Protocol/LiveStream.hpp>
 
@@ -31,6 +33,7 @@
 #include <cstdint>
 #include <format>
 #include <iterator>
+#include <memory>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -1924,4 +1927,106 @@ TEST_CASE("The configuration in force is told to a caller a route identifies, ne
         auto const told = statusFrom(peer);
         CHECK(told.runtime.effectiveConfig.has_value());
     }
+}
+
+namespace
+{
+
+/// A survey published by nobody in particular: one toolchain with a three-file record.
+class OneServedToolchain final: public IServedInputsSource
+{
+  public:
+    /// @copydoc IServedInputsSource::ServedInputsNow
+    [[nodiscard]] std::shared_ptr<ServedInputs const> ServedInputsNow() const override
+    {
+        auto record = Cc::CaptureFingerprintInputs("gcc 13",
+                                                   "gnu",
+                                                   { Cc::ToolchainFile { .relativePath = "a.h", .contentHash = "00" },
+                                                     Cc::ToolchainFile { .relativePath = "b.h", .contentHash = "01" } });
+        auto fingerprint = Cc::ComputeToolchainFingerprint(record);
+        return std::make_shared<ServedInputs const>(
+            ServedInputs { ServedToolchainInputs { .fingerprint = std::move(fingerprint),
+                                                   .label = "gcc 13",
+                                                   .compiler = "/usr/bin/gcc",
+                                                   .inputs = std::make_shared<Cc::FingerprintInputs const>(record) } });
+    }
+};
+
+/// @return A FINGERPRINT-INPUTS frame asking for the index.
+[[nodiscard]] std::vector<std::byte> IndexRequest()
+{
+    return Wire::EncodeFingerprintInputsRequest(Wire::FingerprintInputsRequest { .fingerprint = {}, .cursor = 0 });
+}
+
+} // namespace
+
+TEST_CASE("FINGERPRINT-INPUTS is gated as node-status is: a stranger is refused and counted",
+          "[node][node-status][fingerprint-inputs][admission]")
+{
+    core::platform::ManualClock clock;
+    AtomicMetricsSink metrics;
+    ListedMembership const membership { { "10.0.0.9" }, Distributed::MembershipParticipant::OpenPolicy };
+    Fixture const fixture { {}, clock };
+    CapturedReadings const readings { metrics, {} };
+    OneServedToolchain const served;
+    FingerprintInputsResponder const inputs { &served, metrics, "1.2.3" };
+    NodeStatusResponder responder { fixture.status, readings, membership, HoldsNoRoster, metrics, &inputs };
+
+    auto const shape = ShapeOf(AnswerNow(responder, IndexRequest()));
+    CHECK(shape.code == Wire::ErrorCode::NotAMember);
+    CHECK(metrics.Read(IMetricsSink::Counter::NodeStatusRequestsRefusedNotAMember) == 1);
+    CHECK_FALSE(shape.detail.contains("/usr/bin/gcc"));
+}
+
+TEST_CASE("FINGERPRINT-INPUTS is told to a caller a route identifies, never to one --fleet-open admits alone",
+          "[node][node-status][fingerprint-inputs][admission]")
+{
+    core::platform::ManualClock clock;
+    AtomicMetricsSink metrics;
+    Fixture const fixture { {}, clock };
+    CapturedReadings const readings { metrics, {} };
+    Testing::OpenFleetFold const fold;
+    OneServedToolchain const served;
+    FingerprintInputsResponder const inputs { &served, metrics, "1.2.3" };
+    NodeStatusResponder responder { fixture.status, readings, fold.admitted, HoldsNoRoster, metrics, &inputs };
+
+    // Admitted by --fleet-open alone: a member, and not identified -- refused, with the remedy, and nothing told.
+    auto const anonymous = ShapeOf(AnswerFrom(responder, IndexRequest(), Testing::OpenFleetFold::Anonymous()));
+    CHECK(anonymous.code == Wire::ErrorCode::IdentifiedCallerRequired);
+    CHECK_FALSE(anonymous.detail.contains("/usr/bin/gcc"));
+    CHECK(metrics.Read(IMetricsSink::Counter::NodeStatusRequestsRefusedNotAMember) == 0);
+
+    // The same address with a verified ticket, or having proved the roster's key, and this machine: answered.
+    for (auto const& [label, peer]: { std::pair { "ticketed", Testing::OpenFleetFold::Ticketed() },
+                                      std::pair { "proven", Testing::OpenFleetFold::Proven() },
+                                      std::pair { "loopback", PeerIdentity { .host = "127.0.0.1" } } })
+    {
+        INFO(label);
+        auto const reply = AnswerFrom(responder, IndexRequest(), peer);
+        auto const header = Wire::DecodeReplyHeader(reply);
+        REQUIRE(header.has_value());
+        REQUIRE(Unwrap(header).status == Wire::Status::Ok);
+        auto const index = Wire::DecodeFingerprintIndex(PayloadOf(reply, Unwrap(header)));
+        REQUIRE(index.has_value());
+        REQUIRE(Unwrap(index).entries.size() == 1);
+        CHECK(Unwrap(index).entries.front().compiler == "/usr/bin/gcc");
+    }
+}
+
+TEST_CASE("FINGERPRINT-INPUTS is a verb this node implements, never one it refuses as unknown",
+          "[node][node-status][fingerprint-inputs]")
+{
+    // With no answerer wired the node says it runs no worker -- `NoCompileWorker`'s fact -- never `UnimplementedVerb`,
+    // which a client reads as *this build is too old*.
+    core::platform::ManualClock clock;
+    AtomicMetricsSink metrics;
+    Distributed::LoopbackMembership membership;
+    Fixture const fixture { {}, clock };
+    CapturedReadings const readings { metrics, {} };
+    NodeStatusResponder responder { fixture.status, readings, membership, HoldsNoRoster, metrics };
+
+    auto const shape = ShapeOf(AnswerFrom(responder, IndexRequest(), PeerIdentity { .host = "127.0.0.1" }));
+    CHECK(shape.code != std::optional { Wire::UnimplementedVerb });
+    CHECK(shape.code == Wire::NoCompileWorker::Code);
+    CHECK(Wire::SaysNoCompileWorker(Wire::NoCompileWorker::Code, shape.detail));
 }

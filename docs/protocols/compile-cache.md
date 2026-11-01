@@ -234,6 +234,39 @@ for the question about the connection. A reader refuses a verdict or a standing 
 name and keeps a route bit it cannot name, so a newer node's answer is never misreported as
 a healthy one.
 
+### FINGERPRINT-INPUTS
+
+```
+[0xFC][ver][0x25][u32 len]  payload: [fingerprint][u64 cursor]
+reply, inputs:                       [0x01][fingerprint][version][schema][banner][grammar]
+                                     [u64 cursor][u64 totalFiles][u64 next, or empty][files]
+reply, index:                        [0x00][version][u32 total][entries]
+```
+
+Asks a node what one of its toolchain fingerprints was computed from: the fingerprint schema, the
+compiler's banner verbatim, the driver grammar's name, and the include-tree files, each a relative
+path and a content digest -- exactly the values the node's survey handed to the digest, never a tree
+walked again for the question. It is what the MCP `toolchain_diff` tool explains two fingerprints
+with, and the asker recomputes the fingerprint from the record before it believes it.
+
+The file list is **paged**. A reply is bounded by 4 MiB and a page is cut to fit it; `cursor` is
+the index of the page's first file, `next` where the following page starts (empty on the last
+page), and `totalFiles` how many the record holds, so a cut-short list is never mistaken for a
+whole one. `files` is a field holding, per file, a path field and a digest field. A cursor past
+the end answers an empty last page. A single file too long for a page on its own is refused
+`payload-too-large`, naming it, rather than overflowing the bound.
+
+An **empty** `fingerprint` asks for the index instead: per served toolchain `[fingerprint][label]
+[compiler][recorded]`, `recorded` one byte saying whether the node holds the inputs -- `0` for an
+operator's `--toolchain=<fingerprint>=<compiler>` pin, which is never probed. `total` beside a
+shorter list says the list was cut to the bound.
+
+A member read, gated as `NODE-STATUS` is: a banner and an include tree describe the host, so a
+stranger is refused `not-a-member`, and a caller only `--fleet-open` admitted is refused
+`identified-caller-required`. A fingerprint the node does not serve, or serves under a pin, is
+refused `no-worker`; a node whose survey has not concluded refuses `worker-toolchain-survey-in-flight`;
+a node running no worker, and a cache daemon, refuse `dispatch-not-permitted`.
+
 ### FLEET-SUMMARY
 
 ```

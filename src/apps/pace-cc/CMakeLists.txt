@@ -184,7 +184,6 @@ set(_pace_cc_sources
     RootReconciler.cpp
     Stats.cpp
     TicketCredentials.cpp
-    ToolchainFingerprint.cpp
     ToolchainHost.cpp
     ToolchainProbe.cpp
     ProcessRunner.cpp

@@ -1451,7 +1451,8 @@ ToolchainIdentity CachedToolchainFingerprint(IProcessRunner& runner,
         if (!cachedStamp.empty() && cachedStamp == stamp)
             return ToolchainIdentity { .fingerprint = cachedFingerprint,
                                        .defect = probeDefect,
-                                       .evidence = std::move(evidence) };
+                                       .evidence = std::move(evidence),
+                                       .inputs = std::nullopt };
     }
 
     // Which of those roots the digest walks is the driver row's answer, asked only
@@ -1467,7 +1468,10 @@ ToolchainIdentity CachedToolchainFingerprint(IProcessRunner& runner,
     // The expensive part, reached only on a miss or a forced refresh.
     auto scan = ProbeToolchainFiles(walked.roots, parallel);
     auto const complete = scan.complete;
-    auto const fingerprint = ComputeToolchainFingerprint(banner, grammar, std::move(scan.files));
+    // Captured, then digested: the record this call hands back is the digest's own argument list, so a node that
+    // keeps it can explain this fingerprint to another node and be recomputed by it (`toolchain_diff`).
+    auto inputs = CaptureFingerprintInputs(banner, grammar, std::move(scan.files));
+    auto const fingerprint = ComputeToolchainFingerprint(inputs);
 
     // `NoEvidence` asked again, of the tree the digest FOLDED, which only the walk
     // knows. It differs from `probeDefect` only where the walk selected fewer roots
@@ -1501,7 +1505,9 @@ ToolchainIdentity CachedToolchainFingerprint(IProcessRunner& runner,
             return IdentityDefect::NoEvidence;
         return complete ? IdentityDefect::None : IdentityDefect::PartialTree;
     }();
-    return ToolchainIdentity { .fingerprint = fingerprint, .defect = defect, .evidence = std::move(evidence) };
+    return ToolchainIdentity {
+        .fingerprint = fingerprint, .defect = defect, .evidence = std::move(evidence), .inputs = std::move(inputs)
+    };
 }
 
 } // namespace Pace::Cc

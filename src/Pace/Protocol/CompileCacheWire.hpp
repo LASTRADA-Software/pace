@@ -853,6 +853,23 @@ enum class Op : std::uint8_t
     ///
     /// A machine speaking for itself, so it requires a proven identity as `Register` does.
     MachineBudget = 0x24,
+
+    /// Ask a node what one of its toolchain fingerprints was computed from: the schema, the compiler's banner,
+    /// the driver grammar's name and the include-tree files with their content digests, one page at a time
+    /// (the MCP `toolchain_diff` tool).
+    ///
+    /// **The record the digest was computed FROM**, kept by the node's survey (`Cc::FingerprintInputs`) and
+    /// never re-gathered when asked: a re-walk would describe the tree as it is now rather than what the
+    /// fingerprint says, and the asker recomputes the digest from the record before it believes a word of it.
+    /// An EMPTY fingerprint asks for the index instead -- each served fingerprint with its label and compiler
+    /// path -- which is how a toolchain named by label or path is resolved to one fingerprint.
+    ///
+    /// A member read, gated as `NodeStatus` is: a banner and an include tree describe the host, so a stranger is
+    /// refused, and a caller only `--fleet-open` admitted is refused too, as the configuration is withheld from
+    /// it. The reply is bounded by `FingerprintInputsReplyCeiling`, and the file list is PAGED under it -- a
+    /// toolchain holds thousands of headers -- so nothing is ever cut short in silence: a page says where the next
+    /// one starts and how many files there are in all. `Ok | Error` only, so no version moved.
+    FingerprintInputs = 0x25,
 };
 
 /// Reply status, the first byte of every reply.
@@ -2069,6 +2086,14 @@ inline constexpr std::size_t MaxRefusalReply = 64 * 1024;
 /// four GiB, which no fleet's report comes near.
 inline constexpr std::size_t MaxReportReply = 64U * 1024U * 1024U;
 
+/// The largest FINGERPRINT-INPUTS reply a client reads, and the most one page of a toolchain's inputs may fill.
+///
+/// A ceiling a PAGE is cut to rather than one a record must fit: a toolchain's include tree runs to thousands of
+/// files, so the responder pages the list under this bound and a reply that would exceed it is never built. Four
+/// MiB holds tens of thousands of typical entries -- a relative path and a 32-character digest -- so a typical tree
+/// is one to a few pages, while a single pathological entry that could not fit a page alone is refused by name.
+inline constexpr std::size_t FingerprintInputsReplyCeiling = 4U * 1024U * 1024U;
+
 /// The largest MINT-TICKET reply a client reads: one machine ticket, whose decoder refuses more
 /// than 1 KiB (`Distributed::MaxMachineTicketBytes`, which this dependency-free header cannot
 /// name), or a refusal -- so the refusal ceiling, which holds both.
@@ -2531,6 +2556,16 @@ inline constexpr std::array OpTable {
                    .preAuth = OpenBeforeAuth,
                    .maxPayload = BoundedTo(MaxExplainAdmissionPayload),
                    .maxReply = ReplyBoundedTo(MaxReportReply),
+                   .family = VerbFamily::Node,
+                   .identity = IdentityRequirement::AddressAdmits },
+    // A member read beside node-status, and gated as it is: a banner and an include tree describe the host.
+    OpDescriptor { .code = Op::FingerprintInputs,
+                   .name = "fingerprint-inputs",
+                   .fieldCount = 2, // fingerprint (empty asks for the index), page cursor
+                   .legalStatuses = static_cast<std::uint8_t>(StatusBit(Status::Ok) | StatusBit(Status::Error)),
+                   .preAuth = RequiresAuth,
+                   .maxPayload = BoundedTo(MaxControlPayload),
+                   .maxReply = ReplyBoundedTo(FingerprintInputsReplyCeiling),
                    .family = VerbFamily::Node,
                    .identity = IdentityRequirement::AddressAdmits },
     OpDescriptor { .code = Op::NodeMetrics,
@@ -4837,7 +4872,7 @@ static_assert(
 /// 64 KiB of text a peer chose; and a worker entry is filed under the fingerprint it registered.
 /// Refused and counted past it, like the label.
 ///
-/// Sized from what a fingerprint IS. `ComputeToolchainFingerprint` -- one translation unit, which
+/// Sized from what a fingerprint IS. `ComputeToolchainFingerprint` -- one header-only function, which
 /// the launcher and the worker both compile -- renders a `KeyDigest`: `KeyDigest::HexLength`, 32
 /// lowercase hex characters. 64 is twice that, room for a digest twice as wide before this bound
 /// has to move. The `static_assert` holding it there sits in `pace-cc/Dispatch.cpp`, where the

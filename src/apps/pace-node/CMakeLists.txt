@@ -13,9 +13,9 @@
 # worker-side halves of one protocol, and a second copy of either is how the two
 # ends drift apart.
 #
-# The toolchain-fingerprint group (CmdLine, DirectManifest, Stats,
-# ToolchainFingerprint, ToolchainProbe, and AtomicFile, which ToolchainProbe writes
-# its cache through) is here for the same reason and is not
+# The toolchain-fingerprint group (CmdLine, DirectManifest, Stats, ToolchainProbe,
+# and AtomicFile, which ToolchainProbe writes its cache through; the digest itself is
+# the header-only Pace/CompileCache/ToolchainFingerprint.hpp) is here for the same reason and is not
 # optional: a worker derives its own fingerprint so an operator never has to paste
 # a digest, and it MUST derive it through the identical code its clients use. A
 # second implementation would register cleanly, heartbeat happily, and never be
@@ -34,7 +34,6 @@ set(_pace_node_shared
     "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/Stats.cpp"
     "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/TicketCredentials.cpp"
     "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/ToolchainDiscovery.cpp"
-    "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/ToolchainFingerprint.cpp"
     "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/ToolchainHost.cpp"
     "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/ToolchainProbe.cpp"
     "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/WorkerProtocol.cpp")
@@ -109,6 +108,7 @@ add_executable(pace-node
     WorkerTier.cpp
     CompileCapacity.cpp
     CompileResponder.cpp
+    FingerprintInputsResponder.cpp
     NodeStatusResponder.cpp
     LiveStatsResponder.cpp
     LiveStatsSources.cpp
@@ -299,6 +299,8 @@ if(PACE_BUILD_TESTS)
         CompileCapacity.cpp
         CompileCapacity_test.cpp
         CompileResponder.cpp
+        FingerprintInputsResponder.cpp
+        FingerprintInputsResponder_test.cpp
         NodeStatusResponder.cpp
         LiveStatsResponder.cpp
         LiveStatsSources.cpp

@@ -2,12 +2,16 @@
 #pragma once
 
 #include "McpUpstream.hpp"
+#include "NodeNameResolver.hpp"
 
+#include <Pace/Cluster/ClusterState.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <functional>
+#include <initializer_list>
 #include <optional>
 #include <span>
 #include <string>
@@ -89,6 +93,75 @@ class ScriptedUpstream final: public IMcpUpstream
     UpstreamResult answer;           ///< What every call answers; a case may set it whole.
     std::vector<AskedCall> calls;    ///< Every call, in order.
     UpstreamParticipant participant; ///< Who every `Ok` names, and under which term.
+};
+
+/// An upstream that answers each call through a function of that call, and records every call whole.
+///
+/// For a tool that asks more than once and whose later questions depend on the earlier answers -- paging a record,
+/// resolving a name and then asking about what it resolved to -- which one scripted answer cannot exercise.
+class RespondingUpstream final: public IMcpUpstream
+{
+  public:
+    /// What answers one call.
+    using Responder = std::function<UpstreamResult(AskedCall const& call)>;
+
+    /// @param respond Answers every call; called on the thread that asks.
+    explicit RespondingUpstream(Responder respond):
+        _respond { std::move(respond) }
+    {
+    }
+
+    /// @copydoc IMcpUpstream::Ask
+    [[nodiscard]] UpstreamResult Ask(UpstreamTarget target, std::string_view nodeIdOrEmpty, std::string frame) override
+    {
+        _calls.push_back(
+            AskedCall { .target = target, .nodeIdOrEmpty = std::string { nodeIdOrEmpty }, .frame = std::move(frame) });
+        return _respond(_calls.back());
+    }
+
+    /// @return Every call, in order.
+    [[nodiscard]] std::vector<AskedCall> const& Calls() const noexcept
+    {
+        return _calls;
+    }
+
+  private:
+    std::vector<AskedCall> _calls;
+    Responder _respond;
+};
+
+/// @param ids The members' ids.
+/// @return A cluster state holding exactly those members, in that order.
+[[nodiscard]] inline Cluster::ClusterState StateOf(std::initializer_list<std::string_view> ids)
+{
+    auto state = Cluster::ClusterState {};
+    for (auto const id: ids)
+    {
+        auto member = Cluster::ClusterMember {};
+        member.id = std::string { id };
+        state.members.push_back(std::move(member));
+    }
+    return state;
+}
+
+/// A cluster view holding one state, or none.
+class FixedCluster final: public IAppliedClusterView
+{
+  public:
+    /// @param state The state applied, or nothing.
+    explicit FixedCluster(std::optional<Cluster::ClusterState> state):
+        _state { std::move(state) }
+    {
+    }
+
+    /// @copydoc IAppliedClusterView::AppliedState
+    [[nodiscard]] std::optional<Cluster::ClusterState> AppliedState() const override
+    {
+        return _state;
+    }
+
+  private:
+    std::optional<Cluster::ClusterState> _state;
 };
 
 } // namespace Pace::Node::McpFakes

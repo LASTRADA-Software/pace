@@ -168,6 +168,10 @@ inline constexpr std::array ExchangeLogTable {
     VerbLogRow { .code = CompileCacheWire::Op::NodeMetrics,
                  .level = LogLevel::Debug,
                  .rationale = "same shape as node-status, and a scrape is by construction periodic" },
+    VerbLogRow { .code = CompileCacheWire::Op::FingerprintInputs,
+                 .level = LogLevel::Debug,
+                 .rationale = "a diagnostic read like node-status, asked once per page by toolchain_diff; a diff of a "
+                              "large tree is a run of pages, which at Info would read as traffic" },
     VerbLogRow { .code = CompileCacheWire::Op::Enroll,
                  .level = LogLevel::Info,
                  .rationale = "the only verb on this wire an UNAUTHENTICATED stranger can reach, and the only "

@@ -141,16 +141,18 @@ struct NodeTarget
     std::optional<std::string> asked; ///< The name as given, or nothing when none was.
 };
 
-/// Resolve a call's `node` argument, through `ResolveNodeName`: exactly, never by prefix.
-/// @param call The call.
+/// Resolve a `node` member, through `ResolveNodeName`: exactly, never by prefix.
+///
+/// The member rather than the call, so a tool asking two nodes (`toolchain_diff`) resolves each side's `node` the way
+/// a one-node tool resolves its own -- one rule for what a name means, wherever it is written.
+/// @param node The member, or null when it is absent.
 /// @param cluster Where names resolve.
 /// @param selfId This node's id: the one name that resolves on a node that has applied no cluster state.
-/// @return Whom to ask, or the tool error naming why the argument names nobody.
-[[nodiscard]] inline std::expected<NodeTarget, Mcp::ToolResult> NodeTargetOf(Mcp::ToolCall const& call,
-                                                                             IAppliedClusterView const& cluster,
-                                                                             std::string const& selfId)
+/// @return Whom to ask, or the tool error naming why the member names nobody.
+[[nodiscard]] inline std::expected<NodeTarget, Mcp::ToolResult> NodeTargetFrom(Json::Value const* node,
+                                                                               IAppliedClusterView const& cluster,
+                                                                               std::string const& selfId)
 {
-    auto const* const node = call.arguments.Find("node");
     if (node == nullptr || node->IsNull())
         return NodeTarget { .nodeId = {}, .asked = std::nullopt };
     // Refused rather than ignored: a `node` this tool cannot read answered about THIS node would be an answer about
@@ -172,6 +174,18 @@ struct NodeTarget
     if (!resolved.has_value())
         return std::unexpected { Error(std::move(resolved.error())) };
     return NodeTarget { .nodeId = std::move(*resolved), .asked = *name };
+}
+
+/// Resolve a call's `node` argument, through `ResolveNodeName`: exactly, never by prefix.
+/// @param call The call.
+/// @param cluster Where names resolve.
+/// @param selfId This node's id: the one name that resolves on a node that has applied no cluster state.
+/// @return Whom to ask, or the tool error naming why the argument names nobody.
+[[nodiscard]] inline std::expected<NodeTarget, Mcp::ToolResult> NodeTargetOf(Mcp::ToolCall const& call,
+                                                                             IAppliedClusterView const& cluster,
+                                                                             std::string const& selfId)
+{
+    return NodeTargetFrom(call.arguments.Find("node"), cluster, selfId);
 }
 
 /// @param failure Why the upstream could not answer, and who and what happened.

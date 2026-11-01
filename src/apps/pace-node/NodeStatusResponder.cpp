@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <array>
+#include <format>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -419,6 +420,26 @@ core::async::Task<FrameReply> NodeStatusResponder::Answer(std::span<std::byte co
             if (!capture.has_value())
                 co_return Cc::RefuseWithoutCounter(NodeIsStopping, "this node is stopping");
             co_return CompileCacheWire::EncodeReply(CompileCacheWire::Status::Ok, capture->body);
+        }
+        case CompileCacheWire::Op::FingerprintInputs: {
+            // A banner and an include tree describe the host, so they are told only where the configuration is: to a
+            // caller a route IDENTIFIES, never to one `--fleet-open` admitted alone. Refused rather than withheld --
+            // the reply is nothing BUT the detail -- and uncounted, as `explain-admission`'s machine form is.
+            if (!Distributed::RestsOnIdentifiedCaller(Distributed::ExplainConnection(_membership, peer)))
+                co_return Cc::RefuseWithoutCounter(
+                    { .code = CompileCacheWire::ErrorCode::IdentifiedCallerRequired,
+                      .rationale = "a diagnostic question, answered with its remedy; the event an operator watches for "
+                                   "an unidentified caller is the control verbs' refusal, and this one changes nothing" },
+                    "fingerprint-inputs describes this machine's toolchains, so it is answered to a caller this node can "
+                    "identify: from this machine, with a proven key, or with the machine ticket a fleet node mints");
+            if (_fingerprintInputs == nullptr)
+                co_return Cc::RefuseWithoutCounter(
+                    { .code = CompileCacheWire::NoCompileWorker::Code,
+                      .rationale = "a node built without the fingerprint-inputs answerer serves no toolchain to explain" },
+                    std::format("{}, so it holds no fingerprint inputs", CompileCacheWire::NoCompileWorker::Stem));
+            auto const payload = frame.subspan(CompileCacheWire::RequestHeaderSize);
+            co_return _fingerprintInputs->Answer(payload.size() == header->payloadLength ? std::optional { payload }
+                                                                                         : std::nullopt);
         }
         case CompileCacheWire::Op::ExplainAdmission: {
             auto const payload = frame.subspan(CompileCacheWire::RequestHeaderSize);

@@ -641,7 +641,10 @@ TEST_CASE("This build's live-stats layout is the pinned one", "[metrics][livesta
     //
     // Moved again when the MCP surface added `mcp_requests_refused_not_loopback_total` at the end of the
     // catalogue.
-    CHECK(StatsReadingLayout == 0x487d3c993e45bae5ULL);
+    //
+    // Moved again when FINGERPRINT-INPUTS added `node_fingerprint_inputs_refused_malformed_total` at the end of the
+    // catalogue. Clients and nodes upgrade together. Read off the built test, never computed by hand.
+    CHECK(StatsReadingLayout == 0x3ac69106c0ce143aULL);
 }
 
 TEST_CASE("A truncated or padded reading is refused and never half-read", "[metrics][livestats]")

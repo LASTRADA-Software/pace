@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include "FingerprintInputsResponder.hpp"
 #include "NodeConfig.hpp"
 
 #include <Pace/Core/Logger.hpp>
@@ -55,6 +56,25 @@ enum class SurveyVoice : std::uint8_t
     /// The timer sweep, which on almost every occasion finds the same compilers it
     /// found fifteen minutes ago.
     Routine,
+};
+
+/// Whether a survey may take a fingerprint from the launcher's fingerprint cache, or must walk the tree.
+///
+/// **PRIVATE: persisted and transmitted nowhere.** An enum rather than a `bool` at this seam, because the call reads
+/// `FingerprintToolchains(..., FingerprintWalk::Always)` where a bare `true` would say nothing.
+///
+/// A cache hit returns a digest an earlier run wrote and walks nothing, so it has no INPUTS to keep -- and a node
+/// keeps them so `toolchain_diff` can explain the fingerprint to another node (`ServedToolchain::inputs`). The
+/// startup survey therefore walks, once per process; every later survey may take the cache, and a fingerprint it
+/// finds unchanged keeps the inputs the walk captured (`CarryInputsForward`), which is what keeps the timer sweep
+/// from re-walking every tree every fifteen minutes.
+enum class FingerprintWalk : std::uint8_t
+{
+    /// Take a cached fingerprint whose stamp still validates; walk only on a miss.
+    CacheMayAnswer,
+
+    /// Walk every tree whatever the cache holds, and rewrite the cache with the same answer.
+    Always,
 };
 
 /// The level a survey's narration is emitted at.
@@ -188,7 +208,36 @@ struct ServedToolchain
     /// as an empty version of the second, which is exactly the collapse
     /// `Cc::ToolchainIdentity::evidence` carries an `optional` to avoid.
     std::optional<Cc::ToolchainEvidence> witness;
+
+    /// The inputs this fingerprint was computed from, as the survey's walk handed them to the digest; null when
+    /// nothing was digested here.
+    ///
+    /// **Captured, never re-gathered** (`Cc::ToolchainIdentity::inputs`): it is the digest's own argument list, so
+    /// it recomputes to the fingerprint this toolchain is filed under, and another node can check that before it
+    /// explains how two fingerprints differ. Null for an operator's `<fingerprint>=<compiler>` pin, which is never
+    /// probed, and for a toolchain a cache hit identified with no walk to carry it forward from. Kept in memory
+    /// only -- never persisted, never replicated.
+    ///
+    /// Shared and immutable, because a record runs to thousands of files and is published whole to the reactor
+    /// that answers `FINGERPRINT-INPUTS` (`NodeRuntimeState::PublishServedInputs`) without a copy.
+    std::shared_ptr<Cc::FingerprintInputs const> inputs;
 };
+
+/// Keep the inputs a previous survey captured for every fingerprint a later survey found unchanged and took
+/// from the cache.
+///
+/// Sound because the map is keyed by FINGERPRINT: a record filed under a key recomputes to that key, so carrying
+/// it to the same key in the next map hands nobody inputs for another digest -- and the node that reads it
+/// recomputes it before using it anyway. A toolchain whose fingerprint moved has a new key and inherits nothing.
+/// @param previous What the worker served before.
+/// @param next What it serves from now on; a toolchain with no inputs takes @p previous's under the same key.
+void CarryInputsForward(std::map<std::string, ServedToolchain> const& previous,
+                        std::map<std::string, ServedToolchain>& next);
+
+/// What `FINGERPRINT-INPUTS` reads of a served map: each toolchain's fingerprint, label, compiler and inputs.
+/// @param served What the worker serves.
+/// @return The same toolchains in fingerprint order, sharing their inputs rather than copying them.
+[[nodiscard]] std::shared_ptr<ServedInputs const> ServedInputsOf(std::map<std::string, ServedToolchain> const& served);
 
 /// Split a `--toolchain` value into its fingerprint and compiler.
 ///
@@ -369,6 +418,7 @@ struct SurveyResult
 /// @return Fingerprint to what this worker serves under it -- never empty -- or
 ///         nullopt when there is nothing to serve, which is refused HERE with the
 ///         message that fits `discovered.source`.
+/// @param walk Whether a cached fingerprint may answer; the startup survey walks, so it captures inputs.
 /// @param stop Observed between toolchains and between hashed files, so a node told
 ///        to stop mid-walk stops. It is not a courtesy: since #365 this runs on the
 ///        heartbeat thread, whose `jthread` destructor joins before `main` returns,
@@ -383,7 +433,8 @@ struct SurveyResult
                                                  core::platform::IClock const& clock,
                                                  ILogger& logger,
                                                  std::stop_token const& stop,
-                                                 SurveyVoice voice = SurveyVoice::Announce);
+                                                 SurveyVoice voice = SurveyVoice::Announce,
+                                                 FingerprintWalk walk = FingerprintWalk::CacheMayAnswer);
 
 /// Which of these toolchains no longer match the machine they were derived from.
 ///

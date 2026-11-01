@@ -1062,6 +1062,8 @@ inline constexpr std::array CounterSoleWriterTable {
                         .surface = MetricsSurface::AdmissionForwarding },
     CounterSoleWriter { .counter = IMetricsSink::Counter::McpRequestsRefusedNotLoopback,
                         .surface = MetricsSurface::NodeMcp },
+    CounterSoleWriter { .counter = IMetricsSink::Counter::NodeFingerprintInputsRefusedMalformed,
+                        .surface = MetricsSurface::NodeFrameEndpoint },
 };
 
 /// Whether every catalogue row has at least one surface attributed to it.

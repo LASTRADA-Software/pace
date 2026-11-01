@@ -447,6 +447,17 @@ template <typename T>
     return tier != nullptr ? &tier->Service() : nullptr;
 }
 
+/// The worker's published survey, or nullptr on a node that runs no worker.
+///
+/// `ServiceOrNull`'s shape and reason: the source exists only behind the tier, and `WorkerBody` sits at the
+/// cognitive-complexity ceiling, so the test lives here rather than as a conditional at the call site.
+/// @param tier The worker tier, or nullptr when none was started.
+/// @return What `fingerprint-inputs` reads, or nullptr.
+[[nodiscard]] Node::IServedInputsSource const* ServedInputsOrNull(Node::WorkerTier* tier) noexcept
+{
+    return tier != nullptr ? &tier->Runtime() : nullptr;
+}
+
 /// @p value's address when @p present, and nullptr otherwise.
 ///
 /// The sibling of `AddressOrNull` for a source this node OWNS unconditionally but
@@ -805,7 +816,8 @@ class McpForwarding
 [[nodiscard]] std::vector<Mcp::ToolRow> McpToolTable(NodeConfig const& cfg, McpForwarding& forwarding, ILogger& logger)
 {
     auto tools = Node::FleetReadTools(forwarding.Upstream());
-    std::ranges::move(Node::ToolchainTools(forwarding.Upstream()), std::back_inserter(tools));
+    std::ranges::move(Node::ToolchainTools(forwarding.Upstream(), forwarding.Directory(), cfg.nodeId),
+                      std::back_inserter(tools));
     std::ranges::move(Node::NodeReadTools(forwarding.Upstream(), forwarding.Directory(), cfg.nodeId),
                       std::back_inserter(tools));
     std::ranges::move(Node::ActionTools(forwarding.Upstream(), forwarding.Directory(), cfg.nodeId, logger),
@@ -1473,7 +1485,13 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     // What `explain-admission <machine>` answers from: the roster grants are verified against, and
     // the enrollment window where this node serves one.
     Node::NodeMachineStanding const machineStanding { *nodeRoster, AddressWhen(servesEnrollment, enrollmentWindow) };
-    Node::NodeStatusResponder nodeStatusResponder { nodeStatus, liveSources, membership.Oracle(), machineStanding, metrics };
+    // What `fingerprint-inputs` answers from: the worker's published survey, read without touching its served map. A
+    // node running no worker passes a null source and answers that it serves no toolchain.
+    Node::FingerprintInputsResponder const fingerprintInputs { ServedInputsOrNull(workerTier.get()),
+                                                               metrics,
+                                                               std::string { VersionString } };
+    Node::NodeStatusResponder nodeStatusResponder { nodeStatus,      liveSources, membership.Oracle(),
+                                                    machineStanding, metrics,     &fingerprintInputs };
 
     // The dashboard credential, read ONCE for the surfaces that guard the fleet with it: `/fleet`
     // over HTTP, and over `0xFC` the fleet subject of a live-stats subscription and `fleet-text`.

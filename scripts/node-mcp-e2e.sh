@@ -44,6 +44,11 @@
 #                                         recommended where the ordering is unknown, a
 #                                         fingerprint per DRIVER otherwise, nobody behind
 #                                         or ahead on a one-machine fleet, a basis on each.
+#   2g. toolchain_diff explains         — on that same scheduler: one of its fingerprints
+#       a fingerprint                     against itself is identical, with the recompute
+#                                         PASSED -- the inputs the survey kept reproduce the
+#                                         fingerprint it registered -- and a fingerprint it
+#                                         does not serve is a clean tool error.
 #   3. A legacy client is answered      — `initialize` answers `2025-11-25`.
 #   4. It is not a scrape endpoint      — `GET /metrics` on the MCP port is a 404.
 #   5. A network address refuses        — `--mcp-listen=0.0.0.0:<port>` ends the
@@ -164,10 +169,10 @@ e2e_note "server/discover answered, naming ${MODERN} and ${LEGACY}"
 
 listed="$(mcp_post tools/list "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{${META}}}" "$MODERN")"
 [[ "$listed" == HTTP/1.1\ 200* ]] || fail "tools/list did not answer 200: ${listed%%$'\r'*}"
-readonly READ_TOOLS="['fleet_overview','running_compiles','conditions','history','enrollment_status','toolchains','node_status']"
+readonly READ_TOOLS="['fleet_overview','running_compiles','conditions','history','enrollment_status','toolchains','toolchain_diff','node_status']"
 json_check "tools/list" "$(body_of "$listed")" \
     "all(t in [x['name'] for x in d['result']['tools']] for t in ${READ_TOOLS}) and all(x['annotations']['readOnlyHint'] for x in d['result']['tools'] if x['name'] in ${READ_TOOLS})"
-e2e_note "tools/list names the five fleet tools, toolchains and node_status, each read-only"
+e2e_note "tools/list names the five fleet tools, toolchains, toolchain_diff and node_status, each read-only"
 
 # ------------------------------------------------- 2b. a fleet tool reaches the loop
 called="$(mcp_post tools/call "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"fleet_overview\",\"arguments\":{},${META}}}" "$MODERN" fleet_overview)"
@@ -403,8 +408,22 @@ if command -v cc >/dev/null 2>&1 || command -v c++ >/dev/null 2>&1 || command -v
     json_check "toolchains upgrade report" "$toolchains_body" \
         "len(${SC}['upgrade_report']) > 0 and all(r['basis'] != '' and r['behind'] == [] and r['ahead'] == [] and r['same_version_other_fingerprint'] == [] and ((r['recommended_version'] is None and r['recommended_fingerprints'] is None) if r['ordering_unknown'] else (r['recommended_version'] is not None and isinstance(r['recommended_fingerprints'], dict) and all(any(t['fingerprint'] == fp and t['family'] == r['family'] and t['driver'] == driver for t in ${SC}['toolchains']) for driver, fp in r['recommended_fingerprints'].items()) and 'no demand data; highest labelled version served' in r['basis'])) for r in ${SC}['upgrade_report']) and any(r['recommended_fingerprints'] for r in ${SC}['upgrade_report'])"
     e2e_note "toolchains reported $(python3 -I -c "import json,sys; print(json.loads(sys.stdin.read())['result']['structuredContent']['toolchain_count'])" <<< "$toolchains_body") toolchain(s) on this one machine, unserved derived and empty, demand absent, and a consistent upgrade report"
+
+    # ------------------------------------------------------------- 2g. toolchain_diff explains a fingerprint
+    # One served fingerprint against itself, through main's wiring: this node pages its own survey's inputs over
+    # FINGERPRINT-INPUTS, recomputes the fingerprint from them, and finds nothing to tell apart. `recompute: passed`
+    # is the wrong-answer guard having RUN -- the inputs the survey kept reproduce the fingerprint it registered.
+    diff_fingerprint="$(python3 -I -c "import json,sys; print(json.loads(sys.stdin.read())['result']['structuredContent']['toolchains'][0]['fingerprint'])" <<< "$toolchains_body")"
+    diff_body="$(call_action toolchain_diff "{\"a\":{\"fingerprint\":\"${diff_fingerprint}\"},\"b\":{\"fingerprint\":\"${diff_fingerprint}\"}}")"
+    json_check "toolchain_diff of a fingerprint against itself" "$diff_body" \
+        "${OK} and ${SC}['identical'] is True and ${SC}['same_fingerprint'] is True and ${SC}['recompute'] == 'passed' and ${SC}['complete'] is True and ${SC}['skew'] is None and ${SC}['inferred'] is False and ${SC}['only_a']['count'] == 0 and ${SC}['only_b']['count'] == 0 and ${SC}['content_differs']['count'] == 0 and ${SC}['a']['fingerprint'] == '${diff_fingerprint}' and ${SC}['a']['total_files'] == ${SC}['b']['total_files'] and ${SC}['verdict'].startswith('the inputs are identical')"
+    # A fingerprint this node does not serve: the node refuses by name, and the tool answers a clean tool error.
+    missing_body="$(call_action toolchain_diff "{\"a\":{\"fingerprint\":\"${diff_fingerprint}\"},\"b\":{\"fingerprint\":\"00000000000000000000000000000000\"}}")"
+    json_check "toolchain_diff of a fingerprint nobody serves" "$missing_body" \
+        "d['result']['isError'] is True and 'serves no toolchain with fingerprint 00000000000000000000000000000000' in d['result']['content'][0]['text']"
+    e2e_note "toolchain_diff found ${diff_fingerprint} identical to itself over $(python3 -I -c "import json,sys; print(json.loads(sys.stdin.read())['result']['structuredContent']['a']['total_files'])" <<< "$diff_body") file(s) with the recompute passed, and refused a fingerprint nobody serves"
 else
-    e2e_note "no compiler on PATH, so the worker registers no toolchain: the toolchains content check was NOT run"
+    e2e_note "no compiler on PATH, so the worker registers no toolchain: the toolchains and toolchain_diff checks were NOT run"
 fi
 stop_and_require_clean_exit "$action_pid" "the acting scheduler" 30 "${workdir}/node.log"
 node_pid=""

@@ -1286,6 +1286,40 @@ TEST_CASE("A forced refresh ignores a cached value", "[toolchain-probe]")
     CHECK(forced != before);
 }
 
+TEST_CASE("A walk hands back the inputs it digested, and a cache hit hands back none", "[toolchain-probe][fingerprint-inputs]")
+{
+    // The record a node explains a fingerprint with (`toolchain_diff`) is the digest's own argument list, so it
+    // recomputes to exactly the fingerprint returned beside it. A cache hit walked nothing and digested nothing,
+    // so it has no argument list to hand back -- and must not invent one by walking again.
+    Pace::Testing::ScratchDirectory tree { "pace-tcp-inputs" };
+    tree.Write("inc/a.hpp", "alpha");
+    tree.Write("inc/sub/b.hpp", "beta");
+    tree.Write("cc", "#!/bin/sh\n");
+    auto const compiler = (tree / "cc").string();
+    auto const root = (std::filesystem::path { tree.Path().string() } / "inc").string();
+
+    Pace::Testing::ScratchDirectory state { "pace-tcp-inputs-state" };
+    Pace::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
+
+    CountingRunner runner { VerboseNaming(root) };
+    ScriptedToolchainHost host;
+    auto const walked = CachedFingerprintSerially(runner, host, compiler, "cc 1.0", DriverOf(Flavor::Clang));
+    REQUIRE(walked.inputs.has_value());
+    CHECK(ComputeToolchainFingerprint(Pace::Testing::Unwrap(walked.inputs)) == walked.fingerprint);
+    CHECK(Pace::Testing::Unwrap(walked.inputs).banner == "cc 1.0");
+    CHECK(Pace::Testing::Unwrap(walked.inputs).schema == FingerprintSchema);
+    CHECK(Pace::Testing::Unwrap(walked.inputs).files.size() == 2);
+
+    auto const hit = CachedFingerprintSerially(runner, host, compiler, "cc 1.0", DriverOf(Flavor::Clang));
+    CHECK(hit.fingerprint == walked.fingerprint);
+    CHECK_FALSE(hit.inputs.has_value());
+
+    // A forced walk -- what a node's first survey asks for -- captures them again, whatever the cache holds.
+    auto const forced = CachedFingerprintSerially(runner, host, compiler, "cc 1.0", DriverOf(Flavor::Clang), true);
+    REQUIRE(forced.inputs.has_value());
+    CHECK(ComputeToolchainFingerprint(Pace::Testing::Unwrap(forced.inputs)) == forced.fingerprint);
+}
+
 TEST_CASE("No state directory still yields a fingerprint", "[toolchain-probe]")
 {
     // A machine with nowhere to persist must still be able to dispatch. Caching

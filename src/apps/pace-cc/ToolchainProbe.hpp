@@ -889,6 +889,15 @@ struct ToolchainIdentity
     /// silence.
     std::optional<ToolchainEvidence> evidence;
 
+    /// The inputs the digest was computed from in THIS call, or nothing when it computed none.
+    ///
+    /// Engaged exactly when this call walked the tree and digested it -- the record is the argument list
+    /// `ComputeToolchainFingerprint` was handed (`CaptureFingerprintInputs`), so it recomputes to `fingerprint`
+    /// by construction. Disengaged for a cache HIT, which returns a digest written by an earlier run and walked
+    /// nothing, and for an identity nobody probed (an operator's pin): there was no argument list to keep, and
+    /// re-gathering one afterwards would describe whatever the tree is NOW rather than what was digested.
+    std::optional<FingerprintInputs> inputs;
+
     /// Whether this identity may be registered, matched on, or dispatched with.
     ///
     /// Asked rather than compared, so the two consumers cannot drift on what counts

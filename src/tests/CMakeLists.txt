@@ -8138,17 +8138,20 @@ if(TARGET PaceTest)
         # the assertion that could not have failed while this ticket was open: 69
         # cases ran, and 69 is non-zero.
         #
-        # 283 = 207 (CompileCacheWire) + 26 (RaftWire) + 17 (ClusterState)
-        #     + 23 (DiscoveryWire) + 5 (NodeStatusDetailWire) + 1 (RaftTypes)
-        #     + 1 (SchedulerService) + 1 (MachineTicket) + 1 (MachineStanding)
-        #     + 1 (IdentityKeyLabel), read off `PaceTest "[wire]" --list-tests
-        #     --verbosity high`. The first four files are wholly wire subject and are the
-        #     scan's table; the rest carry wire cases among others, which is why the scan
-        #     cannot cover them and why this number is the only thing that watches them.
+        # 291 = 207 (CompileCacheWire) + 26 (RaftWire) + 17 (ClusterState)
+        #     + 23 (DiscoveryWire) + 8 (FingerprintInputsWire) + 5 (NodeStatusDetailWire)
+        #     + 1 (RaftTypes) + 1 (SchedulerService) + 1 (MachineTicket)
+        #     + 1 (MachineStanding) + 1 (IdentityKeyLabel), read off `PaceTest "[wire]"
+        #     --list-tests --verbosity high`. CompileCacheWire, RaftWire, DiscoveryWire,
+        #     RaftTypes and FingerprintInputsWire are wholly wire subject and are the scan's
+        #     table; the rest carry wire cases among others, which is why the scan cannot
+        #     cover them and why this number is the only thing that watches them.
         #
         # What moved it from 277 to 283: "A capacity record carries the toolchain family
         # as its eleventh field" in CompileCacheWire (+1), and NodeStatusDetailWire, a new
-        # file of five wire cases (+5).
+        # file of five wire cases (+5). From 283 to 291: FingerprintInputsWire, a new file
+        # of eight wire cases -- the FINGERPRINT-INPUTS opcode byte and row, and its
+        # request, page and index grammars (+8).
         #
         # `[(]` rather than `\(`: CMake reads `\(` in a quoted argument as an escape
         # and stores a bare `(`, which its regex engine then takes as a capture group
@@ -8160,7 +8163,7 @@ if(TARGET PaceTest)
         # anything matches nothing. No `SKIP_RETURN_CODE` here: every selected case
         # must PASS for the count to be the count, so a run that skipped is a failure
         # of this check, never a state to report.
-        PASS_REGULAR_EXPRESSION "All tests passed [(][0-9]+ assertions in 283 test cases[)]"
+        PASS_REGULAR_EXPRESSION "All tests passed [(][0-9]+ assertions in 291 test cases[)]"
         LABELS "hygiene"
         TIMEOUT 300
     )

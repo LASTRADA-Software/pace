@@ -76,6 +76,7 @@ target_sources(Pace
         Distributed/WorkerRegistry.cpp
         Distributed/UnservedToolchains.cpp
         Distributed/CompilerVersion.cpp
+        Distributed/FingerprintDiff.cpp
         Distributed/FleetVersions.cpp
         Distributed/NodeProof.cpp
         Distributed/StateLeaseRoster.cpp

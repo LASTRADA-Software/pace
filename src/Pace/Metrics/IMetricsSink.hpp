@@ -1593,6 +1593,15 @@ class IMetricsSink
         /// address this node was never meant to answer reached it anyway.
         McpRequestsRefusedNotLoopback,
 
+        /// A `fingerprint-inputs` whose payload is not exactly a fingerprint of at most 64 bytes and an eight-byte
+        /// page cursor. The verb is a member read, so only a caller the node admits can move this.
+        ///
+        /// Counted, for `NodeAdmissionExplanationsRefusedMalformed`'s reason: the one shipped client -- the MCP
+        /// `toolchain_diff` tool -- builds the request through `EncodeFingerprintInputsRequest`, which cannot build a
+        /// malformed one, so a rise is a client of another build or somebody probing the port by hand. Its own row
+        /// rather than that one's: the two verbs carry different fields, so one counter would name two mistakes.
+        NodeFingerprintInputsRefusedMalformed,
+
         Last,
     };
 

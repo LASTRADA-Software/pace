@@ -472,6 +472,8 @@ void WorkerTier::Serve(std::map<std::string, ServedToolchain> served)
     // AFTER the two calls above: this says the worker is serving, and it must not say so
     // while the compile port still holds the previous answer.
     PublishToolchains(_runtime, _toolchains.size(), _discovered.entries.size());
+    // What `FINGERPRINT-INPUTS` answers from: the same map, published whole for the reactor that reads it.
+    _runtime.PublishServedInputs(ServedInputsOf(_toolchains));
 }
 
 void WorkerTier::FollowAnnouncedEndpoint(core::platform::IClock const& statusClock)
@@ -560,7 +562,18 @@ void WorkerTier::Heartbeat(std::stop_token const& stop,
     // ready, so a machine that takes minutes to identify its toolchains spends them
     // SERVING. The stop token is passed because a SIGTERM arriving mid-walk is caught,
     // and an unobservable walk would make the process wait it out before stopping.
-    auto surveyed = FingerprintToolchains(_discovered, *_machine.runner, *_machine.host, _toolchainClock, _logger, stop);
+    //
+    // It WALKS whatever the fingerprint cache holds (`FingerprintWalk::Always`), once per process: a cache hit
+    // walks nothing and so keeps no inputs, and the inputs are what `toolchain_diff` explains a fingerprint with.
+    // Every later survey may take the cache and carries the inputs captured here forward (`CarryInputsForward`).
+    auto surveyed = FingerprintToolchains(_discovered,
+                                          *_machine.runner,
+                                          *_machine.host,
+                                          _toolchainClock,
+                                          _logger,
+                                          stop,
+                                          SurveyVoice::Announce,
+                                          FingerprintWalk::Always);
     switch (surveyed.outcome)
     {
         case SurveyOutcome::Served:
@@ -572,6 +585,7 @@ void WorkerTier::Heartbeat(std::stop_token const& stop,
             // ready line. Published first, so an operator asking what is wrong in the
             // window before the stop lands gets a real answer.
             PublishToolchains(_runtime, 0, _discovered.entries.size());
+            _runtime.PublishServedInputs(ServedInputsOf({}));
             _surveyFoundNothing = true;
             DaemonControls::Instance().RequestStop();
             return;
@@ -581,6 +595,7 @@ void WorkerTier::Heartbeat(std::stop_token const& stop,
             // periodic sweep surveys again, exactly as it does for a machine that loses
             // its last compiler while serving.
             PublishToolchains(_runtime, 0, _discovered.entries.size());
+            _runtime.PublishServedInputs(ServedInputsOf({}));
             break;
         case SurveyOutcome::Cancelled:
             // Already stopping, and interrupted rather than misconfigured.

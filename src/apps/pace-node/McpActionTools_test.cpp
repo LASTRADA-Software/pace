@@ -55,32 +55,7 @@ constexpr std::string_view ClientName = "claude-code";
     return std::string { reinterpret_cast<char const*>(bytes.data()), bytes.size() };
 }
 
-/// A cluster view holding one state.
-class FixedCluster final: public IAppliedClusterView
-{
-  public:
-    /// @param ids The members.
-    explicit FixedCluster(std::initializer_list<std::string_view> ids)
-    {
-        auto state = Cluster::ClusterState {};
-        for (auto const id: ids)
-        {
-            auto member = Cluster::ClusterMember {};
-            member.id = std::string { id };
-            state.members.push_back(std::move(member));
-        }
-        _state = std::move(state);
-    }
-
-    /// @copydoc IAppliedClusterView::AppliedState
-    [[nodiscard]] std::optional<Cluster::ClusterState> AppliedState() const override
-    {
-        return _state;
-    }
-
-  private:
-    std::optional<Cluster::ClusterState> _state;
-};
+using McpFakes::FixedCluster;
 
 /// Everything a case calls the tools through.
 struct Rig
@@ -88,7 +63,7 @@ struct Rig
     McpFakes::ScriptedUpstream upstream { McpFakes::UpstreamParticipant { .answeredBy = std::string { AnsweredAt },
                                                                           .term = std::uint64_t { 4 } },
                                           UpstreamFailure::Unreachable };
-    FixedCluster cluster { std::string_view { SelfId }, std::string_view { "node-b" } };
+    FixedCluster cluster { McpFakes::StateOf({ SelfId, "node-b" }) };
     CapturingLogger logger;
     std::vector<Mcp::ToolRow> tools = ActionTools(upstream, cluster, std::string { SelfId }, logger);
 
