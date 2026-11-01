@@ -48,6 +48,7 @@ add_executable(pace-node
     McpEndpoint.cpp
     McpFleetTools.cpp
     McpNodeTools.cpp
+    McpToolchainTools.cpp
     McpUpstream.cpp
     NodeNameResolver.cpp
     CacheProxy.cpp
@@ -156,6 +157,8 @@ if(PACE_BUILD_TESTS)
         McpFleetTools_test.cpp
         McpNodeTools.cpp
         McpNodeTools_test.cpp
+        McpToolchainTools.cpp
+        McpToolchainTools_test.cpp
         NodeNameResolver.cpp
         NodeNameResolver_test.cpp
         McpUpstream.cpp

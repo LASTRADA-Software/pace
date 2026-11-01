@@ -8,6 +8,7 @@
 #include <Pace/Protocol/Mcp/McpTool.hpp>
 
 #include <cstddef>
+#include <expected>
 #include <vector>
 
 namespace Pace::Node
@@ -54,6 +55,22 @@ namespace McpFleet
     static_assert(FleetDocumentLimits.maxContainerElements > Distributed::FleetJsonCompileCeiling
                       && FleetDocumentLimits.maxContainerElements > Distributed::FleetJsonLeaseCeiling,
                   "a fleet document's longest lists must parse whole");
+
+    /// The leader's fleet document, and who answered it.
+    struct FleetDocument
+    {
+        UpstreamReply reply; ///< Who answered, and under which term as this node sees it.
+        Json::Value root;    ///< The parsed document.
+    };
+
+    /// Read the leader's fleet document: FLEET-TEXT's `Json` format, which is `RenderFleetJson`'s bytes. Shared by
+    /// every tool that reads it, so each reads the one document the dashboard serves.
+    ///
+    /// **A document of another schema is refused**, not read: a projection knows this build's keys and units,
+    /// and a generation it does not know could carry a key of the same name meaning something else.
+    /// @param upstream How the leader is reached.
+    /// @return The document, or the tool error to answer.
+    [[nodiscard]] std::expected<FleetDocument, Mcp::ToolResult> AskFleetDocument(IMcpUpstream& upstream);
 } // namespace McpFleet
 
 /// The fleet-scope read tools: `fleet_overview`, `running_compiles`, `conditions`, `history` and

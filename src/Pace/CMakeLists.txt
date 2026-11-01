@@ -75,6 +75,7 @@ target_sources(Pace
         Distributed/AdmissionQueue.cpp
         Distributed/WorkerRegistry.cpp
         Distributed/UnservedToolchains.cpp
+        Distributed/CompilerVersion.cpp
         Distributed/FleetVersions.cpp
         Distributed/NodeProof.cpp
         Distributed/StateLeaseRoster.cpp

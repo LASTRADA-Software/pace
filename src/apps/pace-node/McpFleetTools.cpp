@@ -60,52 +60,45 @@ namespace
         return std::move(*answer);
     }
 
-    // ------------------------------------------------------------ the fleet document
+} // namespace
 
-    /// The leader's fleet document, and who answered it.
-    struct FleetDocument
-    {
-        UpstreamReply reply; ///< Who answered, and under which term as this node sees it.
-        Json::Value root;    ///< The parsed document.
-    };
+// ------------------------------------------------------------ the fleet document
 
-    /// Read the leader's fleet document: FLEET-TEXT's `Json` format, which is `RenderFleetJson`'s bytes.
-    ///
-    /// **A document of another schema is refused**, not read: the projection below knows this build's keys and
-    /// units, and a generation it does not know could carry a key of the same name meaning something else.
-    /// @param upstream How the leader is reached.
-    /// @return The document, or the tool error to answer.
-    [[nodiscard]] std::expected<FleetDocument, Mcp::ToolResult> AskFleetDocument(IMcpUpstream& upstream)
-    {
-        // No section, which a Json read refuses; no range, which is the day `/fleet.json` defaults to and only
-        // the `kpi` figures read.
-        auto reply =
-            AskLeader(upstream,
-                      Wire::EncodeFleetTextRequest(Wire::FleetTextRequest { .format = Wire::FleetTextFormat::Json }),
-                      "fleet-text");
-        if (!reply.has_value())
-            return std::unexpected { std::move(reply.error()) };
+std::expected<McpFleet::FleetDocument, Mcp::ToolResult> McpFleet::AskFleetDocument(IMcpUpstream& upstream)
+{
+    // No section, which a Json read refuses; no range, which is the day `/fleet.json` defaults to and only
+    // the `kpi` figures read.
+    auto reply = AskLeader(upstream,
+                           Wire::EncodeFleetTextRequest(Wire::FleetTextRequest { .format = Wire::FleetTextFormat::Json }),
+                           "fleet-text");
+    if (!reply.has_value())
+        return std::unexpected { std::move(reply.error()) };
 
-        auto parsed = Json::Parse(reply->payload, McpFleet::FleetDocumentLimits);
-        if (!parsed.has_value())
-            return std::unexpected { Error(std::format(
-                "the fleet document {} answered did not parse (error {} at byte {}); nothing it said is reported",
-                reply->answeredBy,
-                static_cast<unsigned>(parsed.error().code),
-                parsed.error().offset)) };
+    auto parsed = Json::Parse(reply->payload, McpFleet::FleetDocumentLimits);
+    if (!parsed.has_value())
+        return std::unexpected { Error(
+            std::format("the fleet document {} answered did not parse (error {} at byte {}); nothing it said is reported",
+                        reply->answeredBy,
+                        static_cast<unsigned>(parsed.error().code),
+                        parsed.error().offset)) };
 
-        auto const* const schema = parsed->Find("schema");
-        auto const generation = schema != nullptr ? schema->AsInt() : std::nullopt;
-        if (generation != std::optional<std::int64_t> { Distributed::FleetJsonSchema })
-            return std::unexpected { Error(std::format(
-                "{} serves fleet document schema {}, and this node reads schema {}; nothing it said is reported -- "
-                "run the same pace-node build on both",
-                reply->answeredBy,
-                generation.has_value() ? std::format("{}", *generation) : std::string { "(none)" },
-                Distributed::FleetJsonSchema)) };
+    auto const* const schema = parsed->Find("schema");
+    auto const generation = schema != nullptr ? schema->AsInt() : std::nullopt;
+    if (generation != std::optional<std::int64_t> { Distributed::FleetJsonSchema })
+        return std::unexpected { Error(
+            std::format("{} serves fleet document schema {}, and this node reads schema {}; nothing it said is reported -- "
+                        "run the same pace-node build on both",
+                        reply->answeredBy,
+                        generation.has_value() ? std::format("{}", *generation) : std::string { "(none)" },
+                        Distributed::FleetJsonSchema)) };
 
-        return FleetDocument { .reply = std::move(*reply), .root = std::move(*parsed) };
-    }
+    return FleetDocument { .reply = std::move(*reply), .root = std::move(*parsed) };
+}
+
+namespace
+{
+    using McpFleet::AskFleetDocument;
+    using McpFleet::FleetDocument;
 
     /// How one fleet-document array's columns read: the fleet tables' answer for its rows.
     using ColumnFormatOf = std::function<std::optional<CellFormat>(std::string_view)>;

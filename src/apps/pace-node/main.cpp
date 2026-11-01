@@ -36,6 +36,7 @@
 #include "McpEndpoint.hpp"
 #include "McpFleetTools.hpp"
 #include "McpNodeTools.hpp"
+#include "McpToolchainTools.hpp"
 #include "McpUpstream.hpp"
 #include "NodeActivation.hpp"
 #include "NodeAnnounce.hpp"
@@ -804,6 +805,7 @@ class McpForwarding
 [[nodiscard]] std::vector<Mcp::ToolRow> McpToolTable(NodeConfig const& cfg, McpForwarding& forwarding, ILogger& logger)
 {
     auto tools = Node::FleetReadTools(forwarding.Upstream());
+    std::ranges::move(Node::ToolchainTools(forwarding.Upstream()), std::back_inserter(tools));
     std::ranges::move(Node::NodeReadTools(forwarding.Upstream(), forwarding.Directory(), cfg.nodeId),
                       std::back_inserter(tools));
     std::ranges::move(Node::ActionTools(forwarding.Upstream(), forwarding.Directory(), cfg.nodeId, logger),
