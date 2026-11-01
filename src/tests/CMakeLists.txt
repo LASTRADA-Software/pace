@@ -8146,13 +8146,9 @@ if(TARGET PaceTest)
         #     scan's table; the rest carry wire cases among others, which is why the scan
         #     cannot cover them and why this number is the only thing that watches them.
         #
-        # What moved it from 277 (the MCP branch, wire v17): CompileCacheWire gained
-        # "FleetText format byte is pinned", "WireSurface::Mcp is byte 4 and survives a
-        # NODE-STATUS round trip" and "A capacity record carries the toolchain family as
-        # its eleventh field"; NodeStatusDetailWire is new, with five. The v16 -> v17
-        # golden-byte cases were renamed, not added. Note the old sum's 206 for
-        # CompileCacheWire did not match its own tree, which held 204 `[wire]` cases, so
-        # 277 was two high before this branch began; 204 + 3 = 207.
+        # What moved it from 277 to 283: "A capacity record carries the toolchain family
+        # as its eleventh field" in CompileCacheWire (+1), and NodeStatusDetailWire, a new
+        # file of five wire cases (+5).
         #
         # `[(]` rather than `\(`: CMake reads `\(` in a quoted argument as an escape
         # and stores a bare `(`, which its regex engine then takes as a capture group
