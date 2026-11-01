@@ -2,6 +2,7 @@
 #include "McpNodeTools.hpp"
 #include "McpToolSupport.hpp"
 
+#include <Pace/Cluster/ClusterState.hpp>
 #include <Pace/Core/Ed25519.hpp>
 #include <Pace/Distributed/ShownName.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
@@ -16,6 +17,8 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include <core/Ranges.hpp>
 
 namespace Pace::Node
 {
@@ -223,15 +226,25 @@ namespace
         result.emplace_back("node", StrOrNull(target->asked));
         result.emplace_back("version", Str(NodeStatusView::ReadableText(fields.version)));
         // Named as every answer names a machine (`AppendNaming`): by the id the node REPORTED when it reported one -- it
-        // is the node that answered -- and the display name the applied state records for that id.
-        auto const naming = fields.nodeId.empty()
-                                ? target->naming
-                                : NamingOfMember(cluster.AppliedState(), NodeStatusView::ReadableText(fields.nodeId));
+        // is the node that answered -- and the display name the applied state records for that id. Only where this
+        // node's state does not record that member at all (no state, or not yet applied here) does the answering
+        // node's own word stand in (field 30); a member this state records UNNAMED stays unnamed, so `display_name`
+        // and `name` below are one value from one state, never a null beside a name another state supplied.
+        auto const state = cluster.AppliedState();
+        auto naming =
+            fields.nodeId.empty() ? target->naming : NamingOfMember(state, NodeStatusView::ReadableText(fields.nodeId));
+        auto const recorded = state.has_value() && naming.nodeId.has_value()
+                              && core::findIfOrNull(state->members, [&naming](Cluster::ClusterMember const& member) {
+                                     return member.id == *naming.nodeId;
+                                 }) != nullptr;
+        if (!recorded)
+            naming.displayName = runtime.displayName.has_value()
+                                     ? std::optional { NodeStatusView::ReadableText(*runtime.displayName) }
+                                     : std::nullopt;
         AppendNaming(result, naming);
-        // And the name a surface SHOWS, by the dashboard's own rule (`Distributed::NameShown`): the replicated name --
-        // as this node's applied state records it, else as the answering node's does -- else what the machine calls
-        // itself, with which of the two it is.
-        auto const replicated = naming.displayName.has_value() ? naming.displayName : runtime.displayName;
+        // And the name a surface SHOWS, by the dashboard's own rule (`Distributed::NameShown`): that replicated name,
+        // else what the machine calls itself, with which of the two it is.
+        auto const& replicated = naming.displayName;
         auto const shown = Distributed::NameShown(
             replicated.has_value() ? std::string_view { *replicated } : std::string_view {},
             runtime.hostName.has_value() ? std::string_view { *runtime.hostName } : std::string_view {});

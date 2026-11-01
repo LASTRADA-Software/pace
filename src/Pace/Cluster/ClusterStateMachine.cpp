@@ -69,15 +69,19 @@ void ClusterStateMachine::Apply(Consensus::AppliedEntry const& entry)
         Cluster::Apply(_state, *command);
         published = _state;
     }
-    // A label yielded to an identity (`DisplayNameYieldingTo`): said once, at Warn, naming both, because an operator
-    // who chose the name is about to find it gone -- and only when the admission actually committed.
+    // A label yielded to an identity (`DisplayNameYieldingTo`): said at Warn, naming both, because an operator who
+    // chose the name is about to find it gone -- and only when the admission actually applied. NOT once per fleet or
+    // per process: every replica applying the entry says it, and a restart replaying the unsnapshotted log tail
+    // (`RaftDriver::Create`) says it again until a snapshot covers the entry. Each line is the same fact re-applied,
+    // and no state is kept to suppress it, because suppressing it would need state the replay cannot reconstruct.
     if (yielded.has_value())
         if (auto const* const holder = core::findOrNull(published.members, *yielded, &ClusterMember::id);
             holder != nullptr && holder->displayName.empty()
             && core::findOrNull(published.members, command->key, &ClusterMember::id) != nullptr)
             _logger.Logf(LogLevel::Warn,
-                         "cluster: member {} was admitted under an id spelled like {}'s display name, so {} no longer "
-                         "carries it (a name yields to an identity); give {} another name with --cluster-name",
+                         "cluster: applying the admission of member {} under an id spelled like {}'s display name, so "
+                         "{} no longer carries it (a name yields to an identity; this repeats wherever and whenever the "
+                         "entry is applied, replay included); give {} another name with --cluster-name",
                          command->key,
                          *yielded,
                          *yielded,

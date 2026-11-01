@@ -144,9 +144,11 @@ inline constexpr std::string_view TermScope = "this-node";
 /// A machine, as every answer that names one names it: its member id AND the display name the applied state records.
 ///
 /// **The one way an MCP answer names a machine** (`AppendNaming`), whatever it was keyed by where the answer came from
-/// -- an id, a registration's endpoint, a requester's key -- so a model joining one tool's rows to another's joins on
-/// the same two fields. Absent is not empty: a machine the applied state cannot place has a null id and says so, and
-/// a member nobody named has a null display name; neither is ever guessed.
+/// -- an id, the `node-id` the leader joined a fleet row to by the key it PROVED, a requester's key -- so a model
+/// joining one tool's rows to another's joins on the same two fields. **Never by an endpoint**: a registration's
+/// endpoint is the machine's own unverified claim, and naming by it lets one machine be named as another. Absent is
+/// not empty: a machine nobody can place has a null id and says so, and a member nobody named has a null display name;
+/// neither is ever guessed.
 struct MachineNaming
 {
     std::optional<std::string> nodeId;      ///< The member's id; nothing when the state places no member here.
@@ -181,19 +183,6 @@ template <typename Predicate>
         return MachineNaming {};
     auto const* const member = core::findIfOrNull(state->members, places);
     return NamingOfMember(state, member->id);
-}
-
-/// Name the machine a registration's endpoint answers at: the ONE member whose recorded `0xFC` endpoint
-/// (`ClusterMember::schedulerEndpoint`) is exactly @p endpoint, or nobody -- never a host match, never a guess.
-/// @param state The applied state, or nothing.
-/// @param endpoint A `host:port`.
-/// @return The member's naming, or the empty one.
-[[nodiscard]] inline MachineNaming NamingOfEndpoint(std::optional<Cluster::ClusterState> const& state,
-                                                    std::string_view endpoint)
-{
-    return NamingWhere(state, [endpoint](Cluster::ClusterMember const& member) {
-        return !endpoint.empty() && member.schedulerEndpoint == endpoint;
-    });
 }
 
 /// Name the machine an identity key's text belongs to: the member holding that key, exactly.
@@ -232,8 +221,7 @@ inline void AppendNaming(Json::Object& row, MachineNaming const& naming, std::st
 {
     if (unplaced == 0)
         return {};
-    return std::format("; {} machine(s) match no member's recorded 0xFC endpoint or key, so their node_id is null",
-                       unplaced);
+    return std::format("; {} machine(s) proved no identity key a member holds, so their node_id is null", unplaced);
 }
 
 /// Which node a call asks: this one, or the member the `node` argument names exactly.

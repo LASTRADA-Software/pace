@@ -110,6 +110,13 @@ TEST_CASE("A name resolves to the member whose replicated display name it is, ex
     CHECK(ambiguous.error().contains("a3f5c1 (by id)"));
     CHECK(ambiguous.error().contains("c0ffee (by display name)"));
     CHECK(ambiguous.error().contains("names 2 members"));
+    // And a way out that works for BOTH: typing a3f5c1's id is the ambiguous input itself, so the refusal names the
+    // member whose LABEL collides, tells the caller to rename it, and says it is reachable by its own id meanwhile.
+    CHECK(ambiguous.error().contains("the display name of c0ffee collides -- rename it"));
+    CHECK(ambiguous.error().contains("--cluster-name=<id>=<name>"));
+    CHECK(ambiguous.error().contains("until then name c0ffee by its id"));
+    CHECK_FALSE(ambiguous.error().contains("name one by its id"));
+    CHECK(ResolveNodeName(state, "c0ffee") == std::expected<Consensus::NodeId, std::string> { "c0ffee" });
     // And a member whose own display name is its id is one member, matched twice.
     state.members[2].displayName = "c0ffee";
     CHECK(ResolveNodeName(state, "c0ffee") == std::expected<Consensus::NodeId, std::string> { "c0ffee" });

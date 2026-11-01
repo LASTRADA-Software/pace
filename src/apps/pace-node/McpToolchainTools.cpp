@@ -82,14 +82,19 @@ namespace
             // joins no family rather than refusing every other row's answer with it.
             auto family = row.Find("family") == nullptr ? std::optional<std::string> { std::string {} }
                                                         : StringOrNullAt(row, "family");
-            if (!fingerprint.has_value() || !endpoint.has_value() || !label.has_value() || !family.has_value())
+            // Likewise `node-id`: a leader that renders none names no member, which is null, never a refusal.
+            auto memberId = row.Find("node-id") == nullptr ? std::optional<std::string> { std::string {} }
+                                                           : StringOrNullAt(row, "node-id");
+            if (!fingerprint.has_value() || !endpoint.has_value() || !label.has_value() || !family.has_value()
+                || !memberId.has_value())
                 return std::unexpected { std::string { "a \"workers\" row without a string toolchain and endpoint "
-                                                       "and a string-or-null compiler and family" } };
+                                                       "and a string-or-null compiler, family and node-id" } };
             auto worker = Distributed::WorkerReport {};
             worker.info.fingerprint = std::move(*fingerprint);
             worker.info.endpoint = std::move(*endpoint);
             worker.info.toolchainLabel = std::move(*label);
             worker.info.toolchainFamily = std::move(*family);
+            worker.memberId = std::move(*memberId);
             workers.push_back(std::move(worker));
         }
         return workers;
@@ -250,6 +255,9 @@ namespace
 
         auto toolchains = std::map<std::string, ToolchainRow> {};
         auto machines = std::map<std::string, std::set<std::string>> {};
+        // The member ids the LEADER joined each registration to, by the key its connection PROVED (`node-id`), per
+        // endpoint. Two registrations claiming one endpoint under different keys name nobody: a guess either way.
+        auto memberIds = std::map<std::string, std::set<std::string>> {};
         for (auto const& worker: *workers)
         {
             auto& row = toolchains[worker.info.fingerprint];
@@ -259,6 +267,7 @@ namespace
             if (!worker.info.toolchainFamily.empty())
                 row.families.insert(worker.info.toolchainFamily);
             machines[worker.info.endpoint].insert(worker.info.fingerprint);
+            memberIds[worker.info.endpoint].insert(worker.memberId);
         }
         auto familyless = std::set<std::string> {};
         for (auto const& [fingerprint, row]: toolchains)
@@ -280,9 +289,10 @@ namespace
             auto const unserved = UnservedBy(served, toolchains);
             if (unserved.has_value() && !unserved->empty())
                 unservedWords.push_back(std::format("{} lacks {}", endpoint, Joined(*unserved, ", ")));
-            // A registration is keyed by the endpoint the worker answers at; the machine is named through the member
-            // recording that `0xFC` endpoint, or not at all.
-            auto const naming = NamingOfEndpoint(state, endpoint);
+            // Named by the member id its registrations' PROVEN key joined to, when they agree on exactly one --
+            // never by the endpoint, which a registration only claims.
+            auto const& ids = memberIds[endpoint];
+            auto const naming = NamingOfMember(state, ids.size() == 1 ? *ids.begin() : std::string {});
             unplaced += Unplaced(naming) ? 1U : 0U;
             auto row = Json::Object { { "endpoint", Str(endpoint) } };
             AppendNaming(row, naming);
@@ -853,7 +863,7 @@ namespace
         R"("toolchain_count":{"type":"integer","description":"Distinct fingerprints."},)"
         R"("machine_count":{"type":"integer","description":"Distinct worker endpoints: a machine serving two toolchains counts once."},)"
         R"("toolchains":{"type":"array","description":"Per fingerprint: label and version (\"unknown\" when the label does not parse) where its entries agree on one label, every label in labels, family as the node read it off the banner (null when none or disagreeing), driver (the label's compiler name without a version suffix, null when the label does not parse), and the machines serving it."},)"
-        R"("nodes":{"type":"array","description":"Per machine: endpoint; node_id and display_name, of the member whose recorded 0xFC endpoint is that endpoint (both null when no member records it -- absent, never guessed); the fingerprints it serves, and unserved -- the fleet's fingerprints in the same families it does not serve; null when it serves no toolchain of a known family (see unserved_note)."},)"
+        R"("nodes":{"type":"array","description":"Per machine: endpoint; node_id and display_name, of the member whose identity key the machine's registrations PROVED, as the leader's node-id column joins it -- never by the endpoint, which a registration only claims (both null when no member holds that key or its registrations disagree -- absent, never guessed); the fingerprints it serves, and unserved -- the fleet's fingerprints in the same families it does not serve; null when it serves no toolchain of a known family (see unserved_note)."},)"
         R"("unserved_note":{"type":"string"},"demand":{"type":"null","description":"Absent: no demand per toolchain is recorded yet."},"demand_note":{"type":"string"},)"
         R"("upgrade_report":{"type":"array","description":"Per banner-derived compiler family: recommended_version, and recommended_fingerprints -- an object from DRIVER (gcc, cc, g++: one install answers to several) to fingerprint, a driver absent when its builds of the version cannot be told apart, null when the ordering is unknown; basis (the versions compared and any demand), and machines placed by their highest version of the family: behind (lower: should upgrade), ahead (higher), same_version_other_fingerprint (the recommended version under another fingerprint for the SAME driver: ask toolchain_diff); ordering_unknown."}}})";
 

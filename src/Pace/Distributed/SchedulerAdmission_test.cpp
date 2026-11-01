@@ -28,9 +28,11 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
+#include <core/Ranges.hpp>
 #include <core/platform/Clock.hpp>
 #include <tests/LeaseRosterFakes.hpp>
 #include <tests/RaftPeerKeyFakes.hpp>
@@ -860,6 +862,88 @@ TEST_CASE("SchedulerAdmission.dashboard-shows-the-replicated-name-and-says-where
         REQUIRE(snapshot.admission.has_value());
         CHECK(std::ranges::contains(Unwrap(snapshot.admission).machines, "lab-box", &AdmissionMachineRow::machine));
     }
+}
+
+TEST_CASE("SchedulerAdmission.a-machine-is-named-as-a-member-by-the-key-it-proved-never-by-the-endpoint-it-claimed",
+          "[distributed][admission][scheduler][fleetview][display-name]")
+{
+    // A registration's endpoint is the machine's own unverified claim, so the `node-id` a machine and worker row carry
+    // is the member holding the key the connection PROVED -- the join the name already makes -- and nothing else.
+    Fleet fleet;
+    constexpr std::string_view OwnEndpoint = "127.0.0.1:7100";
+    constexpr std::string_view ClaimedEndpoint = "10.0.0.7:6674";
+    // This fleet's own machine, over loopback: a member records no loopback 0xFC endpoint (`Validate` refuses one), so
+    // only the proven key can place this row -- the one-node fleet's every row.
+    auto own = fleet.Worker();
+    own.peerId = "127.0.0.1";
+    REQUIRE(fleet.service
+                .Register(own,
+                          WorkerRegistration { .fingerprint = Toolchain, .endpoint = OwnEndpoint, .slots = 1, .codecs = {} })
+                .status
+            == Wire::Status::Ok);
+    // A machine proving a key NO member holds, registering under the endpoint member w2 RECORDS as its 0xFC endpoint.
+    auto const strangerKey = Testing::TestKeyPair("stranger");
+    auto stranger = fleet.Worker();
+    stranger.peerId = "10.0.0.9";
+    stranger.provenNodeId = "stranger";
+    stranger.provenKey = strangerKey.PublicKey();
+    REQUIRE(
+        fleet.service
+            .Register(stranger,
+                      WorkerRegistration { .fingerprint = Toolchain, .endpoint = ClaimedEndpoint, .slots = 1, .codecs = {} })
+            .status
+        == Wire::Status::Ok);
+
+    auto state = Cluster::ClusterState {};
+    for (auto const& [id, endpoint, key]:
+         { std::tuple { std::string { "w1" }, std::string {}, fleet.workerKey.PublicKey() },
+           std::tuple { std::string { "w2" }, std::string { ClaimedEndpoint }, Testing::TestKeyPair("w2").PublicKey() } })
+        Cluster::Apply(state,
+                       Cluster::Command { .kind = Cluster::CommandKind::AddLearner,
+                                          .key = id,
+                                          .value = {},
+                                          .schedulerEndpoint = endpoint,
+                                          .publicKey = key });
+    REQUIRE(state.members.size() == 2);
+    // The control: w2 really does RECORD the endpoint the stranger claims, so an endpoint join would name it w2.
+    auto const* const claimed = core::findOrNull(state.members, std::string { "w2" }, &Cluster::ClusterMember::id);
+    REQUIRE(claimed != nullptr);
+    REQUIRE(claimed->schedulerEndpoint == ClaimedEndpoint);
+
+    AgreedCluster const cluster { state };
+    auto const snapshot = CollectFleet({ .scheduler = &fleet.service, .cluster = &cluster, .metrics = &fleet.metrics });
+    auto const nodeAt = [&snapshot](std::string_view endpoint) {
+        auto const* const node = core::findOrNull(snapshot.nodes, endpoint, &NodeReport::endpoint);
+        REQUIRE(node != nullptr);
+        return *node;
+    };
+    auto const workerAt = [&snapshot](std::string_view endpoint) {
+        auto const* const worker = core::findIfOrNull(
+            snapshot.workers, [endpoint](WorkerReport const& candidate) { return candidate.info.endpoint == endpoint; });
+        REQUIRE(worker != nullptr);
+        return *worker;
+    };
+    // Its own row, named by its key over loopback.
+    CHECK(nodeAt(OwnEndpoint).memberId == "w1");
+    CHECK(workerAt(OwnEndpoint).memberId == "w1");
+    // The claimant is NOT w2, whose endpoint it claimed; its key is no member's, so it is nobody.
+    CHECK(nodeAt(ClaimedEndpoint).memberId.empty());
+    CHECK(workerAt(ClaimedEndpoint).memberId.empty());
+
+    // And the documents say it in the one `node-id` column, absent at the cell where nobody is placed.
+    auto const json = RenderFleetJson(snapshot, FleetHistoryView {});
+    INFO(json);
+    CHECK(json.contains(R"("endpoint":"127.0.0.1:7100","node-id":"w1")"));
+    CHECK(json.contains(R"("endpoint":"10.0.0.7:6674","node-id":null)"));
+    CHECK(json.contains(R"("name-source":null,"node-id":"w1")"));
+    CHECK(json.contains(R"("name-source":null,"node-id":null)"));
+    CHECK_FALSE(json.contains(R"("node-id":"w2")"));
+    CHECK(RenderFleetText(snapshot, FleetHistoryView {}, FleetSection::Workers).contains("127.0.0.1:7100\tw1"));
+
+    // Without cluster state nobody is placed: absent, not guessed.
+    auto const alone = CollectFleet({ .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics });
+    CHECK(std::ranges::all_of(alone.nodes, [](NodeReport const& node) { return node.memberId.empty(); }));
+    CHECK(std::ranges::all_of(alone.workers, [](WorkerReport const& worker) { return worker.memberId.empty(); }));
 }
 
 TEST_CASE("SchedulerAdmission.a-granted-ticket-lease-carries-its-ticket-id",

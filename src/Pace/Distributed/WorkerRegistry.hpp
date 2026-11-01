@@ -199,6 +199,12 @@ struct WorkerReport
     /// this struct: handed an instant, a consumer subtracts `steady_clock::now()`,
     /// which is right in production and silently wrong under every `core::platform::ManualClock`.
     std::optional<std::chrono::milliseconds> lastPickedAge {};
+
+    /// The id of the cluster member whose identity key this entry's REGISTER connection PROVED
+    /// (`WorkerInfo::identityKey`); empty when it proved none, no member holds that key, or this
+    /// node holds no cluster state. Filled by `CollectFleet`, never by the registry, and never from
+    /// the endpoint the entry registered with, which is the machine's own unverified claim.
+    std::string memberId {};
 };
 
 /// One live MACHINE, grouped as an operator means "node".
@@ -289,6 +295,10 @@ struct NodeReport
     /// node holds no cluster state. Filled by `CollectFleet`, never by the registry, which holds
     /// no replicated state.
     std::string replicatedName {};
+    /// The id of the member holding `identityKey`, from the same join as `replicatedName`; empty
+    /// when none does. What names this machine as a member anywhere a reader asks -- by the key it
+    /// PROVED, never by the endpoint it claimed.
+    std::string memberId {};
     /// What the machine last said is wrong with it (#1364), or ABSENT when it said nothing --
     /// a node too old to carry conditions, or one whose announcements have stopped reaching
     /// this leader while a worker entry keeps its row alive.

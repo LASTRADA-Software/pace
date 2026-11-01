@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <optional>
 #include <string>
@@ -24,10 +25,19 @@ namespace Pace::Node
 /// two after the next join, and the tool would then answer about a machine nobody named. An ambiguous or unknown
 /// name is an error listing the members it could have meant, never a guess.
 
+/// Whether a way of naming is the member's own identity or a label an operator can change. Private: never
+/// transmitted or persisted.
+enum class NameKind : std::uint8_t
+{
+    Identity, ///< The member's id: what consensus counts, and nobody renames.
+    Label,    ///< A display name: what an ambiguity is resolved by RENAMING.
+};
+
 /// One way a name can match a member, tried in `NameMatchers` order.
 struct NameMatchRow
 {
     std::string_view what;                                                        ///< What it matches, in words.
+    NameKind kind;                                                                ///< Identity, or a renamable label.
     bool (*matches)(Cluster::ClusterMember const& member, std::string_view name); ///< Whether @p name names @p member.
 };
 
@@ -39,9 +49,11 @@ struct NameMatchRow
 inline constexpr std::array NameMatchers {
     NameMatchRow {
         .what = "id",
+        .kind = NameKind::Identity,
         .matches = [](Cluster::ClusterMember const& member, std::string_view name) { return member.id == name; } },
     NameMatchRow {
         .what = "display name",
+        .kind = NameKind::Label,
         .matches = [](Cluster::ClusterMember const& member,
                       std::string_view name) { return !member.displayName.empty() && member.displayName == name; } },
 };

@@ -155,6 +155,19 @@ TEST_CASE("The four detail records round-trip whole, and a record with none of t
     CHECK_FALSE(Unwrap(silent).displayName.has_value());
     CHECK_FALSE(Unwrap(silent).hostName.has_value());
 
+    // An OLDER sender's record: thirty fields, positions 30 and 31 never written. Both halves of the name come back
+    // ABSENT -- never empty-engaged -- while everything that sender did state survives, the detail records included.
+    auto const current = EncodeNodeRuntime(sent); // SplitAll's fields borrow it, so it outlives them.
+    auto older = Unwrap(WireFields::SplitAll(current));
+    REQUIRE(older.size() == 32);
+    older.resize(30);
+    auto const fromOlder = DecodeNodeRuntime(WireFields::Encode(WireFields::FieldList { older }));
+    REQUIRE(fromOlder.has_value());
+    CHECK_FALSE(Unwrap(fromOlder).displayName.has_value());
+    CHECK_FALSE(Unwrap(fromOlder).hostName.has_value());
+    CHECK(Unwrap(fromOlder).budgetOverrides == sent.budgetOverrides);
+    CHECK(Unwrap(fromOlder).effectiveConfig == sent.effectiveConfig);
+
     // And an engaged empty override list -- *no overrides* -- comes back engaged and empty.
     auto none = NodeRuntimeFields {};
     none.budgetOverrides = std::vector<NodeBudgetOverrideFields> {};

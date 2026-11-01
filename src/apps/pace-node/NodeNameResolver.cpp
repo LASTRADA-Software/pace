@@ -53,6 +53,7 @@ std::expected<Consensus::NodeId, std::string> ResolveNodeName(Cluster::ClusterSt
     // applied before that clearing reached this node, or a race between two proposals, may hold it for a moment.
     auto matched = std::vector<std::string_view> {};
     auto described = std::vector<std::string> {};
+    auto labelled = std::vector<std::string_view> {};
     for (auto const& matcher: NameMatchers)
         for (auto const& member: state.members)
             if (matcher.matches(member, idOrDisplayName))
@@ -60,14 +61,27 @@ std::expected<Consensus::NodeId, std::string> ResolveNodeName(Cluster::ClusterSt
                 if (!std::ranges::contains(matched, std::string_view { member.id }))
                     matched.emplace_back(member.id);
                 described.push_back(std::format("{} (by {})", member.id, matcher.what));
+                if (matcher.kind == NameKind::Label && member.id != idOrDisplayName)
+                    labelled.emplace_back(member.id);
             }
     if (matched.size() == 1)
         return Consensus::NodeId { matched.front() };
     if (!matched.empty())
     {
+        // The way out has to work for EVERY candidate, and "name one by its id" does not: when the input IS one
+        // member's id, typing that id is the ambiguous input itself. So the refusal names whose LABEL collides --
+        // reachable by its own id now -- and the rename that leaves the input naming the other member alone.
         auto const list = std::vector<std::string_view> { described.begin(), described.end() };
         return std::unexpected { std::format(
-            "{} names {} members: {}; name one by its id", Quoted(idOrDisplayName), matched.size(), Listed(list)) };
+            "{} names {} members: {}; the display name of {} collides -- rename it (pacectl --cluster-name=<id>=<name>, "
+            "or set_display_name naming it by its id), after which {} names the other alone; until then name {} by its "
+            "id",
+            Quoted(idOrDisplayName),
+            matched.size(),
+            Listed(list),
+            Listed(labelled),
+            Quoted(idOrDisplayName),
+            Listed(labelled)) };
     }
 
     if (state.members.empty())

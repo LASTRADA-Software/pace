@@ -384,6 +384,14 @@ member_reads_named() {
     python3 -I -c "import json,sys; d=json.loads(sys.stdin.read()); sys.exit(0 if d['result']['isError'] is False and any(m['id'] == '${self_id}' and m['name'] == 'e2e-box' and m['name_source'] == 'replicated' for m in d['result']['structuredContent']['members']) else 1)" <<< "$body"
 }
 wait_until member_reads_named "the fleet document to show this member named e2e-box" "$action_pid" "${workdir}/node.log" 30
+# This one node's own MACHINE row is named too: by the member holding the key its connection PROVED (the leader's
+# `node-id`), over loopback, where no member records an endpoint an address join could have matched.
+machine_row_named() {
+    local body
+    body="$(call_action fleet_overview '{}')"
+    python3 -I -c "import json,sys; d=json.loads(sys.stdin.read()); sys.exit(0 if d['result']['isError'] is False and [(n['node_id'], n['display_name']) for n in d['result']['structuredContent']['nodes']] == [('${self_id}', 'e2e-box')] else 1)" <<< "$body"
+}
+wait_until machine_row_named "the fleet document's one machine row to carry node_id ${self_id}" "$action_pid" "${workdir}/node.log" 60
 json_check "node_status by display name" "$(call_action node_status '{"node":"e2e-box"}')" \
     "${OK} and ${SC}['node_id'] == '${self_id}' and ${SC}['node'] == 'e2e-box' and ${SC}['display_name'] == 'e2e-box' and ${SC}['name'] == 'e2e-box' and ${SC}['name_source'] == 'replicated'"
 json_check "node_status by another case of the name" "$(call_action node_status '{"node":"E2E-BOX"}')" \
@@ -424,6 +432,10 @@ if command -v cc >/dev/null 2>&1 || command -v c++ >/dev/null 2>&1 || command -v
         "${OK} and ${SC}['answered_by'] == '${action_endpoint}' and ${SC}['term_scope'] == 'this-node' and ${SC}['machine_count'] == 1 and ${SC}['toolchain_count'] == len(${SC}['toolchains']) and all(t['nodes'] == ['${action_endpoint}'] for t in ${SC}['toolchains']) and [n['endpoint'] for n in ${SC}['nodes']] == ['${action_endpoint}'] and sorted(${SC}['nodes'][0]['served']) == sorted(t['fingerprint'] for t in ${SC}['toolchains'])"
     # Unserved is derived: on a one-machine fleet this machine serves every toolchain of its own families, so the
     # list is EMPTY -- and null only if none of its toolchains has a known family. No demand is recorded yet: absent.
+    # Named by the member its registrations' PROVEN key joins to, over loopback -- which no recorded 0xFC endpoint can
+    # place, since a member records none on loopback.
+    json_check "toolchains names the machine by its node id" "$toolchains_body" \
+        "${SC}['nodes'][0]['node_id'] == '${self_id}' and ${SC}['nodes'][0]['display_name'] == 'e2e-box'"
     json_check "toolchains unserved and demand" "$toolchains_body" \
         "${SC}['nodes'][0]['unserved'] == ([] if any(t['family'] is not None for t in ${SC}['toolchains']) else None) and ${SC}['demand'] is None and isinstance(${SC}['unserved_note'], str) and isinstance(${SC}['demand_note'], str)"
     # A version is parsed off the label or is the word `unknown`; a family is the banner's, one of the known keys

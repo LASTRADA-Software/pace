@@ -431,10 +431,14 @@ TEST_CASE("Every fleet tool reads the leader's fleet document and reports what i
 TEST_CASE("Every fleet tool names each machine by member id and display name, and never guesses one",
           "[node][mcp][fleet-tools][display-name]")
 {
-    // One helper names a machine for every tool (`AppendNaming`): placed through the applied state -- a registration's
-    // endpoint by the member recording it as its 0xFC endpoint, a requester by the member holding its key -- and null,
-    // said in the text, where nothing places it.
+    // One helper names a machine for every tool (`AppendNaming`): a machine row by the `node-id` the LEADER joined it
+    // to by the key it PROVED (`CollectFleet`), a requester by the member holding its key -- and null, said in the
+    // text, where nothing places it. NEVER by an endpoint: a registration's is the machine's own claim.
     auto snapshot = ScriptedFleet();
+    // 10.0.0.1 proved n1's key (as `CollectFleet` records it); n1's recorded 0xFC endpoint is elsewhere, as a one-node
+    // fleet's always is -- a member records no loopback endpoint. 10.0.0.3 proved no member's key and CLAIMS the
+    // endpoint n2 records: an endpoint join would name it n2.
+    snapshot.nodes[0].memberId = "n1";
     auto key = Ed25519PublicKey {};
     key.fill(std::byte { 0x42 });
     auto const rawKey = std::string(reinterpret_cast<char const*>(key.data()), key.size());
@@ -444,10 +448,12 @@ TEST_CASE("Every fleet tool names each machine by member id and display name, an
     upstream.AnswerOk(body);
 
     auto state = Cluster::ClusterState {};
-    auto office = Member("n1", "10.0.0.1:6680", "10.0.0.1:6674");
+    auto office = Member("n1", "10.0.0.1:6680", "10.0.0.9:6674");
     office.displayName = "office-pc";
     office.publicKey = key;
-    state.members = { office, Member("n2", "10.0.0.2:6680", "") };
+    auto claimed = Member("n2", "10.0.0.2:6680", "10.0.0.3:6674");
+    claimed.displayName = "build-box";
+    state.members = { office, claimed };
 
     SECTION("fleet_overview: each machine row")
     {
@@ -457,10 +463,16 @@ TEST_CASE("Every fleet tool names each machine by member id and display name, an
         REQUIRE(nodes.size() == 3);
         CHECK(Text(At(nodes[0], "node_id")) == R"("n1")");
         CHECK(Text(At(nodes[0], "display_name")) == R"("office-pc")");
-        // n2 records no 0xFC endpoint, and nothing records 10.0.0.3's: null, never guessed from the host.
+        // One `node_id` per row: the naming REPLACES the leader's projected cell rather than standing beside it.
+        auto const* const firstRow = nodes[0].AsObject();
+        REQUIRE(firstRow != nullptr);
+        CHECK(std::ranges::count_if(*firstRow, [](auto const& member) { return member.first == "node_id"; }) == 1);
+        // 10.0.0.2 proved no member's key: null, never guessed from the host.
         CHECK(At(nodes[1], "node_id").IsNull());
+        // 10.0.0.3 claims n2's recorded endpoint and proved no key: NOT n2.
+        CHECK(At(nodes[2], "node_id").IsNull());
         CHECK(At(nodes[2], "display_name").IsNull());
-        CHECK(result.text.contains("2 machine(s) match no member"));
+        CHECK(result.text.contains("2 machine(s) proved no identity key a member holds"));
     }
     SECTION("conditions: each machine")
     {
@@ -470,6 +482,8 @@ TEST_CASE("Every fleet tool names each machine by member id and display name, an
         REQUIRE(machines.size() == 2);
         CHECK(Text(At(machines[0], "node_id")) == R"("n1")");
         CHECK(Text(At(machines[0], "display_name")) == R"("office-pc")");
+        // 10.0.0.3 again: the endpoint n2 records names nobody.
+        CHECK(Text(At(machines[1], "endpoint")) == R"("10.0.0.3:6674")");
         CHECK(At(machines[1], "node_id").IsNull());
     }
     SECTION("running_compiles: each requester, by its key")
@@ -487,12 +501,19 @@ TEST_CASE("Every fleet tool names each machine by member id and display name, an
         REQUIRE(named != nullptr);
         CHECK(Text(At(*named, "display_name")) == R"("office-pc")");
     }
-    SECTION("no applied state names nobody")
+    SECTION("no applied state here: the leader's id stands, and no display name is invented")
     {
+        // The id is the LEADER's join, by the key the machine proved, so it does not need this node's state; the
+        // display name does, and with none applied here it is null rather than guessed.
         auto const result = Call(upstream, "fleet_overview");
         REQUIRE_FALSE(result.isError);
-        for (auto const& node: Elements(At(result.structured, "nodes")))
-            CHECK(At(node, "node_id").IsNull());
+        auto const& nodes = Elements(At(result.structured, "nodes"));
+        REQUIRE(nodes.size() == 3);
+        CHECK(Text(At(nodes[0], "node_id")) == R"("n1")");
+        for (auto const& node: nodes)
+            CHECK(At(node, "display_name").IsNull());
+        CHECK(At(nodes[1], "node_id").IsNull());
+        CHECK(At(nodes[2], "node_id").IsNull());
     }
 }
 

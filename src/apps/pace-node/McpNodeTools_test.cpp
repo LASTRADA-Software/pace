@@ -360,6 +360,28 @@ TEST_CASE("node_status resolves a member by its display name and names it by id 
     // Nobody named it, so the dashboard's rule falls back to what the machine calls itself.
     CHECK(*At(nameless.structured, "name").AsString() == "beta-host");
     CHECK(*At(nameless.structured, "name_source").AsString() == "self-reported");
+
+    // The answering node LAGS: its own state still names it (field 30), while this node's state records it UNNAMED.
+    // One state answers both fields, so `display_name` and `name` agree -- never a null beside a replicated name.
+    auto lagging = beta;
+    lagging.runtime.displayName = "old-name";
+    upstream.AnswerOk(Wire::EncodeNodeStatus(lagging));
+    auto const lagged = CallNodeStatus(upstream, plain, R"({"node":"node-beta"})");
+    REQUIRE_FALSE(lagged.isError);
+    CHECK(At(lagged.structured, "display_name").IsNull());
+    CHECK(*At(lagged.structured, "name").AsString() == "beta-host");
+    CHECK(*At(lagged.structured, "name_source").AsString() == "self-reported");
+
+    // Only where this node records no such member -- here, no state at all -- does the answerer's own word stand in,
+    // and then for both fields alike.
+    FixedCluster const stateless { std::nullopt };
+    upstream.AnswerOk(Wire::EncodeNodeStatus(lagging));
+    auto const unrecorded = CallNodeStatus(upstream, stateless);
+    REQUIRE_FALSE(unrecorded.isError);
+    CHECK(*At(unrecorded.structured, "node_id").AsString() == "node-beta");
+    CHECK(*At(unrecorded.structured, "display_name").AsString() == "old-name");
+    CHECK(*At(unrecorded.structured, "name").AsString() == "old-name");
+    CHECK(*At(unrecorded.structured, "name_source").AsString() == "replicated");
 }
 
 TEST_CASE("absent tier renders absent", "[mcp][node-status][node-status-detail]")

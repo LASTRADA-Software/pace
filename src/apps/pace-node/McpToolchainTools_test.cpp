@@ -635,15 +635,27 @@ TEST_CASE("toolchain_diff pages two nodes across cursor boundaries and loses not
     CHECK(At(At(out, "a"), "display_name").IsNull());
 }
 
-TEST_CASE("toolchains names each machine by member id and display name, placed by its recorded endpoint",
+TEST_CASE("toolchains names each machine by the member id its proven key joined to, never by an endpoint",
           "[pace-node][mcp][toolchains][display-name]")
 {
+    // The leader's `node-id` worker cell is the member holding the key the registration PROVED (`CollectFleet`). A
+    // registration's endpoint is its own claim, so the endpoint a member RECORDS names nobody here.
+    auto own = Entry("fp-13", "127.0.0.1:6674", "gcc", "gcc 13.2.0");
+    own.memberId = "n1";
+    auto ownSecond = Entry("fp-12", "127.0.0.1:6674", "gcc", "gcc 12.3.0");
+    ownSecond.memberId = "n1";
+    // Proved no member's key, and claims the endpoint n2 records.
+    auto const claimant = Entry("fp-13", "10.0.0.9:6674", "gcc", "gcc 13.2.0");
+    // Two registrations under one endpoint that disagree about the member: a guess either way, so nobody.
+    auto split = Entry("fp-13", "10.0.0.5:6674", "gcc", "gcc 13.2.0");
+    split.memberId = "n1";
+    auto const splitOther = Entry("fp-12", "10.0.0.5:6674", "gcc", "gcc 12.3.0");
     auto upstream = LeaderUpstream();
-    upstream.AnswerOk(DocumentWith(
-        { Entry("fp-13", "10.0.0.1:6674", "gcc", "gcc 13.2.0"), Entry("fp-13", "10.0.0.9:6674", "gcc", "gcc 13.2.0") }));
-    auto state = McpFakes::StateOf({ "n1" });
-    state.members[0].schedulerEndpoint = "10.0.0.1:6674";
+    upstream.AnswerOk(DocumentWith({ own, ownSecond, claimant, split, splitOther }));
+    auto state = McpFakes::StateOf({ "n1", "n2" });
     state.members[0].displayName = "office-pc";
+    state.members[1].schedulerEndpoint = "10.0.0.9:6674";
+    state.members[1].displayName = "build-box";
     McpFakes::FixedCluster const cluster { state };
     auto const tools = ToolchainTools(upstream, cluster, std::string { SelfId }, std::string { ThisVersion });
     auto const* const row = core::findOrNull(tools, std::string_view { "toolchains" }, &Mcp::ToolRow::name);
@@ -652,14 +664,34 @@ TEST_CASE("toolchains names each machine by member id and display name, placed b
     INFO(result.text);
     REQUIRE_FALSE(result.isError);
 
-    auto const& named = RowWhere(At(result.structured, "nodes"), "endpoint", "10.0.0.1:6674");
+    // The one-node fleet's own row, over loopback: named by its key, which no recorded endpoint could do.
+    auto const& named = RowWhere(At(result.structured, "nodes"), "endpoint", "127.0.0.1:6674");
     CHECK(TextAt(named, "node_id") == std::optional<std::string> { "n1" });
     CHECK(TextAt(named, "display_name") == std::optional<std::string> { "office-pc" });
-    // An endpoint no member records: null, never guessed from the host, and said in the text.
-    auto const& unplaced = RowWhere(At(result.structured, "nodes"), "endpoint", "10.0.0.9:6674");
-    CHECK(At(unplaced, "node_id").IsNull());
-    CHECK(At(unplaced, "display_name").IsNull());
-    CHECK(result.text.contains("1 machine(s) match no member"));
+    // The claimant is NOT n2, whose endpoint it claimed.
+    auto const& spoof = RowWhere(At(result.structured, "nodes"), "endpoint", "10.0.0.9:6674");
+    CHECK(At(spoof, "node_id").IsNull());
+    CHECK(At(spoof, "display_name").IsNull());
+    auto const& disagreeing = RowWhere(At(result.structured, "nodes"), "endpoint", "10.0.0.5:6674");
+    CHECK(At(disagreeing, "node_id").IsNull());
+    CHECK(result.text.contains("2 machine(s) proved no identity key a member holds"));
+}
+
+TEST_CASE("toolchains reads a worker row with no node-id key as naming nobody, never refusing the answer",
+          "[pace-node][mcp][toolchains][display-name]")
+{
+    // A leader that renders no `node-id` column: every machine is unplaced, and the rest of the report stands.
+    auto document = DocumentWith({ Entry("fp-13", "10.0.0.1:6674", "gcc", "gcc 13.2.0") });
+    auto const cell = std::string_view { R"("node-id":null,)" };
+    REQUIRE(document.contains(cell));
+    document.erase(document.find(cell), cell.size());
+    REQUIRE_FALSE(document.contains("node-id"));
+    auto upstream = LeaderUpstream();
+    upstream.AnswerOk(document);
+    auto const result = CallToolchains(upstream);
+    INFO(result.text);
+    REQUIRE_FALSE(result.isError);
+    CHECK(At(RowWhere(At(result.structured, "nodes"), "endpoint", "10.0.0.1:6674"), "node_id").IsNull());
 }
 
 TEST_CASE("toolchain_diff refuses stale inputs", "[pace-node][mcp][toolchain-diff]")

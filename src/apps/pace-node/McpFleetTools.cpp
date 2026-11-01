@@ -212,22 +212,29 @@ namespace
         if (elements == nullptr)
             return 0;
         auto unplaced = std::size_t { 0 };
+        auto const idKey = std::format("{}node_id", prefix);
+        auto const nameKey = std::format("{}display_name", prefix);
         for (auto& row: *elements)
             if (auto* const members = std::get_if<Json::Object>(&row.v); members != nullptr)
             {
                 auto const naming = namingOf(state, row);
                 unplaced += Unplaced(naming) ? 1U : 0U;
+                // A row may already carry the leader's own `node_id` cell (`node-id`, projected): the naming READ it,
+                // and replaces it rather than standing beside it as a second key of the same name.
+                std::erase_if(*members, [&idKey, &nameKey](auto const& member) {
+                    return member.first == idKey || member.first == nameKey;
+                });
                 AppendNaming(*members, naming, prefix);
             }
         return unplaced;
     }
 
-    /// @param state The applied state.
-    /// @param row A row carrying the machine's `endpoint`.
-    /// @return The machine's naming, by that endpoint.
-    [[nodiscard]] MachineNaming ByEndpoint(std::optional<Cluster::ClusterState> const& state, Json::Value const& row)
+    /// @param state The applied state, for the display name.
+    /// @param row A machine row carrying the leader's `node_id` cell: the member holding the key the machine PROVED.
+    /// @return The machine's naming, by that id -- never by the endpoint the row also carries, which is a claim.
+    [[nodiscard]] MachineNaming ByNodeId(std::optional<Cluster::ClusterState> const& state, Json::Value const& row)
     {
-        return NamingOfEndpoint(state, StringAt(row, "endpoint").value_or(std::string {}));
+        return NamingOfMember(state, StringAt(row, "node_id").value_or(std::string {}));
     }
 
     /// @param state The applied state.
@@ -329,8 +336,8 @@ namespace
         if (!nodes.has_value())
             return Unreadable(*document, nodes.error());
 
-        // Every machine row named by its member id and display name, placed by its recorded `0xFC` endpoint.
-        auto const unplaced = NameRows(*nodes, cluster.AppliedState(), ByEndpoint);
+        // Every machine row named by its member id and display name, the id the leader joined by the PROVEN key.
+        auto const unplaced = NameRows(*nodes, cluster.AppliedState(), ByNodeId);
         auto const skew = VersionsOf(ElementsOf(*nodes));
         auto const flag = SkewFlag(skew);
         auto const leader = StringAt(document->root, "leader");
@@ -534,8 +541,16 @@ namespace
                 order.push_back(endpoint);
             return entry->second;
         };
+        // Each machine's member id as the LEADER joined its row, by the key the machine proved (`node-id`). The
+        // endpoint is only this document's row key, which ties a condition row to its machine row; it never names a
+        // member.
+        auto memberIds = std::map<std::string, std::string, std::less<>> {};
         for (auto const& node: ElementsOf(*nodes))
-            std::ignore = visit(StringAt(node, "endpoint").value_or(std::string {}));
+        {
+            auto const endpoint = StringAt(node, "endpoint").value_or(std::string {});
+            std::ignore = visit(endpoint);
+            memberIds.try_emplace(endpoint, StringAt(node, "node_id").value_or(std::string {}));
+        }
         auto raised = std::size_t { 0 };
         for (auto const& row: ElementsOf(*rows))
         {
@@ -577,8 +592,9 @@ namespace
                                                StringAt(condition, "persistence").value_or(std::string { "-" }),
                                                StringAt(condition, "detail").value_or(std::string {}),
                                                StringAt(condition, "remedy").value_or(std::string {}));
-            // Named by its member id and display name, placed by its recorded `0xFC` endpoint.
-            auto const naming = NamingOfEndpoint(state, endpoint);
+            // Named by its member id and display name, the id its machine row carries.
+            auto const naming =
+                NamingOfMember(state, memberIds.contains(endpoint) ? memberIds.at(endpoint) : std::string {});
             unplaced += Unplaced(naming) ? 1U : 0U;
             auto row = Json::Object { { "endpoint", Str(endpoint) } };
             AppendNaming(row, naming);
@@ -893,7 +909,7 @@ namespace
         R"("answered_by":{"type":"string"},"term":{"type":["integer","null"]},"term_scope":{"const":"this-node"},)"
         R"("role":{"type":["string","null"]},"leader":{"type":["string","null"],"description":"The leader's 0xFC endpoint as /fleet.json names it: null while the answering node itself leads (role: leader) -- then answered_by is the leader -- or while none is known."},)"
         R"("members":{"type":["array","null"],"description":"/fleet.json members, snake_case; null when the answering node runs no cluster."},)"
-        R"("nodes":{"type":"array","description":"/fleet.json nodes, snake_case; heartbeat_age_s in seconds; null cells are absent, never 0. Each also carries node_id and display_name, of the member whose recorded 0xFC endpoint is the row's endpoint -- both null when no member records it, never guessed."},)"
+        R"("nodes":{"type":"array","description":"/fleet.json nodes, snake_case; heartbeat_age_s in seconds; null cells are absent, never 0. Each also carries node_id and display_name, of the member holding the identity key the machine PROVED (the leader's node-id column), never matched by the row's endpoint, which the machine only claims -- both null when no member holds it, never guessed."},)"
         R"("versions":{"type":"array","items":{"type":"string"}},"versions_unreported":{"type":"array","items":{"type":"string"}},)"
         R"("version_skew":{"type":["boolean","null"],"description":"true: two or more builds; false: one build everywhere; null: cannot be told."}}})";
 
@@ -913,7 +929,7 @@ namespace
         R"({"type":"object","required":["answered_by","term","term_scope","raised_count","nodes","not_reported"],"properties":{)"
         R"("answered_by":{"type":"string"},"term":{"type":["integer","null"]},"term_scope":{"const":"this-node"},)"
         R"("raised_count":{"type":"integer"},)"
-        R"("nodes":{"type":"array","description":"Every machine that reported a list: endpoint; node_id and display_name of the member recording that 0xFC endpoint (both null when none does); and each condition: condition, state, persistence, severity, detail, remedy."},)"
+        R"("nodes":{"type":"array","description":"Every machine that reported a list: endpoint; node_id and display_name of the member holding the key that machine proved, as its fleet machine row says (both null when none does); and each condition: condition, state, persistence, severity, detail, remedy."},)"
         R"("not_reported":{"type":"array","items":{"type":"string"},"description":"Machines whose report carried no conditions at all: absent, not clear."}}})";
 
     /// The `history` tool's input schema: its `enum`s are the series and range tables' keys, composed once from

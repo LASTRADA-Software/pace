@@ -331,6 +331,18 @@ namespace
         "Where the name came from: replicated (an operator named it, and every node agrees) or self-reported (what "
         "the machine calls itself). Absent when there is no name.";
 
+    /// @param memberId A row's member id, as `CollectFleet` joined it.
+    /// @return The `node-id` cell: absent when no member holds the key the row's connection proved, never blank.
+    [[nodiscard]] FleetCell MemberIdCell(std::string const& memberId)
+    {
+        return memberId.empty() ? FleetCell::Nothing() : FleetCell::Of(memberId);
+    }
+
+    /// What the `node-id` column says in a header, for the machine and worker tables.
+    constexpr std::string_view NodeIdHelp =
+        "The cluster member this machine is: the one holding the identity key its connection proved, never matched by "
+        "the endpoint it claims. Absent when it proved no key, no member holds it, or this node holds no cluster state.";
+
     // ------------------------------------------------------------ the tables
 
     /// One member row: the record, and what the machine holding the member's key calls itself -- which only the
@@ -750,7 +762,7 @@ namespace
     };
 
     /// What a node row shows, before its per-tier cache columns.
-    constexpr std::array<FleetColumn<NodeReport>, 13> NodeColumns {
+    constexpr std::array<FleetColumn<NodeReport>, 14> NodeColumns {
         FleetColumn<NodeReport> { .name = "endpoint",
                                   .help = "host:port the machine answers on.",
                                   .format = CellFormat::Text,
@@ -772,6 +784,11 @@ namespace
             .format = CellFormat::Text,
             .keep = ColumnKeep::Detail,
             .project = [](NodeReport const& n) { return NameSourceCell(NameShown(n.replicatedName, n.displayName)); } },
+        FleetColumn<NodeReport> { .name = "node-id",
+                                  .help = NodeIdHelp,
+                                  .format = CellFormat::Text,
+                                  .keep = ColumnKeep::Detail,
+                                  .project = [](NodeReport const& n) { return MemberIdCell(n.memberId); } },
         FleetColumn<NodeReport> {
             .name = "version",
             .help = "Which build of pace-node this machine is running. Absent "
@@ -866,7 +883,7 @@ namespace
     };
 
     /// What a worker row shows.
-    constexpr std::array<FleetColumn<WorkerReport>, 12> WorkerColumns {
+    constexpr std::array<FleetColumn<WorkerReport>, 13> WorkerColumns {
         FleetColumn<WorkerReport> { .name = "id",
                                     .help = "The id this leader assigned at registration.",
                                     .format = CellFormat::Text,
@@ -913,6 +930,11 @@ namespace
                                     .help = "host:port a client is sent to.",
                                     .format = CellFormat::Text,
                                     .project = [](WorkerReport const& w) { return FleetCell::Of(w.info.endpoint); } },
+        FleetColumn<WorkerReport> { .name = "node-id",
+                                    .help = NodeIdHelp,
+                                    .format = CellFormat::Text,
+                                    .keep = ColumnKeep::Detail,
+                                    .project = [](WorkerReport const& w) { return MemberIdCell(w.memberId); } },
         FleetColumn<WorkerReport> { .name = "slots",
                                     .help = "Concurrent compiles it registered with.",
                                     .format = CellFormat::Count,
@@ -1481,16 +1503,25 @@ FleetSnapshot CollectFleet(FleetSources const& sources)
     if (sources.cluster != nullptr)
     {
         snapshot.cluster = sources.cluster->ClusterState();
-        // Each machine's replicated name, joined by the key it PROVED -- for the display name alone, which decides
-        // nothing; the member rows make the converse join from the same two facts (`MemberRowsOf`).
+        // Each machine's member id and replicated name, joined by the key it PROVED -- never by the endpoint it
+        // registered with, which is its own unverified claim and would let one machine be named as another. Labels
+        // alone, which decide nothing; the member rows make the converse join from the same two facts
+        // (`MemberRowsOf`).
+        auto const holderOf = [&members = snapshot.cluster->members](std::string_view key) {
+            return core::findIfOrNull(members, [key](Cluster::ClusterMember const& candidate) {
+                return !key.empty() && AsStringView(std::span<std::byte const> { candidate.publicKey }) == key;
+            });
+        };
         for (auto& node: snapshot.nodes)
         {
-            auto const* const member =
-                core::findIfOrNull(snapshot.cluster->members, [&node](Cluster::ClusterMember const& candidate) {
-                    return !node.identityKey.empty()
-                           && AsStringView(std::span<std::byte const> { candidate.publicKey }) == node.identityKey;
-                });
+            auto const* const member = holderOf(node.identityKey);
+            node.memberId = member != nullptr ? member->id : std::string {};
             node.replicatedName = member != nullptr ? member->displayName : std::string {};
+        }
+        for (auto& worker: snapshot.workers)
+        {
+            auto const* const member = holderOf(worker.info.identityKey);
+            worker.memberId = member != nullptr ? member->id : std::string {};
         }
     }
 
