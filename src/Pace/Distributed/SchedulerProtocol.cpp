@@ -393,6 +393,7 @@ SchedulerReply SchedulerProtocol::Route(Wire::Op op, std::span<std::byte const> 
                                                           // `NodeCapacity`, which must stay a literal type.
                                                           .version = fields->capacity.version,
                                                           .toolchainLabel = fields->capacity.toolchainLabel,
+                                                          .toolchainFamily = fields->capacity.toolchainFamily,
                                                           .displayName = fields->capacity.displayName,
                                                           .slots = fields->slots,
                                                           .codecs = fields->acceptedCodecs,

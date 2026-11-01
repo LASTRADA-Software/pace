@@ -145,6 +145,11 @@ struct ServedToolchain
     /// everywhere it travels, and is rendered as absent rather than as a blank.
     std::string label;
 
+    /// Which compiler family it belongs to, from the banner (`Cc::ToolchainFamily`), e.g. `g++` or `apple-clang`:
+    /// what the upgrade report compares versions within. Empty when no banner was read or no row knows the driver,
+    /// and for an operator's override, which is never probed.
+    std::string family;
+
     /// What this toolchain's identity was derived from, so it can be rechecked cheaply.
     ///
     /// A node fingerprints once at startup and then lives for weeks, while the launcher

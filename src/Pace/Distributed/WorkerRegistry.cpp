@@ -74,6 +74,7 @@ std::string WorkerRegistry::Register(WorkerRegistration const& registration)
         // kept its fingerprint pinned, and a label held over would name the compiler
         // that is no longer there.
         existing->second.info.toolchainLabel = std::string { registration.toolchainLabel };
+        existing->second.info.toolchainFamily = std::string { registration.toolchainFamily };
         existing->second.info.displayName = std::string { registration.displayName };
         // Refreshed whole for `version`'s reason, and because a re-registration is a
         // statement of where the worker is NOW: a VPN reconnect is one way to get here.
@@ -131,6 +132,7 @@ std::string WorkerRegistry::Register(WorkerRegistration const& registration)
                                  .endpoint = std::string { registration.endpoint },
                                  .version = std::string { registration.version },
                                  .toolchainLabel = std::string { registration.toolchainLabel },
+                                 .toolchainFamily = std::string { registration.toolchainFamily },
                                  .displayName = std::string { registration.displayName },
                                  .slots = OfferableSlots(registration.capacity, RequestedSlots(registration)),
                                  .inFlight = 0,

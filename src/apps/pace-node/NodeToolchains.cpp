@@ -80,7 +80,8 @@ namespace
     struct SurveyedToolchain
     {
         Cc::ToolchainIdentity identity;
-        std::string label; ///< Empty when there was no banner to derive one from.
+        std::string label;  ///< Empty when there was no banner to derive one from.
+        std::string family; ///< `Cc::ToolchainFamily` of the banner; empty when there was none.
 
         /// What that identity was computed from, so it can be rechecked without
         /// paying for it again. Disengaged for an operator's override, which is
@@ -310,6 +311,9 @@ namespace
                 // string, so the readable name was already in hand and was being
                 // thrown away (#194).
                 fingerprints[index].label = Cc::ToolchainLabel(entry.compiler, banner);
+                // The same banner, read for the family it names rather than the name it was invoked by: Apple clang
+                // installed as `gcc` is `apple-clang`, never GNU gcc.
+                fingerprints[index].family = Cc::ToolchainFamily(entry.compiler, banner);
             }
         };
 
@@ -566,6 +570,7 @@ SurveyResult FingerprintToolchains(DiscoveredToolchains const& discovered,
             toolchains.emplace(fingerprint,
                                ServedToolchain { .compiler = entry.compiler,
                                                  .label = std::move(fingerprints[index].label),
+                                                 .family = std::move(fingerprints[index].family),
                                                  .witness = std::move(fingerprints[index].witness) });
         if (inserted)
             logger.Logf(NarrationLevel(voice), "serving {} as {}", entry.compiler, fingerprint);

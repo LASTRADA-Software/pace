@@ -793,7 +793,7 @@ namespace
     };
 
     /// What a worker row shows.
-    constexpr std::array<FleetColumn<WorkerReport>, 11> WorkerColumns {
+    constexpr std::array<FleetColumn<WorkerReport>, 12> WorkerColumns {
         FleetColumn<WorkerReport> { .name = "id",
                                     .help = "The id this leader assigned at registration.",
                                     .format = CellFormat::Text,
@@ -822,6 +822,19 @@ namespace
             .project =
                 [](WorkerReport const& w) {
                     return w.info.toolchainLabel.empty() ? FleetCell::Nothing() : FleetCell::Of(w.info.toolchainLabel);
+                } },
+        // Read off the BANNER by the node (`Cc::ToolchainFamily`), never off the label's tool name: Apple clang
+        // installed as `gcc` is labelled `gcc 17.0.0` and is `apple-clang` here. What the upgrade report groups
+        // versions by, so absent stays absent -- a toolchain without one joins no family.
+        FleetColumn<WorkerReport> {
+            .name = "family",
+            .help = "Which compiler family this toolchain is, read from its banner: versions are compared within one "
+                    "and never across. Absent when the node read no banner or knows no family for the driver.",
+            .format = CellFormat::Text,
+            .keep = ColumnKeep::Detail,
+            .project =
+                [](WorkerReport const& w) {
+                    return w.info.toolchainFamily.empty() ? FleetCell::Nothing() : FleetCell::Of(w.info.toolchainFamily);
                 } },
         FleetColumn<WorkerReport> { .name = "endpoint",
                                     .help = "host:port a client is sent to.",

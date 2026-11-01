@@ -2,6 +2,7 @@
 #include <Pace/Cluster/ClusterState.hpp>
 #include <Pace/Cluster/Roster.hpp>
 #include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/Json.hpp>
 #include <Pace/Distributed/DialHint.hpp>
 #include <Pace/Distributed/FleetHistory.hpp>
 #include <Pace/Distributed/FleetView.hpp>
@@ -1236,6 +1237,58 @@ TEST_CASE("A worker that cannot name itself in UTF-8 is refused", "[distributed]
         registration.toolchainLabel = "cl 19.44\xC3"; // a lead byte with nothing after it
         refused(registration, "toolchain label");
     }
+
+    SECTION("the compiler family the upgrade report groups by")
+    {
+        // Composed by the node from a table rather than read off a banner, and refused all the same: it is what a
+        // PEER sent, and the peer is whichever build it is.
+        auto registration = OneSlot("gcc-14", "10.0.0.2:7100");
+        registration.toolchainFamily = "g\xFF+";
+        refused(registration, "toolchain family");
+    }
+}
+
+TEST_CASE("A registration's toolchain family reaches the fleet document's workers, and an absent one stays absent",
+          "[distributed][scheduler][fleetview]")
+{
+    // The family is what the MCP upgrade report groups versions by, and it reads it from `/fleet.json`'s `workers`
+    // rows -- so a family the registry dropped, or a column that rendered an absence as "", would group every
+    // toolchain into no family, or one called "", with nothing failing anywhere else.
+    Leading fleet;
+    auto labelled = OneSlot("fp-gnu", "10.0.0.2:7100");
+    labelled.toolchainLabel = "gcc 17.0.0";
+    labelled.toolchainFamily = "apple-clang";
+    REQUIRE(fleet.service.Register(Insider, labelled).status == Wire::Status::Ok);
+    REQUIRE(fleet.service.Register(Insider, OneSlot("fp-pinned", "10.0.0.3:7100")).status == Wire::Status::Ok);
+
+    auto const snapshot =
+        CollectFleet(FleetSources { .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics });
+    auto const document = Json::Parse(RenderFleetJson(snapshot, FleetHistoryView {}));
+    REQUIRE(document.has_value());
+    auto const* const workers = Unwrap(document).Find("workers");
+    REQUIRE(workers != nullptr);
+    REQUIRE(workers->AsArray() != nullptr);
+    auto const familyOf = [&](std::string_view fingerprint) -> Json::Value const* {
+        for (auto const& row: *workers->AsArray())
+            if (auto const* const toolchain = row.Find("toolchain");
+                toolchain != nullptr && toolchain->AsString() != nullptr && *toolchain->AsString() == fingerprint)
+                return row.Find("family");
+        return nullptr;
+    };
+    REQUIRE(familyOf("fp-gnu") != nullptr);
+    REQUIRE(familyOf("fp-gnu")->AsString() != nullptr);
+    CHECK(*familyOf("fp-gnu")->AsString() == "apple-clang");
+    REQUIRE(familyOf("fp-pinned") != nullptr);
+    CHECK(familyOf("fp-pinned")->IsNull());
+
+    // A re-registration states the family afresh: a toolchain upgraded under a pinned fingerprint names what is
+    // there now.
+    labelled.toolchainFamily = "gcc";
+    REQUIRE(fleet.service.Register(Insider, labelled).status == Wire::Status::Ok);
+    auto const again = fleet.service.Workers().LiveWorkers();
+    auto const entry = std::ranges::find(again, std::string_view { "fp-gnu" }, &WorkerInfo::fingerprint);
+    REQUIRE(entry != again.end());
+    CHECK(entry->toolchainFamily == "gcc");
 }
 
 TEST_CASE("A machine's display name reaches the fleet page and decides nothing", "[distributed][scheduler][fleetview]")

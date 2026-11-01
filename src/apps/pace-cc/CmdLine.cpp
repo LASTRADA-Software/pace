@@ -893,7 +893,7 @@ namespace
     /// "which driver is this" is a second thing to keep in step.
     /// @param compiler argv[0] as invoked.
     /// @return True for a `++` driver.
-    [[nodiscard]] bool CompilesEverythingAsCxx(std::string_view compiler)
+    [[nodiscard]] bool CompilesEverythingAsCxxImpl(std::string_view compiler)
     {
         std::string const base = NormalizedCompilerName(compiler);
 
@@ -1392,6 +1392,11 @@ std::string NormalizedCompilerName(std::string_view compiler)
 Flavor ClassifyCompiler(std::string_view compiler)
 {
     return ClassifyCompilerImpl(compiler);
+}
+
+bool CompilesEverythingAsCxx(std::string_view compiler)
+{
+    return CompilesEverythingAsCxxImpl(compiler);
 }
 
 Flavor ClassifyCompilerFromBanner(Flavor named, std::string_view banner) noexcept

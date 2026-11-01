@@ -4601,6 +4601,18 @@ struct CapacityFields
     ///
     /// **Owned, not a view**, for `version`'s reason.
     std::vector<std::string> interfaceAddresses {};
+
+    /// Which compiler family this registration's toolchain belongs to, as `Cc::ToolchainFamily` derives it from
+    /// the BANNER -- `gcc`, `g++`, `clang`, `apple-clang`, `cl` -- for the upgrade report, which compares versions
+    /// within a family and never across one. Empty means "did not say": no banner was read, or no family row
+    /// knows the driver, and such a toolchain joins no family.
+    ///
+    /// Per registration, like `toolchainLabel` and for its reason. **Advice only, never an identity**: the
+    /// fingerprint decides every match. Field TEN of the record, appended last so a record from a build that
+    /// predates it decodes with this empty; `CompileCacheWire_test` pins the position.
+    ///
+    /// **Owned, not a view**, for `version`'s reason.
+    std::string toolchainFamily {};
 };
 
 /// Frame a capacity record as one nested field list.
@@ -4639,7 +4651,8 @@ struct CapacityFields
                                 std::span<std::byte const> { reservedMemory },
                                 AsBytes(capacity.toolchainLabel),
                                 AsBytes(capacity.displayName),
-                                std::span<std::byte const> { addresses } });
+                                std::span<std::byte const> { addresses },
+                                AsBytes(capacity.toolchainFamily) });
 }
 
 /// Read a capacity record back.
@@ -4727,6 +4740,9 @@ struct CapacityFields
     if (!addresses.has_value())
         return std::nullopt;
     out.interfaceAddresses = *std::move(addresses);
+    // Free-form here for the label's reason; `SchedulerService::Register` refuses it where it enters when it is not
+    // UTF-8 or longer than `MaxToolchainFamilyBytes`. Absent from an older peer, which reads as "did not say".
+    out.toolchainFamily = std::string { AsStringView(at(10)) };
     return out;
 }
 
@@ -4800,6 +4816,19 @@ static_assert(std::ranges::all_of(std::to_array<std::string_view>({ "cl 19.44.35
                                                                     "x86_64-unknown-linux-gnu-clang++ 18.1.8" }),
                                   [](std::string_view label) { return label.size() * 2 <= MaxToolchainLabelBytes; }),
               "MaxToolchainLabelBytes must hold twice the longest real toolchain label");
+
+/// The longest toolchain family a scheduler records, in bytes: a REGISTER's `CapacityFields::toolchainFamily`.
+///
+/// Sized from what a family IS: one row key of `Cc::ToolchainFamily`'s table, the longest of which is
+/// `apple-clang++`. Twice the longest known, so a family a row or two longer still fits; a peer sending more is
+/// refused and counted where it enters, never truncated, as the label is.
+inline constexpr std::size_t MaxToolchainFamilyBytes = 32;
+
+static_assert(
+    std::ranges::all_of(std::to_array<std::string_view>(
+                            { "gcc", "g++", "clang", "clang++", "apple-clang", "apple-clang++", "cl", "clang-cl" }),
+                        [](std::string_view family) { return family.size() * 2 <= MaxToolchainFamilyBytes; }),
+    "MaxToolchainFamilyBytes must hold twice the longest toolchain family");
 
 /// The longest toolchain fingerprint a scheduler records, in bytes: a LEASE's and a REGISTER's.
 ///
@@ -5417,7 +5446,7 @@ inline constexpr std::size_t MaxAddressListBytes = MaxInterfaceAddresses * Detai
 
 /// The longest capacity record `EncodeCapacity` writes, field by field in its order: cores, memory,
 /// class, reserved cores, the cache record (one field holding the tier list, each tier one u64),
-/// version, reserved memory, toolchain label, display name, interface addresses.
+/// version, reserved memory, toolchain label, display name, interface addresses, toolchain family.
 inline constexpr std::size_t MaxCapacityRecordBytes =
     Detail::FramedField(sizeof(std::uint32_t)) + Detail::FramedField(sizeof(std::uint64_t)) + Detail::FramedField(1)
     + Detail::FramedField(sizeof(std::uint32_t))
@@ -5425,7 +5454,7 @@ inline constexpr std::size_t MaxCapacityRecordBytes =
         Detail::FramedField(CarriedCacheTiers * Detail::FramedField(Detail::FramedField(sizeof(std::uint64_t)))))
     + Detail::FramedField(MaxNodeVersionBytes) + Detail::FramedField(sizeof(std::uint64_t))
     + Detail::FramedField(MaxToolchainLabelBytes) + Detail::FramedField(MaxDisplayNameBytes)
-    + Detail::FramedField(MaxAddressListBytes);
+    + Detail::FramedField(MaxAddressListBytes) + Detail::FramedField(MaxToolchainFamilyBytes);
 
 /// The longest load record `EncodeLoad` writes WITHOUT its two variable passengers, whose own
 /// shares cover them: CPU, memory, scratch, the cache record (the tier list, each tier four u64s,

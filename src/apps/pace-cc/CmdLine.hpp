@@ -865,6 +865,15 @@ struct ParsedCommand
 /// @return The corrected flavor; @p named unchanged for every driver but the pair.
 [[nodiscard]] Flavor ClassifyCompilerFromBanner(Flavor named, std::string_view banner) noexcept;
 
+/// Whether a driver compiles every input as C++ whatever its name says -- the `++` drivers (`g++-14`,
+/// `clang++.exe`, `c++`).
+///
+/// The same walk over the same name table `ClassifyCompiler` makes, asked of a different column, so "which driver
+/// is this" and "which language does it default to" cannot disagree about a spelling.
+/// @param compiler argv[0] as invoked, bare name or path.
+/// @return True for a `++` driver.
+[[nodiscard]] bool CompilesEverythingAsCxx(std::string_view compiler);
+
 /// A compiler's basename, lowered and stripped of `.exe`.
 ///
 /// Here rather than beside its callers because THREE questions are answered from

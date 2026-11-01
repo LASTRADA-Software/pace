@@ -3632,6 +3632,33 @@ TEST_CASE("A LEASE grant carries the worker's identity key as its sixth field, a
     CHECK_FALSE(DecodeCompileResult(truncated).has_value());
 }
 
+TEST_CASE("A capacity record carries the toolchain family as its eleventh field", "[wire][capacity]")
+{
+    // The position IS the contract for a positional record: a reader of a later build finds the family at index
+    // ten or not at all, so the index is pinned as well as the round trip -- a round trip alone passes whatever
+    // index both ends agree on.
+    constexpr std::size_t FamilyField = 10;
+    CapacityFields capacity {};
+    capacity.toolchainLabel = "clang++ 17.0.0";
+    capacity.toolchainFamily = "apple-clang++";
+    auto const record = EncodeCapacity(capacity);
+
+    auto const parts = WireFields::SplitAll(record);
+    REQUIRE(parts.has_value());
+    REQUIRE(Unwrap(parts).size() == FamilyField + 1);
+    CHECK(AsStringView(Unwrap(parts)[FamilyField]) == "apple-clang++");
+    CHECK(Unwrap(DecodeCapacity(record)).toolchainFamily == "apple-clang++");
+
+    // A record from a build that predates the field -- the first ten fields only -- says no family, not a wrong one.
+    auto older = std::vector<std::span<std::byte const>> {};
+    std::ranges::copy(Unwrap(parts) | std::views::take(FamilyField), std::back_inserter(older));
+    auto const shorter = WireFields::Encode(older);
+    auto const decoded = DecodeCapacity(shorter);
+    REQUIRE(decoded.has_value());
+    CHECK(Unwrap(decoded).toolchainFamily.empty());
+    CHECK(Unwrap(decoded).toolchainLabel == "clang++ 17.0.0");
+}
+
 TEST_CASE("A worker's interface addresses ride both REGISTER and HEARTBEAT, bounded", "[wire][dialhint]")
 {
     std::vector<std::string> const addresses { "10.8.0.7", "fe80::1" };
@@ -5475,6 +5502,7 @@ TEST_CASE("The longest NODE-ANNOUNCE is exactly the budget its constants add up 
     capacity.toolchainLabel = fill(MaxToolchainLabelBytes, 'l');
     capacity.displayName = fill(MaxDisplayNameBytes, 'd');
     capacity.interfaceAddresses = addresses;
+    capacity.toolchainFamily = fill(MaxToolchainFamilyBytes, 'f');
 
     LoadFields load {};
     load.cpuBusyPermille = 1000;
@@ -5717,12 +5745,14 @@ TEST_CASE("A COMPILE reply at version 17 carries the worker's signature sixth, e
     CHECK(Unwrap(DecodeCompileResult(bare)).signature.empty());
 }
 
-TEST_CASE("A worker's interface addresses ride the last field of REGISTER's capacity record and HEARTBEAT's load record",
+TEST_CASE("A worker's interface addresses ride the tenth field of REGISTER's capacity record and the eighth of "
+          "HEARTBEAT's load record",
           "[wire][dialhint]")
 {
     // The list itself as literal bytes, then WHERE each record carries it: the capacity record's
     // tenth field and the load record's eighth. The records' other fields are pinned where they are
-    // defined; what is new at 15 is this list and its position.
+    // defined; what is new at 15 is this list and its position. The capacity record's eleventh field, the toolchain
+    // family, came after it at 17 and is pinned by its own case.
     auto const addresses = std::vector<std::string> { "10.0.0.2", "fe80::1" };
     // clang-format off
     auto const golden = Bytes({
@@ -5738,7 +5768,7 @@ TEST_CASE("A worker's interface addresses ride the last field of REGISTER's capa
     auto const capacity = EncodeCapacity(capacityRecord);
     auto const capacityFields = WireFields::SplitAll(capacity);
     REQUIRE(capacityFields.has_value());
-    REQUIRE(Unwrap(capacityFields).size() == 10);
+    REQUIRE(Unwrap(capacityFields).size() == 11);
     CHECK(std::ranges::equal(Unwrap(capacityFields)[9], golden));
 
     auto loadRecord = LoadFields {};

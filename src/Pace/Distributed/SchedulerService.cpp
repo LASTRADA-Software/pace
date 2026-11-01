@@ -491,6 +491,11 @@ namespace
         KeptField<WorkerRegistration> { .name = "toolchain label",
                                         .read = [](WorkerRegistration const& r) { return Text(r.toolchainLabel); },
                                         .ceiling = Wire::MaxToolchainLabelBytes },
+        // Composed by the node from a table rather than read from compiler output, and refused all the same: it is
+        // text a PEER sent, rendered in `/fleet.json`, and the node at the other end is whichever build it is.
+        KeptField<WorkerRegistration> { .name = "toolchain family",
+                                        .read = [](WorkerRegistration const& r) { return Text(r.toolchainFamily); },
+                                        .ceiling = Wire::MaxToolchainFamilyBytes },
         // The fifth, and it comes from the same place the fourth does: the machine
         // itself, not this project. `gethostname` and `GetComputerNameExA` hand back
         // whatever the host is called, in whatever encoding the host chose -- so this

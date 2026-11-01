@@ -2114,6 +2114,42 @@ TEST_CASE("A toolchain label says what the compiler is, where a fingerprint cann
     CHECK(ToolchainLabel("", "Version 1.2.3").empty());
 }
 
+TEST_CASE("A toolchain family is what the banner says answered, not what was invoked", "[cc][toolchain][family]")
+{
+    using Pace::Cc::ToolchainFamily;
+
+    constexpr std::string_view AppleBanner = "Apple clang version 17.0.0 (clang-1700.0.13.5)";
+    constexpr std::string_view LlvmBanner = "clang version 18.1.8";
+    constexpr std::string_view GnuBanner = "gcc (GCC) 13.2.0";
+
+    // Apple's version numbers are not LLVM's, so the two are different families however they are invoked.
+    CHECK(ToolchainFamily("/usr/bin/clang", AppleBanner) == "apple-clang");
+    CHECK(ToolchainFamily("/usr/bin/clang", LlvmBanner) == "clang");
+    CHECK(ToolchainFamily("/usr/bin/clang++", AppleBanner) == "apple-clang++");
+    CHECK(ToolchainFamily("/usr/bin/clang++", "Ubuntu clang version 20.1.2 (0ubuntu1)") == "clang++");
+
+    // Apple clang installed as `gcc` -- what macOS ships -- is Apple clang, never GNU gcc.
+    CHECK(ToolchainFamily("/usr/bin/gcc", AppleBanner) == "apple-clang");
+    CHECK(ToolchainFamily("/usr/bin/g++", AppleBanner) == "apple-clang++");
+    CHECK(ToolchainFamily("/usr/bin/gcc", GnuBanner) == "gcc");
+    CHECK(ToolchainFamily("/usr/bin/g++-13", "g++-13 (Ubuntu 13.3.0-6ubuntu2) 13.3.0") == "g++");
+
+    // `cc` and `c++` name a policy; the banner names the product.
+    CHECK(ToolchainFamily("/usr/bin/cc", "cc (GCC) 16.2.1 20260101") == "gcc");
+    CHECK(ToolchainFamily("/usr/bin/c++", "c++ (GCC) 16.2.1 20260101") == "g++");
+    CHECK(ToolchainFamily("/usr/bin/cc", AppleBanner) == "apple-clang");
+    CHECK(ToolchainFamily("/usr/bin/c++", LlvmBanner) == "clang++");
+
+    // clang-cl prints plain clang's banner; its NAME is what separates it, and the banner must not undo that.
+    CHECK(ToolchainFamily("clang-cl.exe", LlvmBanner) == "clang-cl");
+    CHECK(ToolchainFamily("CL.EXE", "Microsoft (R) C/C++ Optimizing Compiler Version 19.44.35207 for x64") == "cl");
+
+    // Nothing read, nothing said: the unrun-driver fallback, an empty banner, and a cross driver no row knows.
+    CHECK(ToolchainFamily("/usr/bin/cc", "cc").empty());
+    CHECK(ToolchainFamily("/usr/bin/gcc", "").empty());
+    CHECK(ToolchainFamily("/opt/cross/bin/aarch64-none-elf-gcc", "aarch64-none-elf-gcc (GCC) 12.2.0").empty());
+}
+
 TEST_CASE("A real toolchain's label is one a scheduler records", "[cc][toolchain][label]")
 {
     using Pace::Cc::ToolchainLabel;

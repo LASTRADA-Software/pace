@@ -915,6 +915,46 @@ std::string ToolchainLabel(std::string_view compiler, std::string_view banner)
     return tool;
 }
 
+namespace
+{
+    /// One compiler family the upgrade report may compare versions within, keyed by what the banner says.
+    struct ToolchainFamilyRow
+    {
+        Flavor flavor;              ///< The driver, corrected by the banner (`ClassifyCompilerFromBanner`).
+        std::string_view vendor;    ///< A banner marker that narrows the row to one vendor; empty matches any.
+        std::string_view cFamily;   ///< The key for a driver that reads the language off the file name.
+        std::string_view cxxFamily; ///< The key for a `++` driver (`CompilesEverythingAsCxx`).
+    };
+
+    /// Every family, most specific first: a vendor row is asked before the flavour's catch-all.
+    ///
+    /// Apple clang is its own family because its version numbers are Apple's, not LLVM's -- `Apple clang version
+    /// 17.0.0` is not clang 17 -- so ordering the two against each other would name a different compiler as the
+    /// newer one. The C and C++ drivers of one release are separate families for the same reason they are
+    /// separate fingerprints: a client compiling with `g++` is served by a `g++` worker only.
+    constexpr auto ToolchainFamilies = std::to_array<ToolchainFamilyRow>({
+        { .flavor = Flavor::Clang, .vendor = "Apple clang version", .cFamily = "apple-clang", .cxxFamily = "apple-clang++" },
+        { .flavor = Flavor::Clang, .vendor = {}, .cFamily = "clang", .cxxFamily = "clang++" },
+        { .flavor = Flavor::Gcc, .vendor = {}, .cFamily = "gcc", .cxxFamily = "g++" },
+        { .flavor = Flavor::ClangCl, .vendor = {}, .cFamily = "clang-cl", .cxxFamily = "clang-cl" },
+        { .flavor = Flavor::Cl, .vendor = {}, .cFamily = "cl", .cxxFamily = "cl" },
+    });
+} // namespace
+
+std::string ToolchainFamily(std::string_view compiler, std::string_view banner)
+{
+    // A banner equal to the compiler's own name is `ProbeDriverIdentity`'s fallback for a driver that could not be
+    // run: nothing was read, so nothing is said -- a `cc` that never answered is not thereby GNU.
+    if (banner.empty() || banner == NormalizedCompilerName(compiler))
+        return {};
+    auto const flavor = ClassifyCompilerFromBanner(ClassifyCompiler(compiler), banner);
+    auto const cxx = CompilesEverythingAsCxx(compiler);
+    for (auto const& row: ToolchainFamilies)
+        if (row.flavor == flavor && (row.vendor.empty() || banner.contains(row.vendor)))
+            return std::string { cxx ? row.cxxFamily : row.cFamily };
+    return {};
+}
+
 bool LooksLikeVersion(std::string_view name) noexcept
 {
     return !name.empty() && std::ranges::any_of(name, [](char c) { return c >= '0' && c <= '9'; })

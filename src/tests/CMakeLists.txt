@@ -8138,12 +8138,21 @@ if(TARGET PaceTest)
         # the assertion that could not have failed while this ticket was open: 69
         # cases ran, and 69 is non-zero.
         #
-        # 277 = 206 (CompileCacheWire) + 26 (RaftWire) + 17 (ClusterState)
-        #     + 23 (DiscoveryWire) + 1 (RaftTypes) + 1 (SchedulerService)
-        #     + 1 (MachineTicket) + 1 (MachineStanding) + 1 (IdentityKeyLabel).
-        # The first four files are wholly wire subject and are the scan's table; the
-        # last five carry wire cases among others, which is why the scan cannot cover
-        # them and why this number is the only thing that watches them.
+        # 283 = 207 (CompileCacheWire) + 26 (RaftWire) + 17 (ClusterState)
+        #     + 23 (DiscoveryWire) + 5 (NodeStatusDetailWire) + 1 (RaftTypes)
+        #     + 1 (SchedulerService) + 1 (MachineTicket) + 1 (MachineStanding)
+        #     + 1 (IdentityKeyLabel), read off `PaceTest "[wire]" --list-tests
+        #     --verbosity high`. The first four files are wholly wire subject and are the
+        #     scan's table; the rest carry wire cases among others, which is why the scan
+        #     cannot cover them and why this number is the only thing that watches them.
+        #
+        # What moved it from 277 (the MCP branch, wire v17): CompileCacheWire gained
+        # "FleetText format byte is pinned", "WireSurface::Mcp is byte 4 and survives a
+        # NODE-STATUS round trip" and "A capacity record carries the toolchain family as
+        # its eleventh field"; NodeStatusDetailWire is new, with five. The v16 -> v17
+        # golden-byte cases were renamed, not added. Note the old sum's 206 for
+        # CompileCacheWire did not match its own tree, which held 204 `[wire]` cases, so
+        # 277 was two high before this branch began; 204 + 3 = 207.
         #
         # `[(]` rather than `\(`: CMake reads `\(` in a quoted argument as an escape
         # and stores a bare `(`, which its regex engine then takes as a capture group
@@ -8155,7 +8164,7 @@ if(TARGET PaceTest)
         # anything matches nothing. No `SKIP_RETURN_CODE` here: every selected case
         # must PASS for the count to be the count, so a run that skipped is a failure
         # of this check, never a state to report.
-        PASS_REGULAR_EXPRESSION "All tests passed [(][0-9]+ assertions in 277 test cases[)]"
+        PASS_REGULAR_EXPRESSION "All tests passed [(][0-9]+ assertions in 283 test cases[)]"
         LABELS "hygiene"
         TIMEOUT 300
     )

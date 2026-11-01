@@ -779,7 +779,8 @@ TEST_CASE("A toolchain label a scheduler would refuse is withheld from the regis
         INFO(why);
         CapturingLogger logger;
         auto const registered = RegisteredToolchainLabel(
-            ServedToolchain { .compiler = "/opt/cross/bin/g++", .label = label, .witness = std::nullopt }, logger);
+            ServedToolchain { .compiler = "/opt/cross/bin/g++", .label = label, .family = {}, .witness = std::nullopt },
+            logger);
         CHECK(registered == sent);
 
         // CHECK rather than REQUIRE on the count, so a case that goes wrong does not hide the ones
@@ -809,7 +810,8 @@ TEST_CASE("RegistrarsFor asks RegisteredToolchainLabel rather than sending a lab
 
     auto const served = std::map<std::string, ServedToolchain> {
         { "fp-cross",
-          ServedToolchain { .compiler = "/opt/cross/bin/g++", .label = "g++ \xff 14.2.0", .witness = std::nullopt } },
+          ServedToolchain {
+              .compiler = "/opt/cross/bin/g++", .label = "g++ \xff 14.2.0", .family = {}, .witness = std::nullopt } },
     };
     auto const registrars = tier.value()->RegistrarsFor(served);
     CHECK(registrars.size() == 1);

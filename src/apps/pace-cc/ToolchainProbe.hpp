@@ -360,6 +360,22 @@ struct DriverIdentityProbe
 ///         Empty only when the compiler is.
 [[nodiscard]] std::string ToolchainLabel(std::string_view compiler, std::string_view banner);
 
+/// Which compiler family a toolchain belongs to, for the upgrade report: versions are compared within a family and
+/// never across one.
+///
+/// **From the banner, not the name** -- the rule `cc` and `c++` taught (`ClassifyCompilerFromBanner`): the name
+/// says what was invoked, the banner says what answered. `/usr/bin/gcc` on macOS is Apple clang and is
+/// `apple-clang` here; a `cc` that is GNU is `gcc`. Apple clang is distinct from LLVM `clang`, whose version
+/// numbers mean something else, and a `++` driver (`CompilesEverythingAsCxx`) is the `++` family of its flavour.
+///
+/// Display and advice only, like `ToolchainLabel`: the fingerprint decides every match.
+/// @param compiler The compiler as invoked.
+/// @param banner What `CompilerBanner` returned for it.
+/// @return e.g. `gcc`, `g++`, `clang++`, `apple-clang`, `cl`, `clang-cl`; empty when the banner is the
+///         unrun-driver fallback or the driver is one no row knows (a cross driver such as `aarch64-none-elf-gcc`
+///         classifies as no flavour, and joins no family rather than a native one).
+[[nodiscard]] std::string ToolchainFamily(std::string_view compiler, std::string_view banner);
+
 /// Whether a name is made only of digits and dots, with at least one digit.
 ///
 /// One predicate for two questions that must answer alike: which subdirectory of a

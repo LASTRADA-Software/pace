@@ -87,6 +87,11 @@ struct WorkerInfo
     /// override is never probed, so there is no banner to read a label out of.
     std::string toolchainLabel {};
 
+    /// Which compiler family the toolchain belongs to, as the node derived it from the banner
+    /// (`CompileCacheWire::CapacityFields::toolchainFamily`): what the upgrade report groups versions by. Empty
+    /// means it did not say, and such an entry joins no family. Advice only -- per entry, like the label.
+    std::string toolchainFamily {};
+
     /// What a person calls this machine, e.g. `buildnode-3`. Empty means it did not say.
     ///
     /// **Advisory, and never a key** (#1024). `id`, `fingerprint` and `endpoint` decide
@@ -346,6 +351,10 @@ struct WorkerRegistration
     /// What a person calls the toolchain, e.g. `cl 19.44.35207`; empty means it did
     /// not say. Display only -- see `WorkerInfo::toolchainLabel` (#194).
     std::string_view toolchainLabel {};
+
+    /// Which compiler family the toolchain belongs to; empty means it did not say. Advice only -- see
+    /// `WorkerInfo::toolchainFamily`.
+    std::string_view toolchainFamily {};
 
     /// What a person calls the machine; empty means it did not say. Advisory only --
     /// see `WorkerInfo::displayName` (#1024).

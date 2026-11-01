@@ -451,6 +451,7 @@ std::vector<Cc::WorkerRegistrar> WorkerTier::RegistrarsAt(std::map<std::string, 
         // node-wide (#194).
         auto perToolchain = _advertisedWire;
         perToolchain.toolchainLabel = RegisteredToolchainLabel(toolchain, _logger);
+        perToolchain.toolchainFamily = toolchain.family;
         built.emplace_back(fingerprint, advertised, _slots, Cc::AvailableCodecs(), perToolchain);
     }
     return built;
