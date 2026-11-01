@@ -4577,8 +4577,7 @@ std::optional<std::string> StartupPolicyRejection(NodeConfig const& cfg)
         { .refuses =
               [](NodeConfig const& c) {
                   auto const endpoints = RowFor(NodeSurface::Mcp).Resolve(c);
-                  return std::ranges::any_of(endpoints,
-                                             [](SurfaceEndpoint const& e) { return !IsLoopbackHost(e.host); });
+                  return std::ranges::any_of(endpoints, [](SurfaceEndpoint const& e) { return !IsLoopbackHost(e.host); });
               },
           .message = McpListenNotLoopbackRefusal },
         // **A worker on a node that can never form**: with the consensus port closed there is no
