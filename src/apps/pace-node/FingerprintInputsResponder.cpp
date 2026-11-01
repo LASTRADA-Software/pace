@@ -47,8 +47,8 @@ namespace
         std::string (*words)(ServedToolchainInputs const& toolchain); ///< What the asker is told.
     };
 
-    /// The absences. A pin and a capture that did not reproduce are PERMANENT for the process, so they answer a code
-    /// whose retry says so; a capture still running is transient, and answers one that says that.
+    /// The absences. A pin, and a capture that did not reproduce, do not change on an immediate retry, so they answer a
+    /// code whose retry says so; a capture still running clears by itself, and answers one that says that.
     constexpr std::array AbsenceRows {
         AbsenceRow {
             .state = Wire::FingerprintInputsState::Pinned,
@@ -73,18 +73,19 @@ namespace
                                  "walk per start that captures what it was computed from; ask again shortly",
                                  toolchain.fingerprint);
                          } },
-        AbsenceRow { .state = Wire::FingerprintInputsState::NotCaptured,
-                     .refusal = { .code = Wire::ErrorCode::FingerprintInputsUnrecorded,
-                                  .rationale = "a capture that concluded without this fingerprint stays so until the node "
-                                               "restarts; answered with why, and the node's log carries the event" },
-                     .words =
-                         [](ServedToolchainInputs const& toolchain) {
-                             return std::format(
-                                 "this node took {} from its fingerprint cache and its capture walk did not "
-                                 "reproduce it -- or found it after the capture ran -- so it holds no inputs for "
-                                 "it until it restarts",
-                                 toolchain.fingerprint);
-                         } },
+        AbsenceRow {
+            .state = Wire::FingerprintInputsState::NotCaptured,
+            .refusal = { .code = Wire::ErrorCode::FingerprintInputsUnrecorded,
+                         .rationale = "a capture that concluded without this fingerprint stays so until a re-survey "
+                                      "walks it or the node restarts; answered with why, and the node's log "
+                                      "carries the event" },
+            .words =
+                [](ServedToolchainInputs const& toolchain) {
+                    return std::format("this node took {} from its fingerprint cache and its capture walk did not "
+                                       "reproduce it -- or found it after the capture ran -- so it holds no inputs for "
+                                       "it until a re-survey walks this toolchain again or the node restarts",
+                                       toolchain.fingerprint);
+                } },
     };
 
     /// What a record no reply can carry is answered with.

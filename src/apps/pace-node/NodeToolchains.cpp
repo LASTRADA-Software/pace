@@ -752,24 +752,40 @@ std::shared_ptr<ServedInputs const> ServedInputsOf(std::map<std::string, ServedT
     return std::make_shared<ServedInputs const>(std::move(rows));
 }
 
-CaptureAdoption AdoptCapture(std::map<std::string, ServedToolchain> const& current, SurveyResult captured)
+CaptureAdoption AdoptCapture(std::map<std::string, ServedToolchain> const& current,
+                             ServedGeneration currentGeneration,
+                             ServedGeneration capturedAt,
+                             SurveyResult captured)
 {
+    auto adoption = CaptureAdoption { .served = current, .refreshFromLiveConfig = false, .captured = {} };
     if (captured.outcome != SurveyOutcome::Served)
-        return CaptureAdoption { .kind = CaptureAdoptionKind::Nothing, .served = {} };
+        return adoption;
 
-    // The same (fingerprint, compiler) pairs: every served fingerprint was reproduced by the walk, so its record is
-    // the digest's argument list for exactly that key, and it attaches.
-    auto const sameMapping = std::ranges::equal(current, captured.served, [](auto const& a, auto const& b) {
-        return a.first == b.first && a.second.compiler == b.second.compiler;
-    });
-    if (!sameMapping)
-        return CaptureAdoption { .kind = CaptureAdoptionKind::Reregister, .served = std::move(captured.served) };
-
-    auto next = current;
-    for (auto& [fingerprint, toolchain]: next)
-        if (toolchain.inputs == nullptr)
-            toolchain.inputs = captured.served.at(fingerprint).inputs;
-    return CaptureAdoption { .kind = CaptureAdoptionKind::Attach, .served = std::move(next) };
+    auto const unchangedSince = currentGeneration == capturedAt;
+    for (auto& [fingerprint, toolchain]: adoption.served)
+    {
+        // A pin is the operator's decision and is never probed: nothing a walk found can make it stale.
+        if (!toolchain.witness.has_value())
+            continue;
+        auto const same = captured.served.find(fingerprint);
+        if (same != captured.served.end() && same->second.compiler == toolchain.compiler)
+        {
+            if (toolchain.inputs == nullptr)
+                toolchain.inputs = same->second.inputs;
+            continue;
+        }
+        // The capture filed THIS compiler under another fingerprint: the cached one no longer digests to it. Judged
+        // only while the map is the one the capture started against -- a reload since re-derived it from the live
+        // configuration, which is the newer answer. An entry the capture lacks altogether (a probe that timed out, a
+        // toolchain a reload added) is left alone: absence is not staleness.
+        auto const moved = std::ranges::any_of(captured.served, [&toolchain](auto const& entry) {
+            return entry.second.compiler == toolchain.compiler && entry.second.witness.has_value();
+        });
+        if (moved && unchangedSince)
+            adoption.refreshFromLiveConfig = true;
+    }
+    adoption.captured = std::move(captured.served);
+    return adoption;
 }
 
 void CarryInputsForward(std::map<std::string, ServedToolchain> const& previous, std::map<std::string, ServedToolchain>& next)

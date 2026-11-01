@@ -13,10 +13,14 @@
 
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <format>
 #include <functional>
+#include <map>
+#include <mutex>
 #include <optional>
 #include <stop_token>
+#include <string_view>
 #include <utility>
 
 #include <CacheProtocol.hpp>
@@ -47,9 +51,42 @@ namespace
     /// a reinstalled compiler rejoins the fleet without anybody restarting a service.
     constexpr std::uint64_t SweepEveryBeats = 45;
 
+    /// The variable `node-mcp-e2e` sets to hold the capture walk until a file exists (`AwaitCaptureRelease`). Unset on
+    /// every production node, where the hold is not consulted at all.
+    constexpr std::string_view CaptureHoldVariable = "PACE_NODE_TEST_CAPTURE_HOLD";
+
+    /// How often a held capture looks for its release file. Only a held capture polls, and only in a test.
+    constexpr std::chrono::milliseconds CaptureHoldPoll { 100 };
+
     // The suspend's one dial must be able to fail and still leave the handler budget to return
     // in: a connect bound at or past the budget spends all of it on a scheduler that is not there.
     static_assert(SuspendDialTimeout < SuspendWithdrawBudget);
+
+    /// Wait, before the capture walk, for the file the end-to-end's hold variable names to exist; return at once when
+    /// the variable is unset, which is every production node.
+    ///
+    /// **A test seam, and stated as one**: `node-mcp-e2e` sets it to prove registration precedes the capture by STAGE
+    /// rather than by a wall-clock threshold -- with the walk held, the worker must still register. Read through the
+    /// injected host, and observed against the capture's stop token, so a held node still stops promptly.
+    /// @param host Where the variable and the file are read.
+    /// @param stop The capture thread's stop token.
+    /// @return False when the node was told to stop while held.
+    [[nodiscard]] bool AwaitCaptureRelease(Cc::IToolchainHost& host, std::stop_token const& stop)
+    {
+        auto const release = host.Environment(CaptureHoldVariable);
+        if (!release.has_value() || release->empty())
+            return true;
+        std::mutex parked;
+        std::condition_variable_any woken;
+        while (!host.ReadTextFile(*release).has_value())
+        {
+            std::unique_lock lock { parked };
+            static_cast<void>(woken.wait_for(lock, stop, CaptureHoldPoll, [] { return false; }));
+            if (stop.stop_requested())
+                return false;
+        }
+        return true;
+    }
 
     /// Tell `node-status` what a finished survey concluded.
     ///
@@ -470,6 +507,8 @@ void WorkerTier::Serve(std::map<std::string, ServedToolchain> served)
     auto endpoint = _announced.Current();
     AdoptRegistrars(RegistrarsAt(_toolchains, endpoint), _registrars, _withdrawals);
     RegisterUnder(std::move(endpoint));
+    // A new served map: a capture that started against the previous one must not judge this one stale.
+    ++_servedGeneration;
     // AFTER the two calls above: this says the worker is serving, and it must not say so
     // while the compile port still holds the previous answer.
     PublishToolchains(_runtime, _toolchains.size(), _discovered.entries.size());
@@ -477,30 +516,29 @@ void WorkerTier::Serve(std::map<std::string, ServedToolchain> served)
     _runtime.PublishServedInputs(ServedInputsOf(_toolchains, _capture));
 }
 
-void WorkerTier::AdoptCaptured(SurveyResult captured)
+std::optional<std::map<std::string, ServedToolchain>> WorkerTier::AdoptCaptured(SurveyResult captured,
+                                                                                ServedGeneration capturedAt)
 {
     _capture = InputsCaptureState::Concluded;
-    auto adoption = AdoptCapture(_toolchains, std::move(captured));
-    switch (adoption.kind)
-    {
-        case CaptureAdoptionKind::Attach:
-            // Nothing this worker serves or registers moved: only what it can explain.
-            _toolchains = std::move(adoption.served);
-            _runtime.PublishServedInputs(ServedInputsOf(_toolchains, _capture));
-            return;
-        case CaptureAdoptionKind::Reregister:
-            // A fingerprint the cache answered is not what the tree digests to now: the walk is the truth, so the
-            // worker serves -- and registers -- what it found, through the path every re-survey takes.
-            _logger.Log(LogLevel::Warn,
-                        "the toolchain capture walk did not reproduce a fingerprint this node took from its cache; "
-                        "serving what the walk found");
-            Serve(std::move(adoption.served));
-            return;
-        case CaptureAdoptionKind::Nothing:
-            // Republished so a toolchain without inputs says NotCaptured rather than a promise nothing keeps.
-            _runtime.PublishServedInputs(ServedInputsOf(_toolchains, _capture));
-            return;
-    }
+    auto adoption = AdoptCapture(_toolchains, _servedGeneration, capturedAt, std::move(captured));
+    // Only inputs attach here: nothing this worker serves or registers is added, dropped or re-pointed, so the compile
+    // port and the registrations are untouched.
+    _toolchains = std::move(adoption.served);
+    _runtime.PublishServedInputs(ServedInputsOf(_toolchains, _capture));
+    auto const recorded =
+        std::ranges::count_if(_toolchains, [](auto const& entry) { return entry.second.inputs != nullptr; });
+    // The stage line the MCP end-to-end orders against registration, and the one an operator reads to learn whether
+    // toolchain_diff can explain this node yet.
+    _logger.Logf(
+        LogLevel::Info, "toolchain inputs captured: {} of {} served toolchain(s) recorded", recorded, _toolchains.size());
+    if (!adoption.refreshFromLiveConfig)
+        return std::nullopt;
+    // A cached fingerprint the walk no longer reproduces: re-derived from the LIVE configuration on this beat, never
+    // served from the capture's own map, which the startup configuration surveyed.
+    _logger.Log(LogLevel::Warn,
+                "the toolchain capture walk filed a served compiler under another fingerprint; re-surveying from the "
+                "configuration in force");
+    return std::move(adoption.captured);
 }
 
 void WorkerTier::FollowAnnouncedEndpoint(core::platform::IClock const& statusClock)
@@ -633,7 +671,12 @@ void WorkerTier::Heartbeat(std::stop_token const& stop,
     // stops hearing from expires. Started after the first registration was queued, never by a request; declared
     // here so returning from this function stops the walk and joins it.
     InputsCapture<SurveyResult> capture;
+    auto const captureGeneration = _servedGeneration;
     capture.Start([this, discovered = _discovered](std::stop_token const& captureStop) {
+        // The end-to-end's hold, a no-op unless its variable names a file: what lets it prove registration does not
+        // wait on this walk without timing anything.
+        if (!AwaitCaptureRelease(*_machine.host, captureStop))
+            return SurveyResult { .outcome = SurveyOutcome::Cancelled, .served = {} };
         return FingerprintToolchains(discovered,
                                      *_machine.runner,
                                      *_machine.host,
@@ -671,18 +714,25 @@ void WorkerTier::Heartbeat(std::stop_token const& stop,
         // a change this beat was woken for is published before it is compared.
         _endpoints.Refresh();
         FollowAnnouncedEndpoint(statusClock);
-        auto const depth = RecheckDepthFor(reloaded, beat, SweepEveryBeats);
-        auto const voice = SurveyVoiceFor(reloaded, depth);
-
-        // The capture walk, once it has finished: asked, never waited for.
+        // The capture walk, once it has finished: asked, never waited for. A served compiler it filed under another
+        // fingerprint makes THIS beat's recheck unconditional, from the configuration in force.
+        auto carry = std::optional<std::map<std::string, ServedToolchain>> {};
         if (auto captured = capture.Take(); captured.has_value())
-            AdoptCaptured(*std::move(captured));
+            carry = AdoptCaptured(*std::move(captured), captureGeneration);
+
+        auto const depth =
+            carry.has_value() ? RecheckDepth::Unconditional : RecheckDepthFor(reloaded, beat, SweepEveryBeats);
+        auto const voice = SurveyVoiceFor(reloaded, depth);
 
         auto* const discovery = liveCfg.toolchainDiscovery ? _machine.discovery.get() : nullptr;
         if (auto refreshed = RefreshToolchains(
                 _toolchains, liveCfg, discovery, *_machine.runner, *_machine.host, _toolchainClock, _logger, depth, voice);
             refreshed.changed)
         {
+            // The capture rewrote the cache, so the re-survey above took its fingerprints from it and walked nothing:
+            // the capture's inputs, under the keys they digest to, are the record.
+            if (carry.has_value())
+                CarryInputsForward(*carry, refreshed.served);
             Serve(std::move(refreshed.served));
 
             // A worker that ends up serving nothing keeps running and says so rather than

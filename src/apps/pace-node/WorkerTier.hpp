@@ -411,9 +411,13 @@ class WorkerTier
     /// Make @p served what the compile port and the registrations answer, in that order.
     void Serve(std::map<std::string, ServedToolchain> served);
 
-    /// Adopt the capture walk's survey (`AdoptCapture`): attach its inputs, or serve what it found.
+    /// Adopt the capture walk's survey (`AdoptCapture`): attach its inputs entry by entry, and say whether this beat
+    /// must re-survey from the live configuration.
     /// @param captured What the capture walk surveyed.
-    void AdoptCaptured(SurveyResult captured);
+    /// @param capturedAt The served map's generation when the capture started.
+    /// @return The capture's map, to carry onto the re-survey, when one is due; nothing otherwise.
+    [[nodiscard]] std::optional<std::map<std::string, ServedToolchain>> AdoptCaptured(SurveyResult captured,
+                                                                                      ServedGeneration capturedAt);
 
     /// Re-file the registrations under the endpoint now published, when it is not the one they
     /// were filed under (`_registeredAs`).
@@ -478,6 +482,8 @@ class WorkerTier
     std::map<std::string, ServedToolchain> _toolchains;
     /// Whether this process's capture walk has concluded. Read and written on the heartbeat thread only.
     InputsCaptureState _capture { InputsCaptureState::Pending };
+    /// Bumped by every `Serve`; heartbeat thread only. What a capture is judged against (`AdoptCapture`).
+    ServedGeneration _servedGeneration { 0 };
     std::unique_ptr<IScratchClaim> _scratchClaim;
     Cc::CompileJobRunner _jobs;
     std::vector<std::string> _appliedExtraArgs;

@@ -1445,7 +1445,8 @@ enum class ErrorCode : std::uint8_t
 
     /// FINGERPRINT-INPUTS about a fingerprint this node serves and holds no inputs for, and will not hold while it
     /// runs: an operator's `--toolchain=<fingerprint>=<compiler>` pin, which is never probed, or a fingerprint this
-    /// process's one capture walk did not reproduce.
+    /// process's one capture walk did not reproduce (recorded later only if a re-survey walks it again, e.g. after
+    /// its stamp moved, or at the next start).
     ///
     /// Its own code rather than `NoWorker`, which is RETRIABLE -- a booting fleet has none yet -- and would send the
     /// asker round again for an answer that cannot change. The transient case, a capture walk still running, is
@@ -3168,8 +3169,8 @@ inline constexpr std::array ErrorTable {
                       .defaultMessage = "this node serves that fingerprint and holds no record of what it was computed "
                                         "from",
                       .retry = RetryWillNotHelp,
-                      .retryWhy = "a pin is never probed, and a process captures inputs once; only a restart of the "
-                                  "node asked changes it" },
+                      .retryWhy = "an immediate retry meets the same record: a pin is never probed, and a fingerprint the "
+                                  "capture missed is recorded only when a re-survey walks it again or the node restarts" },
     ErrorDescriptor { .code = ErrorCode::OperatorStandingRequired,
                       .name = "operator-standing-required",
                       .defaultMessage = "an operator's control verb needs this machine, or a voter's identity; a machine "

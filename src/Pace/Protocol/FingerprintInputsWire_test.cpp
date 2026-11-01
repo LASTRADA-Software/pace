@@ -218,3 +218,15 @@ TEST_CASE("A page's overhead and entry sizes are what the encoder writes", "[wir
     CHECK(EncodeFingerprintIndex(index).size()
           == FingerprintIndexOverhead(index.version) + EncodedIndexEntryBytes(index.entries[0]));
 }
+
+TEST_CASE("FINGERPRINT-INPUTS-UNRECORDED keeps its byte and its name", "[wire][fingerprint-inputs]")
+{
+    // The BYTE on the raw enumerator, and the name a log prints, as every neighbouring code is pinned: a consistent
+    // renumbering would leave every symbol-spelling test green while a deployed peer read another refusal.
+    CHECK(static_cast<std::uint8_t>(ErrorCode::FingerprintInputsUnrecorded) == 0x34);
+    auto const* const row = Describe(ErrorCode::FingerprintInputsUnrecorded);
+    REQUIRE(row != nullptr);
+    CHECK(row->name == "fingerprint-inputs-unrecorded");
+    CHECK_FALSE(row->retry.MayHelp());
+    CHECK_FALSE(std::ranges::contains(RetiredErrorCodes, std::uint8_t { 0x34 }));
+}

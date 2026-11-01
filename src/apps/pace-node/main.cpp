@@ -816,8 +816,9 @@ class McpForwarding
 [[nodiscard]] std::vector<Mcp::ToolRow> McpToolTable(NodeConfig const& cfg, McpForwarding& forwarding, ILogger& logger)
 {
     auto tools = Node::FleetReadTools(forwarding.Upstream());
-    std::ranges::move(Node::ToolchainTools(forwarding.Upstream(), forwarding.Directory(), cfg.nodeId),
-                      std::back_inserter(tools));
+    std::ranges::move(
+        Node::ToolchainTools(forwarding.Upstream(), forwarding.Directory(), cfg.nodeId, std::string { VersionString }),
+        std::back_inserter(tools));
     std::ranges::move(Node::NodeReadTools(forwarding.Upstream(), forwarding.Directory(), cfg.nodeId),
                       std::back_inserter(tools));
     std::ranges::move(Node::ActionTools(forwarding.Upstream(), forwarding.Directory(), cfg.nodeId, logger),

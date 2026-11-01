@@ -129,7 +129,7 @@ diagnostic — the build merely got slower, forever, with nothing to show for it
 | `0x31` | grant-unverifiable | The worker can check nobody's lease right now: the state its own consensus applied names no voter yet, or no leader that state counts has spoken to it for longer than the silence bound. A statement about the worker, never about the lease — a fresh grant would get the same answer. |
 | `0x32` | roster-not-yet-applied | A node proof the answering node cannot judge **yet**: its consensus has not applied the log it recovered when it started -- a lone voter before its election commits, a follower before its leader first speaks -- so the key roster it judges by may lack a key its cluster holds. Answered instead of `node-key-unknown`, which would tell an operator to admit a machine the cluster already holds. A statement about the answering node: the proving node asks again on a short backoff, and nobody needs to act. A launcher never meets it -- it proves no identity. |
 | `0x33` | operator-standing-required | An operator's **control** verb -- `CLUSTER-ADMIT` in every form, `CLUSTER-FORGET`, `CLUSTER-SET`, `ENROLL-CONTROL` -- from a caller that IS identified, by a proven node key or a verified machine ticket, whose machine holds no **voter's** seat in the state the asked node applied. A ticket proves a fleet machine, never an operator: any process on an admitted laptop can have its node mint one. These verbs are answered to the asked node's own machine and to a voter's identity alone; run the verb on a voter, or promote this machine. A caller `--fleet-open` alone admitted is still told `identified-caller-required`. |
-| `0x34` | fingerprint-inputs-unrecorded | `FINGERPRINT-INPUTS` about a fingerprint the node serves and holds no inputs for, and will not while it runs: an operator's `--toolchain=<fingerprint>=<compiler>` pin, which is never probed, or a fingerprint the process's one capture walk did not reproduce. Not `no-worker`, which is retriable; asking again does not help until the node restarts. While the capture walk is still running the answer is `worker-toolchain-survey-in-flight`, which does pass. |
+| `0x34` | fingerprint-inputs-unrecorded | `FINGERPRINT-INPUTS` about a fingerprint the node serves and holds no inputs for, and will not hold on an immediate retry: an operator's `--toolchain=<fingerprint>=<compiler>` pin, which is never probed, or a fingerprint the process's one capture walk did not reproduce -- recorded later only when a re-survey walks that toolchain again (its stamp moved, say) or the node restarts. Not `no-worker`, which is retriable. While the capture walk is still running the answer is `worker-toolchain-survey-in-flight` instead, and asking again shortly does help. |
 
 Every one of these is a **refusal the client answers by compiling locally**,
 never by failing. They are distinct codes rather than one "no" because they mean
@@ -262,16 +262,18 @@ An **empty** `fingerprint` asks for the index instead: per served toolchain `[fi
 `0` recorded; `1` an operator's `--toolchain=<fingerprint>=<compiler>` pin, which is never probed;
 `2` not yet captured -- a warm start took the fingerprint from the cache and the one capture walk
 per process, run off the registration path, has not finished; `3` not captured -- that walk ended
-without reproducing this fingerprint, or the toolchain arrived after it. A reader refuses a byte
+without reproducing this fingerprint, or the toolchain arrived after it; a later re-survey that
+walks it records it. A reader refuses a byte
 past `3`. `total` beside a shorter list says the list was cut to the bound.
 
 A member read, gated as `NODE-STATUS` is: a banner and an include tree describe the host, so a
 stranger is refused `not-a-member`, and a caller only `--fleet-open` admitted is refused
 `identified-caller-required`. A fingerprint the node does not serve is refused `no-worker`. One it serves
 and holds no inputs for is refused by its reason: a pin, or a capture that ended without it, is
-`fingerprint-inputs-unrecorded`, which asking again does not change until the node restarts; a
-capture still running is `worker-toolchain-survey-in-flight`, which does pass -- as does a node
-whose first survey has not concluded. A node running no worker, and a cache daemon, refuse
+`fingerprint-inputs-unrecorded`, which an immediate retry does not change (a later re-survey that
+walks the toolchain, or a restart, can); a capture still running is
+`worker-toolchain-survey-in-flight`, and so is a node whose first survey has not concluded --
+both clear by themselves, so asking again shortly helps. A node running no worker, and a cache daemon, refuse
 `dispatch-not-permitted`. No request ever starts a walk: a node answers from what its survey and
 its one capture walk recorded.
 

@@ -44,8 +44,10 @@
 #                                         recommended where the ordering is unknown, a
 #                                         fingerprint per DRIVER otherwise, nobody behind
 #                                         or ahead on a one-machine fleet, a basis on each.
-#   2g. toolchain_diff explains         — on that same scheduler, once its capture walk has
-#       a fingerprint                     run: one of its fingerprints
+#   2g. toolchain_diff explains         — on that same scheduler, whose capture walk is HELD
+#       a fingerprint                     until released: the worker has registered while it
+#                                         is held (asserted -- registration does not wait on
+#                                         the walk), then, released: one of its fingerprints
 #                                         against itself is identical, with the recompute
 #                                         PASSED -- the inputs the survey kept reproduce the
 #                                         fingerprint it registered -- and a fingerprint it
@@ -287,7 +289,10 @@ readonly ACTION_META="\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"$
 action_node_port="$(free_port)"
 action_raft_port="$(free_port)"
 action_mcp_port="$(free_port)"
-"$node" \
+# The capture walk is HELD until this file exists (the node's test seam, read only when the variable is set), so 2f
+# can assert that the worker registers while the walk has not run -- by state, never by a timing threshold.
+capture_release="${workdir}/capture-release"
+PACE_NODE_TEST_CAPTURE_HOLD="$capture_release" "$node" \
     --slots=1 \
     --advertise "127.0.0.1:${action_node_port}" \
     --listen-node "127.0.0.1:${action_node_port}" \
@@ -415,14 +420,27 @@ if command -v cc >/dev/null 2>&1 || command -v c++ >/dev/null 2>&1 || command -v
     # FINGERPRINT-INPUTS, recomputes the fingerprint from them, and finds nothing to tell apart. `recompute: passed`
     # is the wrong-answer guard having RUN -- the inputs the survey kept reproduce the fingerprint it registered.
     diff_fingerprint="$(python3 -I -c "import json,sys; print(json.loads(sys.stdin.read())['result']['structuredContent']['toolchains'][0]['fingerprint'])" <<< "$toolchains_body")"
-    # A warm start registers from the fingerprint cache and captures inputs in ONE walk on a thread of its own, so
-    # until that walk finishes the node answers "not yet captured" -- a transient refusal. Wait on that STATE.
+    # REGISTRATION DOES NOT WAIT ON THE CAPTURE WALK, asserted: the walk is still held (the release file does not
+    # exist), the worker registered above anyway, the node answers the diff with the transient "not yet captured"
+    # refusal, and its log has no capture line yet. A worker that walked before registering could not have got here.
+    [[ ! -e "$capture_release" ]] || fail "the capture release file exists before the test released it"
+    held_body="$(call_action toolchain_diff "{\"a\":{\"fingerprint\":\"${diff_fingerprint}\"},\"b\":{\"fingerprint\":\"${diff_fingerprint}\"}}")"
+    json_check "toolchain_diff while the capture walk is held" "$held_body" \
+        "d['result']['isError'] is True and 'has not yet finished the one walk per start' in d['result']['content'][0]['text']"
+    if grep -q "toolchain inputs captured" "${workdir}/node.log"; then
+        fail "the node logged its capture while the capture walk was held"
+    fi
+    e2e_note "the worker registered while its capture walk was held, and answered the diff not-yet-captured"
+    : > "$capture_release"
+    # Released: the walk runs on its own thread and the node answers once it is adopted. Wait on that STATE.
     diff_captured() {
         local body
         body="$(call_action toolchain_diff "{\"a\":{\"fingerprint\":\"${diff_fingerprint}\"},\"b\":{\"fingerprint\":\"${diff_fingerprint}\"}}")"
         python3 -I -c "import json,sys; d=json.loads(sys.stdin.read()); sys.exit(0 if d['result']['isError'] is False else 1)" <<< "$body"
     }
     wait_until diff_captured "the node's capture walk to record the inputs of ${diff_fingerprint}" "$action_pid" "${workdir}/node.log" 300
+    grep -q "toolchain inputs captured" "${workdir}/node.log" \
+        || fail "the node recorded inputs without logging its capture stage"
     diff_body="$(call_action toolchain_diff "{\"a\":{\"fingerprint\":\"${diff_fingerprint}\"},\"b\":{\"fingerprint\":\"${diff_fingerprint}\"}}")"
     json_check "toolchain_diff of a fingerprint against itself" "$diff_body" \
         "${OK} and ${SC}['identical'] is True and ${SC}['same_fingerprint'] is True and ${SC}['recompute'] == 'passed' and ${SC}['complete'] is True and ${SC}['skew'] is None and ${SC}['inferred'] is False and ${SC}['only_a']['count'] == 0 and ${SC}['only_b']['count'] == 0 and ${SC}['content_differs']['count'] == 0 and ${SC}['a']['fingerprint'] == '${diff_fingerprint}' and ${SC}['a']['total_files'] == ${SC}['b']['total_files'] and ${SC}['verdict'].startswith('the inputs are identical')"

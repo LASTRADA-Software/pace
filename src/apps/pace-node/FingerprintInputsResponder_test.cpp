@@ -339,14 +339,14 @@ TEST_CASE("FINGERPRINT-INPUTS says why there is no record, by which refusal", "[
         CHECK(reply.detail.contains("has not yet finished the one walk per start"));
         CHECK(reply.detail.contains("ask again shortly"));
     }
-    SECTION("a capture that concluded without it: permanent until a restart")
+    SECTION("a capture that concluded without it: not on a retry, only on a re-survey that walks it or a restart")
     {
         FixedServed const source { SurveyOf(record) };
         FingerprintInputsResponder const responder { &source, metrics, std::string { Version } };
         auto const reply = ReadReply(responder.Answer(RequestPayload("uncaptured0000000000000000000000", 0)));
         CHECK(reply.code == Wire::ErrorCode::FingerprintInputsUnrecorded);
         CHECK(reply.detail.contains("did not reproduce it"));
-        CHECK(reply.detail.contains("until it restarts"));
+        CHECK(reply.detail.contains("until a re-survey walks this toolchain again or the node restarts"));
     }
     SECTION("a survey that has not concluded")
     {
@@ -515,40 +515,92 @@ TEST_CASE("A capture walk still running is stopped and joined when the worker st
     CHECK(observedStop.load());
 }
 
-TEST_CASE("Adopting the capture attaches its inputs where it reproduced, and re-serves where the cache was stale",
+TEST_CASE("Adopting the capture attaches inputs entry by entry and never serves the capture's own map",
           "[node][fingerprint-inputs]")
 {
     auto const record = std::make_shared<Cc::FingerprintInputs const>(RecordOf(2));
-    auto const current = std::map<std::string, ServedToolchain> {
-        { "fp-a", ServedWith("/usr/bin/gcc", nullptr, Probed("/usr/bin/gcc")) },
-        { "fp-pin", ServedWith("/opt/pinned/g++", nullptr, std::nullopt) },
-    };
+    auto const servedAt = ServedGeneration { 1 };
 
-    SECTION("the walk reproduced every served fingerprint: inputs attach, nothing re-registers")
+    SECTION("a matching (fingerprint, compiler) pair gets its inputs attached")
     {
+        auto const current = std::map<std::string, ServedToolchain> {
+            { "fp-a", ServedWith("/usr/bin/gcc", nullptr, Probed("/usr/bin/gcc")) },
+        };
         auto captured = SurveyResult { .outcome = SurveyOutcome::Served, .served = current };
         captured.served.at("fp-a").inputs = record;
-        auto const adoption = AdoptCapture(current, std::move(captured));
-        CHECK(adoption.kind == CaptureAdoptionKind::Attach);
+        auto const adoption = AdoptCapture(current, servedAt, servedAt, std::move(captured));
         CHECK(adoption.served.at("fp-a").inputs == record);
-        CHECK(adoption.served.at("fp-pin").inputs == nullptr);
+        CHECK_FALSE(adoption.refreshFromLiveConfig);
     }
-    SECTION("the walk found another fingerprint: the cached one was stale, and the walk's set is served")
+    SECTION("a pin reloaded to /new during the capture stays /new")
     {
+        // The capture surveyed the startup configuration's pin at /old; a reload re-pointed it, and the map moved on.
+        auto const current = std::map<std::string, ServedToolchain> {
+            { "fp-pin", ServedWith("/opt/new/g++", nullptr, std::nullopt) },
+        };
         auto captured = SurveyResult { .outcome = SurveyOutcome::Served, .served = {} };
-        captured.served.emplace("fp-a2", ServedWith("/usr/bin/gcc", record, Probed("/usr/bin/gcc")));
-        captured.served.emplace("fp-pin", ServedWith("/opt/pinned/g++", nullptr, std::nullopt));
-        auto const adoption = AdoptCapture(current, std::move(captured));
-        CHECK(adoption.kind == CaptureAdoptionKind::Reregister);
-        CHECK(adoption.served.contains("fp-a2"));
-        CHECK_FALSE(adoption.served.contains("fp-a"));
-        CHECK(adoption.served.at("fp-a2").inputs == record);
+        captured.served.emplace("fp-pin", ServedWith("/opt/old/g++", nullptr, std::nullopt));
+        for (auto const now: { servedAt, servedAt + 1 })
+        {
+            auto const adoption = AdoptCapture(current, now, servedAt, captured);
+            CHECK(adoption.served.at("fp-pin").compiler == "/opt/new/g++");
+            CHECK_FALSE(adoption.refreshFromLiveConfig);
+        }
     }
-    SECTION("the walk served nothing: nothing changes")
+    SECTION("a toolchain a reload added during the capture survives")
     {
-        auto const adoption = AdoptCapture(current, SurveyResult { .outcome = SurveyOutcome::Cancelled, .served = {} });
-        CHECK(adoption.kind == CaptureAdoptionKind::Nothing);
-        CHECK(adoption.served.empty());
+        auto const current = std::map<std::string, ServedToolchain> {
+            { "fp-a", ServedWith("/usr/bin/gcc", nullptr, Probed("/usr/bin/gcc")) },
+            { "fp-added", ServedWith("/usr/bin/clang", nullptr, Probed("/usr/bin/clang")) },
+        };
+        auto captured = SurveyResult { .outcome = SurveyOutcome::Served, .served = {} };
+        captured.served.emplace("fp-a", ServedWith("/usr/bin/gcc", record, Probed("/usr/bin/gcc")));
+        auto const adoption = AdoptCapture(current, servedAt + 1, servedAt, std::move(captured));
+        REQUIRE(adoption.served.contains("fp-added"));
+        CHECK(adoption.served.at("fp-added").compiler == "/usr/bin/clang");
+        CHECK(adoption.served.at("fp-a").inputs == record);
+        CHECK_FALSE(adoption.refreshFromLiveConfig);
+    }
+    SECTION("a probe that failed in the capture does not drop a served toolchain")
+    {
+        // Same generation: nothing moved, and the capture simply lacks one entry -- a timeout, not staleness.
+        auto const current = std::map<std::string, ServedToolchain> {
+            { "fp-a", ServedWith("/usr/bin/gcc", nullptr, Probed("/usr/bin/gcc")) },
+            { "fp-b", ServedWith("/usr/bin/g++", nullptr, Probed("/usr/bin/g++")) },
+        };
+        auto captured = SurveyResult { .outcome = SurveyOutcome::Served, .served = {} };
+        captured.served.emplace("fp-a", ServedWith("/usr/bin/gcc", record, Probed("/usr/bin/gcc")));
+        auto const adoption = AdoptCapture(current, servedAt, servedAt, std::move(captured));
+        CHECK(adoption.served.size() == 2);
+        CHECK(adoption.served.at("fp-b").inputs == nullptr);
+        CHECK_FALSE(adoption.refreshFromLiveConfig);
+    }
+    SECTION("a real mismatch asks for a refresh from the live configuration, and serves nothing of the capture's")
+    {
+        auto const current = std::map<std::string, ServedToolchain> {
+            { "fp-cached", ServedWith("/usr/bin/gcc", nullptr, Probed("/usr/bin/gcc")) },
+        };
+        auto captured = SurveyResult { .outcome = SurveyOutcome::Served, .served = {} };
+        captured.served.emplace("fp-walked", ServedWith("/usr/bin/gcc", record, Probed("/usr/bin/gcc")));
+        auto const adoption = AdoptCapture(current, servedAt, servedAt, captured);
+        CHECK(adoption.refreshFromLiveConfig);
+        CHECK(adoption.served.contains("fp-cached"));
+        CHECK_FALSE(adoption.served.contains("fp-walked"));
+        // Its inputs are kept only to carry onto what the refresh re-derives.
+        CHECK(adoption.captured.at("fp-walked").inputs == record);
+
+        // And once the map was re-derived since the capture started, the map is the newer answer: no refresh.
+        CHECK_FALSE(AdoptCapture(current, servedAt + 1, servedAt, captured).refreshFromLiveConfig);
+    }
+    SECTION("a capture that served nothing changes nothing")
+    {
+        auto const current = std::map<std::string, ServedToolchain> {
+            { "fp-a", ServedWith("/usr/bin/gcc", nullptr, Probed("/usr/bin/gcc")) },
+        };
+        auto const adoption =
+            AdoptCapture(current, servedAt, servedAt, SurveyResult { .outcome = SurveyOutcome::Cancelled, .served = {} });
+        CHECK(adoption.served.size() == 1);
+        CHECK_FALSE(adoption.refreshFromLiveConfig);
     }
 }
 

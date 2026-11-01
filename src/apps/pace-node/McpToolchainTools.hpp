@@ -68,9 +68,12 @@ namespace McpToolchainDiff
 /// @param upstream How the leader and the nodes are reached; must outlive every row returned.
 /// @param cluster The state `toolchain_diff`'s node names resolve in; must outlive every row returned.
 /// @param selfId This node's id: the one name that resolves on a node that has applied no cluster state.
+/// @param thisVersion This build's `pace-node` version: `toolchain_diff` recomputes HERE, so a side that fails on
+///        another build may be this build's digest moving, which the refusal then names.
 /// @return The rows, in the order `tools/list` presents them.
 [[nodiscard]] std::vector<Mcp::ToolRow> ToolchainTools(IMcpUpstream& upstream,
                                                        IAppliedClusterView const& cluster,
-                                                       std::string selfId);
+                                                       std::string selfId,
+                                                       std::string thisVersion);
 
 } // namespace Pace::Node

@@ -46,6 +46,9 @@ namespace
 /// The id this node answers to in every case.
 constexpr std::string_view SelfId = "node-self";
 
+/// The `pace-node` version this node -- the one that recomputes -- runs in every case.
+constexpr std::string_view ThisVersion = "1.0.0";
+
 /// A cluster that has applied no state: only this node's own id names anybody.
 McpFakes::FixedCluster const NoState { std::nullopt };
 
@@ -111,7 +114,7 @@ constexpr std::uint64_t TermHere = 4;
 /// @return What it answered.
 [[nodiscard]] Mcp::ToolResult CallToolchains(IMcpUpstream& upstream)
 {
-    auto const tools = ToolchainTools(upstream, NoState, std::string { SelfId });
+    auto const tools = ToolchainTools(upstream, NoState, std::string { SelfId }, std::string { ThisVersion });
     auto const found = std::ranges::find(tools, std::string_view { "toolchains" }, &Mcp::ToolRow::name);
     REQUIRE(found != tools.end());
     auto const args = Json::Parse("{}");
@@ -392,7 +395,7 @@ TEST_CASE("toolchains refuses a worker row it cannot read rather than skipping i
 TEST_CASE("toolchains is read-only and says its report is conservative and checkable", "[pace-node][mcp][toolchains]")
 {
     auto upstream = LeaderUpstream();
-    auto const tools = ToolchainTools(upstream, NoState, std::string { SelfId });
+    auto const tools = ToolchainTools(upstream, NoState, std::string { SelfId }, std::string { ThisVersion });
     REQUIRE(tools.size() == 2);
     CHECK(tools.front().name == "toolchains");
     CHECK(tools.front().effect == Mcp::ToolEffect::ReadOnly);
@@ -526,7 +529,7 @@ struct DiffFleet
 [[nodiscard]] Mcp::ToolResult CallDiff(McpFakes::RespondingUpstream& upstream, std::string_view arguments)
 {
     static McpFakes::FixedCluster const cluster { McpFakes::StateOf({ SelfId, "node-b" }) };
-    auto const tools = ToolchainTools(upstream, cluster, std::string { SelfId });
+    auto const tools = ToolchainTools(upstream, cluster, std::string { SelfId }, std::string { ThisVersion });
     auto const found = std::ranges::find(tools, std::string_view { "toolchain_diff" }, &Mcp::ToolRow::name);
     REQUIRE(found != tools.end());
     auto const args = Json::Parse(arguments);
@@ -672,9 +675,9 @@ TEST_CASE("toolchain_diff refuses to stitch two surveys together", "[pace-node][
 TEST_CASE("toolchain_diff recomputes whatever the version strings say, and refuses the one side that fails as stale",
           "[pace-node][mcp][toolchain-diff]")
 {
-    // Identical inputs, one side reproducing and one not, on two builds: the recompute runs on BOTH (the schema is
-    // this build's), the failing side is refused as stale, and the other cause the comparison cannot rule out -- a
-    // digest change without a schema bump -- is named, labelled as an inference, with both versions.
+    // Identical inputs, one side reproducing and one not: the recompute runs on BOTH (the schema is this build's), the
+    // failing side is refused as stale, and because it runs another build than the RECOMPUTING node, the cause the
+    // comparison cannot rule out -- a digest change without a schema bump -- is named, labelled as an inference.
     DiffFleet fleet;
     auto const record = DiffRecord(4);
     fleet.members[""] = DiffFleet::Member { .served = Survey({ Served(record) }), .version = "1.0.0" };
@@ -689,9 +692,71 @@ TEST_CASE("toolchain_diff recomputes whatever the version strings say, and refus
     INFO(result.text);
     CHECK(result.isError);
     CHECK(result.text.starts_with("node-b's inputs no longer reproduce its fingerprint; its toolchain survey changed"));
-    CHECK(result.text.contains("inferred: or the two pace-node builds digest differently without a schema bump"));
-    CHECK(result.text.contains("pace-node 1.0.0"));
-    CHECK(result.text.contains("pace-node 2.0.0"));
+    CHECK(result.text.contains("inferred: or this node's pace-node 1.0.0 digests differently from node-b runs pace-node "
+                               "2.0.0 without a schema bump"));
+}
+
+TEST_CASE("toolchain_diff names this build as a possible cause when both failing sides run another build than it",
+          "[pace-node][mcp][toolchain-diff]")
+{
+    // Both nodes on one build, THIS node on another, different trees, neither reproducing here: the two nodes agree
+    // with each other, so comparing their versions says nothing -- the recomputing node's is the one to compare.
+    DiffFleet fleet;
+    fleet.members[""] = DiffFleet::Member { .served = Survey({ Served(DiffRecord(3), "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee") }),
+                                            .version = "0.9.0" };
+    fleet.members["node-b"] =
+        DiffFleet::Member { .served = Survey({ Served(DiffRecord(4), "ffffffffffffffffffffffffffffffff") }),
+                            .version = "0.9.0" };
+    auto upstream = UpstreamOf(fleet);
+
+    auto const result = CallDiff(upstream,
+                                 R"({"a":{"fingerprint":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"},)"
+                                 R"("b":{"node":"node-b","fingerprint":"ffffffffffffffffffffffffffffffff"}})");
+    INFO(result.text);
+    CHECK(result.isError);
+    CHECK(result.text.starts_with("this node's and node-b's inputs no longer reproduce their fingerprints"));
+    CHECK(result.text.contains("inferred: or this node's pace-node 1.0.0 digests differently"));
+}
+
+TEST_CASE("toolchain_diff offers no build alternative when the failing side runs this node's build",
+          "[pace-node][mcp][toolchain-diff]")
+{
+    DiffFleet fleet;
+    auto const record = DiffRecord(4);
+    fleet.members[""] = DiffFleet::Member { .served = Survey({ Served(record) }), .version = "1.0.0" };
+    fleet.members["node-b"] =
+        DiffFleet::Member { .served = Survey({ Served(record, "ffffffffffffffffffffffffffffffff") }), .version = "1.0.0" };
+    auto upstream = UpstreamOf(fleet);
+
+    auto const result = CallDiff(upstream,
+                                 std::format(R"({{"a":{{"fingerprint":"{}"}},"b":{{"node":"node-b","fingerprint":"{}"}}}})",
+                                             Cc::ComputeToolchainFingerprint(record),
+                                             "ffffffffffffffffffffffffffffffff"));
+    CHECK(result.isError);
+    CHECK(result.text == "node-b's inputs no longer reproduce its fingerprint; its toolchain survey changed");
+}
+
+TEST_CASE("toolchain_diff still checks the matching side when the other is of a foreign schema",
+          "[pace-node][mcp][toolchain-diff]")
+{
+    // Side a is stale under this build's schema; side b is digested under another. a is still recomputed and refused
+    // as stale, and b's schema is named beside it.
+    DiffFleet fleet;
+    auto foreign = DiffRecord(4);
+    foreign.schema = "toolchain-v2";
+    fleet.members[""] = DiffFleet::Member { .served = Survey({ Served(DiffRecord(3), "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee") }),
+                                            .version = "1.0.0" };
+    fleet.members["node-b"] = DiffFleet::Member { .served = Survey({ Served(foreign) }), .version = "0.9.0" };
+    auto upstream = UpstreamOf(fleet);
+
+    auto const result = CallDiff(upstream,
+                                 std::format(R"({{"a":{{"fingerprint":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}},)"
+                                             R"("b":{{"node":"node-b","fingerprint":"{}"}}}})",
+                                             Cc::ComputeToolchainFingerprint(foreign)));
+    INFO(result.text);
+    CHECK(result.isError);
+    CHECK(result.text.starts_with("this node's inputs no longer reproduce its fingerprint"));
+    CHECK(result.text.contains("node-b digests under another fingerprint schema"));
 }
 
 TEST_CASE("toolchain_diff reports a skew where both sides fail on identical inputs", "[pace-node][mcp][toolchain-diff]")

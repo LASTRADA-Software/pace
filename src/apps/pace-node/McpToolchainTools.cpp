@@ -22,6 +22,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -657,6 +658,7 @@ namespace
     [[nodiscard]] Mcp::ToolResult ToolchainDiff(IMcpUpstream& upstream,
                                                 IAppliedClusterView const& cluster,
                                                 std::string const& selfId,
+                                                std::string const& thisVersion,
                                                 Mcp::ToolCall const& call)
     {
         auto a = SideOf(call, "a", upstream, cluster, selfId);
@@ -693,51 +695,79 @@ namespace
         if (complete)
         {
             // The recompute runs for every side digested under THIS build's schema, whatever its version string says:
-            // a version is a label, and the digest is the fact. A side of another schema cannot be recomputed here at
-            // all, which is a skew, reported naming both builds rather than diffing inputs nobody checked.
-            if (left->inputs.schema != Cc::FingerprintSchema || right->inputs.schema != Cc::FingerprintSchema)
-                return Error(std::format("this node digests under fingerprint schema {} and cannot recompute a side "
-                                         "digested under another, so it compares neither: a schema skew -- {}; run one "
-                                         "pace-node build on both",
-                                         Cc::FingerprintSchema,
-                                         versions));
-            auto const reproduces = [](DiffSide const& side, SideRecord const& record) {
+            // a version is a label, and the digest is the fact. A side of another schema cannot be recomputed here,
+            // and it does not stop the OTHER side from being checked: a stale side is reported whatever its partner is.
+            auto const checked = [](DiffSide const& side, SideRecord const& record) -> std::optional<bool> {
+                if (record.inputs.schema != Cc::FingerprintSchema)
+                    return std::nullopt;
                 return Cc::ComputeToolchainFingerprint(record.inputs) == side.fingerprint;
             };
-            auto const leftOk = reproduces(*a, *left);
-            auto const rightOk = reproduces(*b, *right);
+            auto const leftOk = checked(*a, *left);
+            auto const rightOk = checked(*b, *right);
+            auto const failed = [](std::optional<bool> const& ok) {
+                return ok.has_value() && !*ok;
+            };
             auto const sameInputs =
                 left->inputs.banner == right->inputs.banner && left->inputs.driverGrammar == right->inputs.driverGrammar
                 && std::ranges::equal(left->inputs.files, right->inputs.files, [](auto const& x, auto const& y) {
                        return x.relativePath == y.relativePath && x.contentHash == y.contentHash;
                    });
-            if (!leftOk && !rightOk && sameInputs)
+            if (failed(leftOk) && failed(rightOk) && sameInputs)
             {
                 // Both fail on ONE set of inputs: this node digests them to neither fingerprint, so it is this build
                 // that differs, not either survey.
-                skew = std::format("identical inputs, and this node reproduces neither fingerprint from them: a version "
-                                   "skew between this node's digest and the two nodes' -- {}",
+                skew = std::format("identical inputs, and this node (pace-node {}) reproduces neither fingerprint from "
+                                   "them: a version skew between this node's digest and the two nodes' -- {}",
+                                   Readable(thisVersion),
                                    versions);
                 recompute = "failed";
             }
-            else if (!leftOk || !rightOk)
+            else if (failed(leftOk) || failed(rightOk))
             {
-                auto const& stale = !leftOk ? *a : *b;
-                auto refusal = !leftOk && !rightOk
+                auto stale = std::vector<std::string> {};
+                auto otherBuild = std::vector<std::string> {};
+                for (auto const& [side, record, ok]:
+                     { std::tuple { &*a, &*left, leftOk }, std::tuple { &*b, &*right, rightOk } })
+                {
+                    if (!failed(ok))
+                        continue;
+                    stale.push_back(NodeWords(*side));
+                    // The recompute ran HERE, so a failing side on another build than this one may be this build's
+                    // digest moving without a schema bump -- the cause the comparison cannot rule out.
+                    if (record->version != thisVersion)
+                        otherBuild.push_back(
+                            std::format("{} runs pace-node {}", NodeWords(*side), Readable(record->version)));
+                }
+                auto refusal = stale.size() == 2
                                    ? std::format("{}'s and {}'s inputs no longer reproduce their fingerprints; their "
                                                  "toolchain surveys changed",
-                                                 NodeWords(*a),
-                                                 NodeWords(*b))
+                                                 stale[0],
+                                                 stale[1])
                                    : std::format("{}'s inputs no longer reproduce its fingerprint; its toolchain survey "
                                                  "changed",
-                                                 NodeWords(stale));
-                // Two builds: the other cause the comparison cannot rule out, said and labelled.
-                if (left->version != right->version)
-                    refusal += std::format(" -- inferred: or the two pace-node builds digest differently without a "
-                                           "schema bump ({})",
+                                                 stale[0]);
+                if (!otherBuild.empty())
+                    refusal += std::format(" -- inferred: or this node's pace-node {} digests differently from {} without "
+                                           "a schema bump ({})",
+                                           Readable(thisVersion),
+                                           Joined(otherBuild, " and "),
                                            versions);
+                for (auto const& [side, ok]: { std::pair { &*a, leftOk }, std::pair { &*b, rightOk } })
+                    if (!ok.has_value())
+                        refusal += std::format("; {} digests under another fingerprint schema, which this node cannot "
+                                               "check ({})",
+                                               NodeWords(*side),
+                                               versions);
                 return Error(std::move(refusal));
             }
+            else if (!leftOk.has_value() || !rightOk.has_value())
+                // Every side this node could check reproduced; a side it could not is a skew, named with both builds
+                // rather than diffing inputs nobody checked.
+                return Error(std::format("this node digests under fingerprint schema {} and cannot recompute a side "
+                                         "digested under another, so it compares neither: a schema skew -- {}; run one "
+                                         "pace-node build on both",
+                                         Cc::FingerprintSchema,
+                                         versions));
             else
                 recompute = "passed";
         }
@@ -817,7 +847,10 @@ namespace
 
 } // namespace
 
-std::vector<Mcp::ToolRow> ToolchainTools(IMcpUpstream& upstream, IAppliedClusterView const& cluster, std::string selfId)
+std::vector<Mcp::ToolRow> ToolchainTools(IMcpUpstream& upstream,
+                                         IAppliedClusterView const& cluster,
+                                         std::string selfId,
+                                         std::string thisVersion)
 {
     auto* const to = &upstream;
     auto const* const in = &cluster;
@@ -865,8 +898,8 @@ std::vector<Mcp::ToolRow> ToolchainTools(IMcpUpstream& upstream, IAppliedCluster
             .inputSchema = ToolchainDiffInput,
             .outputSchema = ToolchainDiffOutput,
             .effect = Mcp::ToolEffect::ReadOnly,
-            .handler = [to, in, self = std::move(selfId)](
-                           Mcp::ToolCall const& call) { return ToolchainDiff(*to, *in, self, call); },
+            .handler = [to, in, self = std::move(selfId), version = std::move(thisVersion)](
+                           Mcp::ToolCall const& call) { return ToolchainDiff(*to, *in, self, version, call); },
         },
     };
 }
