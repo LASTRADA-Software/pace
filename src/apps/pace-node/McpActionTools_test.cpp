@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "McpActionTools.hpp"
 #include "McpUpstream.hpp"
+#include "McpUpstreamFakes.hpp"
 
 #include <Pace/Cluster/ClusterState.hpp>
 #include <Pace/Core/Ed25519.hpp>
@@ -47,13 +48,6 @@ constexpr std::string_view AnsweredAt = "10.0.0.2:6674";
 /// The client name every call states.
 constexpr std::string_view ClientName = "claude-code";
 
-/// One call the scripted upstream was asked.
-struct AskedCall
-{
-    UpstreamTarget target;     ///< Whom.
-    std::string nodeIdOrEmpty; ///< Which node.
-    std::string frame;         ///< The whole request frame.
-};
 
 /// @param bytes A frame or payload.
 /// @return It, as the upstream carries it.
@@ -62,31 +56,6 @@ struct AskedCall
     return std::string { reinterpret_cast<char const*>(bytes.data()), bytes.size() };
 }
 
-/// An upstream that answers every call with one scripted answer and records what it was asked.
-class ScriptedUpstream final: public IMcpUpstream
-{
-  public:
-    /// @copydoc IMcpUpstream::Ask
-    [[nodiscard]] UpstreamResult Ask(UpstreamTarget target, std::string_view nodeIdOrEmpty, std::string frame) override
-    {
-        calls.push_back(
-            AskedCall { .target = target, .nodeIdOrEmpty = std::string { nodeIdOrEmpty }, .frame = std::move(frame) });
-        return answer;
-    }
-
-    /// Answer every call `Ok` with @p payload.
-    /// @param payload The reply body.
-    void AnswerOk(std::vector<std::byte> const& payload)
-    {
-        answer = UpstreamReply { .status = Wire::Status::Ok,
-                                 .payload = Text(payload),
-                                 .answeredBy = std::string { AnsweredAt },
-                                 .term = std::uint64_t { 4 } };
-    }
-
-    UpstreamResult answer { std::unexpected { std::pair { UpstreamFailure::Unreachable, std::string { "unset" } } } };
-    std::vector<AskedCall> calls;
-};
 
 /// A cluster view holding one state.
 class FixedCluster final: public IAppliedClusterView
@@ -118,7 +87,9 @@ class FixedCluster final: public IAppliedClusterView
 /// Everything a case calls the tools through.
 struct Rig
 {
-    ScriptedUpstream upstream;
+    McpFakes::ScriptedUpstream upstream { McpFakes::UpstreamParticipant { .answeredBy = std::string { AnsweredAt },
+                                                                         .term = std::uint64_t { 4 } },
+                                         UpstreamFailure::Unreachable };
     FixedCluster cluster { std::string_view { SelfId }, std::string_view { "node-b" } };
     CapturingLogger logger;
     std::vector<Mcp::ToolRow> tools = ActionTools(upstream, cluster, std::string { SelfId }, logger);

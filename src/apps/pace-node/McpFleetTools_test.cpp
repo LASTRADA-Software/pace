@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "McpFleetTools.hpp"
 #include "McpUpstream.hpp"
+#include "McpUpstreamFakes.hpp"
 
 #include <Pace/Cluster/ClusterState.hpp>
 #include <Pace/Core/Json.hpp>
@@ -45,39 +46,15 @@ constexpr std::string_view LeaderAt = "10.0.0.1:6674";
 /// The term this node holds, as the scripted upstream reports it.
 constexpr std::uint64_t TermHere = 7;
 
-/// One call the scripted upstream was asked.
-struct AskedCall
+/// @return An upstream answering as the leader under `TermHere`, refusing `NoLeaderKnown` until scripted.
+[[nodiscard]] McpFakes::ScriptedUpstream LeaderUpstream()
 {
-    UpstreamTarget target;     ///< Whom.
-    std::string nodeIdOrEmpty; ///< Which node, for a node target.
-    std::string frame;         ///< The whole request frame.
-};
+    return McpFakes::ScriptedUpstream { McpFakes::UpstreamParticipant { .answeredBy = std::string { LeaderAt },
+                                                                        .term = TermHere },
+                                        UpstreamFailure::NoLeaderKnown };
+}
 
-/// An upstream that answers every call with one scripted result and records what it was asked.
-class ScriptedUpstream final: public IMcpUpstream
-{
-  public:
-    /// @copydoc IMcpUpstream::Ask
-    [[nodiscard]] UpstreamResult Ask(UpstreamTarget target, std::string_view nodeIdOrEmpty, std::string frame) override
-    {
-        calls.push_back(
-            AskedCall { .target = target, .nodeIdOrEmpty = std::string { nodeIdOrEmpty }, .frame = std::move(frame) });
-        return answer;
-    }
 
-    /// Answer @p payload with `Ok`, from the leader, under `TermHere`.
-    /// @param payload The reply's payload.
-    void AnswerOk(std::string payload)
-    {
-        answer = UpstreamReply { .status = Wire::Status::Ok,
-                                 .payload = std::move(payload),
-                                 .answeredBy = std::string { LeaderAt },
-                                 .term = TermHere };
-    }
-
-    UpstreamResult answer { std::unexpected { std::pair { UpstreamFailure::NoLeaderKnown, std::string { "unset" } } } };
-    std::vector<AskedCall> calls;
-};
 
 /// @param tools The table.
 /// @param name A tool's name.
@@ -287,7 +264,7 @@ void CheckSameRow(Json::Value const& document, Json::Value const& projected)
 
 /// @param upstream What was asked.
 /// @return The FLEET-TEXT request the one call carried.
-[[nodiscard]] Wire::FleetTextRequest FleetTextAsked(ScriptedUpstream const& upstream)
+[[nodiscard]] Wire::FleetTextRequest FleetTextAsked(McpFakes::ScriptedUpstream const& upstream)
 {
     REQUIRE(upstream.calls.size() == 1);
     auto const& frame = upstream.calls.front().frame;
@@ -338,7 +315,7 @@ TEST_CASE("Every fleet tool reads the leader's fleet document and reports what i
     // for the same snapshot -- the bytes `/fleet.json` serves -- re-keyed in snake_case with every millisecond
     // column in seconds, and a `null` never turned into a zero.
     auto const [body, document] = ScriptedDocument();
-    ScriptedUpstream upstream;
+    auto upstream = LeaderUpstream();
     upstream.AnswerOk(body);
 
     SECTION("fleet_overview")
@@ -450,7 +427,7 @@ TEST_CASE("A leader that leads no compile queue is reported as none, never as an
 {
     auto snapshot = ScriptedFleet();
     snapshot.compiles.reset();
-    ScriptedUpstream upstream;
+    auto upstream = LeaderUpstream();
     upstream.AnswerOk(Dist::RenderFleetJson(snapshot, Dist::FleetHistoryView {}));
 
     auto const result = Call(upstream, "running_compiles");
@@ -469,7 +446,7 @@ TEST_CASE("A compile total the leader does not carry reads as absent in the text
     auto const at = body.find(totals);
     REQUIRE(at != std::string::npos);
     body.replace(at, totals.size(), R"("compile-totals":{"queued":null,"running":2})");
-    ScriptedUpstream upstream;
+    auto upstream = LeaderUpstream();
     upstream.AnswerOk(body);
 
     auto const result = Call(upstream, "running_compiles");
@@ -481,7 +458,7 @@ TEST_CASE("A compile total the leader does not carry reads as absent in the text
 
 TEST_CASE("An unreachable leader is a tool error naming the endpoint, and nothing structured", "[node][mcp][fleet-tools]")
 {
-    ScriptedUpstream upstream;
+    auto upstream = LeaderUpstream();
     upstream.answer =
         std::unexpected { std::pair { UpstreamFailure::Unreachable,
                                       std::format("{} at 10.0.0.9:6674: connection refused",
@@ -506,7 +483,7 @@ TEST_CASE("A fleet document of another schema is refused, not read", "[node][mcp
     auto const current = std::format(R"("schema":{},)", Dist::FleetJsonSchema);
     REQUIRE(body.starts_with("{" + current));
     body.replace(1, current.size(), std::format(R"("schema":{},)", Dist::FleetJsonSchema + 1));
-    ScriptedUpstream upstream;
+    auto upstream = LeaderUpstream();
     upstream.AnswerOk(body);
 
     auto const result = Call(upstream, "fleet_overview");
@@ -517,7 +494,7 @@ TEST_CASE("A fleet document of another schema is refused, not read", "[node][mcp
 TEST_CASE("An unknown history range or series is refused before anything is asked, listing the valid ones",
           "[node][mcp][fleet-tools]")
 {
-    ScriptedUpstream upstream;
+    auto upstream = LeaderUpstream();
 
     auto const range = Call(upstream, "history", R"({"series":"dispatched","range":"3h"})");
     CHECK(range.isError);
@@ -558,7 +535,7 @@ TEST_CASE("history reports the values /fleet/series.json carries for one series,
     REQUIRE(seriesJson.has_value());
     auto const& expected = Elements(At(At(Unwrap(seriesJson), "series"), "dispatched"));
 
-    ScriptedUpstream upstream;
+    auto upstream = LeaderUpstream();
     upstream.AnswerOk(text);
     auto const result = Call(upstream, "history", R"({"series":"dispatched","range":"24h"})");
     REQUIRE_FALSE(result.isError);
@@ -611,7 +588,7 @@ TEST_CASE("enrollment_status reports the leader's window as --enroll-list reads 
         } },
     };
     auto const payload = Wire::EncodeEnrollmentReport(report);
-    ScriptedUpstream upstream;
+    auto upstream = LeaderUpstream();
     upstream.AnswerOk(AsText(payload));
 
     auto const result = Call(upstream, "enrollment_status");

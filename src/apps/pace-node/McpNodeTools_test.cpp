@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "McpNodeTools.hpp"
 #include "McpUpstream.hpp"
+#include "McpUpstreamFakes.hpp"
 #include "NodeStatusResponder.hpp"
 
 #include <Pace/Cluster/ClusterState.hpp>
@@ -39,40 +40,15 @@ constexpr std::string_view SelfId = "node-self";
 /// Where the answering node is, as the scripted upstream reports it.
 constexpr std::string_view AnsweredAt = "10.0.0.2:6674";
 
-/// One call the scripted upstream was asked.
-struct AskedCall
+/// @return An upstream answering as `AnsweredAt` under term 3, refusing `Unreachable` until scripted.
+[[nodiscard]] McpFakes::ScriptedUpstream NodeUpstream()
 {
-    UpstreamTarget target;     ///< Whom.
-    std::string nodeIdOrEmpty; ///< Which node.
-    std::string frame;         ///< The whole request frame.
-};
+    return McpFakes::ScriptedUpstream { McpFakes::UpstreamParticipant { .answeredBy = std::string { AnsweredAt },
+                                                                        .term = std::uint64_t { 3 } },
+                                        UpstreamFailure::Unreachable };
+}
 
-/// An upstream that answers every call with one scripted reply and records what it was asked.
-class ScriptedUpstream final: public IMcpUpstream
-{
-  public:
-    /// @copydoc IMcpUpstream::Ask
-    [[nodiscard]] UpstreamResult Ask(UpstreamTarget target, std::string_view nodeIdOrEmpty, std::string frame) override
-    {
-        calls.push_back(
-            AskedCall { .target = target, .nodeIdOrEmpty = std::string { nodeIdOrEmpty }, .frame = std::move(frame) });
-        return answer;
-    }
 
-    /// Answer every call with @p fields, encoded as the node encodes them.
-    /// @param fields The status.
-    void AnswerStatus(Wire::NodeStatusFields const& fields)
-    {
-        auto const bytes = Wire::EncodeNodeStatus(fields);
-        answer = UpstreamReply { .status = Wire::Status::Ok,
-                                 .payload = std::string { reinterpret_cast<char const*>(bytes.data()), bytes.size() },
-                                 .answeredBy = std::string { AnsweredAt },
-                                 .term = std::uint64_t { 3 } };
-    }
-
-    UpstreamResult answer { std::unexpected { std::pair { UpstreamFailure::Unreachable, std::string { "unset" } } } };
-    std::vector<AskedCall> calls;
-};
 
 /// A cluster view holding one state, or none.
 class FixedCluster final: public IAppliedClusterView
@@ -204,9 +180,9 @@ TEST_CASE("node_status equals pacectl node for the same reply", "[mcp][node-stat
     // **One derivation**: the tool decodes the reply `pacectl node` decodes and reads every shared quantity through
     // `NodeStatusView`, which `pacectl node`'s record reads too (`NodeVerbs_test` holds that half). So each value
     // the tool reports is compared with the view's answer over the SAME decoded payload.
-    ScriptedUpstream upstream;
+    auto upstream = NodeUpstream();
     FixedCluster const cluster { StateOf({ SelfId }) };
-    upstream.AnswerStatus(EveryDetail());
+    upstream.AnswerOk(Wire::EncodeNodeStatus(EveryDetail()));
     auto const result = CallNodeStatus(upstream, cluster);
     REQUIRE_FALSE(result.isError);
 
@@ -323,9 +299,9 @@ TEST_CASE("secrets are redacted", "[mcp][node-status][node-status-detail]")
     auto const wire = std::string { reinterpret_cast<char const*>(bytes.data()), bytes.size() };
     CHECK(wire.find(Secret) == std::string::npos);
 
-    ScriptedUpstream upstream;
+    auto upstream = NodeUpstream();
     FixedCluster const cluster { std::nullopt };
-    upstream.AnswerStatus(described);
+    upstream.AnswerOk(Wire::EncodeNodeStatus(described));
     auto const result = CallNodeStatus(upstream, cluster);
     REQUIRE_FALSE(result.isError);
     CHECK(Json::Serialize(result.structured).find(Secret) == std::string::npos);
@@ -345,9 +321,9 @@ TEST_CASE("secrets are redacted", "[mcp][node-status][node-status-detail]")
 TEST_CASE("a prefix of an id is not a match", "[mcp][node-status][node-name]")
 {
     // Nothing is asked: a name that resolves nowhere is refused before any node is, never answered about another.
-    ScriptedUpstream upstream;
+    auto upstream = NodeUpstream();
     FixedCluster const cluster { StateOf({ "node-alpha-1", "node-beta" }) };
-    upstream.AnswerStatus(EveryDetail());
+    upstream.AnswerOk(Wire::EncodeNodeStatus(EveryDetail()));
 
     auto const prefix = CallNodeStatus(upstream, cluster, R"({"node":"node-alpha"})");
     CHECK(prefix.isError);
@@ -371,12 +347,12 @@ TEST_CASE("a prefix of an id is not a match", "[mcp][node-status][node-name]")
 
 TEST_CASE("absent tier renders absent", "[mcp][node-status][node-status-detail]")
 {
-    ScriptedUpstream upstream;
+    auto upstream = NodeUpstream();
     FixedCluster const cluster { std::nullopt };
 
     // A cache that has a memory tier and no disk tier: the disk row says so, with every figure null -- never a
     // disk tier holding nothing.
-    upstream.AnswerStatus(EveryDetail());
+    upstream.AnswerOk(Wire::EncodeNodeStatus(EveryDetail()));
     auto const result = CallNodeStatus(upstream, cluster);
     REQUIRE_FALSE(result.isError);
     auto const& tiers = Elements(At(result.structured, "tiers"));
@@ -395,7 +371,7 @@ TEST_CASE("absent tier renders absent", "[mcp][node-status][node-status-detail]"
     // A node with no cache at all: no tiers, which is not a cache with empty ones.
     auto noCache = EveryDetail();
     noCache.runtime.tiers.reset();
-    upstream.AnswerStatus(noCache);
+    upstream.AnswerOk(Wire::EncodeNodeStatus(noCache));
     auto const without = CallNodeStatus(upstream, cluster);
     REQUIRE_FALSE(without.isError);
     CHECK(At(without.structured, "tiers").IsNull());
@@ -403,7 +379,7 @@ TEST_CASE("absent tier renders absent", "[mcp][node-status][node-status-detail]"
 
 TEST_CASE("node_status names who could not be asked rather than answering", "[mcp][node-status]")
 {
-    ScriptedUpstream upstream;
+    auto upstream = NodeUpstream();
     FixedCluster const cluster { StateOf({ SelfId, "node-far" }) };
     upstream.answer =
         std::unexpected { std::pair { UpstreamFailure::Unreachable, std::string { "node-far at 10.0.0.9:6674" } } };
@@ -422,7 +398,7 @@ TEST_CASE("node_status names who could not be asked rather than answering", "[mc
 TEST_CASE("node_status carries 64-bit figures exactly and marks a value that is not UTF-8",
           "[mcp][node-status][node-status-detail]")
 {
-    ScriptedUpstream upstream;
+    auto upstream = NodeUpstream();
     FixedCluster const cluster { std::nullopt };
     auto fields = EveryDetail();
     fields.runtime.tiers = Wire::NodeTiersFields { Wire::NodeTierFields {
@@ -432,7 +408,7 @@ TEST_CASE("node_status carries 64-bit figures exactly and marks a value that is 
             .name = "--cache-dir", .kind = Wire::WireSettingValue::Value, .text = std::string { "/var/cache/p\xff" } },
         Wire::NodeSettingFields { .name = "--pidfile", .kind = Wire::WireSettingValue::Value, .text = "/run/p" },
     };
-    upstream.AnswerStatus(fields);
+    upstream.AnswerOk(Wire::EncodeNodeStatus(fields));
     auto const result = CallNodeStatus(upstream, cluster);
     REQUIRE_FALSE(result.isError);
 

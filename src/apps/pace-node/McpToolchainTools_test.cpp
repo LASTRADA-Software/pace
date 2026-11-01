@@ -2,6 +2,7 @@
 #include "McpFleetTools.hpp"
 #include "McpToolchainTools.hpp"
 #include "McpUpstream.hpp"
+#include "McpUpstreamFakes.hpp"
 
 #include <Pace/Core/Json.hpp>
 #include <Pace/Distributed/FleetHistory.hpp>
@@ -14,6 +15,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -37,32 +39,14 @@ constexpr std::string_view LeaderAt = "10.0.0.1:6674";
 /// The term this node holds, as the scripted upstream reports it.
 constexpr std::uint64_t TermHere = 4;
 
-/// An upstream that answers every call with one scripted result and records whom it was asked.
-class ScriptedUpstream final: public IMcpUpstream
+/// @return An upstream answering as the leader under `TermHere`, refusing `NoLeaderKnown` until scripted.
+[[nodiscard]] McpFakes::ScriptedUpstream LeaderUpstream()
 {
-  public:
-    /// @copydoc IMcpUpstream::Ask
-    [[nodiscard]] UpstreamResult Ask(UpstreamTarget target,
-                                     std::string_view /*nodeIdOrEmpty*/,
-                                     std::string /*frame*/) override
-    {
-        targets.push_back(target);
-        return answer;
-    }
+    return McpFakes::ScriptedUpstream { McpFakes::UpstreamParticipant { .answeredBy = std::string { LeaderAt },
+                                                                        .term = TermHere },
+                                        UpstreamFailure::NoLeaderKnown };
+}
 
-    /// Answer @p payload with `Ok`, from the leader, under `TermHere`.
-    /// @param payload The reply's payload.
-    void AnswerOk(std::string payload)
-    {
-        answer = UpstreamReply { .status = Wire::Status::Ok,
-                                 .payload = std::move(payload),
-                                 .answeredBy = std::string { LeaderAt },
-                                 .term = TermHere };
-    }
-
-    UpstreamResult answer { std::unexpected { std::pair { UpstreamFailure::NoLeaderKnown, std::string { "unset" } } } };
-    std::vector<UpstreamTarget> targets;
-};
 
 /// @param fingerprint The toolchain.
 /// @param endpoint The machine.
@@ -77,6 +61,21 @@ class ScriptedUpstream final: public IMcpUpstream
     report.info.toolchainLabel = std::move(label);
     report.info.slots = 2;
     return report;
+}
+
+/// @param upstream What was asked.
+/// @return The FLEET-TEXT request the first call carried; the case fails when it carried another verb.
+[[nodiscard]] Wire::FleetTextRequest FleetTextAsked(McpFakes::ScriptedUpstream const& upstream)
+{
+    REQUIRE_FALSE(upstream.calls.empty());
+    auto const& frame = upstream.calls.front().frame;
+    auto const bytes = std::as_bytes(std::span { frame.data(), frame.size() });
+    auto const header = Wire::DecodeRequestHeader(bytes);
+    REQUIRE(header.has_value());
+    REQUIRE(Unwrap(header).opRaw == static_cast<std::uint8_t>(Wire::Op::FleetText));
+    auto request = Wire::DecodeFleetTextRequest(bytes.subspan(Wire::RequestHeaderSize));
+    REQUIRE(request.has_value());
+    return Unwrap(request);
 }
 
 /// @param workers The registry entries.
@@ -157,7 +156,7 @@ class ScriptedUpstream final: public IMcpUpstream
 TEST_CASE("toolchains projects the leader's workers by fingerprint and counts machines, not registry rows",
           "[pace-node][mcp][toolchains]")
 {
-    auto upstream = ScriptedUpstream {};
+    auto upstream = LeaderUpstream();
     upstream.AnswerOk(DocumentWith({
         Entry("fp-12", "a:1", "gcc 12.3.0"),
         Entry("fp-13", "b:1", "gcc 13.2.0"),
@@ -171,7 +170,10 @@ TEST_CASE("toolchains projects the leader's workers by fingerprint and counts ma
     auto const result = CallToolchains(upstream);
     INFO(result.text);
     REQUIRE_FALSE(result.isError);
-    CHECK(upstream.targets == std::vector { UpstreamTarget::Leader });
+    // One FLEET-TEXT, in the Json format, to the leader: the one document the fleet tools read.
+    REQUIRE(upstream.calls.size() == 1);
+    CHECK(upstream.calls.front().target == UpstreamTarget::Leader);
+    CHECK(FleetTextAsked(upstream).format == Wire::FleetTextFormat::Json);
     auto const& out = result.structured;
 
     CHECK(*At(out, "answered_by").AsString() == LeaderAt);
@@ -213,7 +215,7 @@ TEST_CASE("toolchains projects the leader's workers by fingerprint and counts ma
 TEST_CASE("toolchains reports an unparseable family as ordering unknown, recommending nothing",
           "[pace-node][mcp][toolchains]")
 {
-    auto upstream = ScriptedUpstream {};
+    auto upstream = LeaderUpstream();
     upstream.AnswerOk(DocumentWith({
         Entry("fp-17", "a:1", "clang 17.0.6"),
         Entry("fp-x", "b:1", "clang"),
@@ -230,7 +232,7 @@ TEST_CASE("toolchains reports an unparseable family as ordering unknown, recomme
 
 TEST_CASE("toolchains on an empty fleet says so rather than failing", "[pace-node][mcp][toolchains]")
 {
-    auto upstream = ScriptedUpstream {};
+    auto upstream = LeaderUpstream();
     upstream.AnswerOk(DocumentWith({}));
     auto const result = CallToolchains(upstream);
     REQUIRE_FALSE(result.isError);
@@ -241,7 +243,7 @@ TEST_CASE("toolchains on an empty fleet says so rather than failing", "[pace-nod
 
 TEST_CASE("toolchains carries the upstream's failure as a tool error", "[pace-node][mcp][toolchains]")
 {
-    auto upstream = ScriptedUpstream {};
+    auto upstream = LeaderUpstream();
     auto const result = CallToolchains(upstream);
     CHECK(result.isError);
     CHECK(result.structured.IsNull());
@@ -258,7 +260,7 @@ TEST_CASE("toolchains refuses a worker row it cannot read rather than skipping i
     workers->second = Json::Value { .v = Json::Array { Json::Value {
                                         .v = Json::Object { { "toolchain", Json::Value { .v = std::int64_t { 7 } } } } } } };
 
-    auto upstream = ScriptedUpstream {};
+    auto upstream = LeaderUpstream();
     upstream.AnswerOk(Json::Serialize(document));
     auto const result = CallToolchains(upstream);
     CHECK(result.isError);
@@ -267,7 +269,7 @@ TEST_CASE("toolchains refuses a worker row it cannot read rather than skipping i
 
 TEST_CASE("toolchains is read-only and says its report is conservative and checkable", "[pace-node][mcp][toolchains]")
 {
-    auto upstream = ScriptedUpstream {};
+    auto upstream = LeaderUpstream();
     auto const tools = ToolchainTools(upstream);
     REQUIRE(tools.size() == 1);
     CHECK(tools.front().effect == Mcp::ToolEffect::ReadOnly);
