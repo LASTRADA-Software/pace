@@ -42,8 +42,26 @@ namespace McpToolchainDiff
     /// grammar only, and the answer says so (`complete: false`) rather than comparing half a tree.
     inline constexpr std::size_t MaxDiffFiles = 200000;
 
+    /// The most reply bytes `toolchain_diff` reads per side before calling it incomplete.
+    ///
+    /// Sized from what a legitimate record IS: this host's largest toolchain, 14162 files, encodes to about 1.3 MB
+    /// (a relative path, a 32-character digest and two field prefixes, ~95 bytes a file), and the `MaxDiffFiles` a
+    /// side may hold at that density is about 19 MB. 64 MiB is three times that -- room for long paths -- and bounds
+    /// what one call holds to two sides of it, whatever a node answers.
+    inline constexpr std::size_t MaxDiffBytesPerSide = std::size_t { 64 } * 1024U * 1024U;
+
+    /// The most pages `toolchain_diff` asks per side before calling it incomplete.
+    ///
+    /// A legitimate record is one to five pages of `FingerprintInputsReplyCeiling` (the 19 MB above at 4 MiB a page);
+    /// 32 is six times that. It is what stops a node answering a page per file -- a page cut to one huge path, with
+    /// the next cursor one further on -- from holding the call for `MaxDiffFiles` round trips.
+    inline constexpr std::size_t MaxDiffPagesPerSide = 32;
+
     /// The most paths each differing group lists; the group's `count` is always the whole number.
     inline constexpr std::size_t MaxListedDiffPaths = 500;
+
+    /// The longest path a group lists whole; a longer one is cut and says how long it was.
+    inline constexpr std::size_t MaxListedPathBytes = 512;
 } // namespace McpToolchainDiff
 
 /// The toolchain tools: `toolchains` and `toolchain_diff`.

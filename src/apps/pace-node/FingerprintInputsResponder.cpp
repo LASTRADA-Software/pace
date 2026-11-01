@@ -5,6 +5,7 @@
 #include <Pace/Protocol/SurfaceRefusal.hpp>
 
 #include <algorithm>
+#include <array>
 #include <format>
 #include <utility>
 
@@ -31,11 +32,59 @@ namespace
                      "and expected, so a counter would read a restart as an event"
     };
 
-    /// What a fingerprint this node does not serve, or serves with no record, is answered with.
-    constexpr Cc::UncountedRefusal NotRecordedHere {
+    /// What a fingerprint this node does not serve is answered with.
+    constexpr Cc::UncountedRefusal NotServedHere {
         .code = Wire::ErrorCode::NoWorker,
-        .rationale = "a diagnostic question about a fingerprint this node does not hold inputs for, answered with "
-                     "which; asking about another node's toolchain is the ordinary way to learn that"
+        .rationale = "a diagnostic question about a fingerprint this node does not serve, answered with which; asking "
+                     "about another node's toolchain is the ordinary way to learn that"
+    };
+
+    /// Why a served fingerprint has no inputs, and how that is answered: one row per absence.
+    struct AbsenceRow
+    {
+        Wire::FingerprintInputsState state; ///< The absence.
+        Cc::UncountedRefusal refusal;       ///< Its code -- whose retry column says whether asking again helps.
+        std::string (*words)(ServedToolchainInputs const& toolchain); ///< What the asker is told.
+    };
+
+    /// The absences. A pin and a capture that did not reproduce are PERMANENT for the process, so they answer a code
+    /// whose retry says so; a capture still running is transient, and answers one that says that.
+    constexpr std::array AbsenceRows {
+        AbsenceRow {
+            .state = Wire::FingerprintInputsState::Pinned,
+            .refusal = { .code = Wire::ErrorCode::FingerprintInputsUnrecorded,
+                         .rationale = "an operator's pin is a decision, answered with what it means; not an event" },
+            .words =
+                [](ServedToolchainInputs const& toolchain) {
+                    return std::format("this node serves {} with {} under an operator's --toolchain=<fingerprint>="
+                                       "<compiler> pin, which is never probed, so it holds no inputs for it and will "
+                                       "not while the pin stands",
+                                       toolchain.fingerprint,
+                                       toolchain.compiler);
+                } },
+        AbsenceRow { .state = Wire::FingerprintInputsState::NotYetCaptured,
+                     .refusal = { .code = Wire::ErrorCode::WorkerToolchainSurveyInFlight,
+                                  .rationale = "what every warm-started node answers until its one capture walk finishes; "
+                                               "transient and expected, so a counter would read a restart as an event" },
+                     .words =
+                         [](ServedToolchainInputs const& toolchain) {
+                             return std::format(
+                                 "this node took {} from its fingerprint cache and has not yet finished the one "
+                                 "walk per start that captures what it was computed from; ask again shortly",
+                                 toolchain.fingerprint);
+                         } },
+        AbsenceRow { .state = Wire::FingerprintInputsState::NotCaptured,
+                     .refusal = { .code = Wire::ErrorCode::FingerprintInputsUnrecorded,
+                                  .rationale = "a capture that concluded without this fingerprint stays so until the node "
+                                               "restarts; answered with why, and the node's log carries the event" },
+                     .words =
+                         [](ServedToolchainInputs const& toolchain) {
+                             return std::format(
+                                 "this node took {} from its fingerprint cache and its capture walk did not "
+                                 "reproduce it -- or found it after the capture ran -- so it holds no inputs for "
+                                 "it until it restarts",
+                                 toolchain.fingerprint);
+                         } },
     };
 
     /// What a record no reply can carry is answered with.
@@ -49,11 +98,13 @@ namespace
 FingerprintInputsResponder::FingerprintInputsResponder(IServedInputsSource const* source,
                                                        IMetricsSink& metrics,
                                                        std::string version,
-                                                       std::size_t pageEntries) noexcept:
+                                                       std::size_t pageEntries,
+                                                       std::size_t replyCeiling) noexcept:
     _source { source },
     _metrics { metrics },
     _version { std::move(version) },
-    _pageEntries { std::max<std::size_t>(pageEntries, 1) }
+    _pageEntries { std::max<std::size_t>(pageEntries, 1) },
+    _replyCeiling { std::min(replyCeiling, Wire::FingerprintInputsReplyCeiling) }
 {
 }
 
@@ -82,18 +133,19 @@ std::vector<std::byte> FingerprintInputsResponder::Answer(std::optional<std::spa
 
     auto const* const toolchain = core::findOrNull(*served, request->fingerprint, &ServedToolchainInputs::fingerprint);
     if (toolchain == nullptr)
-        return Cc::RefuseWithoutCounter(NotRecordedHere,
+        return Cc::RefuseWithoutCounter(NotServedHere,
                                         std::format("this node serves no toolchain with fingerprint {} (it serves {}); "
                                                     "ask with no fingerprint for the list",
                                                     request->fingerprint,
                                                     served->size()));
     if (toolchain->inputs == nullptr)
-        return Cc::RefuseWithoutCounter(
-            NotRecordedHere,
-            std::format("this node serves {} with {} under an operator's --toolchain=<fingerprint>=<compiler> pin, "
-                        "which is never probed, so it holds no inputs for it",
-                        request->fingerprint,
-                        toolchain->compiler));
+    {
+        // A null record with no reason is a publication defect, answered as a capture that did not run rather than
+        // as a pin -- the permanent answer that does not invent a cause.
+        auto const* const absence = core::findOrNull(AbsenceRows, toolchain->state, &AbsenceRow::state);
+        auto const& row = absence != nullptr ? *absence : AbsenceRows.back();
+        return Cc::RefuseWithoutCounter(row.refusal, row.words(*toolchain));
+    }
     return Page(toolchain->fingerprint, *toolchain->inputs, request->cursor);
 }
 
@@ -110,9 +162,9 @@ std::vector<std::byte> FingerprintInputsResponder::Index(ServedInputs const& ser
         auto entry = Wire::FingerprintIndexEntry { .fingerprint = toolchain.fingerprint,
                                                    .label = toolchain.label,
                                                    .compiler = toolchain.compiler,
-                                                   .recorded = toolchain.inputs != nullptr };
+                                                   .state = toolchain.state };
         auto const cost = Wire::EncodedIndexEntryBytes(entry);
-        if (used + cost > Wire::FingerprintInputsReplyCeiling)
+        if (used + cost > _replyCeiling)
             break;
         used += cost;
         index.entries.push_back(std::move(entry));
@@ -126,18 +178,18 @@ std::vector<std::byte> FingerprintInputsResponder::Page(std::string const& finge
 {
     auto const total = inputs.files.size();
     auto const overhead = Wire::FingerprintInputsPageOverhead(fingerprint, _version, inputs);
-    if (overhead > Wire::FingerprintInputsReplyCeiling)
+    if (overhead > _replyCeiling)
         return Cc::RefuseWithoutCounter(UnpageableRecord,
                                         std::format("the inputs of {} hold a banner of {} bytes, more than one reply of "
                                                     "{} bytes carries",
                                                     fingerprint,
                                                     inputs.banner.size(),
-                                                    Wire::FingerprintInputsReplyCeiling));
+                                                    _replyCeiling));
 
     // A cursor past the end is an empty LAST page, never an error and never an index past the vector: the asker
     // learns there is nothing further, which is the truth.
     auto const start = static_cast<std::size_t>(std::min<std::uint64_t>(cursor, total));
-    auto budget = Wire::FingerprintInputsReplyCeiling - overhead;
+    auto budget = _replyCeiling - overhead;
     auto end = start;
     while (end < total && end - start < _pageEntries)
     {
@@ -155,7 +207,7 @@ std::vector<std::byte> FingerprintInputsResponder::Page(std::string const& finge
                                                     start,
                                                     fingerprint,
                                                     inputs.files[start].relativePath.size(),
-                                                    Wire::FingerprintInputsReplyCeiling));
+                                                    _replyCeiling));
 
     auto page = Wire::FingerprintInputsPage {
         .fingerprint = fingerprint,

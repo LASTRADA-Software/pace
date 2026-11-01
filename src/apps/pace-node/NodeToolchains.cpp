@@ -730,16 +730,46 @@ std::vector<std::string> StaleToolchains(std::map<std::string, ServedToolchain> 
     return stale;
 }
 
-std::shared_ptr<ServedInputs const> ServedInputsOf(std::map<std::string, ServedToolchain> const& served)
+std::shared_ptr<ServedInputs const> ServedInputsOf(std::map<std::string, ServedToolchain> const& served,
+                                                   InputsCaptureState capture)
 {
+    using State = CompileCacheWire::FingerprintInputsState;
+    auto const stateOf = [capture](ServedToolchain const& toolchain) {
+        if (toolchain.inputs != nullptr)
+            return State::Recorded;
+        if (!toolchain.witness.has_value())
+            return State::Pinned;
+        return capture == InputsCaptureState::Pending ? State::NotYetCaptured : State::NotCaptured;
+    };
     auto rows = ServedInputs {};
     rows.reserve(served.size());
     for (auto const& [fingerprint, toolchain]: served)
         rows.push_back(ServedToolchainInputs { .fingerprint = fingerprint,
                                                .label = toolchain.label,
                                                .compiler = toolchain.compiler,
-                                               .inputs = toolchain.inputs });
+                                               .inputs = toolchain.inputs,
+                                               .state = stateOf(toolchain) });
     return std::make_shared<ServedInputs const>(std::move(rows));
+}
+
+CaptureAdoption AdoptCapture(std::map<std::string, ServedToolchain> const& current, SurveyResult captured)
+{
+    if (captured.outcome != SurveyOutcome::Served)
+        return CaptureAdoption { .kind = CaptureAdoptionKind::Nothing, .served = {} };
+
+    // The same (fingerprint, compiler) pairs: every served fingerprint was reproduced by the walk, so its record is
+    // the digest's argument list for exactly that key, and it attaches.
+    auto const sameMapping = std::ranges::equal(current, captured.served, [](auto const& a, auto const& b) {
+        return a.first == b.first && a.second.compiler == b.second.compiler;
+    });
+    if (!sameMapping)
+        return CaptureAdoption { .kind = CaptureAdoptionKind::Reregister, .served = std::move(captured.served) };
+
+    auto next = current;
+    for (auto& [fingerprint, toolchain]: next)
+        if (toolchain.inputs == nullptr)
+            toolchain.inputs = captured.served.at(fingerprint).inputs;
+    return CaptureAdoption { .kind = CaptureAdoptionKind::Attach, .served = std::move(next) };
 }
 
 void CarryInputsForward(std::map<std::string, ServedToolchain> const& previous, std::map<std::string, ServedToolchain>& next)

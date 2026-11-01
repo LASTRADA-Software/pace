@@ -182,3 +182,23 @@ TEST_CASE("The common directory is cut at whole path components", "[distributed]
     CHECK(CommonDirectory(std::vector<std::string> { "c++/13/bits/a.h", "c++/13/b.h" }) == "c++/13/");
     CHECK(CommonDirectory(std::vector<std::string> { "stdio.h", "c++/13/b.h" }).empty());
 }
+
+TEST_CASE("An identity-only diff says the files were not compared, and infers nothing", "[distributed][fingerprint-diff]")
+{
+    // Different trees on purpose: an identity diff must not read them -- neither as agreeing nor as differing.
+    auto changed = WithContent(BaseTree(), "c++/13/bits/stl_vector.h", "zz");
+    auto const same = DiffFingerprintIdentity(Record("gcc 13", BaseTree()), Record("gcc 13", changed));
+    CHECK_FALSE(same.filesCompared);
+    CHECK_FALSE(same.Identical());
+    CHECK(same.onlyA.empty());
+    CHECK(same.contentDiffers.empty());
+    CHECK_FALSE(same.inferred);
+    CHECK(same.verdict
+          == "same schema, banner and grammar; the include-tree files were not compared, so whether they "
+             "agree is not known");
+
+    auto const banner = DiffFingerprintIdentity(Record("gcc 13", BaseTree()), Record("gcc 14", BaseTree()));
+    REQUIRE(banner.banner.has_value());
+    CHECK(banner.verdict.starts_with("the compiler banners differ; the include-tree files were not compared"));
+    CHECK_FALSE(banner.inferred);
+}

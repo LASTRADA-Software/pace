@@ -75,14 +75,52 @@ std::string CommonDirectory(std::span<std::string const> paths)
     return std::string { common };
 }
 
+namespace
+{
+    /// Compare the identity two records were digested under, and state each difference as a fact.
+    /// @param a The first record.
+    /// @param b The second record.
+    /// @param diff Where the identity's differences are recorded.
+    /// @return One sentence per difference, in a fixed order.
+    [[nodiscard]] std::vector<std::string> IdentityFacts(Cc::FingerprintInputs const& a,
+                                                         Cc::FingerprintInputs const& b,
+                                                         FingerprintDiff& diff)
+    {
+        diff.schemaDiffers = a.schema != b.schema;
+        if (a.banner != b.banner)
+            diff.banner = std::pair { a.banner, b.banner };
+        if (a.driverGrammar != b.driverGrammar)
+            diff.grammar = std::pair { a.driverGrammar, b.driverGrammar };
+
+        auto facts = std::vector<std::string> {};
+        if (diff.schemaDiffers)
+            facts.push_back(std::format("the fingerprint schemas differ ({} vs {}), so the two pace-node builds digest "
+                                        "differently",
+                                        a.schema,
+                                        b.schema));
+        if (diff.banner.has_value())
+            facts.emplace_back("the compiler banners differ");
+        if (diff.grammar.has_value())
+            facts.push_back(std::format("the driver grammars differ ({} vs {})", a.driverGrammar, b.driverGrammar));
+        return facts;
+    }
+
+    /// @param facts Sentences.
+    /// @return Them joined by `; `.
+    [[nodiscard]] std::string Joined(std::vector<std::string> const& facts)
+    {
+        auto joined = std::string {};
+        for (auto const& fact: facts)
+            joined += joined.empty() ? fact : std::format("; {}", fact);
+        return joined;
+    }
+} // namespace
+
 FingerprintDiff DiffFingerprintInputs(Cc::FingerprintInputs const& a, Cc::FingerprintInputs const& b)
 {
     auto diff = FingerprintDiff {};
-    diff.schemaDiffers = a.schema != b.schema;
-    if (a.banner != b.banner)
-        diff.banner = std::pair { a.banner, b.banner };
-    if (a.driverGrammar != b.driverGrammar)
-        diff.grammar = std::pair { a.driverGrammar, b.driverGrammar };
+    // The facts first, each one a comparison's direct result.
+    auto facts = IdentityFacts(a, b, diff);
 
     auto const left = ByPath(a);
     auto const right = ByPath(b);
@@ -103,18 +141,6 @@ FingerprintDiff DiffFingerprintInputs(Cc::FingerprintInputs const& a, Cc::Finger
         diff.verdict = "the inputs are identical: same schema, banner, grammar and files";
         return diff;
     }
-
-    // The facts first, each one a comparison's direct result.
-    auto facts = std::vector<std::string> {};
-    if (diff.schemaDiffers)
-        facts.push_back(std::format("the fingerprint schemas differ ({} vs {}), so the two pace-node builds digest "
-                                    "differently",
-                                    a.schema,
-                                    b.schema));
-    if (diff.banner.has_value())
-        facts.emplace_back("the compiler banners differ");
-    if (diff.grammar.has_value())
-        facts.push_back(std::format("the driver grammars differ ({} vs {})", a.driverGrammar, b.driverGrammar));
 
     auto const differing = diff.onlyA.size() + diff.onlyB.size() + diff.contentDiffers.size();
     auto directory = std::string {};
@@ -137,12 +163,7 @@ FingerprintDiff DiffFingerprintInputs(Cc::FingerprintInputs const& a, Cc::Finger
     }
 
     auto const sameIdentity = !diff.schemaDiffers && !diff.banner.has_value() && !diff.grammar.has_value();
-    diff.verdict = std::format("{}{}", sameIdentity ? "same banner and grammar; " : "", [&facts] {
-        auto joined = std::string {};
-        for (auto const& fact: facts)
-            joined += joined.empty() ? fact : std::format("; {}", fact);
-        return joined;
-    }());
+    diff.verdict = std::format("{}{}", sameIdentity ? "same banner and grammar; " : "", Joined(facts));
 
     // The one inference: where the compiler identity agrees and only its tree differs, WHERE the difference sits is
     // read for what installs that directory. Said only then, and labelled -- a different banner already names the
@@ -152,6 +173,17 @@ FingerprintDiff DiffFingerprintInputs(Cc::FingerprintInputs const& a, Cc::Finger
         diff.verdict += std::format(" -- inferred: likely {}", InferenceFor(directory).likely);
         diff.inferred = true;
     }
+    return diff;
+}
+
+FingerprintDiff DiffFingerprintIdentity(Cc::FingerprintInputs const& a, Cc::FingerprintInputs const& b)
+{
+    auto diff = FingerprintDiff {};
+    diff.filesCompared = false;
+    auto const facts = IdentityFacts(a, b, diff);
+    // Never "identical", never "the files differ": the files are not known, and the verdict says that much and no more.
+    diff.verdict = std::format("{}; the include-tree files were not compared, so whether they agree is not known",
+                               facts.empty() ? std::string { "same schema, banner and grammar" } : Joined(facts));
     return diff;
 }
 

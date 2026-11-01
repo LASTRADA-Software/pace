@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "FingerprintInputsResponder.hpp"
+#include "InputsCapture.hpp"
 #include "NodeStatusResponder.hpp"
 #include "NodeToolchains.hpp"
 
@@ -10,19 +11,24 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <format>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <ranges>
 #include <span>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
+#include <tests/BoundedWait.hpp>
 #include <tests/Unwrap.hpp>
 
 using namespace Pace;
@@ -86,7 +92,18 @@ class FixedServed final: public IServedInputsSource
         ServedToolchainInputs { .fingerprint = "pinned00000000000000000000000000",
                                 .label = {},
                                 .compiler = "/opt/pinned/g++",
-                                .inputs = nullptr },
+                                .inputs = nullptr,
+                                .state = Wire::FingerprintInputsState::Pinned },
+        ServedToolchainInputs { .fingerprint = "pending0000000000000000000000000",
+                                .label = "clang 22",
+                                .compiler = "/usr/bin/clang",
+                                .inputs = nullptr,
+                                .state = Wire::FingerprintInputsState::NotYetCaptured },
+        ServedToolchainInputs { .fingerprint = "uncaptured0000000000000000000000",
+                                .label = "clang++ 22",
+                                .compiler = "/usr/bin/clang++",
+                                .inputs = nullptr,
+                                .state = Wire::FingerprintInputsState::NotCaptured },
     });
 }
 
@@ -276,13 +293,15 @@ TEST_CASE("FINGERPRINT-INPUTS lists the served toolchains, and says which hold a
     auto const index = Wire::DecodeFingerprintIndex(reply.payload);
     REQUIRE(index.has_value());
     CHECK(Unwrap(index).version == Version);
-    CHECK(Unwrap(index).total == 2);
-    REQUIRE(Unwrap(index).entries.size() == 2);
+    CHECK(Unwrap(index).total == 4);
+    REQUIRE(Unwrap(index).entries.size() == 4);
     CHECK(Unwrap(index).entries[0].fingerprint == Cc::ComputeToolchainFingerprint(record));
     CHECK(Unwrap(index).entries[0].label == "gcc 13.2.0");
     CHECK(Unwrap(index).entries[0].compiler == "/usr/bin/gcc");
-    CHECK(Unwrap(index).entries[0].recorded);
-    CHECK_FALSE(Unwrap(index).entries[1].recorded);
+    CHECK(Unwrap(index).entries[0].state == Wire::FingerprintInputsState::Recorded);
+    CHECK(Unwrap(index).entries[1].state == Wire::FingerprintInputsState::Pinned);
+    CHECK(Unwrap(index).entries[2].state == Wire::FingerprintInputsState::NotYetCaptured);
+    CHECK(Unwrap(index).entries[3].state == Wire::FingerprintInputsState::NotCaptured);
 }
 
 TEST_CASE("FINGERPRINT-INPUTS says why there is no record, by which refusal", "[node][fingerprint-inputs]")
@@ -303,8 +322,31 @@ TEST_CASE("FINGERPRINT-INPUTS says why there is no record, by which refusal", "[
         FixedServed const source { SurveyOf(record) };
         FingerprintInputsResponder const responder { &source, metrics, std::string { Version } };
         auto const reply = ReadReply(responder.Answer(RequestPayload("pinned00000000000000000000000000", 0)));
-        CHECK(reply.code == Wire::ErrorCode::NoWorker);
+        // A pin never changes, so its refusal is one whose retry says asking again does not help -- never `NoWorker`,
+        // which reads as a booting fleet.
+        CHECK(reply.code == Wire::ErrorCode::FingerprintInputsUnrecorded);
+        auto const* const described = Wire::Describe(Wire::ErrorCode::FingerprintInputsUnrecorded);
+        REQUIRE(described != nullptr);
+        CHECK_FALSE(described->retry.MayHelp());
         CHECK(reply.detail.contains("never probed"));
+    }
+    SECTION("a capture walk still running: transient, and said so")
+    {
+        FixedServed const source { SurveyOf(record) };
+        FingerprintInputsResponder const responder { &source, metrics, std::string { Version } };
+        auto const reply = ReadReply(responder.Answer(RequestPayload("pending0000000000000000000000000", 0)));
+        CHECK(reply.code == Wire::ErrorCode::WorkerToolchainSurveyInFlight);
+        CHECK(reply.detail.contains("has not yet finished the one walk per start"));
+        CHECK(reply.detail.contains("ask again shortly"));
+    }
+    SECTION("a capture that concluded without it: permanent until a restart")
+    {
+        FixedServed const source { SurveyOf(record) };
+        FingerprintInputsResponder const responder { &source, metrics, std::string { Version } };
+        auto const reply = ReadReply(responder.Answer(RequestPayload("uncaptured0000000000000000000000", 0)));
+        CHECK(reply.code == Wire::ErrorCode::FingerprintInputsUnrecorded);
+        CHECK(reply.detail.contains("did not reproduce it"));
+        CHECK(reply.detail.contains("until it restarts"));
     }
     SECTION("a survey that has not concluded")
     {
@@ -341,6 +383,31 @@ TEST_CASE("FINGERPRINT-INPUTS counts a malformed request, and only that", "[node
     CHECK(metrics.Read(IMetricsSink::Counter::NodeFingerprintInputsRefusedMalformed) == 3);
 }
 
+namespace
+{
+
+/// @param compiler A compiler path.
+/// @return The witness a probed toolchain carries -- engaged, which is what tells it from an operator's pin.
+[[nodiscard]] std::optional<Cc::ToolchainEvidence> Probed(std::string const& compiler)
+{
+    return Cc::ToolchainEvidence { .compiler = compiler, .banner = "cc 1.0", .roots = {}, .stamp = {} };
+}
+
+/// @param compiler A compiler path.
+/// @param inputs Its record, or null.
+/// @param witness How it was identified: probed, or a pin (none).
+/// @return One served toolchain.
+[[nodiscard]] ServedToolchain ServedWith(std::string const& compiler,
+                                         std::shared_ptr<Cc::FingerprintInputs const> inputs,
+                                         std::optional<Cc::ToolchainEvidence> witness)
+{
+    return ServedToolchain {
+        .compiler = compiler, .label = {}, .family = {}, .witness = std::move(witness), .inputs = std::move(inputs)
+    };
+}
+
+} // namespace
+
 TEST_CASE("A served map publishes each toolchain's inputs, and a later survey keeps an unchanged one's",
           "[node][fingerprint-inputs]")
 {
@@ -348,31 +415,156 @@ TEST_CASE("A served map publishes each toolchain's inputs, and a later survey ke
     // the same fingerprint brought none, and keeps the earlier one under the same key -- never under another.
     auto const record = std::make_shared<Cc::FingerprintInputs const>(RecordOf(3));
     auto previous = std::map<std::string, ServedToolchain> {
-        { "fp-a",
-          ServedToolchain {
-              .compiler = "/usr/bin/gcc", .label = "gcc 13", .family = "gcc", .witness = std::nullopt, .inputs = record } },
+        { "fp-a", ServedWith("/usr/bin/gcc", record, Probed("/usr/bin/gcc")) },
     };
     auto next = std::map<std::string, ServedToolchain> {
-        { "fp-a",
-          ServedToolchain {
-              .compiler = "/usr/bin/gcc", .label = "gcc 13", .family = "gcc", .witness = std::nullopt, .inputs = nullptr } },
-        { "fp-b",
-          ServedToolchain {
-              .compiler = "/usr/bin/g++", .label = "g++ 13", .family = "g++", .witness = std::nullopt, .inputs = nullptr } },
+        { "fp-a", ServedWith("/usr/bin/gcc", nullptr, Probed("/usr/bin/gcc")) },
+        { "fp-b", ServedWith("/usr/bin/g++", nullptr, Probed("/usr/bin/g++")) },
+        { "fp-pin", ServedWith("/opt/pinned/g++", nullptr, std::nullopt) },
     };
     CarryInputsForward(previous, next);
     CHECK(next.at("fp-a").inputs == record);
     CHECK(next.at("fp-b").inputs == nullptr);
 
-    auto const published = ServedInputsOf(next);
-    REQUIRE(published->size() == 2);
-    CHECK((*published)[0].fingerprint == "fp-a");
-    CHECK((*published)[0].inputs == record);
-    CHECK((*published)[1].compiler == "/usr/bin/g++");
+    // A null record carries its REASON: a pin is a pin whenever it is asked; a probed toolchain with none is "not yet"
+    // while the capture runs and "not captured" once it has concluded.
+    using State = Wire::FingerprintInputsState;
+    auto const pending = ServedInputsOf(next, InputsCaptureState::Pending);
+    REQUIRE(pending->size() == 3);
+    CHECK((*pending)[0].fingerprint == "fp-a");
+    CHECK((*pending)[0].inputs == record);
+    CHECK((*pending)[0].state == State::Recorded);
+    CHECK((*pending)[1].compiler == "/usr/bin/g++");
+    CHECK((*pending)[1].state == State::NotYetCaptured);
+    CHECK((*pending)[2].state == State::Pinned);
+    auto const concluded = ServedInputsOf(next, InputsCaptureState::Concluded);
+    CHECK((*concluded)[1].state == State::NotCaptured);
+    CHECK((*concluded)[2].state == State::Pinned);
 
     // Through the runtime state the worker publishes into: nothing before a survey concludes, then exactly that.
     auto runtime = NodeRuntimeState { ToolchainReading {} };
     CHECK(runtime.ServedInputsNow() == nullptr);
-    runtime.PublishServedInputs(published);
-    CHECK(runtime.ServedInputsNow() == published);
+    runtime.PublishServedInputs(pending);
+    CHECK(runtime.ServedInputsNow() == pending);
+}
+
+TEST_CASE("A warm start registers from the cache, and inputs come from one capture walk off that path",
+          "[node][fingerprint-inputs]")
+{
+    // The decision, as data the heartbeat thread reads: the survey that registers takes the cache, so a warm start
+    // waits on no walk; the capture walks.
+    STATIC_CHECK(StartupSurveyPlan.initial == FingerprintWalk::CacheMayAnswer);
+    STATIC_CHECK(StartupSurveyPlan.capture == FingerprintWalk::Always);
+
+    // The ordering, through the seam itself: `Start` returns while the walk is still blocked, and `Take` answers
+    // "not yet" without waiting -- which is what the heartbeat thread asks once per round. Nothing here is timed.
+    std::mutex gate;
+    std::condition_variable opened;
+    auto release = false;
+    auto walkStarted = std::atomic<bool> { false };
+    InputsCapture<int> capture;
+    capture.Start([&](std::stop_token const& /*stop*/) {
+        walkStarted = true;
+        std::unique_lock lock { gate };
+        opened.wait(lock, [&] { return release; });
+        return 42;
+    });
+    REQUIRE(Testing::WaitUntil(
+        "the capture walk to start on its own thread", [&] { return walkStarted.load(); }, [] { return "not started"; }));
+    CHECK_FALSE(capture.Take().has_value());
+
+    {
+        std::scoped_lock const lock { gate };
+        release = true;
+    }
+    opened.notify_all();
+    auto taken = std::optional<int> {};
+    REQUIRE(Testing::WaitUntil(
+        "the capture walk to hand its result back",
+        [&] {
+            if (!taken.has_value())
+                taken = capture.Take();
+            return taken.has_value();
+        },
+        [] { return "no result yet"; }));
+    CHECK(taken == std::optional { 42 });
+    // Exactly once.
+    CHECK_FALSE(capture.Take().has_value());
+}
+
+TEST_CASE("A capture walk still running is stopped and joined when the worker stops", "[node][fingerprint-inputs]")
+{
+    // The walk observes the capture thread's stop token, so destroying the capture -- the heartbeat thread returning
+    // -- ends a walk mid-tree rather than waiting it out.
+    auto observedStop = std::atomic<bool> { false };
+    {
+        InputsCapture<int> capture;
+        auto started = std::atomic<bool> { false };
+        capture.Start([&](std::stop_token const& stop) {
+            started = true;
+            std::mutex parked;
+            std::condition_variable_any woken;
+            std::unique_lock lock { parked };
+            static_cast<void>(woken.wait(lock, stop, [] { return false; }));
+            observedStop = stop.stop_requested();
+            return 0;
+        });
+        REQUIRE(
+            Testing::WaitUntil("the capture walk to start", [&] { return started.load(); }, [] { return "not started"; }));
+    }
+    CHECK(observedStop.load());
+}
+
+TEST_CASE("Adopting the capture attaches its inputs where it reproduced, and re-serves where the cache was stale",
+          "[node][fingerprint-inputs]")
+{
+    auto const record = std::make_shared<Cc::FingerprintInputs const>(RecordOf(2));
+    auto const current = std::map<std::string, ServedToolchain> {
+        { "fp-a", ServedWith("/usr/bin/gcc", nullptr, Probed("/usr/bin/gcc")) },
+        { "fp-pin", ServedWith("/opt/pinned/g++", nullptr, std::nullopt) },
+    };
+
+    SECTION("the walk reproduced every served fingerprint: inputs attach, nothing re-registers")
+    {
+        auto captured = SurveyResult { .outcome = SurveyOutcome::Served, .served = current };
+        captured.served.at("fp-a").inputs = record;
+        auto const adoption = AdoptCapture(current, std::move(captured));
+        CHECK(adoption.kind == CaptureAdoptionKind::Attach);
+        CHECK(adoption.served.at("fp-a").inputs == record);
+        CHECK(adoption.served.at("fp-pin").inputs == nullptr);
+    }
+    SECTION("the walk found another fingerprint: the cached one was stale, and the walk's set is served")
+    {
+        auto captured = SurveyResult { .outcome = SurveyOutcome::Served, .served = {} };
+        captured.served.emplace("fp-a2", ServedWith("/usr/bin/gcc", record, Probed("/usr/bin/gcc")));
+        captured.served.emplace("fp-pin", ServedWith("/opt/pinned/g++", nullptr, std::nullopt));
+        auto const adoption = AdoptCapture(current, std::move(captured));
+        CHECK(adoption.kind == CaptureAdoptionKind::Reregister);
+        CHECK(adoption.served.contains("fp-a2"));
+        CHECK_FALSE(adoption.served.contains("fp-a"));
+        CHECK(adoption.served.at("fp-a2").inputs == record);
+    }
+    SECTION("the walk served nothing: nothing changes")
+    {
+        auto const adoption = AdoptCapture(current, SurveyResult { .outcome = SurveyOutcome::Cancelled, .served = {} });
+        CHECK(adoption.kind == CaptureAdoptionKind::Nothing);
+        CHECK(adoption.served.empty());
+    }
+}
+
+TEST_CASE("FINGERPRINT-INPUTS cuts the index to the reply ceiling, and says it was cut", "[node][fingerprint-inputs]")
+{
+    // A ceiling small enough that the four entries cannot all fit: the index lists a prefix and `total` names all.
+    AtomicMetricsSink metrics;
+    FixedServed const source { SurveyOf(RecordOf(1)) };
+    auto const small = Wire::FingerprintIndexOverhead(Version) + 120;
+    FingerprintInputsResponder const responder { &source, metrics, std::string { Version }, 3, small };
+    auto const reply = ReadReply(responder.Answer(RequestPayload({}, 0)));
+    REQUIRE(reply.status == Wire::Status::Ok);
+    CHECK(reply.payload.size() <= small);
+    auto const index = Wire::DecodeFingerprintIndex(reply.payload);
+    REQUIRE(index.has_value());
+    CHECK(Unwrap(index).total == 4);
+    CHECK_FALSE(Unwrap(index).entries.empty());
+    CHECK(Unwrap(index).entries.size() < 4);
 }

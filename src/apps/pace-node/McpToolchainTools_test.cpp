@@ -664,12 +664,17 @@ TEST_CASE("toolchain_diff refuses to stitch two surveys together", "[pace-node][
     auto const result =
         CallDiff(upstream, std::format(R"({{"a":{{"fingerprint":"{0}"}},"b":{{"fingerprint":"{0}"}}}})", fingerprint));
     CHECK(result.isError);
-    CHECK(result.text.contains("changed while they were being read"));
+    // Both causes, since this end cannot tell them apart: a survey that ran again, or a node whose pages do not add up.
+    CHECK(result.text.contains("its toolchain survey ran again"));
+    CHECK(result.text.contains("pages that do not add up"));
 }
 
-TEST_CASE("toolchain_diff reports identical inputs under two fingerprints as a skew naming both versions",
+TEST_CASE("toolchain_diff recomputes whatever the version strings say, and refuses the one side that fails as stale",
           "[pace-node][mcp][toolchain-diff]")
 {
+    // Identical inputs, one side reproducing and one not, on two builds: the recompute runs on BOTH (the schema is
+    // this build's), the failing side is refused as stale, and the other cause the comparison cannot rule out -- a
+    // digest change without a schema bump -- is named, labelled as an inference, with both versions.
     DiffFleet fleet;
     auto const record = DiffRecord(4);
     fleet.members[""] = DiffFleet::Member { .served = Survey({ Served(record) }), .version = "1.0.0" };
@@ -682,14 +687,60 @@ TEST_CASE("toolchain_diff reports identical inputs under two fingerprints as a s
                                              Cc::ComputeToolchainFingerprint(record),
                                              "ffffffffffffffffffffffffffffffff"));
     INFO(result.text);
+    CHECK(result.isError);
+    CHECK(result.text.starts_with("node-b's inputs no longer reproduce its fingerprint; its toolchain survey changed"));
+    CHECK(result.text.contains("inferred: or the two pace-node builds digest differently without a schema bump"));
+    CHECK(result.text.contains("pace-node 1.0.0"));
+    CHECK(result.text.contains("pace-node 2.0.0"));
+}
+
+TEST_CASE("toolchain_diff reports a skew where both sides fail on identical inputs", "[pace-node][mcp][toolchain-diff]")
+{
+    // This node reproduces neither fingerprint from ONE set of inputs: it is this build's digest that differs, so it is
+    // a skew -- reported naming both versions and both schemas -- and neither survey is blamed.
+    DiffFleet fleet;
+    auto const record = DiffRecord(4);
+    fleet.members[""] =
+        DiffFleet::Member { .served = Survey({ Served(record, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee") }), .version = "1.0.0" };
+    fleet.members["node-b"] =
+        DiffFleet::Member { .served = Survey({ Served(record, "ffffffffffffffffffffffffffffffff") }), .version = "2.0.0" };
+    auto upstream = UpstreamOf(fleet);
+
+    auto const result = CallDiff(upstream,
+                                 R"({"a":{"fingerprint":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"},)"
+                                 R"("b":{"node":"node-b","fingerprint":"ffffffffffffffffffffffffffffffff"}})");
+    INFO(result.text);
     REQUIRE_FALSE(result.isError);
     auto const skew = TextAt(result.structured, "skew");
     REQUIRE(skew.has_value());
-    CHECK(Unwrap(skew).contains("schema or version skew"));
+    CHECK(Unwrap(skew).contains("version skew"));
     CHECK(Unwrap(skew).contains("pace-node 1.0.0"));
     CHECK(Unwrap(skew).contains("pace-node 2.0.0"));
-    CHECK(TextAt(result.structured, "recompute") == "not-run");
+    CHECK(Unwrap(skew).contains(std::string { Cc::FingerprintSchema }));
+    CHECK(TextAt(result.structured, "recompute") == "failed");
+    CHECK(At(result.structured, "identical").AsBool() == std::optional { false });
     CHECK(At(result.structured, "inferred").AsBool() == std::optional { false });
+}
+
+TEST_CASE("toolchain_diff refuses a side digested under another schema, naming both builds",
+          "[pace-node][mcp][toolchain-diff]")
+{
+    DiffFleet fleet;
+    auto const record = DiffRecord(4);
+    auto foreign = record;
+    foreign.schema = "toolchain-v2";
+    fleet.members[""] = DiffFleet::Member { .served = Survey({ Served(record) }), .version = "1.0.0" };
+    fleet.members["node-b"] = DiffFleet::Member { .served = Survey({ Served(foreign) }), .version = "0.9.0" };
+    auto upstream = UpstreamOf(fleet);
+
+    auto const result = CallDiff(upstream,
+                                 std::format(R"({{"a":{{"fingerprint":"{}"}},"b":{{"node":"node-b","fingerprint":"{}"}}}})",
+                                             Cc::ComputeToolchainFingerprint(record),
+                                             Cc::ComputeToolchainFingerprint(foreign)));
+    CHECK(result.isError);
+    CHECK(result.text.contains("schema skew"));
+    CHECK(result.text.contains("pace-node 1.0.0 under fingerprint schema toolchain-v3"));
+    CHECK(result.text.contains("pace-node 0.9.0 under toolchain-v2"));
 }
 
 TEST_CASE("toolchain_diff resolves a toolchain by label or compiler path, exactly, and lists the candidates otherwise",
@@ -754,7 +805,126 @@ TEST_CASE("toolchain_diff refuses a fingerprint the node does not serve, and mal
     }
 }
 
-TEST_CASE("toolchain_diff compares only the identity of a tree too large to fetch, and says so",
+namespace
+{
+
+/// @param call A FINGERPRINT-INPUTS call.
+/// @return The request it carried; the case fails when it carried anything else.
+[[nodiscard]] Wire::FingerprintInputsRequest InputsAsked(McpFakes::AskedCall const& call)
+{
+    auto const frame = std::as_bytes(std::span { call.frame.data(), call.frame.size() });
+    auto request = Wire::DecodeFingerprintInputsRequest(frame.subspan(Wire::RequestHeaderSize));
+    REQUIRE(request.has_value());
+    return Unwrap(request);
+}
+
+/// @param page A page.
+/// @return It, answered `Ok` as the upstream reports it.
+[[nodiscard]] UpstreamResult Answered(Wire::FingerprintInputsPage const& page)
+{
+    return UpstreamReply { .status = Wire::Status::Ok,
+                           .payload = McpFakes::AsUpstreamText(Wire::EncodeFingerprintInputsPage(page)),
+                           .answeredBy = "self:6674",
+                           .term = TermHere };
+}
+
+/// A node claiming far more files than it ever finishes, answering a page per file: one path of @p pathBytes at the
+/// cursor asked, and the next cursor one further on -- every page well-formed, the record never ending.
+/// @param pathBytes How long each page's one path is.
+/// @return What answers every call.
+[[nodiscard]] McpFakes::RespondingUpstream::Responder EndlessPages(std::size_t pathBytes)
+{
+    return [pathBytes](McpFakes::AskedCall const& call) {
+        auto const cursor = InputsAsked(call).cursor;
+        return Answered(Wire::FingerprintInputsPage {
+            .fingerprint = "0123456789abcdef0123456789abcdef",
+            .version = "1.0.0",
+            .cursor = cursor,
+            .totalFiles = 1000,
+            .nextCursor = cursor + 1,
+            .inputs = Cc::FingerprintInputs {
+                .schema = std::string { Cc::FingerprintSchema },
+                .banner = "gcc 13",
+                .driverGrammar = "gnu",
+                .files = { Cc::ToolchainFile { .relativePath = std::string(pathBytes, 'p'), .contentHash = "00" } } } });
+    };
+}
+
+/// The arguments asking the endless node about one fingerprint on both sides.
+constexpr std::string_view EndlessArguments = R"({"a":{"fingerprint":"0123456789abcdef0123456789abcdef"},)"
+                                              R"("b":{"fingerprint":"0123456789abcdef0123456789abcdef"}})";
+
+} // namespace
+
+TEST_CASE("toolchain_diff stops a node that never ends its record at the page bound, and says so",
+          "[pace-node][mcp][toolchain-diff]")
+{
+    // Small paths, so the PAGE bound is what stops it: 32 asks a side, every file dropped, reported incomplete.
+    auto upstream = McpFakes::RespondingUpstream { EndlessPages(64U * 1024U) };
+    auto const result = CallDiff(upstream, EndlessArguments);
+    INFO(result.text);
+    REQUIRE_FALSE(result.isError);
+    CHECK(upstream.Calls().size() == 2 * McpToolchainDiff::MaxDiffPagesPerSide);
+    CHECK(At(result.structured, "complete").AsBool() == std::optional { false });
+    CHECK(TextAt(result.structured, "incomplete").value_or("").contains("had not ended after 32 pages"));
+    CHECK(At(result.structured, "only_a").IsNull());
+    CHECK(At(result.structured, "inferred").AsBool() == std::optional { false });
+}
+
+TEST_CASE("toolchain_diff stops a node at the byte bound before the page bound when its pages are huge",
+          "[pace-node][mcp][toolchain-diff]")
+{
+    // 2.5 MiB a page: the 64 MiB a side is passed within 26 pages, well before the 32-page bound.
+    static_assert((McpToolchainDiff::MaxDiffBytesPerSide / (std::size_t { 5 } * 512U * 1024U))
+                  < McpToolchainDiff::MaxDiffPagesPerSide);
+    auto upstream = McpFakes::RespondingUpstream { EndlessPages(std::size_t { 5 } * 512U * 1024U) };
+    auto const result = CallDiff(upstream, EndlessArguments);
+    INFO(result.text.substr(0, 400));
+    REQUIRE_FALSE(result.isError);
+    CHECK(upstream.Calls().size() < 2 * McpToolchainDiff::MaxDiffPagesPerSide);
+    CHECK(TextAt(result.structured, "incomplete").value_or("").contains("bytes this tool reads per side"));
+}
+
+TEST_CASE("toolchain_diff compares only the identity when ONE side is incomplete, and says the files were not compared",
+          "[pace-node][mcp][toolchain-diff]")
+{
+    // Side a claims too many files; side b is a real, complete record with the same banner. Neither side's files are
+    // compared -- b's list must not be set against an empty a and read as "only on b" -- and nothing is inferred.
+    DiffFleet fleet;
+    auto const record = DiffRecord(5, "gcc 13");
+    fleet.members["node-b"] = DiffFleet::Member { .served = Survey({ Served(record) }), .version = "1.0.0" };
+    auto const tooMany = Wire::FingerprintInputsPage {
+        .fingerprint = "0123456789abcdef0123456789abcdef",
+        .version = "1.0.0",
+        .cursor = 0,
+        .totalFiles = McpToolchainDiff::MaxDiffFiles + 1,
+        .nextCursor = 1,
+        .inputs = Cc::FingerprintInputs { .schema = std::string { Cc::FingerprintSchema },
+                                          .banner = "gcc 13",
+                                          .driverGrammar = "gnu",
+                                          .files = { Cc::ToolchainFile { .relativePath = "a.h", .contentHash = "00" } } },
+    };
+    auto upstream = McpFakes::RespondingUpstream { [&](McpFakes::AskedCall const& call) {
+        return call.nodeIdOrEmpty.empty() ? Answered(tooMany) : fleet.Answer(call);
+    } };
+    auto const result = CallDiff(upstream,
+                                 std::format(R"({{"a":{{"fingerprint":"0123456789abcdef0123456789abcdef"}},)"
+                                             R"("b":{{"node":"node-b","fingerprint":"{}"}}}})",
+                                             Cc::ComputeToolchainFingerprint(record)));
+    INFO(result.text);
+    REQUIRE_FALSE(result.isError);
+    CHECK(At(result.structured, "complete").AsBool() == std::optional { false });
+    CHECK(TextAt(result.structured, "recompute") == "not-run");
+    CHECK(At(result.structured, "inferred").AsBool() == std::optional { false });
+    CHECK(At(result.structured, "identical").AsBool() == std::optional { false });
+    CHECK(At(result.structured, "only_b").IsNull());
+    CHECK(TextAt(result.structured, "verdict")
+          == "same schema, banner and grammar; the include-tree files were not compared, so whether they agree is not "
+             "known");
+    CHECK(TextAt(result.structured, "incomplete").value_or("").contains("200000"));
+}
+
+TEST_CASE("toolchain_diff compares only the identity when BOTH sides are too large to fetch, and says so",
           "[pace-node][mcp][toolchain-diff]")
 {
     // A page claiming more files than the tool fetches: one page is read, the files are not compared, and nothing is
@@ -786,6 +956,34 @@ TEST_CASE("toolchain_diff compares only the identity of a tree too large to fetc
     CHECK(TextAt(result.structured, "incomplete").value_or("").contains("200000"));
     CHECK(At(result.structured, "only_a").IsNull());
     CHECK(At(result.structured, "identical").AsBool() == std::optional { false });
+    CHECK(At(result.structured, "inferred").AsBool() == std::optional { false });
+    CHECK(TextAt(result.structured, "verdict").value_or("").contains("the include-tree files were not compared"));
+    // Both sides' reasons, not only the first's.
+    CHECK(TextAt(result.structured, "incomplete").value_or("").contains("; and "));
     // One page a side, and no more.
     CHECK(upstream.Calls().size() == 2);
+}
+
+TEST_CASE("toolchain_diff cuts a long listed path and says how long it was", "[pace-node][mcp][toolchain-diff]")
+{
+    DiffFleet fleet;
+    auto const mine = DiffRecord(2);
+    auto longer = DiffRecord(2);
+    longer.files.push_back(Cc::ToolchainFile { .relativePath = "c++/13/" + std::string(2000, 'x'), .contentHash = "e1" });
+    longer = Cc::CaptureFingerprintInputs(longer.banner, longer.driverGrammar, std::move(longer.files));
+    fleet.members[""] = DiffFleet::Member { .served = Survey({ Served(mine) }), .version = "1.0.0" };
+    fleet.members["node-b"] = DiffFleet::Member { .served = Survey({ Served(longer) }), .version = "1.0.0" };
+    auto upstream = UpstreamOf(fleet);
+
+    auto const result = CallDiff(upstream,
+                                 std::format(R"({{"a":{{"fingerprint":"{}"}},"b":{{"node":"node-b","fingerprint":"{}"}}}})",
+                                             Cc::ComputeToolchainFingerprint(mine),
+                                             Cc::ComputeToolchainFingerprint(longer)));
+    INFO(result.text.substr(0, 300));
+    REQUIRE_FALSE(result.isError);
+    auto const& paths = Elements(At(At(result.structured, "only_b"), "paths"));
+    REQUIRE(paths.size() == 1);
+    auto const listed = *paths.front().AsString();
+    CHECK(listed.size() < McpToolchainDiff::MaxListedPathBytes + 64);
+    CHECK(listed.ends_with("... (2007 bytes in all)"));
 }

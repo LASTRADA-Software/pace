@@ -44,11 +44,16 @@ struct FingerprintDiff
     /// Whether the verdict says anything the comparison does not show by itself.
     bool inferred { false };
 
-    /// @return True when nothing differs: same schema, banner, grammar and files.
+    /// Whether the files were compared at all. False from `DiffFingerprintIdentity`, whose empty file groups say
+    /// nothing about the files -- never that they agree.
+    bool filesCompared { true };
+
+    /// @return True when nothing differs: same schema, banner, grammar and files -- false when the files were not
+    ///         compared, since then nobody knows.
     [[nodiscard]] bool Identical() const noexcept
     {
-        return !schemaDiffers && !banner.has_value() && !grammar.has_value() && onlyA.empty() && onlyB.empty()
-               && contentDiffers.empty();
+        return filesCompared && !schemaDiffers && !banner.has_value() && !grammar.has_value() && onlyA.empty()
+               && onlyB.empty() && contentDiffers.empty();
     }
 };
 
@@ -83,5 +88,15 @@ inline constexpr std::array TreeInferences {
 /// @param b The second record.
 /// @return What differs, and the verdict.
 [[nodiscard]] FingerprintDiff DiffFingerprintInputs(Cc::FingerprintInputs const& a, Cc::FingerprintInputs const& b);
+
+/// Compare only the identity two fingerprints were computed under -- schema, banner and grammar -- for when a file list
+/// is not available on both sides.
+///
+/// The file groups stay empty and `filesCompared` is false; the verdict SAYS the files were not compared, and nothing
+/// is inferred, since an inference reads the files.
+/// @param a The first record; its files are not read.
+/// @param b The second record; its files are not read.
+/// @return What differs of the identity, and the verdict.
+[[nodiscard]] FingerprintDiff DiffFingerprintIdentity(Cc::FingerprintInputs const& a, Cc::FingerprintInputs const& b);
 
 } // namespace Pace::Distributed

@@ -1442,6 +1442,16 @@ enum class ErrorCode : std::uint8_t
     /// batch this change lands beside assigns; two builds that each read 0x32 their own way would
     /// disagree about a refusal while both looked correct.
     OperatorStandingRequired = 0x33,
+
+    /// FINGERPRINT-INPUTS about a fingerprint this node serves and holds no inputs for, and will not hold while it
+    /// runs: an operator's `--toolchain=<fingerprint>=<compiler>` pin, which is never probed, or a fingerprint this
+    /// process's one capture walk did not reproduce.
+    ///
+    /// Its own code rather than `NoWorker`, which is RETRIABLE -- a booting fleet has none yet -- and would send the
+    /// asker round again for an answer that cannot change. The transient case, a capture walk still running, is
+    /// `WorkerToolchainSurveyInFlight`, which is retriable and true. A new byte and no version bump: the reply
+    /// grammar is unchanged, and a reader that predates it reads a refusal it does not know.
+    FingerprintInputsUnrecorded = 0x34,
 };
 
 /// Bit for `status` within an `OpDescriptor::legalStatuses` mask.
@@ -2559,6 +2569,11 @@ inline constexpr std::array OpTable {
                    .family = VerbFamily::Node,
                    .identity = IdentityRequirement::AddressAdmits },
     // A member read beside node-status, and gated as it is: a banner and an include tree describe the host.
+    // `AddressAdmits` is the DOOR, not the whole rule: the node's handler answers only a caller a route IDENTIFIES
+    // (this machine, a proven key, a verified ticket) and refuses one `--fleet-open` admitted alone
+    // `IdentifiedCallerRequired` -- NODE-STATUS's precedent, which withholds its effective configuration from that
+    // caller. Not `IdentifiedCaller` in this column, which would refuse the whole family's verbs to it; the reply here
+    // is nothing BUT host detail, so this verb refuses where node-status withholds.
     OpDescriptor { .code = Op::FingerprintInputs,
                    .name = "fingerprint-inputs",
                    .fieldCount = 2, // fingerprint (empty asks for the index), page cursor
@@ -3148,6 +3163,13 @@ inline constexpr std::array ErrorTable {
                                         "nobody to it",
                       .retry = RetryWillNotHelp,
                       .retryWhy = "who the caller is does not change by asking again" },
+    ErrorDescriptor { .code = ErrorCode::FingerprintInputsUnrecorded,
+                      .name = "fingerprint-inputs-unrecorded",
+                      .defaultMessage = "this node serves that fingerprint and holds no record of what it was computed "
+                                        "from",
+                      .retry = RetryWillNotHelp,
+                      .retryWhy = "a pin is never probed, and a process captures inputs once; only a restart of the "
+                                  "node asked changes it" },
     ErrorDescriptor { .code = ErrorCode::OperatorStandingRequired,
                       .name = "operator-standing-required",
                       .defaultMessage = "an operator's control verb needs this machine, or a voter's identity; a machine "

@@ -315,8 +315,11 @@ namespace
     // ------------------------------------------------------------ toolchain_diff
 
     namespace Wire = CompileCacheWire;
+    using McpToolchainDiff::MaxDiffBytesPerSide;
     using McpToolchainDiff::MaxDiffFiles;
+    using McpToolchainDiff::MaxDiffPagesPerSide;
     using McpToolchainDiff::MaxListedDiffPaths;
+    using McpToolchainDiff::MaxListedPathBytes;
 
     /// One side of a `toolchain_diff` call, resolved: whom to ask and which fingerprint.
     struct DiffSide
@@ -335,7 +338,8 @@ namespace
         std::string answeredBy;            ///< Who answered.
         std::optional<std::uint64_t> term; ///< This node's term when the answer arrived.
         std::uint64_t totalFiles { 0 };    ///< How many files the record holds.
-        bool complete { false };           ///< Whether every file was fetched (`totalFiles <= MaxDiffFiles`).
+        bool complete { false };           ///< Whether every file was fetched within every per-side bound.
+        std::string incomplete;            ///< Why not, in words naming the bound; empty when `complete`.
     };
 
     /// @param side A side.
@@ -499,30 +503,47 @@ namespace
                && first.inputs.driverGrammar == later.inputs.driverGrammar;
     }
 
-    /// Fetch @p side's whole record, page by page.
+    /// Fetch @p side's whole record, page by page, within the per-side bounds.
     ///
     /// **Two surveys are never merged.** A node's survey can re-run while it is being paged, so every page must
     /// repeat the first one's schema, banner, grammar, version and total, and start where the previous one said the
     /// next would; and the files fetched must add up to the total. Any break is refused, never stitched.
+    ///
+    /// **A side is bounded however its node answers**: past `MaxDiffFiles` claimed, `MaxDiffBytesPerSide` received or
+    /// `MaxDiffPagesPerSide` asked, the record is INCOMPLETE -- its files are dropped there and then, so memory stays
+    /// bounded, and the answer says which bound was reached rather than comparing part of a tree.
     /// @param upstream How a node is asked.
     /// @param side Whom, and which fingerprint.
     /// @return The record, or the tool error naming why there is none.
     [[nodiscard]] std::expected<SideRecord, Mcp::ToolResult> FetchRecord(IMcpUpstream& upstream, DiffSide const& side)
     {
-        auto const changed = [&side] {
-            return Error(std::format("{}'s inputs changed while they were being read; its toolchain survey ran again -- "
-                                     "ask again",
+        // Both causes, because this end cannot tell them apart: a survey that re-ran mid-read and a node whose pages do
+        // not add up look identical from here, and naming one would send the reader after the wrong fault.
+        auto const brokenStream = [&side] {
+            return Error(std::format("{}'s pages did not describe one record: either its toolchain survey ran again "
+                                     "while they were being read -- ask again -- or it answered pages that do not add "
+                                     "up, which a repeat of this answer would point to; compare both nodes' pace-node "
+                                     "builds",
                                      NodeWords(side)));
+        };
+        auto const stopAt = [](SideRecord record, std::string why) {
+            record.complete = false;
+            record.incomplete = std::move(why);
+            record.inputs.files.clear();
+            record.inputs.files.shrink_to_fit();
+            return record;
         };
         auto record = SideRecord {};
         auto first = std::optional<Wire::FingerprintInputsPage> {};
         auto cursor = std::uint64_t { 0 };
-        while (true)
+        auto received = std::size_t { 0 };
+        for (auto const asked: std::views::iota(std::size_t { 1 }, MaxDiffPagesPerSide + 1))
         {
             auto reply = AskInputs(
                 upstream, side, Wire::FingerprintInputsRequest { .fingerprint = side.fingerprint, .cursor = cursor });
             if (!reply.has_value())
                 return std::unexpected { std::move(reply.error()) };
+            received += reply->payload.size();
             auto page = Wire::DecodeFingerprintInputsPage(PayloadBytes(reply->payload));
             if (!page.has_value() || page->fingerprint != side.fingerprint || page->cursor != cursor)
                 return std::unexpected { Error(std::format(
@@ -543,46 +564,54 @@ namespace
                 record.inputs.schema = page->inputs.schema;
                 record.inputs.banner = page->inputs.banner;
                 record.inputs.driverGrammar = page->inputs.driverGrammar;
-                record.complete = page->totalFiles <= MaxDiffFiles;
-                if (!record.complete)
-                    return record;
-                record.inputs.files.reserve(static_cast<std::size_t>(page->totalFiles));
+                record.complete = true;
+                if (page->totalFiles > MaxDiffFiles)
+                    return stopAt(std::move(record),
+                                  std::format("{} holds {} files, more than the {} this tool compares per side",
+                                              NodeWords(side),
+                                              page->totalFiles,
+                                              MaxDiffFiles));
             }
             else if (!SameRecord(*first, *page))
-                return std::unexpected { changed() };
+                return std::unexpected { brokenStream() };
             std::ranges::move(page->inputs.files, std::back_inserter(record.inputs.files));
             auto const next = page->nextCursor;
             if (!first.has_value())
                 first = std::move(*page);
             if (!next.has_value())
                 break;
+            if (received > MaxDiffBytesPerSide)
+                return stopAt(std::move(record),
+                              std::format("{}'s record passed {} bytes over {} pages before it ended, more than the {} "
+                                          "bytes this tool reads per side",
+                                          NodeWords(side),
+                                          received,
+                                          asked,
+                                          MaxDiffBytesPerSide));
+            if (asked >= MaxDiffPagesPerSide)
+                return stopAt(std::move(record),
+                              std::format("{}'s record had not ended after {} pages, the most this tool reads per side",
+                                          NodeWords(side),
+                                          MaxDiffPagesPerSide));
             cursor = *next;
         }
         if (record.inputs.files.size() != record.totalFiles)
-            return std::unexpected { changed() };
+            return std::unexpected { brokenStream() };
         return record;
     }
 
-    /// The wrong-answer guard: a record is used only if it recomputes to the fingerprint it is filed under.
-    /// @param side Whose.
-    /// @param record Its record, complete.
-    /// @return Nothing when it reproduces, or the tool error saying why it cannot be used.
-    [[nodiscard]] std::optional<Mcp::ToolResult> RefuseUnreproduced(DiffSide const& side, SideRecord const& record)
+    /// @param path A path to list.
+    /// @return It as a reader prints it, cut to `MaxListedPathBytes` with the cut said.
+    [[nodiscard]] std::string ListedPath(std::string_view path)
     {
-        // A record of another schema is one this build's digest may not describe at all, so a mismatch there would
-        // blame a survey for a version skew.
-        if (record.inputs.schema != Cc::FingerprintSchema)
-            return Error(std::format("{} fingerprints under schema {} and this node under {}, so this node cannot check "
-                                     "its inputs; {} runs pace-node {} -- run one pace-node build on both",
-                                     NodeWords(side),
-                                     Readable(record.inputs.schema),
-                                     Cc::FingerprintSchema,
-                                     NodeWords(side),
-                                     Readable(record.version)));
-        if (Cc::ComputeToolchainFingerprint(record.inputs) != side.fingerprint)
-            return Error(std::format("{}'s inputs no longer reproduce its fingerprint; its toolchain survey changed",
-                                     NodeWords(side)));
-        return std::nullopt;
+        if (path.size() <= MaxListedPathBytes)
+            return Readable(path);
+        // Cut back to a character boundary, so a cut through a multi-byte character does not read as bytes that are
+        // not UTF-8.
+        auto cut = MaxListedPathBytes;
+        while (cut > 0 && (static_cast<unsigned char>(path[cut]) & 0xC0U) == 0x80U)
+            --cut;
+        return std::format("{}... ({} bytes in all)", Readable(path.substr(0, cut)), path.size());
     }
 
     /// @param paths A group of differing paths.
@@ -591,7 +620,7 @@ namespace
     {
         auto listed = Json::Array {};
         for (auto const& path: paths | std::views::take(MaxListedDiffPaths))
-            listed.push_back(Str(Readable(path)));
+            listed.push_back(Str(ListedPath(path)));
         return Obj(Json::Object {
             { "count", Count(paths.size()) },
             { "listed", Count(listed.size()) },
@@ -644,54 +673,94 @@ namespace
             return std::move(right.error());
 
         auto const complete = left->complete && right->complete;
-        auto const sameInputs =
-            complete && left->inputs.schema == right->inputs.schema && left->inputs.banner == right->inputs.banner
-            && left->inputs.driverGrammar == right->inputs.driverGrammar
-            && left->inputs.files.size() == right->inputs.files.size()
-            && std::ranges::equal(left->inputs.files, right->inputs.files, [](auto const& x, auto const& y) {
-                   return x.relativePath == y.relativePath && x.contentHash == y.contentHash;
-               });
+        auto const verdictFacts = [&] {
+            // An incomplete side has no file list, so neither side's files are compared: the identity alone, and a
+            // verdict that says the files were not compared rather than one that reads two empty lists as agreeing.
+            return complete ? Distributed::DiffFingerprintInputs(left->inputs, right->inputs)
+                            : Distributed::DiffFingerprintIdentity(left->inputs, right->inputs);
+        };
+        auto const versions = std::format("{} runs pace-node {} under fingerprint schema {}, {} runs pace-node {} under "
+                                          "{}",
+                                          NodeWords(*a),
+                                          Readable(left->version),
+                                          Readable(left->inputs.schema),
+                                          NodeWords(*b),
+                                          Readable(right->version),
+                                          Readable(right->inputs.schema));
 
-        // Identical inputs under two fingerprints cannot happen while both nodes digest alike. Where the two nodes run
-        // different pace-node builds that is said as what it is -- a schema or version skew -- BEFORE the recompute,
-        // which would otherwise blame one node's survey for its build. Where they run ONE build the digests agree by
-        // construction, so the side that does not reproduce is the one whose survey moved, and the recompute says so.
         auto skew = std::optional<std::string> {};
-        if (sameInputs && a->fingerprint != b->fingerprint && left->version != right->version)
-            skew = std::format("identical inputs digest to two fingerprints, which cannot happen while both nodes run one "
-                               "fingerprint schema and build: a schema or version skew -- {} runs pace-node {}, {} runs "
-                               "pace-node {}",
-                               NodeWords(*a),
-                               Readable(left->version),
-                               NodeWords(*b),
-                               Readable(right->version));
-        else if (complete)
+        auto recompute = std::string_view { "not-run" };
+        if (complete)
         {
-            if (auto refusal = RefuseUnreproduced(*a, *left); refusal.has_value())
-                return *std::move(refusal);
-            if (auto refusal = RefuseUnreproduced(*b, *right); refusal.has_value())
-                return *std::move(refusal);
+            // The recompute runs for every side digested under THIS build's schema, whatever its version string says:
+            // a version is a label, and the digest is the fact. A side of another schema cannot be recomputed here at
+            // all, which is a skew, reported naming both builds rather than diffing inputs nobody checked.
+            if (left->inputs.schema != Cc::FingerprintSchema || right->inputs.schema != Cc::FingerprintSchema)
+                return Error(std::format("this node digests under fingerprint schema {} and cannot recompute a side "
+                                         "digested under another, so it compares neither: a schema skew -- {}; run one "
+                                         "pace-node build on both",
+                                         Cc::FingerprintSchema,
+                                         versions));
+            auto const reproduces = [](DiffSide const& side, SideRecord const& record) {
+                return Cc::ComputeToolchainFingerprint(record.inputs) == side.fingerprint;
+            };
+            auto const leftOk = reproduces(*a, *left);
+            auto const rightOk = reproduces(*b, *right);
+            auto const sameInputs =
+                left->inputs.banner == right->inputs.banner && left->inputs.driverGrammar == right->inputs.driverGrammar
+                && std::ranges::equal(left->inputs.files, right->inputs.files, [](auto const& x, auto const& y) {
+                       return x.relativePath == y.relativePath && x.contentHash == y.contentHash;
+                   });
+            if (!leftOk && !rightOk && sameInputs)
+            {
+                // Both fail on ONE set of inputs: this node digests them to neither fingerprint, so it is this build
+                // that differs, not either survey.
+                skew = std::format("identical inputs, and this node reproduces neither fingerprint from them: a version "
+                                   "skew between this node's digest and the two nodes' -- {}",
+                                   versions);
+                recompute = "failed";
+            }
+            else if (!leftOk || !rightOk)
+            {
+                auto const& stale = !leftOk ? *a : *b;
+                auto refusal = !leftOk && !rightOk
+                                   ? std::format("{}'s and {}'s inputs no longer reproduce their fingerprints; their "
+                                                 "toolchain surveys changed",
+                                                 NodeWords(*a),
+                                                 NodeWords(*b))
+                                   : std::format("{}'s inputs no longer reproduce its fingerprint; its toolchain survey "
+                                                 "changed",
+                                                 NodeWords(stale));
+                // Two builds: the other cause the comparison cannot rule out, said and labelled.
+                if (left->version != right->version)
+                    refusal += std::format(" -- inferred: or the two pace-node builds digest differently without a "
+                                           "schema bump ({})",
+                                           versions);
+                return Error(std::move(refusal));
+            }
+            else
+                recompute = "passed";
         }
 
-        auto const diff = Distributed::DiffFingerprintInputs(left->inputs, right->inputs);
+        auto const diff = verdictFacts();
+        // Every incomplete side's reason, in order; both when both are.
+        auto reasons = std::vector<std::string> {};
+        for (auto const* const record: { &*left, &*right })
+            if (!record->complete)
+                reasons.push_back(record->incomplete);
         auto const incomplete =
             complete ? std::optional<std::string> {}
-                     : std::format("{} holds {} files and {} holds {}; this tool compares at most {} per side, so only "
-                                   "the schema, banner and grammar were compared and neither fingerprint was recomputed",
-                                   NodeWords(*a),
-                                   left->totalFiles,
-                                   NodeWords(*b),
-                                   right->totalFiles,
-                                   MaxDiffFiles);
-        auto const verdict = skew.value_or(complete ? diff.verdict : std::format("{} (files not compared)", diff.verdict));
-        auto const recompute = std::string_view { skew.has_value() || !complete ? "not-run" : "passed" };
+                     : std::optional<std::string> { std::format("{}; only the schema, banner and grammar were compared "
+                                                                "and neither fingerprint was recomputed",
+                                                                Joined(reasons, "; and ")) };
+        auto const verdict = skew.value_or(diff.verdict);
 
         auto result = Json::Object {
             { "term", left->term.has_value() ? Int(static_cast<std::int64_t>(*left->term)) : Null() },
             { "term_scope", Str(std::string { TermScope }) },
             { "a", SideJson(*a, *left) },
             { "b", SideJson(*b, *right) },
-            { "identical", Bool(complete && diff.Identical()) },
+            { "identical", Bool(!skew.has_value() && diff.Identical()) },
             { "same_fingerprint", Bool(a->fingerprint == b->fingerprint) },
             { "recompute", Str(std::string { recompute }) },
             { "complete", Bool(complete) },
@@ -727,9 +796,9 @@ namespace
         R"("term":{"type":["integer","null"]},"term_scope":{"const":"this-node"},)"
         R"("a":{"type":"object","description":"node (null: this node), fingerprint, toolchain (what it was resolved from, or null), answered_by, version (its pace-node), schema, grammar, total_files."},"b":{"type":"object"},)"
         R"("identical":{"type":"boolean"},"same_fingerprint":{"type":"boolean"},)"
-        R"("recompute":{"enum":["passed","not-run"],"description":"passed: both records recomputed to their fingerprints on this node before they were compared. not-run: a skew or an incomplete comparison."},)"
-        R"("complete":{"type":"boolean"},"incomplete":{"type":["string","null"],"description":"Why the files were not compared: a side holds more than 200000."},)"
-        R"("skew":{"type":["string","null"],"description":"Identical inputs under two fingerprints from nodes running different pace-node builds: a schema or version skew, naming both versions."},)"
+        R"("recompute":{"enum":["passed","not-run","failed"],"description":"passed: both records recomputed to their fingerprints on this node before they were compared. failed: neither reproduced from identical inputs (see skew). not-run: a side was incomplete, so nothing was recomputed. A side that alone fails is refused as stale."},)"
+        R"("complete":{"type":"boolean"},"incomplete":{"type":["string","null"],"description":"Why the files were not compared: a side passed the files, bytes or pages this tool reads per side. Only schema, banner and grammar are then compared, and inferred is false."},)"
+        R"("skew":{"type":["string","null"],"description":"Identical inputs that this node reproduces to neither fingerprint: a version skew, naming both versions and schemas."},)"
         R"("schema_differs":{"type":"boolean"},"banner":{"type":["object","null"],"description":"Both banners verbatim when they differ."},"grammar":{"type":["object","null"]},)"
         R"("only_a":{"type":["object","null"],"description":"{count, listed, paths}: relative paths only side a holds; at most 500 listed."},"only_b":{"type":["object","null"]},"content_differs":{"type":["object","null"]},)"
         R"("verdict":{"type":"string"},"inferred":{"type":"boolean","description":"true when the verdict carries an inference (marked 'inferred:'), beyond what the comparison shows."}}})";
@@ -787,11 +856,12 @@ std::vector<Mcp::ToolRow> ToolchainTools(IMcpUpstream& upstream, IAppliedCluster
                 "recomputes each fingerprint from them before comparing (recompute: passed), refusing a record that "
                 "no longer reproduces. The result names what differs: schema, both banners, both grammars, files only "
                 "on a, only on b, and on both with different content, each with a count. The verdict states only what "
-                "the comparison shows; anything more is marked 'inferred:' and inferred is true. Identical inputs "
-                "under two fingerprints from two pace-node builds are reported as a schema or version skew naming both "
-                "versions; from one build, the side that does not reproduce is refused as stale. A "
-                "side above 200000 files is compared on schema, banner and grammar only (complete: false). `term` is "
-                "the term THIS node holds.",
+                "the comparison shows; anything more is marked 'inferred:' and inferred is true. A side whose "
+                "record does not reproduce its fingerprint is refused as stale; identical inputs reproducing neither "
+                "fingerprint, or a side digested under another schema, are reported as a skew naming both versions and "
+                "schemas. A side past 200000 files, its byte bound or its page bound is compared on schema, banner and "
+                "grammar only (complete: false), and the verdict says the files were not compared. `term` is the term "
+                "THIS node holds.",
             .inputSchema = ToolchainDiffInput,
             .outputSchema = ToolchainDiffOutput,
             .effect = Mcp::ToolEffect::ReadOnly,

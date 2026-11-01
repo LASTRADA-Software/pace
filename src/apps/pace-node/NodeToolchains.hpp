@@ -65,9 +65,8 @@ enum class SurveyVoice : std::uint8_t
 ///
 /// A cache hit returns a digest an earlier run wrote and walks nothing, so it has no INPUTS to keep -- and a node
 /// keeps them so `toolchain_diff` can explain the fingerprint to another node (`ServedToolchain::inputs`). The
-/// startup survey therefore walks, once per process; every later survey may take the cache, and a fingerprint it
-/// finds unchanged keeps the inputs the walk captured (`CarryInputsForward`), which is what keeps the timer sweep
-/// from re-walking every tree every fifteen minutes.
+/// startup survey still takes the cache, so a warm start registers at once (`StartupSurveyPlan`); the inputs come
+/// from ONE forced walk per process on a thread of its own (`InputsCapture`), adopted through `AdoptCapture`.
 enum class FingerprintWalk : std::uint8_t
 {
     /// Take a cached fingerprint whose stamp still validates; walk only on a miss.
@@ -75,6 +74,30 @@ enum class FingerprintWalk : std::uint8_t
 
     /// Walk every tree whatever the cache holds, and rewrite the cache with the same answer.
     Always,
+};
+
+/// How a worker's start surveys its toolchains: what registers, and what captures inputs.
+struct SurveyPlan
+{
+    FingerprintWalk initial; ///< The survey the heartbeat thread runs before it registers anything.
+    FingerprintWalk capture; ///< The one survey per process, on its own thread, that captures inputs.
+};
+
+/// The plan every worker starts by. **The registering survey takes the cache**: a warm start must register as fast as
+/// it did before inputs existed, since a walk is seconds on Linux and has exceeded five minutes on a Windows CI runner
+/// (#1157). **The capture walks**, off the heartbeat thread, so its length never holds a heartbeat.
+inline constexpr SurveyPlan StartupSurveyPlan { .initial = FingerprintWalk::CacheMayAnswer,
+                                                .capture = FingerprintWalk::Always };
+
+/// Whether this process's one capture walk has concluded.
+///
+/// **PRIVATE: persisted and transmitted nowhere.** It decides which absence a toolchain with no inputs reports:
+/// `NotYetCaptured` before, `NotCaptured` after -- a capture runs once, so a toolchain without inputs after it will
+/// not get any until the node restarts, and saying "not yet" then would be a promise nothing keeps.
+enum class InputsCaptureState : std::uint8_t
+{
+    Pending,   ///< The capture walk has not handed back a result.
+    Concluded, ///< It has, whatever it found.
 };
 
 /// The level a survey's narration is emitted at.
@@ -234,10 +257,17 @@ struct ServedToolchain
 void CarryInputsForward(std::map<std::string, ServedToolchain> const& previous,
                         std::map<std::string, ServedToolchain>& next);
 
-/// What `FINGERPRINT-INPUTS` reads of a served map: each toolchain's fingerprint, label, compiler and inputs.
+/// What `FINGERPRINT-INPUTS` reads of a served map: each toolchain's fingerprint, label, compiler and inputs -- and,
+/// where it holds none, WHY.
+///
+/// A toolchain with no witness is an operator's pin (a served toolchain that was probed always carries one -- an
+/// unrun probe is refused, never served), so it is `Pinned`; any other toolchain without inputs is `NotYetCaptured`
+/// while @p capture is pending and `NotCaptured` once it has concluded.
 /// @param served What the worker serves.
+/// @param capture Whether this process's capture walk has concluded.
 /// @return The same toolchains in fingerprint order, sharing their inputs rather than copying them.
-[[nodiscard]] std::shared_ptr<ServedInputs const> ServedInputsOf(std::map<std::string, ServedToolchain> const& served);
+[[nodiscard]] std::shared_ptr<ServedInputs const> ServedInputsOf(std::map<std::string, ServedToolchain> const& served,
+                                                                 InputsCaptureState capture);
 
 /// Split a `--toolchain` value into its fingerprint and compiler.
 ///
@@ -403,6 +433,39 @@ struct SurveyResult
     SurveyOutcome outcome { SurveyOutcome::NothingToServe }; ///< What happened.
     std::map<std::string, ServedToolchain> served;           ///< Empty unless `Served`.
 };
+
+/// What adopting the capture walk's survey does to what a worker serves.
+///
+/// **PRIVATE: persisted and transmitted nowhere.**
+enum class CaptureAdoptionKind : std::uint8_t
+{
+    /// The capture reproduced every served fingerprint: its inputs attach, and nothing is re-registered.
+    Attach,
+    /// The capture found a different set: a cached fingerprint was stale, so the worker serves -- and re-registers --
+    /// what the walk found.
+    Reregister,
+    /// The capture served nothing (it was stopped, or found no compiler): nothing changes, and every toolchain
+    /// without inputs is now `NotCaptured`.
+    Nothing,
+};
+
+/// What `AdoptCapture` concluded, and the map to serve from now on.
+struct CaptureAdoption
+{
+    CaptureAdoptionKind kind { CaptureAdoptionKind::Nothing }; ///< What to do.
+    std::map<std::string, ServedToolchain> served;             ///< The map for `Attach` and `Reregister`; else empty.
+};
+
+/// Adopt the capture walk's survey into what the worker serves.
+///
+/// **One derivation**: the inputs attached are the capture's own digest arguments, and they are attached only under
+/// the key they digested to -- a capture whose set of (fingerprint, compiler) differs from what is served is not
+/// patched onto it, it REPLACES it, because the walk is the truth and a cached fingerprint it did not reproduce was
+/// stale. Pure, so the decision is a unit test.
+/// @param current What the worker serves now.
+/// @param captured What the forced walk surveyed.
+/// @return What to do, and the map to do it with.
+[[nodiscard]] CaptureAdoption AdoptCapture(std::map<std::string, ServedToolchain> const& current, SurveyResult captured);
 
 /// Identify the discovered compilers, and refuse a node that would serve none.
 ///

@@ -5,6 +5,7 @@
 #include <Pace/Core/WireFields.hpp>
 #include <Pace/Metrics/IMetricsSink.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/FingerprintInputsWire.hpp>
 
 #include <cstddef>
 #include <memory>
@@ -35,9 +36,13 @@ struct ServedToolchainInputs
     std::string label;       ///< What a person calls it; empty when nothing said.
     std::string compiler;    ///< The compiler path it is served with.
 
-    /// What the fingerprint was computed from; null for an operator's pin or a toolchain whose inputs nothing
-    /// captured. Shared and immutable, so publishing it copies no file list.
+    /// What the fingerprint was computed from; null exactly when `state` is not `Recorded`. Shared and immutable,
+    /// so publishing it copies no file list.
     std::shared_ptr<Cc::FingerprintInputs const> inputs;
+
+    /// Whether `inputs` is held, and if not WHY -- a pin, a capture still running, or one that did not reproduce
+    /// this fingerprint. A null pointer alone would answer all three alike, and only one of them passes.
+    CompileCacheWire::FingerprintInputsState state { CompileCacheWire::FingerprintInputsState::Recorded };
 };
 
 /// Every served toolchain, in fingerprint order.
@@ -79,10 +84,14 @@ class FingerprintInputsResponder
     /// @param metrics Where a malformed request is counted; must outlive this.
     /// @param version This build's `pace-node` version, named in every reply so the asker can name both sides'.
     /// @param pageEntries The most files one page lists; `DefaultFingerprintPageEntries` in production.
+    /// @param replyCeiling The most bytes one reply body holds: `FingerprintInputsReplyCeiling` in production, and
+    ///        never more -- a larger value is clamped to it, so no configuration can widen the wire's bound. A test
+    ///        lowers it to reach the cut paths on a small record.
     FingerprintInputsResponder(IServedInputsSource const* source,
                                IMetricsSink& metrics,
                                std::string version,
-                               std::size_t pageEntries = DefaultFingerprintPageEntries) noexcept;
+                               std::size_t pageEntries = DefaultFingerprintPageEntries,
+                               std::size_t replyCeiling = CompileCacheWire::FingerprintInputsReplyCeiling) noexcept;
 
     /// Answer one request.
     /// @param payload The request payload, or nothing when the frame did not carry all of it.
@@ -106,6 +115,7 @@ class FingerprintInputsResponder
     IMetricsSink& _metrics;
     std::string _version;
     std::size_t _pageEntries;
+    std::size_t _replyCeiling;
 };
 
 } // namespace Pace::Node

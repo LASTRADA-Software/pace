@@ -411,6 +411,10 @@ class WorkerTier
     /// Make @p served what the compile port and the registrations answer, in that order.
     void Serve(std::map<std::string, ServedToolchain> served);
 
+    /// Adopt the capture walk's survey (`AdoptCapture`): attach its inputs, or serve what it found.
+    /// @param captured What the capture walk surveyed.
+    void AdoptCaptured(SurveyResult captured);
+
     /// Re-file the registrations under the endpoint now published, when it is not the one they
     /// were filed under (`_registeredAs`).
     ///
@@ -472,6 +476,8 @@ class WorkerTier
     core::platform::SteadyClock _toolchainClock;
     DiscoveredToolchains _discovered;
     std::map<std::string, ServedToolchain> _toolchains;
+    /// Whether this process's capture walk has concluded. Read and written on the heartbeat thread only.
+    InputsCaptureState _capture { InputsCaptureState::Pending };
     std::unique_ptr<IScratchClaim> _scratchClaim;
     Cc::CompileJobRunner _jobs;
     std::vector<std::string> _appliedExtraArgs;

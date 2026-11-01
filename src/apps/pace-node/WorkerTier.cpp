@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "AdminEndpoint.hpp"
 #include "CacheTier.hpp"
+#include "InputsCapture.hpp"
 #include "NodeAnnounce.hpp"
 #include "NodeFormation.hpp"
 #include "NodeIoLoop.hpp"
@@ -473,7 +474,33 @@ void WorkerTier::Serve(std::map<std::string, ServedToolchain> served)
     // while the compile port still holds the previous answer.
     PublishToolchains(_runtime, _toolchains.size(), _discovered.entries.size());
     // What `FINGERPRINT-INPUTS` answers from: the same map, published whole for the reactor that reads it.
-    _runtime.PublishServedInputs(ServedInputsOf(_toolchains));
+    _runtime.PublishServedInputs(ServedInputsOf(_toolchains, _capture));
+}
+
+void WorkerTier::AdoptCaptured(SurveyResult captured)
+{
+    _capture = InputsCaptureState::Concluded;
+    auto adoption = AdoptCapture(_toolchains, std::move(captured));
+    switch (adoption.kind)
+    {
+        case CaptureAdoptionKind::Attach:
+            // Nothing this worker serves or registers moved: only what it can explain.
+            _toolchains = std::move(adoption.served);
+            _runtime.PublishServedInputs(ServedInputsOf(_toolchains, _capture));
+            return;
+        case CaptureAdoptionKind::Reregister:
+            // A fingerprint the cache answered is not what the tree digests to now: the walk is the truth, so the
+            // worker serves -- and registers -- what it found, through the path every re-survey takes.
+            _logger.Log(LogLevel::Warn,
+                        "the toolchain capture walk did not reproduce a fingerprint this node took from its cache; "
+                        "serving what the walk found");
+            Serve(std::move(adoption.served));
+            return;
+        case CaptureAdoptionKind::Nothing:
+            // Republished so a toolchain without inputs says NotCaptured rather than a promise nothing keeps.
+            _runtime.PublishServedInputs(ServedInputsOf(_toolchains, _capture));
+            return;
+    }
 }
 
 void WorkerTier::FollowAnnouncedEndpoint(core::platform::IClock const& statusClock)
@@ -563,9 +590,8 @@ void WorkerTier::Heartbeat(std::stop_token const& stop,
     // SERVING. The stop token is passed because a SIGTERM arriving mid-walk is caught,
     // and an unobservable walk would make the process wait it out before stopping.
     //
-    // It WALKS whatever the fingerprint cache holds (`FingerprintWalk::Always`), once per process: a cache hit
-    // walks nothing and so keeps no inputs, and the inputs are what `toolchain_diff` explains a fingerprint with.
-    // Every later survey may take the cache and carries the inputs captured here forward (`CarryInputsForward`).
+    // It takes the fingerprint cache (`StartupSurveyPlan.initial`), so a warm start registers at once; the inputs
+    // `toolchain_diff` explains a fingerprint with come from the capture walk started below, on its own thread.
     auto surveyed = FingerprintToolchains(_discovered,
                                           *_machine.runner,
                                           *_machine.host,
@@ -573,7 +599,7 @@ void WorkerTier::Heartbeat(std::stop_token const& stop,
                                           _logger,
                                           stop,
                                           SurveyVoice::Announce,
-                                          FingerprintWalk::Always);
+                                          StartupSurveyPlan.initial);
     switch (surveyed.outcome)
     {
         case SurveyOutcome::Served:
@@ -585,7 +611,7 @@ void WorkerTier::Heartbeat(std::stop_token const& stop,
             // ready line. Published first, so an operator asking what is wrong in the
             // window before the stop lands gets a real answer.
             PublishToolchains(_runtime, 0, _discovered.entries.size());
-            _runtime.PublishServedInputs(ServedInputsOf({}));
+            _runtime.PublishServedInputs(ServedInputsOf({}, _capture));
             _surveyFoundNothing = true;
             DaemonControls::Instance().RequestStop();
             return;
@@ -595,12 +621,28 @@ void WorkerTier::Heartbeat(std::stop_token const& stop,
             // periodic sweep surveys again, exactly as it does for a machine that loses
             // its last compiler while serving.
             PublishToolchains(_runtime, 0, _discovered.entries.size());
-            _runtime.PublishServedInputs(ServedInputsOf({}));
+            _runtime.PublishServedInputs(ServedInputsOf({}, _capture));
             break;
         case SurveyOutcome::Cancelled:
             // Already stopping, and interrupted rather than misconfigured.
             return;
     }
+
+    // The one walk per process that captures what each fingerprint was computed from, on a thread of its own: a
+    // tree walk holding THIS thread would hold every heartbeat for its length, and a registration the scheduler
+    // stops hearing from expires. Started after the first registration was queued, never by a request; declared
+    // here so returning from this function stops the walk and joins it.
+    InputsCapture<SurveyResult> capture;
+    capture.Start([this, discovered = _discovered](std::stop_token const& captureStop) {
+        return FingerprintToolchains(discovered,
+                                     *_machine.runner,
+                                     *_machine.host,
+                                     _toolchainClock,
+                                     _logger,
+                                     captureStop,
+                                     SurveyVoice::Routine,
+                                     StartupSurveyPlan.capture);
+    });
 
     std::uint64_t beat = 0;
     while (!stop.stop_requested())
@@ -631,6 +673,10 @@ void WorkerTier::Heartbeat(std::stop_token const& stop,
         FollowAnnouncedEndpoint(statusClock);
         auto const depth = RecheckDepthFor(reloaded, beat, SweepEveryBeats);
         auto const voice = SurveyVoiceFor(reloaded, depth);
+
+        // The capture walk, once it has finished: asked, never waited for.
+        if (auto captured = capture.Take(); captured.has_value())
+            AdoptCaptured(*std::move(captured));
 
         auto* const discovery = liveCfg.toolchainDiscovery ? _machine.discovery.get() : nullptr;
         if (auto refreshed = RefreshToolchains(

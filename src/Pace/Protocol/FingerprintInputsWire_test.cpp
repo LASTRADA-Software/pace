@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -148,10 +149,14 @@ TEST_CASE("A FINGERPRINT-INPUTS index round-trips, and its entries cannot outnum
     auto const index = FingerprintIndexFields {
         .version = "1.2.3",
         .total = 3,
-        .entries = { FingerprintIndexEntry {
-                         .fingerprint = "f1", .label = "gcc 13.2.0", .compiler = "/usr/bin/gcc", .recorded = true },
-                     FingerprintIndexEntry {
-                         .fingerprint = "f2", .label = {}, .compiler = "/opt/pinned/g++", .recorded = false } },
+        .entries = { FingerprintIndexEntry { .fingerprint = "f1",
+                                             .label = "gcc 13.2.0",
+                                             .compiler = "/usr/bin/gcc",
+                                             .state = FingerprintInputsState::Recorded },
+                     FingerprintIndexEntry { .fingerprint = "f2",
+                                             .label = {},
+                                             .compiler = "/opt/pinned/g++",
+                                             .state = FingerprintInputsState::NotYetCaptured } },
     };
     auto const payload = EncodeFingerprintIndex(index);
     CHECK(FingerprintInputsReplyKindOf(payload) == FingerprintInputsReplyKind::Index);
@@ -160,9 +165,9 @@ TEST_CASE("A FINGERPRINT-INPUTS index round-trips, and its entries cannot outnum
     CHECK(Unwrap(decoded).total == 3);
     REQUIRE(Unwrap(decoded).entries.size() == 2);
     CHECK(Unwrap(decoded).entries[0].label == "gcc 13.2.0");
-    CHECK(Unwrap(decoded).entries[0].recorded);
+    CHECK(Unwrap(decoded).entries[0].state == FingerprintInputsState::Recorded);
     CHECK(Unwrap(decoded).entries[1].compiler == "/opt/pinned/g++");
-    CHECK_FALSE(Unwrap(decoded).entries[1].recorded);
+    CHECK(Unwrap(decoded).entries[1].state == FingerprintInputsState::NotYetCaptured);
 
     auto overfull = index;
     overfull.total = 1;
@@ -171,6 +176,24 @@ TEST_CASE("A FINGERPRINT-INPUTS index round-trips, and its entries cannot outnum
 
 TEST_CASE("The reply kinds keep their bytes", "[wire][fingerprint-inputs]")
 {
+    // And the index's per-entry state: why a node holds no inputs is part of the answer, so its byte is pinned and a
+    // byte past the last is refused rather than read as a reason it is not.
+    CHECK(static_cast<std::uint8_t>(FingerprintInputsState::Recorded) == 0);
+    CHECK(static_cast<std::uint8_t>(FingerprintInputsState::Pinned) == 1);
+    CHECK(static_cast<std::uint8_t>(FingerprintInputsState::NotYetCaptured) == 2);
+    CHECK(static_cast<std::uint8_t>(FingerprintInputsState::NotCaptured) == 3);
+    CHECK(static_cast<std::uint8_t>(FingerprintInputsState::Last) == 4);
+    auto const foreign = std::array { std::byte { 4 } };
+    auto const entries =
+        WireFields::Encode({ AsBytes("f1"), AsBytes("l"), AsBytes("/c"), std::span<std::byte const> { foreign } });
+    auto const kind = std::array { std::byte { 0 } };
+    auto const total = EncodeU32Field(1);
+    auto const index = WireFields::Encode({ std::span<std::byte const> { kind },
+                                            AsBytes("1"),
+                                            std::span<std::byte const> { total },
+                                            std::span<std::byte const> { entries } });
+    CHECK_FALSE(DecodeFingerprintIndex(index).has_value());
+
     CHECK(static_cast<std::uint8_t>(FingerprintInputsReplyKind::Index) == 0);
     CHECK(static_cast<std::uint8_t>(FingerprintInputsReplyKind::Inputs) == 1);
     CHECK(static_cast<std::uint8_t>(FingerprintInputsReplyKind::Last) == 2);
@@ -189,7 +212,8 @@ TEST_CASE("A page's overhead and entry sizes are what the encoder writes", "[wir
     auto const index = FingerprintIndexFields {
         .version = "1.2.3",
         .total = 1,
-        .entries = { FingerprintIndexEntry { .fingerprint = "f1", .label = "l", .compiler = "/c", .recorded = true } },
+        .entries = { FingerprintIndexEntry {
+            .fingerprint = "f1", .label = "l", .compiler = "/c", .state = FingerprintInputsState::Pinned } },
     };
     CHECK(EncodeFingerprintIndex(index).size()
           == FingerprintIndexOverhead(index.version) + EncodedIndexEntryBytes(index.entries[0]));

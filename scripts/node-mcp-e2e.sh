@@ -44,8 +44,9 @@
 #                                         recommended where the ordering is unknown, a
 #                                         fingerprint per DRIVER otherwise, nobody behind
 #                                         or ahead on a one-machine fleet, a basis on each.
-#   2g. toolchain_diff explains         — on that same scheduler: one of its fingerprints
-#       a fingerprint                     against itself is identical, with the recompute
+#   2g. toolchain_diff explains         — on that same scheduler, once its capture walk has
+#       a fingerprint                     run: one of its fingerprints
+#                                         against itself is identical, with the recompute
 #                                         PASSED -- the inputs the survey kept reproduce the
 #                                         fingerprint it registered -- and a fingerprint it
 #                                         does not serve is a clean tool error.
@@ -414,6 +415,14 @@ if command -v cc >/dev/null 2>&1 || command -v c++ >/dev/null 2>&1 || command -v
     # FINGERPRINT-INPUTS, recomputes the fingerprint from them, and finds nothing to tell apart. `recompute: passed`
     # is the wrong-answer guard having RUN -- the inputs the survey kept reproduce the fingerprint it registered.
     diff_fingerprint="$(python3 -I -c "import json,sys; print(json.loads(sys.stdin.read())['result']['structuredContent']['toolchains'][0]['fingerprint'])" <<< "$toolchains_body")"
+    # A warm start registers from the fingerprint cache and captures inputs in ONE walk on a thread of its own, so
+    # until that walk finishes the node answers "not yet captured" -- a transient refusal. Wait on that STATE.
+    diff_captured() {
+        local body
+        body="$(call_action toolchain_diff "{\"a\":{\"fingerprint\":\"${diff_fingerprint}\"},\"b\":{\"fingerprint\":\"${diff_fingerprint}\"}}")"
+        python3 -I -c "import json,sys; d=json.loads(sys.stdin.read()); sys.exit(0 if d['result']['isError'] is False else 1)" <<< "$body"
+    }
+    wait_until diff_captured "the node's capture walk to record the inputs of ${diff_fingerprint}" "$action_pid" "${workdir}/node.log" 300
     diff_body="$(call_action toolchain_diff "{\"a\":{\"fingerprint\":\"${diff_fingerprint}\"},\"b\":{\"fingerprint\":\"${diff_fingerprint}\"}}")"
     json_check "toolchain_diff of a fingerprint against itself" "$diff_body" \
         "${OK} and ${SC}['identical'] is True and ${SC}['same_fingerprint'] is True and ${SC}['recompute'] == 'passed' and ${SC}['complete'] is True and ${SC}['skew'] is None and ${SC}['inferred'] is False and ${SC}['only_a']['count'] == 0 and ${SC}['only_b']['count'] == 0 and ${SC}['content_differs']['count'] == 0 and ${SC}['a']['fingerprint'] == '${diff_fingerprint}' and ${SC}['a']['total_files'] == ${SC}['b']['total_files'] and ${SC}['verdict'].startswith('the inputs are identical')"

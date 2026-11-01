@@ -39,6 +39,19 @@ enum class FingerprintInputsReplyKind : std::uint8_t
     Last = 2,   ///< Not a kind.
 };
 
+/// Whether a node holds the inputs a fingerprint was computed from, and if not, why: one byte per index entry.
+///
+/// **TRANSMITTED**: the explicit values are the wire contract, so an enumerator is appended and never renumbered.
+/// The absence is a REASON, never a `false`: each one is answered with its own words, and one of them passes.
+enum class FingerprintInputsState : std::uint8_t
+{
+    Recorded = 0,       ///< Held: the inputs the survey's walk digested.
+    Pinned = 1,         ///< An operator's `--toolchain=<fingerprint>=<compiler>` pin: never probed, so never held.
+    NotYetCaptured = 2, ///< Taken from the fingerprint cache; this process's one capture walk has not finished yet.
+    NotCaptured = 3,    ///< Taken from the cache, and this process's capture walk did not reproduce it or did not run.
+    Last = 4,           ///< Not a state.
+};
+
 /// A FINGERPRINT-INPUTS request.
 struct FingerprintInputsRequest
 {
@@ -52,7 +65,8 @@ struct FingerprintIndexEntry
     std::string fingerprint; ///< What it is filed under.
     std::string label;       ///< What a person calls it (`gcc 13.2.0`); empty when nothing said.
     std::string compiler;    ///< The compiler path the node serves it with.
-    bool recorded { false }; ///< Whether the node holds its inputs -- false for an operator's pin, never probed.
+    /// Whether the node holds its inputs, or why not.
+    FingerprintInputsState state { FingerprintInputsState::Recorded };
 };
 
 /// The index: every toolchain the node serves, as far as the reply ceiling holds them.
@@ -112,6 +126,15 @@ struct FingerprintInputsPage
 {
     // Four fields: kind, version, total, entries.
     return (4 * WireFields::FieldPrefixSize) + 1 + version.size() + sizeof(std::uint32_t);
+}
+
+/// @param state A state.
+/// @return Its one wire byte, as text with static storage, so an encoder can point a field at it.
+[[nodiscard]] constexpr std::string_view StateTextOf(FingerprintInputsState state) noexcept
+{
+    constexpr std::string_view Bytes { "\x00\x01\x02\x03", 4 };
+    static_assert(Bytes.size() == static_cast<std::size_t>(FingerprintInputsState::Last));
+    return Bytes.substr(static_cast<std::size_t>(state), 1);
 }
 
 /// Frame a FINGERPRINT-INPUTS request.
@@ -182,13 +205,12 @@ struct FingerprintInputsPage
 {
     std::vector<std::span<std::byte const>> entryFields;
     entryFields.reserve(index.entries.size() * 4);
-    static constexpr std::array recordedFlags { std::byte { 0 }, std::byte { 1 } };
     for (auto const& entry: index.entries)
     {
         entryFields.push_back(AsBytes(entry.fingerprint));
         entryFields.push_back(AsBytes(entry.label));
         entryFields.push_back(AsBytes(entry.compiler));
-        entryFields.emplace_back(&recordedFlags[entry.recorded ? 1 : 0], 1);
+        entryFields.emplace_back(AsBytes(StateTextOf(entry.state)));
     }
     auto const entries = WireFields::Encode(WireFields::FieldList { entryFields });
     auto const kind = std::array { static_cast<std::byte>(FingerprintInputsReplyKind::Index) };
@@ -276,13 +298,15 @@ struct FingerprintInputsPage
     index.entries.reserve(entries->size() / 4);
     for (auto const row: std::views::iota(std::size_t { 0 }, entries->size() / 4))
     {
-        auto const recorded = (*entries)[(4 * row) + 3];
-        if (recorded.size() != 1 || std::to_integer<std::uint8_t>(recorded[0]) > 1)
+        auto const state = (*entries)[(4 * row) + 3];
+        if (state.size() != 1
+            || std::to_integer<std::uint8_t>(state[0]) >= static_cast<std::uint8_t>(FingerprintInputsState::Last))
             return std::nullopt;
-        index.entries.push_back(FingerprintIndexEntry { .fingerprint = std::string { AsStringView((*entries)[4 * row]) },
-                                                        .label = std::string { AsStringView((*entries)[(4 * row) + 1]) },
-                                                        .compiler = std::string { AsStringView((*entries)[(4 * row) + 2]) },
-                                                        .recorded = std::to_integer<std::uint8_t>(recorded[0]) == 1 });
+        index.entries.push_back(
+            FingerprintIndexEntry { .fingerprint = std::string { AsStringView((*entries)[4 * row]) },
+                                    .label = std::string { AsStringView((*entries)[(4 * row) + 1]) },
+                                    .compiler = std::string { AsStringView((*entries)[(4 * row) + 2]) },
+                                    .state = static_cast<FingerprintInputsState>(std::to_integer<std::uint8_t>(state[0])) });
     }
     return index;
 }
