@@ -9,13 +9,15 @@ namespace Pace::Node
 FleetReadVerdict DecideFleetRead(std::optional<LiveLeadership> const& leadership,
                                  AdminCredential const& dashboard,
                                  std::string_view token,
-                                 std::string_view peer)
+                                 std::string_view peer,
+                                 FleetReader reader)
 {
     if (!leadership.has_value())
         return { .decision = FleetReadDecision::NoScheduler,
                  .detail = "this node runs no scheduler, so it has no fleet; ask the fleet's scheduler" };
 
-    auto const admitted = dashboard.Required() ? dashboard.Matches(token) : IsLoopbackHost(peer);
+    auto const admitted =
+        reader == FleetReader::ProvenMember || (dashboard.Required() ? dashboard.Matches(token) : IsLoopbackHost(peer));
     if (!admitted)
         return { .decision = FleetReadDecision::Unauthenticated,
                  .detail = dashboard.Required()

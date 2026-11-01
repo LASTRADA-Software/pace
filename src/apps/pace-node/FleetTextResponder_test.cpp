@@ -246,6 +246,40 @@ TEST_CASE("The dashboard credential decides a fleet read and is counted against 
     }
 }
 
+TEST_CASE("A member that proved its key reads the fleet without the dashboard credential", "[node][fleettext]")
+{
+    // What a member's MCP fleet tools reach the leader by: the proven, sealed connection, from a node that
+    // holds no dashboard credential. The production fold, with the key PRESENTED on the connection -- a
+    // host-answering fake cannot stand for a proof.
+    AtomicMetricsSink metrics;
+    ScriptedFleet sources;
+    Testing::RosterFold const roster { { "pc-07" }, { "gone-01" } };
+    FleetTextResponder guarded { sources, roster.admitted, AdminCredential { "s3cret" }, metrics };
+    auto const ask = [&guarded](PeerIdentity peer) {
+        return core::async::syncRun(guarded.Answer(FleetTextFrame({}, {}, {}, Wire::FleetTextFormat::Json), std::move(peer)))
+            .bytes;
+    };
+
+    auto const proven = ask(PeerIdentity { .host = "10.0.0.7", .proven = Testing::IdentityOf("pc-07") });
+    CHECK(Testing::StatusOf(proven) == Wire::Status::Ok);
+    CHECK(sources.reads == 1);
+    CHECK(sources.askedFormat == Wire::FleetTextFormat::Json);
+
+    SECTION("this machine without a proof is still asked for the credential")
+    {
+        // The control: loopback is admitted to the surface, and earns no fleet read under a token file.
+        CHECK(Testing::ErrorOf(ask(PeerIdentity { .host = "127.0.0.1" })) == Wire::ErrorCode::Unauthenticated);
+        CHECK(metrics.Read(IMetricsSink::Counter::FleetTextRequestsRefusedUnauthenticated) == 1);
+    }
+
+    SECTION("a revoked key's proof reads nothing, and is refused as a stranger")
+    {
+        auto const refused = ask(PeerIdentity { .host = "127.0.0.1", .proven = Testing::IdentityOf("gone-01") });
+        CHECK(Testing::ErrorOf(refused) == Wire::ErrorCode::NotAMember);
+        CHECK(sources.reads == 1);
+    }
+}
+
 TEST_CASE("A follower redirects a fleet read to the leader and a worker says the fleet is elsewhere", "[node][fleettext]")
 {
     Rig rig;

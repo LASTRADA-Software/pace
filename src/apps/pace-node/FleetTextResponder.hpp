@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include "FleetReadGate.hpp"
 #include "FrameEndpoint.hpp"
 
 #include <Pace/Distributed/MembershipOracle.hpp>
@@ -156,10 +157,12 @@ class FleetTextResponder final: public IFrameResponder
   private:
     /// Gate a decoded request from a member, and answer it.
     /// @param request What was asked for.
-    /// @param peer Who asked.
+    /// @param peer Who asked: the host the kernel reported.
+    /// @param reader Whether the connection proved a member's live identity key.
     /// @return The encoded reply.
     [[nodiscard]] std::vector<std::byte> Read(CompileCacheWire::FleetTextRequest const& request,
-                                              std::string_view peer) const;
+                                              std::string_view peer,
+                                              FleetReader reader) const;
 
     /// Answer an admitted request with the document, or with why there is none.
     /// @param request What was asked for.

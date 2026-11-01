@@ -33,6 +33,22 @@ enum class FleetReadDecision : std::uint8_t
     NotLeader,       ///< This node follows; the leader is elsewhere.
 };
 
+/// What the connection a read arrived on established about its caller, beside its address.
+///
+/// **A PRIVATE enum**: nothing transmits it and nothing stores it, so it states no ordinals.
+enum class FleetReader : std::uint8_t
+{
+    /// Nothing beyond its address: the dashboard credential decides, or, with none configured, whether the
+    /// caller is this machine.
+    ByAddress,
+    /// A fleet member whose live identity key the connection PROVED (`Distributed::RestsOnProvenIdentity`):
+    /// admitted without the dashboard credential, which a node does not hold. This is how a member's MCP
+    /// fleet tools read the leader's fleet over the proven, sealed `0xFC` connection -- the design's rule
+    /// that read tools work on any member -- and it widens nothing a stranger can reach: the proof is a
+    /// signature by a key the cluster's roster holds, checked on every verb.
+    ProvenMember,
+};
+
 /// A decision and the words a refusal carries.
 struct FleetReadVerdict
 {
@@ -46,17 +62,20 @@ struct FleetReadVerdict
 
 /// Decide whether @p peer may read the fleet here.
 ///
-/// The order is the rule: no scheduler first, since there is then nothing to guard; the credential
-/// BEFORE leadership, so a caller without it is not told where the leader is; leadership last.
+/// The order is the rule: no scheduler first, since there is then nothing to guard; the credential -- or a
+/// proven member's proof in its place -- BEFORE leadership, so a caller with neither is not told where the
+/// leader is; leadership last.
 /// @param leadership Who leads, or nullopt when this node runs no scheduler.
 /// @param dashboard The dashboard credential; a default one when no token file is named, and then
 ///        the fleet is served to this machine only.
 /// @param token The credential the request carried, or empty.
 /// @param peer The caller's host, as the kernel reported it.
+/// @param reader What the connection proved about the caller; `ProvenMember` stands in for the credential.
 /// @return The decision, with its words.
 [[nodiscard]] FleetReadVerdict DecideFleetRead(std::optional<LiveLeadership> const& leadership,
                                                AdminCredential const& dashboard,
                                                std::string_view token,
-                                               std::string_view peer);
+                                               std::string_view peer,
+                                               FleetReader reader);
 
 } // namespace Pace::Node

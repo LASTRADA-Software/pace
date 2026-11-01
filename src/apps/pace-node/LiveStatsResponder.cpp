@@ -240,7 +240,10 @@ std::optional<std::vector<std::byte>> LiveStatsResponder::Admit(Wire::SubscribeR
     // refusal moves. The HOST alone, and that is unchanged by #1512: this is the dashboard
     // credential and locality, which a proven identity is not a substitute for -- two
     // credentials answering two questions, and the token is its own file by rule.
-    auto const verdict = DecideFleetRead(_sources.Leadership(), _dashboard, request.dashboardToken, watcher.host);
+    // By address alone: the fleet subscription is the dashboard's live panel, and what a proven member reads is
+    // the one-shot document (`FleetTextResponder`), not a stream it would hold open.
+    auto const verdict =
+        DecideFleetRead(_sources.Leadership(), _dashboard, request.dashboardToken, watcher.host, FleetReader::ByAddress);
     switch (verdict.decision)
     {
         case FleetReadDecision::Admitted:
