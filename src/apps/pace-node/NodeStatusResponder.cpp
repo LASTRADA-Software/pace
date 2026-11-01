@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
+#include "EffectiveConfig.hpp"
 #include "MembershipGate.hpp"
 #include "NodeIdentity.hpp"
 #include "NodeStatusResponder.hpp"
 #include "NodeSurfaces.hpp"
 
+#include <Pace/Cache/StorageTier.hpp>
 #include <Pace/Cluster/FleetPin.hpp>
 #include <Pace/Core/Ed25519.hpp>
 #include <Pace/Core/EnumTable.hpp>
@@ -230,6 +232,44 @@ namespace
                                                                              .rationale = row.policy.rationale };
                                                }),
                   "every endpoint refusal row must state either a counter or a rationale, and not both");
+
+    /// How one limit's ceiling is read out of `Distributed::SlotCeilings`: a row per `SlotLimit`, so a limit
+    /// added there without a reader here is a build failure rather than a ceiling `node-status` never names.
+    struct CeilingReaderRow
+    {
+        Distributed::SlotLimit limit;                                           ///< The limit.
+        std::optional<std::uint32_t> (*read)(Distributed::SlotCeilings const&); ///< Its ceiling, or absent.
+    };
+
+    constexpr EnumTable<Distributed::SlotLimit, CeilingReaderRow> CeilingReaders { {
+        { .limit = Distributed::SlotLimit::Registered,
+          .read = [](Distributed::SlotCeilings const& c) { return std::optional { c.registered }; } },
+        { .limit = Distributed::SlotLimit::ExternalCpu,
+          .read = [](Distributed::SlotCeilings const& c) { return c.byExternalCpu; } },
+        { .limit = Distributed::SlotLimit::Memory, .read = [](Distributed::SlotCeilings const& c) { return c.byMemory; } },
+        { .limit = Distributed::SlotLimit::Scratch, .read = [](Distributed::SlotCeilings const& c) { return c.byScratch; } },
+        { .limit = Distributed::SlotLimit::CompileBudget,
+          .read = [](Distributed::SlotCeilings const& c) { return c.byCompileBudget; } },
+        // A cordon is a decision, not a resource: a ceiling of zero while it binds, and no ceiling otherwise --
+        // `SlotCeilingsFor` applies it last and names it on every tie, so binding is exactly *cordoned*.
+        { .limit = Distributed::SlotLimit::Cordoned,
+          .read =
+              [](Distributed::SlotCeilings const& c) {
+                  return c.binding == Distributed::SlotLimit::Cordoned ? std::optional { std::uint32_t { 0 } }
+                                                                       : std::nullopt;
+              } },
+    } };
+    static_assert(RowsInEnumeratorOrder(CeilingReaders, &CeilingReaderRow::limit),
+                  "CeilingReaders must hold one row per SlotLimit, in enumerator order");
+
+    /// @param ceilings What `SlotCeilingsFor` computed.
+    /// @param limit One limit.
+    /// @return Its ceiling, or absent where it did not apply.
+    [[nodiscard]] std::optional<std::uint32_t> CeilingSlots(Distributed::SlotCeilings const& ceilings,
+                                                            Distributed::SlotLimit limit)
+    {
+        return CeilingReaders[static_cast<std::size_t>(limit)].read(ceilings);
+    }
 } // namespace
 
 std::vector<std::byte> NodeStatusResponder::RefusalReply(CompileCacheWire::PrePayloadDecision decision,
@@ -412,6 +452,59 @@ ConfiguredNodeStatus::ConfiguredNodeStatus(NodeConfig const& cfg,
     _components { components },
     _sources { sources }
 {
+}
+
+void ConfiguredNodeStatus::DescribeDetail(CompileCacheWire::NodeRuntimeFields& runtime) const
+{
+    // The ceilings the last heartbeat's load put on the slots, named through the scheduler's own table so the
+    // name a reader sees is the one a fleet page prints for the same limit. Absent before the first heartbeat
+    // has sampled the host: a reading nobody took is not a worker bound by nothing.
+    if (auto const reading = _sources.runtime != nullptr ? _sources.runtime->SlotCeilings() : std::nullopt)
+    {
+        auto record = CompileCacheWire::NodeSlotCeilingsFields {
+            .ceilings = {},
+            .available = reading->ceilings.available,
+            .binding = std::string { Distributed::TraitsFor(reading->ceilings.binding).name },
+            .sampledSecondsAgo = static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::seconds>(_clock.now() - reading->sampledAt).count()),
+        };
+        for (auto const& row: Distributed::SlotLimitTable)
+            record.ceilings.push_back(CompileCacheWire::NodeSlotCeilingFields {
+                .name = std::string { row.name }, .slots = CeilingSlots(reading->ceilings, row.limit) });
+        runtime.slotCeilings = std::move(record);
+    }
+
+    // Each tier the cache has, positionally by `StorageTier`, from the storage's own snapshot; a tier the cache
+    // lacks stays a disengaged position, never a tier of zeroes.
+    if (_sources.cacheTiers != nullptr)
+    {
+        auto const snapshot = _sources.cacheTiers->SnapshotTiers();
+        auto tiers = CompileCacheWire::NodeTiersFields {};
+        tiers.reserve(StorageTierTable.size());
+        for (auto const& row: StorageTierTable)
+        {
+            auto const& stats = snapshot[static_cast<std::size_t>(row.tier)];
+            if (!stats.has_value())
+            {
+                tiers.emplace_back();
+                continue;
+            }
+            tiers.emplace_back(
+                CompileCacheWire::NodeTierFields { .entries = static_cast<std::uint64_t>(stats->itemCount),
+                                                   .bytesUsed = static_cast<std::uint64_t>(stats->bytesUsed),
+                                                   .bytesLimit = static_cast<std::uint64_t>(stats->bytesLimit),
+                                                   .hits = stats->getHits,
+                                                   .misses = stats->getMisses });
+        }
+        runtime.tiers = std::move(tiers);
+    }
+
+    // The configuration IN FORCE, read now: a reload accepted a second ago shows. Every credential is redacted
+    // here, before the record exists, so no reader of this reply -- local or another member -- can see one.
+    if (_sources.config != nullptr)
+        runtime.effectiveConfig = EffectiveConfigOf(_sources.config->Current());
+
+    // `budgetOverrides` stays ABSENT: nothing sets an override yet, and absent says *does not say*.
 }
 
 CompileCacheWire::NodeStatusFields ConfiguredNodeStatus::Describe() const
@@ -629,6 +722,8 @@ CompileCacheWire::NodeStatusFields ConfiguredNodeStatus::Describe() const
     // like everything above, so an apply that moves the setting shows on the next answer.
     if (_sources.sharedCache != nullptr)
         fields.runtime.sharedCache = _sources.sharedCache->Report();
+
+    DescribeDetail(fields.runtime);
 
     for (auto const& mapping: mappings)
     {

@@ -10,6 +10,7 @@
 #include "NodeRefusal.hpp"
 #include "Responders.hpp"
 #include "SharedCacheDirectory.hpp"
+#include "TierStatsSource.hpp"
 
 #include <Pace/Cache/IStorage.hpp>
 #include <Pace/Cache/InMemoryLruStorage.hpp>
@@ -163,7 +164,9 @@ static_assert(RowsInEnumeratorOrder(UpstreamKindTable, &UpstreamKindRow::kind),
 /// than a rule to argue with: it went over because a coherent decision with one
 /// answer -- "does this node cache, and where" -- had been spread across a
 /// function that already had several.
-class CacheTier
+///
+/// It is the `ITierStatsSource` `node-status` reads its tiers through.
+class CacheTier final: public ITierStatsSource
 {
   public:
     /// Build the tier and start serving it.
@@ -204,7 +207,7 @@ class CacheTier
                                                                                       IMetricsSink& metrics,
                                                                                       ILogger& logger);
 
-    ~CacheTier() = default;
+    ~CacheTier() override = default;
 
     CacheTier(CacheTier const&) = delete;
     CacheTier& operator=(CacheTier const&) = delete;
@@ -239,7 +242,7 @@ class CacheTier
     /// half above it leaves no trace. See `IStorage::SnapshotTiers` for why these
     /// are per-tier answers rather than a total waiting to be summed.
     /// @return One entry per tier this node configured.
-    [[nodiscard]] TieredStorageStats SnapshotTiers() const noexcept
+    [[nodiscard]] TieredStorageStats SnapshotTiers() const noexcept override
     {
         return _storage->SnapshotTiers();
     }

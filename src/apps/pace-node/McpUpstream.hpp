@@ -3,6 +3,7 @@
 
 #include "AdmitForwarder.hpp"
 #include "EndpointDialer.hpp"
+#include "NodeNameResolver.hpp"
 
 #include <Pace/Cluster/ClusterState.hpp>
 #include <Pace/Core/EnumTable.hpp>
@@ -269,7 +270,7 @@ class IUpstreamDirectory
 ///
 /// Thread-safe: told on the consensus apply thread and the role observer's, read on the MCP thread and
 /// the I/O loop's -- the shape `AppliedSchedulers` has for the same reason.
-class AppliedUpstreamDirectory final: public IUpstreamDirectory
+class AppliedUpstreamDirectory final: public IUpstreamDirectory, public IAppliedClusterView
 {
   public:
     /// @param selfId This node's id.
@@ -308,13 +309,17 @@ class AppliedUpstreamDirectory final: public IUpstreamDirectory
     /// @copydoc IUpstreamDirectory::Term
     [[nodiscard]] std::optional<std::uint64_t> Term() const override;
 
+    /// @copydoc IAppliedClusterView::AppliedState
+    [[nodiscard]] std::optional<Cluster::ClusterState> AppliedState() const override;
+
   private:
     std::string _selfId;                                        ///< This node's id.
     ISchedulingLeaderSource const& _leader;                     ///< Where the leader answers.
     Cc::IAdvertisedEndpointSource const& _self;                 ///< This node's advertised endpoint.
-    mutable std::mutex _lock;                                   ///< Guards the three below.
+    mutable std::mutex _lock;                                   ///< Guards the four below.
     std::map<std::string, std::string, std::less<>> _endpoints; ///< Member id to `0xFC` endpoint.
     std::optional<std::uint64_t> _term;                         ///< The last term observed.
+    std::optional<Cluster::ClusterState> _state;                ///< The state last applied, whole: names resolve in it.
     bool _selfLeads { false };                                  ///< Whether this node leads in `_term`.
 };
 

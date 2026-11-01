@@ -5,13 +5,16 @@
 #include "ConsensusStanding.hpp"
 #include "EnrollmentWindow.hpp"
 #include "FrameEndpoint.hpp"
+#include "LiveNodeConfig.hpp"
 #include "NodeConditions.hpp"
 #include "NodeMachineStanding.hpp"
 #include "NodeRoster.hpp"
 #include "SchedulingRedirect.hpp"
 #include "SharedCacheStatus.hpp"
+#include "TierStatsSource.hpp"
 
 #include <Pace/Distributed/MembershipOracle.hpp>
+#include <Pace/Distributed/NodePolicy.hpp>
 #include <Pace/Distributed/SchedulerService.hpp>
 #include <Pace/Metrics/IMetricsSink.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
@@ -357,6 +360,13 @@ struct RegistrationReading
     std::optional<core::platform::SteadyTimePoint> lastAccepted {};
 };
 
+/// The ceilings one heartbeat's load put on this worker's slots, and when that load was sampled.
+struct SlotCeilingsReading
+{
+    Distributed::SlotCeilings ceilings;        ///< `Distributed::SlotCeilingsFor` over the round's reading.
+    core::platform::SteadyTimePoint sampledAt; ///< When the load was sampled, on the clock `Describe()` reads.
+};
+
 /// Where the worker publishes what it is doing, for a reader on another thread.
 ///
 /// **A publication seam, and it is not an incidental one.** The served-toolchain map is
@@ -446,6 +456,25 @@ class NodeRuntimeState
         return _registration;
     }
 
+    /// Record the ceilings the last heartbeat's load put on this worker's slots.
+    ///
+    /// Called from the heartbeat thread, once per round, with `Distributed::SlotCeilingsFor` over exactly the
+    /// capacity and load that round sent -- so `node-status` names the limit the scheduler names, from the same
+    /// reading, rather than re-sampling the host from a reactor thread.
+    /// @param reading The ceilings, and when the load they were computed from was sampled.
+    void PublishSlotCeilings(SlotCeilingsReading reading)
+    {
+        std::scoped_lock const guard { _mutex };
+        _slotCeilings = reading;
+    }
+
+    /// @return The last published ceilings, or nothing before the first heartbeat sampled the host.
+    [[nodiscard]] std::optional<SlotCeilingsReading> SlotCeilings() const
+    {
+        std::scoped_lock const guard { _mutex };
+        return _slotCeilings;
+    }
+
   private:
     /// Guards `_toolchains`, and `mutable` for the reason
     /// `SchedulerService::LeaderEndpoint` is: the read is `const` and the lock is not
@@ -460,6 +489,9 @@ class NodeRuntimeState
     /// Unlike `_toolchains` there IS no honest reading before then: the registrars do
     /// not exist yet when this object is built.
     std::optional<RegistrationReading> _registration {};
+
+    /// Disengaged until the first heartbeat round has sampled the host -- see `SlotCeilings()`.
+    std::optional<SlotCeilingsReading> _slotCeilings {};
 };
 
 /// Where `ConfiguredNodeStatus` reads this node's LIVE facts from.
@@ -557,6 +589,15 @@ struct NodeRuntimeSources
     /// endpoint is read through it: `schedulerRole` stays ABSENT on such a node, because it runs no
     /// scheduler, and absence is the truth there rather than a role it does not hold.
     ISchedulingLeaderSource const* schedulingLeader { nullptr };
+
+    /// The configuration IN FORCE -- the reloader's live snapshot, so an accepted reload shows on the next
+    /// answer -- rendered as `effectiveConfig` with every credential redacted (`EffectiveConfigOf`). Null
+    /// reports the field ABSENT, which is what a node too old to carry it says.
+    INodeConfigSource const* config { nullptr };
+
+    /// This node's cache, for its tiers; null on a node that runs none, which reports the field ABSENT -- no
+    /// cache -- rather than a cache whose every tier is empty.
+    ITierStatsSource const* cacheTiers { nullptr };
 };
 
 /// The production `INodeStatusSource`: config for the surfaces, a clock for the uptime.
@@ -596,6 +637,11 @@ class ConfiguredNodeStatus final: public INodeStatusSource
     [[nodiscard]] CompileCacheWire::NodeStatusFields Describe() const override;
 
   private:
+    /// Fill the detail `node_status` and `pacectl node` read -- slot ceilings, cache tiers and the configuration
+    /// in force -- each from its source, and each ABSENT where its source is not wired.
+    /// @param runtime Where the fields are written.
+    void DescribeDetail(CompileCacheWire::NodeRuntimeFields& runtime) const;
+
     NodeConfig const& _cfg;
     core::platform::IClock const& _clock;
     core::platform::SteadyTimePoint _startedAt;

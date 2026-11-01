@@ -274,6 +274,13 @@ void AppliedUpstreamDirectory::Applied(Cluster::ClusterState const& state)
         endpoints.emplace(member.id, member.schedulerEndpoint);
     auto const guard = std::scoped_lock { _lock };
     _endpoints = std::move(endpoints);
+    _state = state;
+}
+
+std::optional<Cluster::ClusterState> AppliedUpstreamDirectory::AppliedState() const
+{
+    auto const guard = std::scoped_lock { _lock };
+    return _state;
 }
 
 void AppliedUpstreamDirectory::ObservedRole(std::uint64_t term, bool selfLeads)

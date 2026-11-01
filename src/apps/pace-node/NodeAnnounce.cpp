@@ -208,6 +208,8 @@ AnnounceOutcome AnnounceOnce(HeartbeatRound const& round, core::net::ISocket& cl
     // Sampled beside the load for the load's reason -- one reading of one machine per round --
     // and handed to REGISTER as well, which carries no load record of its own.
     load.interfaceAddresses = AddressesToReport(round);
+    if (round.sampled)
+        round.sampled(Distributed::LoadFromWire(load, inFlight));
 
     // The first leader any entry was pointed at. One per round rather than one per
     // registrar: every entry here describes the same machine talking to the same

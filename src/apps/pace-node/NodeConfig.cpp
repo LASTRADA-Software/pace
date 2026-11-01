@@ -3840,6 +3840,11 @@ std::string WorkerReadinessPhrase(NodeConfig const& cfg, std::optional<std::uint
                        toolchains);
 }
 
+std::string_view NodeLogLevelSpelling(LogLevel level) noexcept
+{
+    return LogLevelName(level);
+}
+
 std::string AdmissionSummary(NodeConfig const& cfg)
 {
     // One sentence with a conditional tail rather than two whole ones: written twice
@@ -4603,8 +4608,7 @@ std::optional<std::string> StartupPolicyRejection(NodeConfig const& cfg)
         { .refuses =
               [](NodeConfig const& c) {
                   auto const endpoints = RowFor(NodeSurface::Mcp).Resolve(c);
-                  return std::ranges::any_of(endpoints,
-                                             [](SurfaceEndpoint const& e) { return !IsLoopbackHost(e.host); });
+                  return std::ranges::any_of(endpoints, [](SurfaceEndpoint const& e) { return !IsLoopbackHost(e.host); });
               },
           .message = McpListenNotLoopbackRefusal },
         // **A worker on a node that can never form**: with the consensus port closed there is no

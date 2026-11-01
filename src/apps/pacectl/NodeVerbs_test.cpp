@@ -15,6 +15,7 @@
 #include <Pace/Metrics/MetricsCatalog.hpp>
 #include <Pace/Metrics/StatsReading.hpp>
 #include <Pace/Metrics/StatsReadingCodec.hpp>
+#include <Pace/Protocol/NodeStatusView.hpp>
 #include <Pace/Transport/NativeListen.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -180,6 +181,64 @@ TEST_CASE("`node` reports what the endpoint is", "[cli][node][verbs]")
     CHECK(RequiredCell(answer, "admin-port").lexical == "9101");
     CHECK(RequiredCell(answer, "raft-port").lexical == "9102");
     CHECK(RequiredCell(answer, "admin-tls").lexical == "false");
+}
+
+TEST_CASE("`node` shows the slot ceilings, the tiers and the configuration in force as node_status does",
+          "[cli][node][verbs][node-status-detail]")
+{
+    // **One derivation**: every cell below is `NodeStatusView`'s answer over the decoded reply -- the functions the MCP
+    // `node_status` tool reads (`McpNodeTools_test` holds that half) -- so the two cannot disagree.
+    auto fields = CacheWire::NodeStatusFields {};
+    fields.version = "1.0.0";
+    fields.nodeId = "node-a";
+    fields.runtime.slotCeilings = CacheWire::NodeSlotCeilingsFields {
+        .ceilings = { CacheWire::NodeSlotCeilingFields { .name = "registered", .slots = 8 },
+                      CacheWire::NodeSlotCeilingFields { .name = "memory", .slots = 3 },
+                      CacheWire::NodeSlotCeilingFields { .name = "cordoned", .slots = std::nullopt } },
+        .available = 3,
+        .binding = "memory",
+        .sampledSecondsAgo = 5,
+    };
+    fields.runtime.tiers = CacheWire::NodeTiersFields {
+        CacheWire::NodeTierFields { .entries = 4, .bytesUsed = 400, .bytesLimit = 0, .hits = 3, .misses = 1 }, std::nullopt
+    };
+    fields.runtime.effectiveConfig = std::vector {
+        CacheWire::NodeSettingFields { .name = "--toolchain", .kind = CacheWire::WireSettingValue::Value, .text = "gcc" },
+        CacheWire::NodeSettingFields { .name = "--toolchain", .kind = CacheWire::WireSettingValue::Value, .text = "clang" },
+        CacheWire::NodeSettingFields { .name = "--slots", .kind = CacheWire::WireSettingValue::Unset, .text = {} },
+        CacheWire::NodeSettingFields { .name = "--requirepass", .kind = CacheWire::WireSettingValue::Redacted, .text = {} },
+    };
+    ScriptedNodeExchange node { { StatusReply(fields) } };
+    auto const answer = RunNodeVerb("node", node);
+    REQUIRE(answer.outcome == Outcome::Affirmative);
+
+    CHECK(RequiredCell(answer, "slots-available").lexical == "3");
+    CHECK(RequiredCell(answer, "slots-bound-by").lexical == "memory");
+    CHECK(RequiredCell(answer, "slot-ceiling-registered").lexical == "8");
+    CHECK(RequiredCell(answer, "slot-ceiling-cordoned").kind == CellKind::Absent);
+    CHECK(RequiredCell(answer, "slot-ceilings-sampled-seconds-ago").lexical == "5");
+
+    // The memory tier through the view: its zero budget reads unbounded, its ratio is the view's.
+    auto const tiers = NodeStatusView::TiersOf(fields.runtime);
+    REQUIRE(tiers.has_value());
+    auto const& memory = Unwrap(tiers)[0];
+    REQUIRE(memory.stats.has_value());
+    auto const ratio = NodeStatusView::HitRatio(Unwrap(memory.stats));
+    REQUIRE(ratio.has_value());
+    CHECK(RequiredCell(answer, "cache-memory-entries").lexical == "4");
+    CHECK(RequiredCell(answer, "cache-memory-budget").lexical == "unbounded");
+    CHECK(RequiredCell(answer, "cache-memory-hit-ratio").lexical == RealCell(Unwrap(ratio)).lexical);
+    // A tier the cache lacks is an absent cell under its name, never a tier of zeroes.
+    CHECK(RequiredCell(answer, "cache-disk").kind == CellKind::Absent);
+    CHECK(CellOf(answer, "cache-disk-entries") == nullptr);
+
+    // The configuration: a list gathered, unset absent, a credential redacted.
+    CHECK(RequiredCell(answer, "config-toolchain").lexical == "gcc, clang");
+    CHECK(RequiredCell(answer, "config-slots").kind == CellKind::Absent);
+    CHECK(RequiredCell(answer, "config-requirepass").lexical == CacheWire::RedactedSettingText);
+
+    // Overrides the node did not say anything about are ABSENT, never `none`.
+    CHECK(RequiredCell(answer, "budget-overrides").kind == CellKind::Absent);
 }
 
 TEST_CASE("`node` renders an absent surface as an absent FIELD, never a zero port", "[cli][node][verbs]")

@@ -43,9 +43,12 @@ add_executable(pace-node
     main.cpp
     NodeLogging.cpp
     AdminEndpoint.cpp
+    EffectiveConfig.cpp
     McpEndpoint.cpp
     McpFleetTools.cpp
+    McpNodeTools.cpp
     McpUpstream.cpp
+    NodeNameResolver.cpp
     CacheProxy.cpp
     CacheTier.cpp
     ClusterAdminCli.cpp
@@ -144,8 +147,14 @@ if(PACE_BUILD_TESTS)
         AdminEndpoint_test.cpp
         McpEndpoint.cpp
         McpEndpoint_test.cpp
+        EffectiveConfig.cpp
+        EffectiveConfig_test.cpp
         McpFleetTools.cpp
         McpFleetTools_test.cpp
+        McpNodeTools.cpp
+        McpNodeTools_test.cpp
+        NodeNameResolver.cpp
+        NodeNameResolver_test.cpp
         McpUpstream.cpp
         McpUpstream_test.cpp
         CacheProxy.cpp

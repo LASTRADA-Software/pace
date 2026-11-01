@@ -126,6 +126,7 @@ target_sources(Pace
         Protocol/MemcachedBinary.cpp
         Protocol/MemcachedMeta.cpp
         Protocol/MemcachedText.cpp
+        Protocol/NodeStatusView.cpp
         Protocol/Mcp/McpServer.cpp
         Protocol/ProtocolAutodetect.cpp
         Protocol/KeyspaceNotifier.cpp

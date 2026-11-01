@@ -486,6 +486,9 @@ class WorkerTier
     CompileResponder _responder;
     NodeRuntimeState _runtime;
     CompileCacheWire::CapacityFields _advertisedWire;
+    /// What `NodeCapacityOf` made of this machine: the capacity the scheduler's `SlotCeilingsFor` weighs this
+    /// worker's load against, held so `node-status` weighs it the same way.
+    Distributed::NodeCapacity _machineCapacity;
     std::vector<Cc::WorkerRegistrar> _registrars;
     std::vector<Cc::WorkerRegistrar> _withdrawals;
     IEndpointDialer& _dialer;

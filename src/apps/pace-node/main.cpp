@@ -34,6 +34,7 @@
 #include "MachineBudget.hpp"
 #include "McpEndpoint.hpp"
 #include "McpFleetTools.hpp"
+#include "McpNodeTools.hpp"
 #include "McpUpstream.hpp"
 #include "NodeActivation.hpp"
 #include "NodeAnnounce.hpp"
@@ -126,9 +127,11 @@
 #include <format>
 #include <functional>
 #include <iostream>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -791,6 +794,18 @@ class McpForwarding
     Node::LoopGatedUpstream _gated;
 };
 
+/// Every MCP tool this node serves, in the order `tools/list` presents them: the fleet tools, then the node tools.
+/// @param cfg The configuration the node runs under; its id is the one name a node with no applied state resolves.
+/// @param forwarding How the tools reach the fleet and resolve names; must outlive the MCP surface.
+/// @return The table.
+[[nodiscard]] std::vector<Mcp::ToolRow> McpToolTable(NodeConfig const& cfg, McpForwarding& forwarding)
+{
+    auto tools = Node::FleetReadTools(forwarding.Upstream());
+    std::ranges::move(Node::NodeReadTools(forwarding.Upstream(), forwarding.Directory(), cfg.nodeId),
+                      std::back_inserter(tools));
+    return tools;
+}
+
 /// Serve the leader's admission queue (#1728) from the scheduler tier, when this node runs one.
 /// @param responder Receives the queue's responder.
 /// @param tier The scheduler tier; null on a node that schedules nothing, which then has no queue.
@@ -1428,7 +1443,12 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
                                    // learner names the leader its launchers are sent to (#1641);
                                    // null on a node that schedules or runs no consensus. Declared
                                    // well before this responder, so it outlives it.
-                                   .schedulingLeader = AddressWhen(Node::RedirectsScheduling(cfg), knownSchedulingLeader) },
+                                   .schedulingLeader = AddressWhen(Node::RedirectsScheduling(cfg), knownSchedulingLeader),
+                                   // The configuration IN FORCE, the one the endpoint resolver reads: an
+                                   // accepted reload shows on the next `node-status`, credentials redacted.
+                                   .config = &endpointConfig,
+                                   // Null on a node with no cache, which reports no tiers rather than empty ones.
+                                   .cacheTiers = cacheTier.get() },
     };
 
     // The operator verbs. Declared BEFORE the surface that routes to it and therefore
@@ -1848,24 +1868,23 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
         Node::AdminSurface admin;
         std::unique_ptr<Node::McpEndpoint> mcp;
     };
-    auto surfaceOrRefusal =
-        Node::StartAdminSurfaceOrExplain(cfg,
-                                         *host,
-                                         metrics,
-                                         std::move(snapshotProvider),
-                                         fleetSources,
-                                         &sampler,
-                                         dashboardCredential,
-                                         logger,
-                                         conditions,
-                                         nodeIo.AcceptLoops())
-            .and_then([&](Node::AdminSurface admin) {
-                return Node::StartMcpSurfaceOrExplain(
-                           cfg, Node::FleetReadTools(mcpForwarding.Upstream()), metrics, logger, nodeIo.AcceptLoops())
-                    .transform([&admin](std::unique_ptr<Node::McpEndpoint> mcp) {
-                        return HttpSurfaces { .admin = std::move(admin), .mcp = std::move(mcp) };
-                    });
-            });
+    auto surfaceOrRefusal = Node::StartAdminSurfaceOrExplain(cfg,
+                                                             *host,
+                                                             metrics,
+                                                             std::move(snapshotProvider),
+                                                             fleetSources,
+                                                             &sampler,
+                                                             dashboardCredential,
+                                                             logger,
+                                                             conditions,
+                                                             nodeIo.AcceptLoops())
+                                .and_then([&](Node::AdminSurface admin) {
+                                    return Node::StartMcpSurfaceOrExplain(
+                                               cfg, McpToolTable(cfg, mcpForwarding), metrics, logger, nodeIo.AcceptLoops())
+                                        .transform([&admin](std::unique_ptr<Node::McpEndpoint> mcp) {
+                                            return HttpSurfaces { .admin = std::move(admin), .mcp = std::move(mcp) };
+                                        });
+                                });
 
     // Fatal here and not in the daemon, which is a real difference between the two
     // binaries rather than a defect in either; the row says why

@@ -12,6 +12,7 @@
 #include <Pace/Core/Ed25519.hpp>
 #include <Pace/Core/EnumTable.hpp>
 #include <Pace/Distributed/MembershipWire.hpp>
+#include <Pace/Protocol/NodeStatusView.hpp>
 
 #include <algorithm>
 #include <array>
@@ -980,22 +981,7 @@ namespace
     /// @return A stable lower-case name.
     [[nodiscard]] std::string_view NameOfSurface(CompileCacheWire::WireSurface surface) noexcept
     {
-        switch (surface)
-        {
-            case CompileCacheWire::WireSurface::Admin:
-                return "admin";
-            case CompileCacheWire::WireSurface::Raft:
-                return "raft";
-            case CompileCacheWire::WireSurface::Discovery:
-                return "discovery";
-            case CompileCacheWire::WireSurface::Mcp:
-                return "mcp";
-        }
-        // A tag this build does not name never reaches here -- `DecodeNodeStatus` SKIPS
-        // one rather than refusing the whole reply, which is what lets an older client
-        // read a newer node at all. Closed anyway, because falling off the end of a
-        // function returning a view is a dangling one.
-        return "unknown";
+        return NodeStatusView::SurfaceName(surface);
     }
 
     /// What to call one enrollment-window state.
@@ -1023,19 +1009,7 @@ namespace
     /// @return A stable lower-case name.
     [[nodiscard]] std::string_view NameOfConsensusStanding(CompileCacheWire::WireConsensusStanding standing) noexcept
     {
-        switch (standing)
-        {
-            case CompileCacheWire::WireConsensusStanding::NoCluster:
-                return "no-cluster";
-            case CompileCacheWire::WireConsensusStanding::Voter:
-                return "voter";
-            case CompileCacheWire::WireConsensusStanding::Learner:
-                return "learner";
-            case CompileCacheWire::WireConsensusStanding::Outsider:
-                return "outsider";
-        }
-        // Unreachable for `NameOfEnrollmentState`'s reason.
-        return "unknown";
+        return NodeStatusView::ConsensusStandingName(standing);
     }
 
     /// What to call one cordon state.
@@ -1043,17 +1017,7 @@ namespace
     /// @return A stable lower-case name.
     [[nodiscard]] std::string_view NameOfCordonState(CompileCacheWire::WireCordonState state) noexcept
     {
-        switch (state)
-        {
-            case CompileCacheWire::WireCordonState::Serving:
-                return "serving";
-            case CompileCacheWire::WireCordonState::Draining:
-                return "draining";
-            case CompileCacheWire::WireCordonState::Drained:
-                return "drained";
-        }
-        // Unreachable for `NameOfEnrollmentState`'s reason.
-        return "unknown";
+        return NodeStatusView::CordonStateName(state);
     }
 
     /// Add an optional unsigned field, or nothing at all when the node did not say.
@@ -1069,6 +1033,94 @@ namespace
     {
         if (value.has_value())
             record.push_back({ .name = std::string { name }, .value = NumberCell(*value) });
+    }
+
+    /// Append the detail `node_status` reads too: the slot ceilings with the binding one named, each cache tier,
+    /// the configuration in force and the budget overrides.
+    ///
+    /// **Every value is `NodeStatusView`'s** -- the tiers this build names, a tier's hit ratio and what its zero
+    /// budget means, a setting's rows gathered and a redaction spelled -- the derivation the MCP tool renders
+    /// from, so the two cannot disagree about a quantity both show. Absent is a CELL, never a zero: a cache that
+    /// lacks a tier says so under that tier's name, a ratio of no lookups is absent, and an unset setting is
+    /// absent rather than empty.
+    /// @param record Where the fields are appended.
+    /// @param runtime What the node said.
+    void AddNodeDetail(std::vector<Field>& record, CompileCacheWire::NodeRuntimeFields const& runtime)
+    {
+        if (runtime.slotCeilings.has_value())
+        {
+            auto const& ceilings = *runtime.slotCeilings;
+            record.push_back({ .name = "slots-available", .value = NumberCell(std::uint64_t { ceilings.available }) });
+            record.push_back({ .name = "slots-bound-by", .value = TextCell(ceilings.binding) });
+            for (auto const& ceiling: ceilings.ceilings)
+                record.push_back(
+                    { .name = std::format("slot-ceiling-{}", ceiling.name),
+                      .value = ceiling.slots.has_value() ? NumberCell(std::uint64_t { *ceiling.slots }) : AbsentCell() });
+            record.push_back(
+                { .name = "slot-ceilings-sampled-seconds-ago", .value = NumberCell(ceilings.sampledSecondsAgo) });
+        }
+
+        if (auto const tiers = NodeStatusView::TiersOf(runtime); tiers.has_value())
+            for (auto const& tier: *tiers)
+            {
+                auto const prefix = std::format("cache-{}", tier.name);
+                if (!tier.stats.has_value())
+                {
+                    record.push_back({ .name = prefix, .value = AbsentCell() });
+                    continue;
+                }
+                auto const& stats = *tier.stats;
+                auto const budget = NodeStatusView::BudgetBytes(stats);
+                auto const ratio = NodeStatusView::HitRatio(stats);
+                record.push_back({ .name = prefix + "-entries", .value = NumberCell(stats.entries) });
+                record.push_back({ .name = prefix + "-bytes", .value = NumberCell(stats.bytesUsed) });
+                record.push_back({ .name = prefix + "-budget",
+                                   .value = budget.has_value() ? NumberCell(*budget) : TextCell("unbounded") });
+                record.push_back({ .name = prefix + "-hits", .value = NumberCell(stats.hits) });
+                record.push_back({ .name = prefix + "-misses", .value = NumberCell(stats.misses) });
+                record.push_back(
+                    { .name = prefix + "-hit-ratio", .value = ratio.has_value() ? RealCell(*ratio) : AbsentCell() });
+            }
+
+        // One field per setting, named for the flag without its dashes; a list setting's values joined. A
+        // redacted credential reads `<redacted>`: its value never left the node.
+        if (auto const settings = NodeStatusView::SettingsOf(runtime); settings.has_value())
+            for (auto const& setting: *settings)
+            {
+                auto const flag = std::string_view { setting.name };
+                auto const name = std::format("config-{}", flag.substr(std::min(flag.find_first_not_of('-'), flag.size())));
+                if (!setting.values.has_value())
+                {
+                    record.push_back({ .name = name, .value = AbsentCell() });
+                    continue;
+                }
+                auto joined = std::string {};
+                for (auto const& value: *setting.values)
+                    joined += (joined.empty() ? "" : ", ") + value;
+                record.push_back({ .name = name, .value = TextCell(std::move(joined)) });
+            }
+
+        // ABSENT from a node that does not say -- every node until overrides can be set -- and `none` from one
+        // that says it applies none.
+        if (runtime.budgetOverrides.has_value())
+        {
+            auto described = std::string {};
+            for (auto const& entry: *runtime.budgetOverrides)
+            {
+                auto const tier = entry.tier < StorageTierTable.size() ? std::string { StorageTierTable[entry.tier].name }
+                                                                       : std::format("tier-{}", entry.tier);
+                described += std::format(
+                    "{}{}={}{}",
+                    described.empty() ? "" : ", ",
+                    tier,
+                    entry.bytes,
+                    entry.baselineBytes.has_value() ? std::format(" (baseline {})", *entry.baselineBytes) : std::string {});
+            }
+            record.push_back(
+                { .name = "budget-overrides", .value = TextCell(described.empty() ? std::string { "none" } : described) });
+        }
+        else
+            record.push_back({ .name = "budget-overrides", .value = AbsentCell() });
     }
 
     /// Turn a decoded node status into the reported record.
@@ -1293,6 +1345,8 @@ namespace
         }
         else
             record.push_back({ .name = "shared-cache", .value = AbsentCell() });
+
+        AddNodeDetail(record, fields.runtime);
 
         // One field per surface the node actually opened. A surface it does not run gets
         // no field at all rather than a zero port -- the same rule the node applies when

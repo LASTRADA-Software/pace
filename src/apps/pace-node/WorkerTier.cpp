@@ -370,6 +370,7 @@ WorkerTier::WorkerTier(WorkerTierParts const& parts,
                                   .served = 0,
                                   .discovered = static_cast<std::uint32_t>(_discovered.entries.size()) } },
     _advertisedWire { Distributed::CapacityToWire(parts.capacity) },
+    _machineCapacity { parts.capacity },
     _dialer { parts.schedulerDialer },
     _link { std::move(link) },
     _hostInbox { [this] { _capacity.WakeHeartbeat(); }, parts.suspendWait },
@@ -538,7 +539,14 @@ void WorkerTier::Heartbeat(std::stop_token const& stop,
                                  .prover = _prover,
                                  .lease = *_leaseState,
                                  .logger = _logger,
-                                 .reachability = reachability };
+                                 .reachability = reachability,
+                                 // The ceilings `node-status` names: the scheduler's own arithmetic over the
+                                 // capacity this worker registered with and the load this round sent.
+                                 .sampled = [this, &statusClock](Distributed::NodeLoad const& load) {
+                                     _runtime.PublishSlotCeilings(SlotCeilingsReading {
+                                         .ceilings = Distributed::SlotCeilingsFor(_machineCapacity, _slots, load),
+                                         .sampledAt = statusClock.now() });
+                                 } };
 
     // The configuration snapshot this thread last surveyed against, so a reload is
     // noticed by COMPARISON rather than by a flag somebody else sets. Seeded BEFORE the

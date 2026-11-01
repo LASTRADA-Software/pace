@@ -478,6 +478,31 @@ Beside them, what that worker is offering and whether anyone knows about it:
   in the detail. A node with no shared cache says `none`; only a node too old to report
   it leaves `shared-cache` absent. A machine, endpoint or detail the node did not name
   is absent rather than blank.
+- **`slots-available`, `slots-bound-by`, `slot-ceiling-<limit>`,
+  `slot-ceilings-sampled-seconds-ago`** — every ceiling on the worker's slots as of its
+  last heartbeat, and which one binds: `registered`, `external-cpu`, `memory`, `scratch`,
+  `compile-budget`, `cordoned`. The worker computes them with the scheduler's own
+  arithmetic over the load that heartbeat sent, so the two name the same limit. A limit
+  that did not apply — a CPU figure the host could not read, a cordon nobody set — is an
+  absent cell, never a zero, which would be a limit that takes everything. A node with no
+  worker, or one whose first heartbeat has not sampled the host, reports none of them.
+- **`cache-<tier>-entries`, `-bytes`, `-budget`, `-hits`, `-misses`, `-hit-ratio`** — each
+  tier the node's cache has, by `memory` and `disk`. A budget of zero reads `unbounded`;
+  a hit ratio with no lookups behind it is absent. A tier the cache does **not** have is
+  one absent `cache-<tier>` cell, never a tier of zeroes, and a node with no cache reports
+  no tier at all.
+- **`config-<flag>`** — the configuration in force, **after** every accepted reload, one
+  cell per setting a configuration file can carry: a list setting's values joined, an
+  unset setting absent rather than empty. `--requirepass` reads `<redacted>` when set:
+  the node replaces it before its reply exists, so its value never leaves the machine. A
+  path to a secret file (`--tls-key`, `--dashboard-token-file`, `--cluster-dir`) is shown,
+  because the path is not the secret and the file is.
+- **`budget-overrides`** — the cache budgets this node applies from the cluster rather
+  than its own flags. Absent until a node can be given one; `none` once it says it
+  applies none.
+
+The MCP `node_status` tool reads the same reply and the same derivations, so it cannot
+disagree with these cells about a quantity both show.
 
 **`conditions`** is what this node has detected that an operator must act on — each
 condition it raised, by its stable id, with **`latched`** or **`live`** beside it:

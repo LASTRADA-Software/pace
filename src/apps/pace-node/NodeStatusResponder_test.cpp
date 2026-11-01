@@ -30,6 +30,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <iterator>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -293,6 +294,10 @@ struct DirectSources
     Cc::IAdvertisedEndpointSource const* raftEndpoint { nullptr };
     /// Where a node that redirects scheduling names the leader; null is a node that does not.
     ISchedulingLeaderSource const* schedulingLeader { nullptr };
+    /// The configuration in force; null reports none.
+    INodeConfigSource const* config { nullptr };
+    /// The cache's tiers; null is a node with no cache.
+    ITierStatsSource const* cacheTiers { nullptr };
 };
 
 /// A `ConfiguredNodeStatus` beside the configuration it holds a reference to.
@@ -335,7 +340,9 @@ struct Fixture
                                       .roster = direct.roster,
                                       .sharedCache = direct.sharedCache,
                                       .raftEndpoint = direct.raftEndpoint,
-                                      .schedulingLeader = direct.schedulingLeader } }
+                                      .schedulingLeader = direct.schedulingLeader,
+                                      .config = direct.config,
+                                      .cacheTiers = direct.cacheTiers } }
     {
     }
 
@@ -1736,4 +1743,144 @@ TEST_CASE("A node reports the fleet id to paste, with its voters' keys, and the 
     CHECK(pinned.runtime.fleetPin
           == std::optional { Wire::NodeFleetPinFields {
               .fleet = std::format("fedcba9876543210fedcba9876543210@{}", FormatEd25519PublicKey(desk)) } });
+}
+
+namespace
+{
+
+/// A configuration source a case can change between two answers, as an accepted reload does.
+class ReloadableConfig final: public INodeConfigSource
+{
+  public:
+    /// @copydoc INodeConfigSource::Current
+    [[nodiscard]] NodeConfig Current() const override
+    {
+        return inForce;
+    }
+
+    NodeConfig inForce; ///< What the next answer reads.
+};
+
+/// A cache whose tiers a case states.
+class StatedTiers final: public ITierStatsSource
+{
+  public:
+    /// @copydoc ITierStatsSource::SnapshotTiers
+    [[nodiscard]] TieredStorageStats SnapshotTiers() const noexcept override
+    {
+        return tiers;
+    }
+
+    TieredStorageStats tiers {}; ///< One entry per tier the cache has.
+};
+
+/// @param fields What `NodeStatus` answered.
+/// @param flag A setting.
+/// @return Its rows in the configuration the node reported.
+[[nodiscard]] std::vector<Wire::NodeSettingFields> SettingRows(Wire::NodeStatusFields const& fields, std::string_view flag)
+{
+    auto out = std::vector<Wire::NodeSettingFields> {};
+    if (fields.runtime.effectiveConfig.has_value())
+        std::ranges::copy_if(
+            *fields.runtime.effectiveConfig, std::back_inserter(out), [flag](auto const& row) { return row.name == flag; });
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("A node names every slot ceiling of its last heartbeat and the binding one, and none before it",
+          "[node][node-status][node-status-detail]")
+{
+    core::platform::ManualClock clock;
+    Fixture fixture {
+        {}, clock, {}, ToolchainReading { .state = Wire::ToolchainState::Serving, .served = 1, .discovered = 1 }
+    };
+
+    // Before the first heartbeat has sampled the host: no ceilings, never a worker bound by nothing.
+    CHECK_FALSE(fixture.status.Describe().runtime.slotCeilings.has_value());
+
+    // The scheduler's own arithmetic over a reading whose memory binds.
+    auto const ceilings = Distributed::SlotCeilingsFor(
+        Distributed::NodeCapacity { .logicalCores = 8 },
+        8,
+        Distributed::NodeLoad { .inFlight = 0,
+                                .cpuBusyPermille = std::nullopt,
+                                .availableMemoryBytes = 2 * Distributed::MemoryBudgetPerJobBytes,
+                                .freeScratchBytes = std::nullopt,
+                                .cache = {},
+                                .cordoned = false,
+                                .compileBudget = std::nullopt });
+    REQUIRE(ceilings.binding == Distributed::SlotLimit::Memory);
+    fixture.runtime.PublishSlotCeilings(SlotCeilingsReading { .ceilings = ceilings, .sampledAt = clock.now() });
+    clock.advance(std::chrono::seconds { 7 });
+
+    auto const reported = fixture.status.Describe().runtime.slotCeilings;
+    REQUIRE(reported.has_value());
+    auto const& record = Unwrap(reported);
+    CHECK(record.binding == "memory");
+    CHECK(record.available == 2);
+    CHECK(record.sampledSecondsAgo == 7);
+    REQUIRE(record.ceilings.size() == Distributed::SlotLimitTable.size());
+    CHECK(record.ceilings[0] == Wire::NodeSlotCeilingFields { .name = "registered", .slots = 8 });
+    // A CPU the reading did not carry is a ceiling that did not apply: absent, never zero.
+    CHECK(record.ceilings[1] == Wire::NodeSlotCeilingFields { .name = "external-cpu", .slots = std::nullopt });
+    CHECK(record.ceilings[2] == Wire::NodeSlotCeilingFields { .name = "memory", .slots = 2 });
+    CHECK(record.ceilings[5] == Wire::NodeSlotCeilingFields { .name = "cordoned", .slots = std::nullopt });
+}
+
+TEST_CASE("A node reports each tier its cache has, a tier it lacks as absent, and no tiers without a cache",
+          "[node][node-status][node-status-detail]")
+{
+    core::platform::ManualClock clock;
+    Fixture const noCache { {}, clock };
+    CHECK_FALSE(noCache.status.Describe().runtime.tiers.has_value());
+
+    StatedTiers cache;
+    auto memory = StorageStats {};
+    memory.itemCount = 5;
+    memory.bytesUsed = 500;
+    memory.bytesLimit = 4096;
+    memory.getHits = 9;
+    memory.getMisses = 3;
+    cache.tiers[static_cast<std::size_t>(StorageTier::Memory)] = memory;
+    Fixture const withCache { {}, clock, {}, std::nullopt, DirectSources { .cacheTiers = &cache } };
+    auto const tiers = withCache.status.Describe().runtime.tiers;
+    REQUIRE(tiers.has_value());
+    CHECK(Unwrap(tiers)
+          == Wire::NodeTiersFields {
+              Wire::NodeTierFields { .entries = 5, .bytesUsed = 500, .bytesLimit = 4096, .hits = 9, .misses = 3 },
+              std::nullopt });
+}
+
+TEST_CASE("A node reports the configuration in force now, after a reload, with its credential redacted",
+          "[node][node-status][node-status-detail]")
+{
+    core::platform::ManualClock clock;
+    ReloadableConfig config;
+    config.inForce.slots = 4;
+    Fixture const fixture { {}, clock, {}, std::nullopt, DirectSources { .config = &config } };
+
+    CHECK(SettingRows(fixture.status.Describe(), "--slots")
+          == std::vector {
+              Wire::NodeSettingFields { .name = "--slots", .kind = Wire::WireSettingValue::Value, .text = "4" } });
+
+    // An accepted reload: the next answer reads it, not the configuration the start built the status over.
+    config.inForce.slots = 6;
+    config.inForce.requirePass = "a-secret-the-reply-must-not-carry";
+    auto const after = fixture.status.Describe();
+    CHECK(SettingRows(after, "--slots")
+          == std::vector {
+              Wire::NodeSettingFields { .name = "--slots", .kind = Wire::WireSettingValue::Value, .text = "6" } });
+    CHECK(SettingRows(after, "--requirepass")
+          == std::vector {
+              Wire::NodeSettingFields { .name = "--requirepass", .kind = Wire::WireSettingValue::Redacted, .text = {} } });
+
+    // And none of it reached the wire.
+    auto const bytes = Wire::EncodeNodeStatus(after);
+    CHECK(std::string_view { reinterpret_cast<char const*>(bytes.data()), bytes.size() }.find("a-secret-the-reply")
+          == std::string_view::npos);
+
+    // A node that wires no source says nothing about its configuration.
+    Fixture const unwired { {}, clock };
+    CHECK_FALSE(unwired.status.Describe().runtime.effectiveConfig.has_value());
 }

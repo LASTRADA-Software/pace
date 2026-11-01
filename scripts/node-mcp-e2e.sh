@@ -23,6 +23,10 @@
 #                                         second WITH `--dashboard-token-file`, which
 #                                         proves the leader's call to itself is not
 #                                         refused for want of the token.
+#   2d. A node tool answers about it    — `node_status` with no `node` answers about this node
+#                                         with real content: its memory tier present and the
+#                                         disk tier ABSENT, the listen spec it runs by, and the
+#                                         `--requirepass` it holds redacted and nowhere in the body.
 #   3. A legacy client is answered      — `initialize` answers `2025-11-25`.
 #   4. It is not a scrape endpoint      — `GET /metrics` on the MCP port is a 404.
 #   5. A network address refuses        — `--mcp-listen=0.0.0.0:<port>` ends the
@@ -71,6 +75,8 @@ e2e_wait_seconds 120
 
 node_port="$(free_port)"
 mcp_port="$(free_port)"
+# A credential the node holds, which no MCP answer may carry: `node_status` must report it redacted.
+readonly E2E_SECRET="e2e-not-a-real-credential-$$"
 
 # The smallest node that serves: no worker, no consensus, no discovery -- its private
 # cache tier is what it runs, and MCP beside it. Its own state directory, so it never
@@ -82,6 +88,7 @@ mcp_port="$(free_port)"
     --discovery= \
     --cluster-dir "${workdir}/state" \
     --mcp-listen "$mcp_port" \
+    --requirepass "$E2E_SECRET" \
     > "${workdir}/node.log" 2>&1 &
 node_pid=$!
 
@@ -140,10 +147,10 @@ e2e_note "server/discover answered, naming ${MODERN} and ${LEGACY}"
 
 listed="$(mcp_post tools/list "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{${META}}}" "$MODERN")"
 [[ "$listed" == HTTP/1.1\ 200* ]] || fail "tools/list did not answer 200: ${listed%%$'\r'*}"
-readonly FLEET_TOOLS="['fleet_overview','running_compiles','conditions','history','enrollment_status']"
+readonly READ_TOOLS="['fleet_overview','running_compiles','conditions','history','enrollment_status','node_status']"
 json_check "tools/list" "$(body_of "$listed")" \
-    "all(t in [x['name'] for x in d['result']['tools']] for t in ${FLEET_TOOLS}) and all(x['annotations']['readOnlyHint'] for x in d['result']['tools'] if x['name'] in ${FLEET_TOOLS})"
-e2e_note "tools/list names the five fleet tools, each read-only"
+    "all(t in [x['name'] for x in d['result']['tools']] for t in ${READ_TOOLS}) and all(x['annotations']['readOnlyHint'] for x in d['result']['tools'] if x['name'] in ${READ_TOOLS})"
+e2e_note "tools/list names the five fleet tools and node_status, each read-only"
 
 # ------------------------------------------------- 2b. a fleet tool reaches the loop
 called="$(mcp_post tools/call "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"fleet_overview\",\"arguments\":{},${META}}}" "$MODERN" fleet_overview)"
@@ -153,6 +160,24 @@ called="$(mcp_post tools/call "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/
 json_check "tools/call fleet_overview" "$(body_of "$called")" \
     "d['result']['isError'] is True and 'no-leader-known' in d['result']['content'][0]['text'] and 'structuredContent' not in d['result']"
 e2e_note "fleet_overview on a node with no consensus is a tool error naming no-leader-known"
+
+# ----------------------------------------------- 2d. node_status answers about this node
+# Answered in-process through the node's own 0xFC router: the reply `pacectl node` reads, with the detail
+# only a running node can give -- its cache tier, the configuration it runs by, and its credential REDACTED.
+status_called="$(mcp_post tools/call "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"node_status\",\"arguments\":{},${META}}}" "$MODERN" node_status)"
+[[ "$status_called" == HTTP/1.1\ 200* ]] || fail "tools/call node_status did not answer 200: ${status_called%%$'\r'*}"
+status_body="$(body_of "$status_called")"
+readonly NS="d['result']['structuredContent']"
+json_check "tools/call node_status" "$status_body" \
+    "d['result']['isError'] is False and ${NS}['term_scope'] == 'this-node' and ${NS}['node'] is None and isinstance(${NS}['version'], str) and ${NS}['version'] != '' and isinstance(${NS}['uptime_s'], int) and 'cache-tier' in ${NS}['components'] and ${NS}['compile_slots'] is None and ${NS}['slot_ceilings'] is None"
+# The memory tier is present with real figures; a cache with no disk tier says so rather than reporting zeroes.
+json_check "node_status tiers" "$status_body" \
+    "[t['tier'] for t in ${NS}['tiers']] == ['memory', 'disk'] and ${NS}['tiers'][0]['present'] is True and isinstance(${NS}['tiers'][0]['entries'], int) and ${NS}['tiers'][1]['present'] is False and ${NS}['tiers'][1]['entries'] is None"
+# The configuration in force: the listen spec this node was started with, and the credential redacted.
+json_check "node_status effective_config" "$status_body" \
+    "{s['name']: s['values'] for s in ${NS}['effective_config']}['--listen-node'] == ['127.0.0.1:${node_port}'] and {s['name']: s['values'] for s in ${NS}['effective_config']}['--requirepass'] == ['<redacted>'] and ${NS}['budget_overrides'] is None"
+[[ "$status_body" != *"${E2E_SECRET}"* ]] || fail "node_status carried the --requirepass value: ${status_body}"
+e2e_note "node_status answered about this node: its memory tier, a disk tier absent, its listen spec, its credential redacted"
 
 # ------------------------------------------------------------- 3. legacy era
 initialized="$(mcp_post "" '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"e2e","version":"1"}}}' "")"

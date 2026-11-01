@@ -7,6 +7,7 @@
 #include <Pace/Core/WireFields.hpp>
 #include <Pace/Core/WireFrame.hpp>
 #include <Pace/Protocol/NodeConditionWire.hpp>
+#include <Pace/Protocol/NodeStatusDetailWire.hpp>
 
 #include <algorithm>
 #include <array>
@@ -7108,6 +7109,28 @@ struct NodeRuntimeFields
 
     /// The worker's per-request ceiling as resolved (`--compile-request-max`), disengaged as above.
     std::optional<std::uint64_t> compileRequestMaxBytes {};
+
+    /// Every ceiling the worker's slots are held to and which one binds, as of its last heartbeat (field 26),
+    /// or disengaged on a node with no worker, one whose first heartbeat has not been sampled, or a sender too
+    /// old to say. See `NodeSlotCeilingsFields`.
+    ///
+    /// **This replaces nothing the scheduler concludes**: it is the same `Distributed::SlotCeilingsFor`, over
+    /// the very load the heartbeat sent, so the worker and the scheduler cannot name two different limits for
+    /// one reading. The cordon is one of its ceilings, and `cordon` above still says whether it has drained.
+    std::optional<NodeSlotCeilingsFields> slotCeilings {};
+
+    /// The cache tiers this node holds, positionally by `StorageTier` (field 27), or disengaged on a node with
+    /// no cache. **A disengaged POSITION is a tier this cache lacks, never one holding nothing.**
+    std::optional<NodeTiersFields> tiers {};
+
+    /// The configuration in force -- after every accepted reload, not the one the process started with -- one
+    /// row per setting (field 28), every credential `Redacted` BY THE SENDER, so its value never leaves the
+    /// machine. Disengaged from a sender too old to say.
+    std::optional<std::vector<NodeSettingFields>> effectiveConfig {};
+
+    /// The cache budgets this node applies from the cluster rather than its own flags (field 29). Declared and
+    /// sent by nothing yet, so ABSENT everywhere: *does not say*, never *no overrides*.
+    std::optional<std::vector<NodeBudgetOverrideFields>> budgetOverrides {};
 };
 
 /// What an operator reads `NodeRuntimeFields::consensusEndpoint` under, as prose: the
@@ -7417,6 +7440,16 @@ inline constexpr std::size_t SharedCacheStatusFieldCount = 5;
     auto const fleetPin = runtime.fleetPin.has_value() ? EncodeNodeFleetPin(*runtime.fleetPin) : std::vector<std::byte> {};
     auto const inflightMax = Detail::OptionalBigEndian(runtime.compileInflightMaxBytes);
     auto const requestMax = Detail::OptionalBigEndian(runtime.compileRequestMaxBytes);
+    // Absent as zero length; each engaged record encodes non-empty -- see `NodeStatusDetailWire.hpp`.
+    auto const slotCeilings =
+        runtime.slotCeilings.has_value() ? EncodeNodeSlotCeilings(*runtime.slotCeilings) : std::vector<std::byte> {};
+    auto const tiers =
+        runtime.tiers.has_value() && !runtime.tiers->empty() ? EncodeNodeTiers(*runtime.tiers) : std::vector<std::byte> {};
+    auto const effectiveConfig = runtime.effectiveConfig.has_value() && !runtime.effectiveConfig->empty()
+                                     ? EncodeNodeSettings(*runtime.effectiveConfig)
+                                     : std::vector<std::byte> {};
+    auto const budgetOverrides = runtime.budgetOverrides.has_value() ? EncodeNodeBudgetOverrides(*runtime.budgetOverrides)
+                                                                     : std::vector<std::byte> {};
 
     // Positional, so the ORDER here is the wire contract for this record. Append only:
     // an insertion shifts every later field and every peer decodes one fact as the next.
@@ -7445,7 +7478,11 @@ inline constexpr std::size_t SharedCacheStatusFieldCount = 5;
                                 fleetId,
                                 fleetPin,
                                 inflightMax,
-                                requestMax });
+                                requestMax,
+                                slotCeilings,
+                                tiers,
+                                effectiveConfig,
+                                budgetOverrides });
 }
 
 /// Read a runtime record back.
@@ -7655,6 +7692,12 @@ inline constexpr std::size_t SharedCacheStatusFieldCount = 5;
     // and from every sender older than them, refused at any width but a u64's.
     if (!Detail::ReadOptionalBigEndian(at(24), out.compileInflightMaxBytes)
         || !Detail::ReadOptionalBigEndian(at(25), out.compileRequestMaxBytes))
+        return std::nullopt;
+
+    // Fields 26 to 29, the detail `node_status` and `pacectl node` show: empty is ABSENT, and a record this
+    // build cannot read refuses the reply, for the rule every field above follows.
+    if (!ReadNodeSlotCeilings(at(26), out.slotCeilings) || !ReadNodeTiers(at(27), out.tiers)
+        || !ReadNodeSettings(at(28), out.effectiveConfig) || !ReadNodeBudgetOverrides(at(29), out.budgetOverrides))
         return std::nullopt;
 
     return out;

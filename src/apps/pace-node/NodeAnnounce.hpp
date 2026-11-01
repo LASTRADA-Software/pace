@@ -27,6 +27,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -238,6 +239,11 @@ struct HeartbeatRound
     /// empty subject: that place is where the presence loop's refusal lives, and a worker's success
     /// filed there would announce "recorded this machine again" about a machine still refused.
     SchedulerReachability& reachability;
+
+    /// Told the load this round sampled, as the scheduler reads the heartbeat (`Distributed::LoadFromWire`), once
+    /// per round before anything is sent; empty where nobody listens. What `node-status` names the binding slot
+    /// ceiling from, so the worker and the scheduler conclude from ONE reading.
+    std::function<void(Distributed::NodeLoad const&)> sampled {};
 };
 
 /// What one announcement learned, beyond how many entries landed.

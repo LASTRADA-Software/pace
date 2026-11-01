@@ -2120,6 +2120,12 @@ enum class ConsensusDialGap : std::uint8_t
 /// @return A phrase naming who this node admits.
 [[nodiscard]] std::string AdmissionSummary(NodeConfig const& cfg);
 
+/// How `--log-level` spells @p level: the inverse of the parser, so a value read back out of a running node
+/// (`node_status`'s configuration in force) can be handed straight back to the flag.
+/// @param level The level.
+/// @return Its spelling.
+[[nodiscard]] std::string_view NodeLogLevelSpelling(LogLevel level) noexcept;
+
 /// What the readiness line says about this node's worker.
 ///
 /// A node running no worker says exactly that, rather than "0 slot(s) ... identifying 0
