@@ -52,6 +52,7 @@
 #include <core/platform/Clock.hpp>
 #include <tests/BoundedWait.hpp>
 #include <tests/ScratchPath.hpp>
+#include <tests/ScriptedSocket.hpp>
 #include <tests/SteppedDrainWait.hpp>
 #include <tests/SurfaceOwnerFakes.hpp>
 #include <tests/Unwrap.hpp>
@@ -863,6 +864,45 @@ namespace
 }
 
 } // namespace
+
+TEST_CASE("A served toolchain's family reaches the REGISTER frame's capacity record", "[node][worker-tier][family]")
+{
+    // The family is surveyed beside the label and must travel to the scheduler in `CapacityFields::toolchainFamily`;
+    // a registrar that dropped it would register every toolchain into no family, and the upgrade report would go
+    // silent with nothing failing. So the frame a registrar actually WRITES is decoded, not a field read back.
+    namespace Wire = CompileCacheWire;
+    WorkerTierFixture fixture;
+    auto const tier = fixture.Start();
+    REQUIRE(tier.has_value());
+    REQUIRE(tier.value() != nullptr);
+
+    auto const served = std::map<std::string, ServedToolchain> {
+        { "fp-apple",
+          ServedToolchain {
+              .compiler = "/usr/bin/gcc", .label = "gcc 17.0.0", .family = "apple-clang", .witness = std::nullopt } },
+        { "fp-pinned", ServedToolchain { .compiler = "/opt/none/g++", .label = {}, .family = {}, .witness = std::nullopt } },
+    };
+    auto registrars = tier.value()->RegistrarsFor(served);
+    REQUIRE(registrars.size() == 2);
+
+    auto const familyRegistered = [](Cc::WorkerRegistrar& registrar) {
+        Testing::ScriptedSocket scheduler { RegisterAccepted("w-1") };
+        REQUIRE(registrar.Register(scheduler, {}).has_value());
+        auto const& sent = scheduler.Sent();
+        REQUIRE(sent.size() > Wire::RequestHeaderSize);
+        auto const header = Wire::DecodeRequestHeader(sent);
+        REQUIRE(header.has_value());
+        REQUIRE(Testing::Unwrap(header).opRaw == static_cast<std::uint8_t>(Wire::Op::Register));
+        auto const view = Wire::DecodeRegisterPayload(std::span { sent }.subspan(Wire::RequestHeaderSize));
+        REQUIRE(view.has_value());
+        return std::pair { std::string { Wire::AsStringView(Testing::Unwrap(view).fingerprint) },
+                           Testing::Unwrap(view).capacity.toolchainFamily };
+    };
+    auto families = std::map<std::string, std::string> {};
+    for (auto& registrar: registrars)
+        families.insert(familyRegistered(registrar));
+    CHECK(families == std::map<std::string, std::string> { { "fp-apple", "apple-clang" }, { "fp-pinned", "" } });
+}
 
 TEST_CASE("A worker re-registers under a moved endpoint and withdraws the old one exactly once", "[node][worker][endpoint]")
 {

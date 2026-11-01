@@ -4,6 +4,7 @@
 #include <Pace/Distributed/WorkerRegistry.hpp>
 
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
@@ -51,17 +52,20 @@ struct UpgradeAdvice
     std::string family; ///< The banner-derived family key, as the registration carried it.
     /// The version the family should converge on, or nothing when the ordering is unknown.
     std::optional<std::string> recommendedVersion;
-    /// The toolchain that version should be, or nothing when the report cannot say which: an unknown ordering, or
-    /// the version served under several fingerprints that demand does not tell apart.
-    std::optional<std::string> recommendedFingerprint;
+    /// The toolchain that version should be, per DRIVER (`gcc`, `cc`, `g++` -- a label's tool with its version suffix
+    /// dropped, `CompileCache::DriverWithoutVersion`): `gcc` and `cc` are one install under two names, each with its
+    /// own fingerprint, so neither is the other's "other build". A driver is absent when the ordering is unknown or
+    /// when it serves the version under several fingerprints that demand does not tell apart.
+    std::map<std::string, std::string> recommendedFingerprints;
     /// Why, in words a reader can check: the versions compared and, where there is any, the demand behind each.
     std::string basis;
     /// Machines whose highest version of the family is LOWER than the recommended one: these should upgrade.
     std::vector<std::string> nodesBehind;
     /// Machines whose highest version of the family is HIGHER than the recommended one: ahead, never "behind".
     std::vector<std::string> nodesAhead;
-    /// Machines serving the recommended version under another fingerprint, never the recommended one: the same
-    /// version built differently, which `toolchain_diff` explains. Empty when no fingerprint is recommended.
+    /// Machines serving the recommended version under another fingerprint for the SAME driver, never the recommended
+    /// one: the same version built differently, which `toolchain_diff` explains. Empty for a driver with no
+    /// recommended fingerprint.
     std::vector<std::string> nodesSameVersionOtherFingerprint;
     /// True when the family's versions cannot be ordered unambiguously, so nothing is recommended.
     bool orderingUnknown {};
@@ -84,9 +88,11 @@ struct UpgradeAdvice
 /// Within a family, versions are ordered only when every toolchain carries a label that parses, no toolchain is
 /// labelled with two versions, and every version has the same number of parts; otherwise `orderingUnknown`. The
 /// target version is the highest one the most demand uses (ties going to the higher version); with no demand for
-/// the family it is the highest labelled version served, and the basis says "no demand data". A target version
-/// served under more than one fingerprint names a fingerprint only when demand clearly favours one of them;
-/// otherwise the basis names the competitors and points at `toolchain_diff`.
+/// the family it is the highest labelled version served, and the basis says "no demand data". The FAMILY orders
+/// versions and places machines, so `gcc-13` and `gcc-14` are compared and a `cc`-only machine is behind `gcc 14`;
+/// only the fingerprint choice at the target is per DRIVER. A driver serving the target under more than one
+/// fingerprint names one only when demand clearly favours it; otherwise the basis names the competitors and points
+/// at `toolchain_diff`.
 ///
 /// **A node is a machine**, counted by its worker endpoint: the registry keys on (fingerprint, endpoint), so a
 /// machine serving two toolchains is two entries and appears at most once per family. An entry with no family

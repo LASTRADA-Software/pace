@@ -3,6 +3,7 @@
 #include "McpToolSupport.hpp"
 #include "McpToolchainTools.hpp"
 
+#include <Pace/CompileCache/VersionName.hpp>
 #include <Pace/Distributed/CompilerVersion.hpp>
 #include <Pace/Distributed/WorkerRegistry.hpp>
 
@@ -68,7 +69,10 @@ namespace
             auto fingerprint = StringAt(row, "toolchain");
             auto endpoint = StringAt(row, "endpoint");
             auto label = StringOrNullAt(row, "compiler");
-            auto family = StringOrNullAt(row, "family");
+            // A row with no `family` key at all is a leader that renders no such column -- read as `null`, so the row
+            // joins no family rather than refusing every other row's answer with it.
+            auto family = row.Find("family") == nullptr ? std::optional<std::string> { std::string {} }
+                                                        : StringOrNullAt(row, "family");
             if (!fingerprint.has_value() || !endpoint.has_value() || !label.has_value() || !family.has_value())
                 return std::unexpected { std::string { "a \"workers\" row without a string toolchain and endpoint "
                                                        "and a string-or-null compiler and family" } };
@@ -133,9 +137,23 @@ namespace
             { "label", StrOrNull(label) },
             { "labels", Strings(row.labels) },
             { "family", StrOrNull(OnlyOf(row.families)) },
+            { "driver",
+              parsed.has_value() ? Str(std::string { CompileCache::DriverWithoutVersion(parsed->tool) }) : Null() },
             { "version", Str(parsed.has_value() ? Distributed::VersionText(parsed->parts) : std::string { "unknown" }) },
             { "nodes", Strings(row.endpoints) },
         });
+    }
+
+    /// @param advice One family's advice.
+    /// @return `recommended_fingerprints`: driver to fingerprint, or `null` when the ordering is unknown.
+    [[nodiscard]] Json::Value FingerprintsJson(Distributed::UpgradeAdvice const& advice)
+    {
+        if (advice.orderingUnknown)
+            return Null();
+        auto chosen = Json::Object {};
+        for (auto const& [driver, fingerprint]: advice.recommendedFingerprints)
+            chosen.emplace_back(driver, Str(fingerprint));
+        return Obj(std::move(chosen));
     }
 
     /// @param advice One family's advice.
@@ -145,7 +163,7 @@ namespace
         return Obj(Json::Object {
             { "family", Str(advice.family) },
             { "recommended_version", StrOrNull(advice.recommendedVersion) },
-            { "recommended_fingerprint", StrOrNull(advice.recommendedFingerprint) },
+            { "recommended_fingerprints", FingerprintsJson(advice) },
             { "basis", Str(advice.basis) },
             { "behind", Strings(advice.nodesBehind) },
             { "ahead", Strings(advice.nodesAhead) },
@@ -162,6 +180,16 @@ namespace
     }
 
     /// @param advice One family's advice.
+    /// @return How the text names the fingerprint chosen per driver.
+    [[nodiscard]] std::string ChoicesWords(Distributed::UpgradeAdvice const& advice)
+    {
+        auto words = std::vector<std::string> {};
+        for (auto const& [driver, fingerprint]: advice.recommendedFingerprints)
+            words.push_back(std::format("{}: {}", driver, fingerprint));
+        return words.empty() ? std::string { "no single fingerprint for any driver" } : Joined(words, ", ");
+    }
+
+    /// @param advice One family's advice.
     /// @return How the text says it.
     [[nodiscard]] std::string AdviceWords(Distributed::UpgradeAdvice const& advice)
     {
@@ -171,7 +199,7 @@ namespace
                            "toolchain_diff): {} ({})",
                            advice.family,
                            *advice.recommendedVersion,
-                           advice.recommendedFingerprint.value_or("no single fingerprint"),
+                           ChoicesWords(advice),
                            MachinesWords(advice.nodesBehind),
                            MachinesWords(advice.nodesAhead),
                            MachinesWords(advice.nodesSameVersionOtherFingerprint),
@@ -283,10 +311,10 @@ namespace
         R"("answered_by":{"type":"string"},"term":{"type":["integer","null"]},"term_scope":{"const":"this-node"},)"
         R"("toolchain_count":{"type":"integer","description":"Distinct fingerprints."},)"
         R"("machine_count":{"type":"integer","description":"Distinct worker endpoints: a machine serving two toolchains counts once."},)"
-        R"("toolchains":{"type":"array","description":"Per fingerprint: label and version (\"unknown\" when the label does not parse) where its entries agree on one label, every label in labels, family as the node read it off the banner (null when none or disagreeing), and the machines serving it."},)"
+        R"("toolchains":{"type":"array","description":"Per fingerprint: label and version (\"unknown\" when the label does not parse) where its entries agree on one label, every label in labels, family as the node read it off the banner (null when none or disagreeing), driver (the label's compiler name without a version suffix, null when the label does not parse), and the machines serving it."},)"
         R"("nodes":{"type":"array","description":"Per machine: the fingerprints it serves, and unserved -- the fleet's fingerprints in the same families it does not serve; null when it serves no toolchain of a known family (see unserved_note)."},)"
         R"("unserved_note":{"type":"string"},"demand":{"type":"null","description":"Absent: no demand per toolchain is recorded yet."},"demand_note":{"type":"string"},)"
-        R"("upgrade_report":{"type":"array","description":"Per banner-derived compiler family: recommended_version and recommended_fingerprint (null when the report cannot say), basis (the versions compared and any demand), and machines placed by their highest version of the family: behind (lower: should upgrade), ahead (higher), same_version_other_fingerprint (the recommended version built differently: ask toolchain_diff); ordering_unknown."}}})";
+        R"("upgrade_report":{"type":"array","description":"Per banner-derived compiler family: recommended_version, and recommended_fingerprints -- an object from DRIVER (gcc, cc, g++: one install answers to several) to fingerprint, a driver absent when its builds of the version cannot be told apart, null when the ordering is unknown; basis (the versions compared and any demand), and machines placed by their highest version of the family: behind (lower: should upgrade), ahead (higher), same_version_other_fingerprint (the recommended version under another fingerprint for the SAME driver: ask toolchain_diff); ordering_unknown."}}})";
 
 } // namespace
 
@@ -305,8 +333,10 @@ std::vector<Mcp::ToolRow> ToolchainTools(IMcpUpstream& upstream)
                 "Machines are counted once however many toolchains they serve. Includes a conservative upgrade "
                 "report per family: it names a version to converge on only when every version in the family parses "
                 "unambiguously, and places each machine by its highest version -- behind (lower), ahead (higher), or "
-                "same_version_other_fingerprint (the same version built differently: ask toolchain_diff why); it "
-                "names no fingerprint between two of one version unless demand settles it. Every row carries its "
+                "same_version_other_fingerprint (the same version built differently for the same driver: ask "
+                "toolchain_diff why). It names a fingerprint per DRIVER (recommended_fingerprints: gcc and cc are one "
+                "install under two names), and none for a driver whose builds of one version demand cannot tell "
+                "apart. Every row carries its "
                 "basis -- the versions compared and the demand behind them -- so it can be checked. `demand` is "
                 "null: absent, not empty. `term` is the term THIS node holds.",
             .inputSchema = NoArguments,

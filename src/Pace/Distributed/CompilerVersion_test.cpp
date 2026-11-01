@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
@@ -52,6 +53,7 @@ namespace
 }
 
 using Endpoints = std::vector<std::string>;
+using Choices = std::map<std::string, std::string>;
 } // namespace
 
 TEST_CASE("A toolchain label parses into its tool and numeric version", "[distributed][toolchains]")
@@ -122,7 +124,7 @@ TEST_CASE("Without demand data the highest labelled version is the target, and m
     auto const gcc = FamilyOf(advice, "gcc");
     CHECK_FALSE(gcc.orderingUnknown);
     CHECK(gcc.recommendedVersion == std::optional<std::string> { "13.2.0" });
-    CHECK(gcc.recommendedFingerprint == std::optional<std::string> { "fp-13" });
+    CHECK(gcc.recommendedFingerprints == Choices { { "gcc", "fp-13" } });
     CHECK(gcc.nodesBehind == Endpoints { "a:1", "d:1" });
     CHECK(gcc.nodesAhead.empty());
     CHECK(gcc.nodesSameVersionOtherFingerprint.empty());
@@ -132,7 +134,7 @@ TEST_CASE("Without demand data the highest labelled version is the target, and m
     CHECK(gcc.basis.contains("13.2.0"));
 
     auto const clang = FamilyOf(advice, "clang");
-    CHECK(clang.recommendedFingerprint == std::optional<std::string> { "fp-clang" });
+    CHECK(clang.recommendedFingerprints == Choices { { "clang", "fp-clang" } });
     CHECK(PlacesNobody(clang));
 }
 
@@ -154,15 +156,15 @@ TEST_CASE("Families come from the banner: Apple clang is never compared with LLV
 
     auto const gcc = FamilyOf(advice, "gcc");
     CHECK(gcc.recommendedVersion == std::optional<std::string> { "14.1.0" });
-    CHECK(gcc.recommendedFingerprint == std::optional<std::string> { "fp-gnu-14" });
+    CHECK(gcc.recommendedFingerprints == Choices { { "gcc", "fp-gnu-14" } });
     CHECK(gcc.nodesBehind == Endpoints { "linux-a:1" });
 
     auto const apple = FamilyOf(advice, "apple-clang");
-    CHECK(apple.recommendedFingerprint == std::optional<std::string> { "fp-apple-as-gcc" });
+    CHECK(apple.recommendedFingerprints == Choices { { "gcc", "fp-apple-as-gcc" } });
     CHECK(apple.nodesBehind == Endpoints { "mac-b:1" });
 
     auto const llvm = FamilyOf(advice, "clang");
-    CHECK(llvm.recommendedFingerprint == std::optional<std::string> { "fp-llvm" });
+    CHECK(llvm.recommendedFingerprints == Choices { { "clang", "fp-llvm" } });
     CHECK(PlacesNobody(llvm));
     // No GNU or LLVM machine appears in another family's lists.
     for (auto const& row: advice)
@@ -179,7 +181,7 @@ TEST_CASE("A toolchain that registered no family joins none and is advised on by
     auto const advice = AdviseUpgrades(workers, {});
     REQUIRE(advice.size() == 1);
     auto const gcc = FamilyOf(advice, "gcc");
-    CHECK(gcc.recommendedFingerprint == std::optional<std::string> { "fp-13" });
+    CHECK(gcc.recommendedFingerprints == Choices { { "gcc", "fp-13" } });
     CHECK(PlacesNobody(gcc));
 }
 
@@ -193,7 +195,7 @@ TEST_CASE("one unparseable label in a family makes orderingUnknown and no recomm
     auto const clang = FamilyOf(AdviseUpgrades(workers, {}), "clang");
     CHECK(clang.orderingUnknown);
     CHECK_FALSE(clang.recommendedVersion.has_value());
-    CHECK_FALSE(clang.recommendedFingerprint.has_value());
+    CHECK(clang.recommendedFingerprints.empty());
     CHECK(PlacesNobody(clang));
     INFO(clang.basis);
     CHECK(clang.basis.contains("clang version 18-ish"));
@@ -207,7 +209,7 @@ TEST_CASE("A label of the tool alone, or none, leaves its family's ordering unkn
     };
     auto const cl = FamilyOf(AdviseUpgrades(toolAlone, {}), "cl");
     CHECK(cl.orderingUnknown);
-    CHECK_FALSE(cl.recommendedFingerprint.has_value());
+    CHECK(cl.recommendedFingerprints.empty());
     CHECK(PlacesNobody(cl));
 
     // A label withheld (too long, not text) still registered a family: its version is unknown, so nothing is ordered.
@@ -217,7 +219,7 @@ TEST_CASE("A label of the tool alone, or none, leaves its family's ordering unkn
     };
     auto const gcc = FamilyOf(AdviseUpgrades(noLabel, {}), "gcc");
     CHECK(gcc.orderingUnknown);
-    CHECK_FALSE(gcc.recommendedFingerprint.has_value());
+    CHECK(gcc.recommendedFingerprints.empty());
     CHECK(PlacesNobody(gcc));
     CHECK(gcc.basis.contains("fp-b"));
 }
@@ -232,7 +234,7 @@ TEST_CASE("One fingerprint labelled with two versions leaves its family's orderi
     };
     auto const gcc = FamilyOf(AdviseUpgrades(workers, {}), "gcc");
     CHECK(gcc.orderingUnknown);
-    CHECK_FALSE(gcc.recommendedFingerprint.has_value());
+    CHECK(gcc.recommendedFingerprints.empty());
     CHECK(PlacesNobody(gcc));
     INFO(gcc.basis);
     CHECK(gcc.basis.contains("gcc 13.2.0"));
@@ -247,7 +249,7 @@ TEST_CASE("Versions of differing lengths in one family do not order", "[distribu
     };
     auto const gcc = FamilyOf(AdviseUpgrades(workers, {}), "gcc");
     CHECK(gcc.orderingUnknown);
-    CHECK_FALSE(gcc.recommendedFingerprint.has_value());
+    CHECK(gcc.recommendedFingerprints.empty());
     CHECK(PlacesNobody(gcc));
 }
 
@@ -269,7 +271,7 @@ TEST_CASE("recommendation is the highest version the most demand uses, basis lis
     auto const gcc = FamilyOf(AdviseUpgrades(workers, demand), "gcc");
     CHECK_FALSE(gcc.orderingUnknown);
     CHECK(gcc.recommendedVersion == std::optional<std::string> { "13.2.0" });
-    CHECK(gcc.recommendedFingerprint == std::optional<std::string> { "fp-13" });
+    CHECK(gcc.recommendedFingerprints == Choices { { "gcc", "fp-13" } });
     CHECK(gcc.nodesBehind == Endpoints { "a:1", "b:1" });
     CHECK(gcc.nodesAhead == Endpoints { "d:1" });
     CHECK(gcc.nodesSameVersionOtherFingerprint.empty());
@@ -290,7 +292,7 @@ TEST_CASE("Two versions with equal demand recommend the higher", "[distributed][
         DemandRow { .fingerprint = "fp-13", .compiles = 50 },
     };
     auto const gcc = FamilyOf(AdviseUpgrades(workers, demand), "gcc");
-    CHECK(gcc.recommendedFingerprint == std::optional<std::string> { "fp-13" });
+    CHECK(gcc.recommendedFingerprints == Choices { { "gcc", "fp-13" } });
     CHECK(gcc.nodesBehind == Endpoints { "a:1" });
     CHECK(gcc.nodesAhead.empty());
 }
@@ -306,7 +308,7 @@ TEST_CASE("One version under two fingerprints names no fingerprint, but still pl
     auto const gcc = FamilyOf(AdviseUpgrades(workers, {}), "gcc");
     CHECK_FALSE(gcc.orderingUnknown);
     CHECK(gcc.recommendedVersion == std::optional<std::string> { "13.2.0" });
-    CHECK_FALSE(gcc.recommendedFingerprint.has_value());
+    CHECK(gcc.recommendedFingerprints.empty());
     // The version is known, so the machine below it is behind whichever 13.2.0 it installs.
     CHECK(gcc.nodesBehind == Endpoints { "a:1" });
     CHECK(gcc.nodesAhead.empty());
@@ -331,7 +333,7 @@ TEST_CASE("Demand that clearly favours one of two same-version fingerprints name
         DemandRow { .fingerprint = "fp-13-y", .compiles = 70 },
     };
     auto const broken = FamilyOf(AdviseUpgrades(workers, decisive), "gcc");
-    CHECK(broken.recommendedFingerprint == std::optional<std::string> { "fp-13-y" });
+    CHECK(broken.recommendedFingerprints == Choices { { "gcc", "fp-13-y" } });
     // Not behind: a:1 runs the recommended VERSION, under another build of it.
     CHECK(broken.nodesBehind.empty());
     CHECK(broken.nodesAhead.empty());
@@ -342,7 +344,7 @@ TEST_CASE("Demand that clearly favours one of two same-version fingerprints name
         DemandRow { .fingerprint = "fp-13-y", .compiles = 70 },
     };
     auto const stillTied = FamilyOf(AdviseUpgrades(workers, tied), "gcc");
-    CHECK_FALSE(stillTied.recommendedFingerprint.has_value());
+    CHECK(stillTied.recommendedFingerprints.empty());
     CHECK(PlacesNobody(stillTied));
     CHECK(stillTied.basis.contains("toolchain_diff"));
 }
@@ -359,10 +361,81 @@ TEST_CASE("A machine is placed by the highest version of the family it serves", 
     };
     auto const demand = std::vector<DemandRow> { DemandRow { .fingerprint = "fp-13", .compiles = 100 } };
     auto const gcc = FamilyOf(AdviseUpgrades(workers, demand), "gcc");
-    CHECK(gcc.recommendedFingerprint == std::optional<std::string> { "fp-13" });
+    CHECK(gcc.recommendedFingerprints == Choices { { "gcc", "fp-13" } });
     CHECK(gcc.nodesBehind.empty());
     CHECK(gcc.nodesAhead == Endpoints { "b:1" });
     CHECK(gcc.nodesSameVersionOtherFingerprint.empty());
+}
+
+TEST_CASE("gcc and cc at one version are one install under two drivers: a fingerprint each, and nobody another build",
+          "[distributed][toolchains]")
+{
+    // What every Linux host serves: `gcc` and `cc` are one GCC under two names, and two fingerprints because each
+    // banner names its own driver. Chosen per driver, both are recommended; chosen across drivers, neither was.
+    auto const workers = std::vector<WorkerReport> {
+        Entry("fp-gcc", "a:1", "gcc", "gcc 13.2.0"),
+        Entry("fp-cc", "a:1", "gcc", "cc 13.2.0"),
+        Entry("fp-gcc", "b:1", "gcc", "gcc 13.2.0"),
+        Entry("fp-cc", "b:1", "gcc", "cc 13.2.0"),
+        // A machine serving only one of the two drivers is not "another build": it lacks a driver, not a version.
+        Entry("fp-cc", "c:1", "gcc", "cc 13.2.0"),
+    };
+    auto const gcc = FamilyOf(AdviseUpgrades(workers, {}), "gcc");
+    CHECK_FALSE(gcc.orderingUnknown);
+    CHECK(gcc.recommendedVersion == std::optional<std::string> { "13.2.0" });
+    CHECK(gcc.recommendedFingerprints == Choices { { "cc", "fp-cc" }, { "gcc", "fp-gcc" } });
+    CHECK(PlacesNobody(gcc));
+    CHECK_FALSE(gcc.basis.contains("toolchain_diff"));
+}
+
+TEST_CASE("Two builds under ONE driver at the target are still another build", "[distributed][toolchains]")
+{
+    // The narrowing is to the driver, not away from the question: two `gcc` 13.2.0 fingerprints remain competitors.
+    auto const workers = std::vector<WorkerReport> {
+        Entry("fp-gcc-x", "a:1", "gcc", "gcc 13.2.0"),
+        Entry("fp-gcc-y", "b:1", "gcc", "gcc 13.2.0"),
+        Entry("fp-cc", "a:1", "gcc", "cc 13.2.0"),
+    };
+    auto const demand = std::vector<DemandRow> { DemandRow { .fingerprint = "fp-gcc-x", .compiles = 30 } };
+    auto const gcc = FamilyOf(AdviseUpgrades(workers, demand), "gcc");
+    CHECK(gcc.recommendedFingerprints == Choices { { "cc", "fp-cc" }, { "gcc", "fp-gcc-x" } });
+    CHECK(gcc.nodesSameVersionOtherFingerprint == Endpoints { "b:1" });
+    CHECK(gcc.nodesBehind.empty());
+}
+
+TEST_CASE("Version-suffixed drivers are one driver, and their versions are still compared", "[distributed][toolchains]")
+{
+    // `gcc-13` and `gcc-14` are the driver `gcc` at two versions: ordered within the family, the older machine
+    // behind -- and a machine with only `cc` is behind `gcc 14` too, since the FAMILY places machines.
+    auto const workers = std::vector<WorkerReport> {
+        Entry("fp-13", "a:1", "gcc", "gcc-13 13.3.0"),
+        Entry("fp-14", "b:1", "gcc", "gcc-14 14.2.0"),
+        Entry("fp-cc", "c:1", "gcc", "cc 13.3.0"),
+    };
+    auto const gcc = FamilyOf(AdviseUpgrades(workers, {}), "gcc");
+    CHECK_FALSE(gcc.orderingUnknown);
+    CHECK(gcc.recommendedVersion == std::optional<std::string> { "14.2.0" });
+    CHECK(gcc.recommendedFingerprints == Choices { { "gcc", "fp-14" } });
+    CHECK(gcc.nodesBehind == Endpoints { "a:1", "c:1" });
+    CHECK(gcc.nodesAhead.empty());
+    CHECK(gcc.nodesSameVersionOtherFingerprint.empty());
+}
+
+TEST_CASE("Apple's aliases are one family row, one choice per driver, and nobody another build", "[distributed][toolchains]")
+{
+    // macOS answers `cc`, `gcc` and `clang` with one Apple clang: one family, one fingerprint, whatever name each
+    // machine's toolchain was first served under.
+    auto const workers = std::vector<WorkerReport> {
+        Entry("fp-apple", "mac-a:1", "apple-clang", "cc 17.0.0"),
+        Entry("fp-apple", "mac-b:1", "apple-clang", "gcc 17.0.0"),
+        Entry("fp-apple", "mac-c:1", "apple-clang", "clang 17.0.0"),
+    };
+    auto const advice = AdviseUpgrades(workers, {});
+    REQUIRE(advice.size() == 1);
+    auto const apple = FamilyOf(advice, "apple-clang");
+    CHECK_FALSE(apple.orderingUnknown);
+    CHECK(apple.recommendedFingerprints == Choices { { "cc", "fp-apple" }, { "clang", "fp-apple" }, { "gcc", "fp-apple" } });
+    CHECK(PlacesNobody(apple));
 }
 
 TEST_CASE("No workers give no advice", "[distributed][toolchains]")

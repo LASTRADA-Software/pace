@@ -955,12 +955,6 @@ std::string ToolchainFamily(std::string_view compiler, std::string_view banner)
     return {};
 }
 
-bool LooksLikeVersion(std::string_view name) noexcept
-{
-    return !name.empty() && std::ranges::any_of(name, [](char c) { return c >= '0' && c <= '9'; })
-           && std::ranges::all_of(name, [](char c) { return (c >= '0' && c <= '9') || c == '.'; });
-}
-
 std::vector<std::string> MsvcToolsetIncludeRoots(IToolchainHost& host, std::string const& compiler)
 {
     // Resolved first, so a bare `cl` from a build system and an absolute path from

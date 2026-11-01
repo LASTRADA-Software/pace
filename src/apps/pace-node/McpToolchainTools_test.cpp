@@ -228,7 +228,8 @@ TEST_CASE("toolchains projects the leader's workers by fingerprint and counts ma
     auto const& report = At(out, "upgrade_report");
     auto const& gcc = RowWhere(report, "family", "gcc");
     CHECK(TextAt(gcc, "recommended_version") == std::optional<std::string> { "13.2.0" });
-    CHECK(TextAt(gcc, "recommended_fingerprint") == std::optional<std::string> { "fp-13" });
+    CHECK(TextAt(At(gcc, "recommended_fingerprints"), "gcc") == std::optional<std::string> { "fp-13" });
+    CHECK(TextAt(RowWhere(At(out, "toolchains"), "fingerprint", "fp-13"), "driver") == std::optional<std::string> { "gcc" });
     CHECK(StringsOf(At(gcc, "behind")) == std::vector<std::string> { "a:1" });
     CHECK(Elements(At(gcc, "ahead")).empty());
     CHECK(Elements(At(gcc, "same_version_other_fingerprint")).empty());
@@ -251,7 +252,7 @@ TEST_CASE("toolchains reports an unparseable family as ordering unknown, recomme
     REQUIRE_FALSE(result.isError);
     auto const& clang = RowWhere(At(result.structured, "upgrade_report"), "family", "clang");
     CHECK(At(clang, "ordering_unknown").AsBool() == std::optional<bool> { true });
-    CHECK(At(clang, "recommended_fingerprint").IsNull());
+    CHECK(At(clang, "recommended_fingerprints").IsNull());
     CHECK(At(clang, "recommended_version").IsNull());
     for (auto const key: { std::string_view { "behind" },
                            std::string_view { "ahead" },
@@ -277,10 +278,61 @@ TEST_CASE("toolchains places a machine on a newer version ahead, and another bui
     auto const result = CallToolchains(upstream);
     REQUIRE_FALSE(result.isError);
     auto const& gcc = RowWhere(At(result.structured, "upgrade_report"), "family", "gcc");
-    CHECK(TextAt(gcc, "recommended_fingerprint") == std::optional<std::string> { "fp-14" });
+    CHECK(TextAt(At(gcc, "recommended_fingerprints"), "gcc") == std::optional<std::string> { "fp-14" });
     CHECK(StringsOf(At(gcc, "behind")) == std::vector<std::string> { "a:1", "b:1" });
     CHECK(Elements(At(gcc, "ahead")).empty());
     CHECK(result.text.contains("behind: a:1, b:1"));
+}
+
+TEST_CASE("toolchains names a fingerprint per driver, so gcc and cc of one install are both recommended",
+          "[pace-node][mcp][toolchains]")
+{
+    auto upstream = LeaderUpstream();
+    upstream.AnswerOk(DocumentWith({
+        Entry("fp-gcc", "a:1", "gcc", "gcc 13.2.0"),
+        Entry("fp-cc", "a:1", "gcc", "cc 13.2.0"),
+        Entry("fp-gcc", "b:1", "gcc", "gcc 13.2.0"),
+        Entry("fp-cc", "b:1", "gcc", "cc 13.2.0"),
+    }));
+    auto const result = CallToolchains(upstream);
+    REQUIRE_FALSE(result.isError);
+    auto const& gcc = RowWhere(At(result.structured, "upgrade_report"), "family", "gcc");
+    auto const& chosen = At(gcc, "recommended_fingerprints");
+    REQUIRE(chosen.AsObject() != nullptr);
+    CHECK(chosen.AsObject()->size() == 2);
+    CHECK(TextAt(chosen, "gcc") == std::optional<std::string> { "fp-gcc" });
+    CHECK(TextAt(chosen, "cc") == std::optional<std::string> { "fp-cc" });
+    CHECK(Elements(At(gcc, "same_version_other_fingerprint")).empty());
+    CHECK(result.text.contains("cc: fp-cc, gcc: fp-gcc"));
+}
+
+TEST_CASE("toolchains reads a worker row with no family key as no family, never refusing the answer",
+          "[pace-node][mcp][toolchains]")
+{
+    // A leader that renders no `family` column at all: each row joins no family, and the rest of the answer stands.
+    auto document =
+        Unwrap(Json::Parse(DocumentWith({ Entry("fp", "a:1", "gcc", "gcc 13.2.0") }), McpFleet::FleetDocumentLimits));
+    auto* const members = std::get_if<Json::Object>(&document.v);
+    REQUIRE(members != nullptr);
+    auto const workers = std::ranges::find(*members, std::string_view { "workers" }, &Json::Member::first);
+    REQUIRE(workers != members->end());
+    auto* const rows = std::get_if<Json::Array>(&workers->second.v);
+    REQUIRE(rows != nullptr);
+    REQUIRE(rows->size() == 1);
+    auto* const row = std::get_if<Json::Object>(&rows->front().v);
+    REQUIRE(row != nullptr);
+    auto const before = row->size();
+    std::erase_if(*row, [](Json::Member const& member) { return member.first == "family"; });
+    REQUIRE(row->size() + 1 == before);
+
+    auto upstream = LeaderUpstream();
+    upstream.AnswerOk(Json::Serialize(document));
+    auto const result = CallToolchains(upstream);
+    INFO(result.text);
+    REQUIRE_FALSE(result.isError);
+    CHECK(At(RowWhere(At(result.structured, "toolchains"), "fingerprint", "fp"), "family").IsNull());
+    CHECK(Elements(At(result.structured, "upgrade_report")).empty());
+    CHECK(At(RowWhere(At(result.structured, "nodes"), "endpoint", "a:1"), "unserved").IsNull());
 }
 
 TEST_CASE("toolchains on an empty fleet says so rather than failing", "[pace-node][mcp][toolchains]")

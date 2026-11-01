@@ -41,8 +41,9 @@
 #                                         family the banner's, unserved derived (EMPTY on
 #                                         one machine), demand ABSENT (null), and an upgrade
 #                                         report whose every row is consistent -- nothing
-#                                         recommended where the ordering is unknown, nobody
-#                                         behind or ahead on a one-machine fleet, a basis on each.
+#                                         recommended where the ordering is unknown, a
+#                                         fingerprint per DRIVER otherwise, nobody behind
+#                                         or ahead on a one-machine fleet, a basis on each.
 #   3. A legacy client is answered      — `initialize` answers `2025-11-25`.
 #   4. It is not a scrape endpoint      — `GET /metrics` on the MCP port is a 404.
 #   5. A network address refuses        — `--mcp-listen=0.0.0.0:<port>` ends the
@@ -395,11 +396,12 @@ if command -v cc >/dev/null 2>&1 || command -v c++ >/dev/null 2>&1 || command -v
     # -- never the label's tool name, so a `cc` that is GNU is in `gcc`.
     json_check "toolchains versions and families" "$toolchains_body" \
         "all((t['label'] is None and t['version'] == 'unknown') or t['version'] == 'unknown' or t['label'] == t['label'].split(' ')[0] + ' ' + t['version'] for t in ${SC}['toolchains']) and all(t['family'] in (None, 'gcc', 'g++', 'clang', 'clang++', 'apple-clang', 'apple-clang++', 'cl', 'clang-cl') for t in ${SC}['toolchains']) and any(t['family'] is not None for t in ${SC}['toolchains'])"
-    # The upgrade report, row by row: an unknown ordering recommends nothing; a known one names a version and, if a
-    # fingerprint, one of its own family; on a one-machine fleet nobody is behind, ahead or on another build; every
-    # row carries its basis.
+    # The upgrade report, row by row: an unknown ordering recommends nothing; a known one names a version and,
+    # per DRIVER, a fingerprint of its own family served under that driver -- `gcc` and `cc` of one install are both
+    # named, so on a host that serves either some row names one. On a one-machine fleet nobody is behind, ahead or on
+    # another build; every row carries its basis.
     json_check "toolchains upgrade report" "$toolchains_body" \
-        "len(${SC}['upgrade_report']) > 0 and all(r['basis'] != '' and r['behind'] == [] and r['ahead'] == [] and r['same_version_other_fingerprint'] == [] and ((r['recommended_version'] is None and r['recommended_fingerprint'] is None) if r['ordering_unknown'] else (r['recommended_version'] is not None and r['recommended_fingerprint'] in [None] + [t['fingerprint'] for t in ${SC}['toolchains'] if t['family'] == r['family']] and 'no demand data; highest labelled version served' in r['basis'])) for r in ${SC}['upgrade_report'])"
+        "len(${SC}['upgrade_report']) > 0 and all(r['basis'] != '' and r['behind'] == [] and r['ahead'] == [] and r['same_version_other_fingerprint'] == [] and ((r['recommended_version'] is None and r['recommended_fingerprints'] is None) if r['ordering_unknown'] else (r['recommended_version'] is not None and isinstance(r['recommended_fingerprints'], dict) and all(any(t['fingerprint'] == fp and t['family'] == r['family'] and t['driver'] == driver for t in ${SC}['toolchains']) for driver, fp in r['recommended_fingerprints'].items()) and 'no demand data; highest labelled version served' in r['basis'])) for r in ${SC}['upgrade_report']) and any(r['recommended_fingerprints'] for r in ${SC}['upgrade_report'])"
     e2e_note "toolchains reported $(python3 -I -c "import json,sys; print(json.loads(sys.stdin.read())['result']['structuredContent']['toolchain_count'])" <<< "$toolchains_body") toolchain(s) on this one machine, unserved derived and empty, demand absent, and a consistent upgrade report"
 else
     e2e_note "no compiler on PATH, so the worker registers no toolchain: the toolchains content check was NOT run"

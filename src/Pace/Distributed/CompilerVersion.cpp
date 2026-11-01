@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <Pace/CompileCache/VersionName.hpp>
 #include <Pace/Distributed/CompilerVersion.hpp>
 
 #include <algorithm>
@@ -61,6 +62,9 @@ namespace
         std::optional<CompilerVersion> parsed; ///< Its version, when every label parsed to one version.
         bool unordered {};                     ///< A label did not parse, or two labels disagree.
         bool unlabelled {};                    ///< An entry stated no label at all, so its version is unknown.
+        /// The drivers its labels name, version suffix dropped (`CompileCache::DriverWithoutVersion`): `gcc` and
+        /// `cc` are one install under two names, and a fingerprint is chosen per driver, never across two.
+        std::set<std::string> drivers;
     };
 
     /// One family, keyed by fingerprint.
@@ -138,7 +142,7 @@ namespace
         if (byVersion.empty())
             return UpgradeAdvice { .family = std::move(family),
                                    .recommendedVersion = std::nullopt,
-                                   .recommendedFingerprint = std::nullopt,
+                                   .recommendedFingerprints = {},
                                    .basis = "ordering unknown: no version parsed",
                                    .nodesBehind = {},
                                    .nodesAhead = {},
@@ -164,7 +168,7 @@ namespace
 
         auto advice = UpgradeAdvice { .family = std::move(family),
                                       .recommendedVersion = targetText,
-                                      .recommendedFingerprint = std::nullopt,
+                                      .recommendedFingerprints = {},
                                       .basis = {},
                                       .nodesBehind = {},
                                       .nodesAhead = {},
@@ -185,39 +189,54 @@ namespace
                                        familyDemand,
                                        Joined(compared));
 
+        // The FINGERPRINT is chosen per DRIVER, never across two: `gcc` and `cc` at one version are one install under
+        // two names, two fingerprints because each banner names its own driver, and neither is "the other build" of
+        // the other. Two fingerprints under ONE driver at the target are; demand settles that only when one carries
+        // strictly more than every other, and otherwise the basis names them and points at toolchain_diff.
         auto const& candidates = target->second.first;
-        if (candidates.size() == 1)
-            advice.recommendedFingerprint = candidates.front();
-        else
+        auto drivers = std::set<std::string> {};
+        for (auto const& fingerprint: candidates)
+            drivers.insert_range(members.at(fingerprint).drivers);
+        for (auto const& driver: drivers)
         {
-            // One version under several fingerprints: the same label, different toolchains. Demand settles it only
-            // when one of them carries strictly more than every other.
-            auto ranked = candidates;
-            std::ranges::sort(ranked, std::ranges::greater {}, demandFor);
-            auto const clear = demandFor(ranked[0]) > demandFor(ranked[1]);
-            auto shares = std::vector<std::string> {};
-            for (auto const& fingerprint: candidates)
-                shares.push_back(std::format("{} ({} compiles)", fingerprint, demandFor(fingerprint)));
-            if (clear)
+            auto underDriver = std::vector<std::string> {};
+            std::ranges::copy_if(candidates, std::back_inserter(underDriver), [&](std::string const& fingerprint) {
+                return members.at(fingerprint).drivers.contains(driver);
+            });
+            if (underDriver.size() == 1)
             {
-                advice.recommendedFingerprint = ranked[0];
-                advice.basis += std::format("; {} is served under {} fingerprints and demand favours {}: {}",
+                advice.recommendedFingerprints.emplace(driver, underDriver.front());
+                continue;
+            }
+            auto ranked = underDriver;
+            std::ranges::sort(ranked, std::ranges::greater {}, demandFor);
+            auto shares = std::vector<std::string> {};
+            for (auto const& fingerprint: underDriver)
+                shares.push_back(std::format("{} ({} compiles)", fingerprint, demandFor(fingerprint)));
+            if (demandFor(ranked[0]) > demandFor(ranked[1]))
+            {
+                advice.recommendedFingerprints.emplace(driver, ranked[0]);
+                advice.basis += std::format("; {} under `{}` is served by {} fingerprints and demand favours {}: {}",
                                             targetText,
-                                            candidates.size(),
+                                            driver,
+                                            underDriver.size(),
                                             ranked[0],
                                             Joined(shares));
             }
             else
-                advice.basis += std::format("; {} is served under {} fingerprints ({}) with nothing in demand to tell "
-                                            "them apart, so none is recommended -- ask toolchain_diff why they differ",
+                advice.basis += std::format("; {} under `{}` is served by {} fingerprints ({}) with nothing in demand "
+                                            "to tell them apart, so none is recommended for it -- ask toolchain_diff "
+                                            "why they differ",
                                             targetText,
-                                            candidates.size(),
-                                            Joined(candidates));
+                                            driver,
+                                            underDriver.size(),
+                                            Joined(underDriver));
         }
 
         // Each machine is placed by the highest version of the family it serves, against the target: below is behind,
-        // above is ahead -- never "behind" for a machine that already runs something newer -- and at the target under
-        // another fingerprint only is the same version built differently.
+        // above is ahead -- never "behind" for a machine that already runs something newer. At the target, a machine
+        // is the same version built differently when, for a driver it serves there, a fingerprint is recommended and
+        // the machine serves that driver only under another one.
         auto servedBy = std::map<std::string, std::vector<std::string>> {};
         for (auto const& [fingerprint, member]: members)
             for (auto const& endpoint: member.endpoints)
@@ -229,11 +248,26 @@ namespace
                 if (auto const& parsed = members.at(fingerprint).parsed; parsed.has_value() && parsed->parts > highest)
                     highest = parsed->parts;
             if (highest < target->first)
+            {
                 advice.nodesBehind.push_back(endpoint);
-            else if (highest > target->first)
+                continue;
+            }
+            if (highest > target->first)
+            {
                 advice.nodesAhead.push_back(endpoint);
-            else if (advice.recommendedFingerprint.has_value()
-                     && !std::ranges::contains(fingerprints, *advice.recommendedFingerprint))
+                continue;
+            }
+            auto const otherBuild = std::ranges::any_of(fingerprints, [&](std::string const& fingerprint) {
+                auto const& member = members.at(fingerprint);
+                if (!member.parsed.has_value() || member.parsed->parts != target->first)
+                    return false;
+                return std::ranges::any_of(member.drivers, [&](std::string const& driver) {
+                    auto const chosen = advice.recommendedFingerprints.find(driver);
+                    return chosen != advice.recommendedFingerprints.end() && chosen->second != fingerprint
+                           && !std::ranges::contains(fingerprints, chosen->second);
+                });
+            });
+            if (otherBuild)
                 advice.nodesSameVersionOtherFingerprint.push_back(endpoint);
         }
         return advice;
@@ -281,6 +315,8 @@ std::vector<UpgradeAdvice> AdviseUpgrades(std::span<WorkerReport const> workers,
         // A label that does not parse, or a second label stating another version for the same fingerprint, leaves
         // the fingerprint -- and so its family -- unordered.
         auto parsed = ParseToolchainLabel(label);
+        if (parsed.has_value())
+            member.drivers.insert(std::string { CompileCache::DriverWithoutVersion(parsed->tool) });
         if (!parsed.has_value() || (member.parsed.has_value() && member.parsed->parts != parsed->parts))
             member.unordered = true;
         else if (!member.parsed.has_value())
@@ -299,7 +335,7 @@ std::vector<UpgradeAdvice> AdviseUpgrades(std::span<WorkerReport const> workers,
         {
             advice.push_back(UpgradeAdvice { .family = family,
                                              .recommendedVersion = std::nullopt,
-                                             .recommendedFingerprint = std::nullopt,
+                                             .recommendedFingerprints = {},
                                              .basis = std::move(*because),
                                              .nodesBehind = {},
                                              .nodesAhead = {},

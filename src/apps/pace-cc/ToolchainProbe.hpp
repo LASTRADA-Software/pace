@@ -7,6 +7,7 @@
 #include "ToolchainFingerprint.hpp"
 #include "ToolchainHost.hpp"
 
+#include <Pace/CompileCache/VersionName.hpp>
 #include <Pace/Core/EnumTable.hpp>
 
 #include <cstddef>
@@ -376,17 +377,10 @@ struct DriverIdentityProbe
 ///         classifies as no flavour, and joins no family rather than a native one).
 [[nodiscard]] std::string ToolchainFamily(std::string_view compiler, std::string_view banner);
 
-/// Whether a name is made only of digits and dots, with at least one digit.
-///
-/// One predicate for two questions that must answer alike: which subdirectory of a
-/// Windows SDK's `Include` is a kit version (`10.0.26100.0` yes, `KitsRoot10` and
-/// the GUID-named values no), and which suffix on a compiler name is a version
-/// (`gcc-13` yes, `gcc-ar` no). A second spelling is a second set of rules for what
-/// counts as a version.
-///
-/// @param name The candidate.
-/// @return True when it could be a version.
-[[nodiscard]] bool LooksLikeVersion(std::string_view name) noexcept;
+/// Whether a name is made only of digits and dots, with at least one digit: the ONE predicate, shared header-only
+/// with the scheduler (`CompileCache::LooksLikeVersion`, `<Pace/CompileCache/VersionName.hpp>`), so the launcher and
+/// the upgrade report cannot disagree about what counts as a version.
+using CompileCache::LooksLikeVersion;
 
 /// The VC half of an MSVC toolchain's include roots, from its own install layout.
 ///
