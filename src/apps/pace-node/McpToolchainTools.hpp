@@ -24,10 +24,13 @@ namespace Pace::Node
 /// **A node is a machine.** The registry keys an entry on (fingerprint, endpoint), so a machine serving two
 /// toolchains is two rows of `workers`; every count and every "nodes behind" here is over distinct endpoints.
 ///
-/// **Two quantities are ABSENT, and say so.** The fleet document lists the toolchains each machine SERVES and
+/// **Two quantities can be ABSENT, and say so.** The fleet document lists the toolchains each machine SERVES and
 /// nothing a machine identified but does not serve, so a machine's `unserved` is `null`, never an empty list
-/// that would claim it serves everything it found. No demand per toolchain is recorded yet, so `demand` is `null`
-/// and the report recommends on versions alone, with a basis that says "no demand data".
+/// that would claim it serves everything it found. And `demand` -- the leader's toolchain-demand over seven days,
+/// which the upgrade report weighs -- is `null` when the answering node keeps none or counted for no minute of the
+/// window: the report then recommends on versions alone and every basis SAYS that demand was unavailable, never
+/// reading absence as zero demand. Present, it is cited with its coverage (observed minutes of the window, since when)
+/// and with whatever was folded into `other`, which names no toolchain and so counts toward none.
 
 /// `toolchain_diff`: why two toolchain fingerprints differ.
 ///

@@ -7,6 +7,7 @@
 #include <Pace/CompileCache/VersionName.hpp>
 #include <Pace/Distributed/CompilerVersion.hpp>
 #include <Pace/Distributed/FingerprintDiff.hpp>
+#include <Pace/Distributed/FleetHistory.hpp>
 #include <Pace/Distributed/WorkerRegistry.hpp>
 #include <Pace/Protocol/FingerprintInputsWire.hpp>
 #include <Pace/Protocol/NodeStatusView.hpp>
@@ -39,10 +40,18 @@ namespace
         "serve itself, derived from the leader's workers; it is null (absent, not empty) for a machine serving no "
         "toolchain whose family is known, since a family is what decides which toolchains are its peers";
 
-    /// What `demand_note` says: why `demand` is `null`.
-    constexpr std::string_view DemandNote =
-        "no demand per toolchain is recorded yet, so `demand` is null (absent) and every recommendation is made on "
-        "versions alone";
+    /// What `demand_note` says when `demand` is present: what its figures are and are not.
+    constexpr std::string_view DemandNoteRead =
+        "`demand` is the leader's toolchain-demand history over the window named, counted only for the minutes it was "
+        "counting (`observed_minutes` of `window_minutes`, since `coverage_since`): a total over part of a window is "
+        "that part's. Compiles folded into `other` are named by no fingerprint, so they count toward no toolchain's "
+        "share and no recommendation";
+
+    /// @return The history range the upgrade advice weighs demand over.
+    [[nodiscard]] Distributed::FleetRangeRow const& DemandRange() noexcept
+    {
+        return Distributed::FleetRangeTable[static_cast<std::size_t>(Distributed::FleetRange::Week)];
+    }
 
     /// The `workers` rows, as the upgrade report reads them.
     using WorkerRows = std::vector<Distributed::WorkerReport>;
@@ -220,6 +229,111 @@ namespace
                            advice.basis);
     }
 
+    /// What the leader's `toolchain_demand` section said, read for the upgrade report.
+    struct DemandReading
+    {
+        std::vector<Distributed::DemandRow> rows; ///< One per named fingerprint; empty unless `available`.
+        bool available { false };                 ///< Whether there is a covered window to weigh.
+        std::string basis;                        ///< Words appended to every ordered family's basis: what was used.
+        Json::Value json;                         ///< The `demand` member: the figures used, or `null`.
+    };
+
+    /// @param section A `toolchain_demand` section.
+    /// @param key A member.
+    /// @return The member as a count, or nothing when it is absent or not one.
+    [[nodiscard]] std::optional<std::uint64_t> UintAt(Json::Value const& section, std::string_view key)
+    {
+        auto const* const member = section.Find(key);
+        return member != nullptr ? member->AsUint() : std::nullopt;
+    }
+
+    /// Read the demand the upgrade report weighs from the fleet document.
+    ///
+    /// **Absent is not zero.** A section that is `null` (the answering node is no leader, or keeps no such history), one
+    /// this build cannot read, or one that counted for no minute at all is UNAVAILABLE, and the report then recommends
+    /// on versions alone and says so; it never reads those as "no toolchain was asked for".
+    /// @param root The fleet document.
+    /// @param range The window the document was asked for.
+    /// @return What was read.
+    [[nodiscard]] DemandReading ReadDemand(Json::Value const& root, std::string_view range)
+    {
+        auto const unavailable = [&](std::string_view why) {
+            return DemandReading { .rows = {},
+                                   .available = false,
+                                   .basis = std::format("demand over {} was unavailable ({}), so this recommendation is "
+                                                        "made on versions alone -- absence of demand data is not "
+                                                        "zero demand",
+                                                        range,
+                                                        why),
+                                   .json = Null() };
+        };
+        auto const* const section = root.Find("toolchain_demand");
+        if (section == nullptr || section->IsNull())
+            return unavailable("the leader keeps no toolchain-demand history; it counts only while it leads");
+        auto const* const keys = section->Find("keys");
+        auto const observed = UintAt(*section, "observed_minutes");
+        auto const window = UintAt(*section, "window_minutes");
+        auto const total = UintAt(*section, "total");
+        if (keys == nullptr || keys->AsArray() == nullptr || !observed.has_value() || !window.has_value()
+            || !total.has_value())
+            return unavailable("the section is not one this build reads");
+        if (*observed == 0)
+            return unavailable("the leader counted for none of the window's minutes");
+
+        auto reading = DemandReading {};
+        auto named = std::uint64_t { 0 };
+        auto rows = Json::Array {};
+        for (auto const& row: *keys->AsArray())
+        {
+            auto fingerprint = StringAt(row, "fingerprint");
+            auto const compiles = UintAt(row, "total");
+            if (!fingerprint.has_value() || !compiles.has_value())
+                return unavailable("a row of the section is not one this build reads");
+            named += *compiles;
+            reading.rows.push_back(Distributed::DemandRow { .fingerprint = *fingerprint, .compiles = *compiles });
+            rows.push_back(Obj(Json::Object { { "fingerprint", Str(*fingerprint) },
+                                              { "compiles", Int(static_cast<std::int64_t>(*compiles)) } }));
+        }
+        auto const* const sinceMember = section->Find("coverage_since_ms");
+        auto const since = sinceMember != nullptr ? sinceMember->AsInt() : std::nullopt;
+        auto const* const other = section->Find("other");
+        auto const foldedKeys = other != nullptr && !other->IsNull() ? UintAt(*other, "keys_folded") : std::nullopt;
+        auto const folded = other != nullptr && !other->IsNull() ? UintAt(*other, "total") : std::nullopt;
+
+        reading.available = true;
+        reading.basis =
+            std::format("demand over {}: counted for {} of the window's {} minute(s), since {}{}; {} compile(s) "
+                        "named a toolchain of {} counted{}",
+                        range,
+                        *observed,
+                        *window,
+                        since.has_value() ? Rfc3339(*since) : std::string { "an unknown instant" },
+                        *observed < *window ? " -- PARTIAL coverage, these counts are of that part only" : std::string {},
+                        named,
+                        *total,
+                        folded.has_value() && foldedKeys.has_value()
+                            ? std::format("; {} more are in `other ({} toolchains)` and are attributed to no "
+                                          "toolchain, so they count toward no recommendation",
+                                          *folded,
+                                          *foldedKeys)
+                            : std::string {});
+        auto figures =
+            Json::Object { { "range", Str(std::string { range }) },
+                           { "observed_minutes", Int(static_cast<std::int64_t>(*observed)) },
+                           { "window_minutes", Int(static_cast<std::int64_t>(*window)) },
+                           { "coverage_since", since.has_value() ? Str(Rfc3339(*since)) : Null() },
+                           { "partial_coverage", Bool(*observed < *window) },
+                           { "total", Int(static_cast<std::int64_t>(*total)) },
+                           { "toolchains", Arr(std::move(rows)) },
+                           { "other",
+                             folded.has_value() && foldedKeys.has_value()
+                                 ? Obj(Json::Object { { "toolchains_folded", Int(static_cast<std::int64_t>(*foldedKeys)) },
+                                                      { "compiles", Int(static_cast<std::int64_t>(*folded)) } })
+                                 : Null() } };
+        reading.json = Obj(std::move(figures));
+        return reading;
+    }
+
     /// The fleet's toolchains in @p endpoint's families that it does not serve.
     /// @param served The fingerprints the machine serves.
     /// @param toolchains Every fingerprint, with its families.
@@ -244,7 +358,10 @@ namespace
                                              IAppliedClusterView const& cluster,
                                              Mcp::ToolCall const& /*call*/)
     {
-        auto document = McpFleet::AskFleetDocument(upstream);
+        // The demand window the advice weighs: a week, so one quiet afternoon does not pick the compiler. The
+        // `workers` rows do not depend on the range.
+        auto const demandRange = DemandRange().key;
+        auto document = McpFleet::AskFleetDocument(upstream, demandRange);
         if (!document.has_value())
             return std::move(document.error());
         auto workers = WorkersOf(document->root);
@@ -274,8 +391,13 @@ namespace
             if (row.families.empty())
                 familyless.insert(fingerprint);
 
-        // No demand is recorded yet: the report recommends on versions alone, and says so in every basis.
-        auto const advice = Distributed::AdviseUpgrades(*workers, {});
+        // Demand is the leader's own record over the window; where it is unavailable the report recommends on versions
+        // alone, and says so in every basis it writes.
+        auto const demand = ReadDemand(document->root, demandRange);
+        auto advice = Distributed::AdviseUpgrades(*workers, demand.rows);
+        for (auto& family: advice)
+            if (!family.orderingUnknown)
+                family.basis += std::format("; {}", demand.basis);
 
         auto toolchainRows = Json::Array {};
         for (auto const& [fingerprint, row]: toolchains)
@@ -310,13 +432,14 @@ namespace
 
         auto text = std::format(
             "{} toolchain(s) on {} machine(s); upgrade report (conservative -- check each basis): {}{}; unserved in "
-            "their families: {}; demand: not recorded{}; {}",
+            "their families: {}; {}{}; {}",
             toolchains.size(),
             machines.size(),
             adviceWords.empty() ? std::string { "no toolchain of a known family" } : Joined(adviceWords, " | "),
             familyless.empty() ? std::string {}
                                : std::format("; {} registered no family and join none", Joined(familyless, ", ")),
             unservedWords.empty() ? std::string { "none" } : Joined(unservedWords, "; "),
+            demand.basis,
             UnplacedNote(unplaced),
             Provenance(document->reply));
 
@@ -326,8 +449,8 @@ namespace
         result.emplace_back("toolchains", Arr(std::move(toolchainRows)));
         result.emplace_back("nodes", Arr(std::move(machineRows)));
         result.emplace_back("unserved_note", Str(std::string { UnservedNote }));
-        result.emplace_back("demand", Null());
-        result.emplace_back("demand_note", Str(std::string { DemandNote }));
+        result.emplace_back("demand", demand.available ? demand.json : Null());
+        result.emplace_back("demand_note", Str(demand.available ? std::string { DemandNoteRead } : demand.basis));
         result.emplace_back("upgrade_report", Arr(std::move(adviceRows)));
         return Answer(std::move(result), std::move(text));
     }
@@ -864,7 +987,7 @@ namespace
         R"("machine_count":{"type":"integer","description":"Distinct worker endpoints: a machine serving two toolchains counts once."},)"
         R"("toolchains":{"type":"array","description":"Per fingerprint: label and version (\"unknown\" when the label does not parse) where its entries agree on one label, every label in labels, family as the node read it off the banner (null when none or disagreeing), driver (the label's compiler name without a version suffix, null when the label does not parse), and the machines serving it."},)"
         R"("nodes":{"type":"array","description":"Per machine: endpoint; node_id and display_name, of the member whose identity key the machine's registrations PROVED, as the leader's node-id column joins it -- never by the endpoint, which a registration only claims (both null when no member holds that key or its registrations disagree -- absent, never guessed); the fingerprints it serves, and unserved -- the fleet's fingerprints in the same families it does not serve; null when it serves no toolchain of a known family (see unserved_note)."},)"
-        R"("unserved_note":{"type":"string"},"demand":{"type":"null","description":"Absent: no demand per toolchain is recorded yet."},"demand_note":{"type":"string"},)"
+        R"("unserved_note":{"type":"string"},"demand":{"type":["object","null"],"description":"The leader's toolchain-demand over 7d, which the upgrade report weighs: range, observed_minutes of window_minutes, coverage_since, partial_coverage, total, toolchains (fingerprint, compiles) and other (toolchains_folded, compiles -- attributed to no toolchain). Null (absent, NOT zero) when the answering node keeps no such history or counted for no minute; demand_note then says why and the report is on versions alone."},"demand_note":{"type":"string"},)"
         R"("upgrade_report":{"type":"array","description":"Per banner-derived compiler family: recommended_version, and recommended_fingerprints -- an object from DRIVER (gcc, cc, g++: one install answers to several) to fingerprint, a driver absent when its builds of the version cannot be told apart, null when the ordering is unknown; basis (the versions compared and any demand), and machines placed by their highest version of the family: behind (lower: should upgrade), ahead (higher), same_version_other_fingerprint (the recommended version under another fingerprint for the SAME driver: ask toolchain_diff); ordering_unknown."}}})";
 
 } // namespace

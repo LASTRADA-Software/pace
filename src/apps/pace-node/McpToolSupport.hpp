@@ -10,6 +10,7 @@
 #include <Pace/Protocol/Mcp/McpTool.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -51,6 +52,15 @@ namespace Pace::Node::McpSupport
 [[nodiscard]] inline Json::Value Count(std::size_t number)
 {
     return Int(static_cast<std::int64_t>(number));
+}
+
+/// @param millis An instant, in milliseconds since the epoch.
+/// @return It as RFC 3339 UTC, to the second.
+[[nodiscard]] inline std::string Rfc3339(std::int64_t millis)
+{
+    auto const instant = std::chrono::floor<std::chrono::seconds>(
+        std::chrono::sys_time<std::chrono::milliseconds> { std::chrono::milliseconds { millis } });
+    return std::format("{:%FT%TZ}", instant);
 }
 
 /// @param number A real.
