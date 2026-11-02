@@ -452,7 +452,8 @@ namespace
                                                        .key = request.objectKey,
                                                        .acceptedCodecs = accepted,
                                                        .excluded = excluded,
-                                                       .toolchainLabel = SendableToolchainLabel(request.toolchainLabel) });
+                                                       .toolchainLabel = SendableToolchainLabel(request.toolchainLabel),
+                                                       .origin = request.askOrigin });
             attempt.outcome = exchange.Exchange(attempt.scheduler, std::move(frame), credential, budget);
 
             auto redirect = RedirectTarget(attempt.outcome);

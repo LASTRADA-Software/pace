@@ -1259,6 +1259,21 @@ void SchedulerService::SetDemandSink(ICompileDemandSink* sink) noexcept
     _demand = sink;
 }
 
+void SchedulerService::ReportLeaseDemand(CallerContext const& caller, std::string_view fingerprint)
+{
+    // Attributed by the rule an admission's charge follows (`AdmissionResponder`): the key this connection PROVED,
+    // else this leader's own machine for a caller on this machine. Anything else -- a ticket, `--fleet-open` --
+    // identified no machine here, so it is counted UNATTRIBUTED: never guessed from an address.
+    auto requester = MachineId {};
+    if (caller.provenKey.has_value())
+        requester = MachineId { AsStringView(std::span<std::byte const> { *caller.provenKey }) };
+    else if (IsLoopbackHost(caller.peerId))
+        requester = OwnMachineId();
+    auto const guard = std::scoped_lock { _admissionMutex };
+    if (_demand != nullptr)
+        _demand->CompileGranted(requester, fingerprint);
+}
+
 SchedulerReply SchedulerService::AnnounceNode(CallerContext const& caller,
                                               NodePresence const& presence,
                                               std::span<FleetBucket const> history)
@@ -1530,6 +1545,10 @@ SchedulerReply SchedulerService::Lease(CallerContext const& caller, Wire::LeaseR
     // would not arrive until its next heartbeat.
     _workers.JobStarted(picked->id);
     _metrics.Increment(IMetricsSink::Counter::DispatchLeasesGranted);
+    // Counted beside the admission queue's grants, once per compile: a lease asked AFTER this compile was already
+    // granted -- an admission that broke past its grant and failed open -- is the same compile again.
+    if (request.origin == Wire::AskOrigin::First)
+        ReportLeaseDemand(caller, request.fingerprint);
 
     // Signed over the endpoint as well as the key, which is what makes it a grant on
     // ONE worker rather than on the fleet: without the endpoint inside the MAC, a

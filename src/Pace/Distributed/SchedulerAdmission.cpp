@@ -151,7 +151,10 @@ std::expected<Ticket, SchedulerReply> SchedulerService::Admit(CallerContext cons
                                                 .parkedAt = _clock.now(),
                                                 .lease = std::nullopt,
                                                 .machine = machine,
-                                                .demandReported = false });
+                                                // A re-admission of a compile this leader already granted (the
+                                                // launcher's local retry after the granted worker failed it) is the
+                                                // SAME compile: reported as already counted, so it never is twice.
+                                                .demandReported = request.origin == Wire::AskOrigin::AfterGrant });
     return ticket;
 }
 

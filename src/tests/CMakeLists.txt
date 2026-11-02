@@ -8138,7 +8138,7 @@ if(TARGET PaceTest)
         # the assertion that could not have failed while this ticket was open: 69
         # cases ran, and 69 is non-zero.
         #
-        # 300 = 210 (CompileCacheWire) + 26 (RaftWire) + 22 (ClusterState)
+        # 301 = 211 (CompileCacheWire) + 26 (RaftWire) + 22 (ClusterState)
         #     + 23 (DiscoveryWire) + 9 (FingerprintInputsWire) + 5 (NodeStatusDetailWire)
         #     + 1 (RaftTypes) + 1 (SchedulerService) + 1 (MachineTicket)
         #     + 1 (MachineStanding) + 1 (IdentityKeyLabel), read off `PaceTest "[wire]"
@@ -8160,7 +8160,8 @@ if(TARGET PaceTest)
         # the name and the state stays readable, and a state carrying that collision decodes
         # (+2). From 298 to 300, in CompileCacheWire: the FLEET-TEXT node selector as the
         # request's fifth field, and a history bucket's absence mask as its optional fourth
-        # (+2).
+        # (+2). From 300 to 301, in CompileCacheWire: ADMIT and LEASE carry the ask
+        # origin as their last byte, pinned (+1).
         #
         # `[(]` rather than `\(`: CMake reads `\(` in a quoted argument as an escape
         # and stores a bare `(`, which its regex engine then takes as a capture group
@@ -8172,7 +8173,7 @@ if(TARGET PaceTest)
         # anything matches nothing. No `SKIP_RETURN_CODE` here: every selected case
         # must PASS for the count to be the count, so a run that skipped is a failure
         # of this check, never a state to report.
-        PASS_REGULAR_EXPRESSION "All tests passed [(][0-9]+ assertions in 300 test cases[)]"
+        PASS_REGULAR_EXPRESSION "All tests passed [(][0-9]+ assertions in 301 test cases[)]"
         LABELS "hygiene"
         TIMEOUT 300
     )

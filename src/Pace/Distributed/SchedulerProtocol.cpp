@@ -468,7 +468,8 @@ SchedulerReply SchedulerProtocol::Route(Wire::Op op, std::span<std::byte const> 
                                                        .key = Wire::AsStringView(fields->key),
                                                        .acceptedCodecs = fields->acceptedCodecs,
                                                        .excluded = excluded,
-                                                       .toolchainLabel = Wire::AsStringView(fields->toolchainLabel) });
+                                                       .toolchainLabel = Wire::AsStringView(fields->toolchainLabel),
+                                                       .origin = fields->origin });
         }
         case Wire::Op::Release: {
             auto const fields = Wire::DecodeReleasePayload(payload);

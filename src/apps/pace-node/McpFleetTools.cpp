@@ -766,21 +766,34 @@ namespace
         return buckets;
     }
 
-    /// Whether one row of a keyed section is the one `key` selects: its key exactly, or -- for a row naming a
-    /// machine -- that machine's node id or display name, exactly.
-    /// @param row A row of the section's `keys`.
+    /// @param row A row of a keyed section's `keys`.
+    /// @param field A member of it.
+    /// @param key What the caller named.
+    /// @return Whether that member is @p key, exactly.
+    [[nodiscard]] bool RowFieldIs(Json::Value const& row, std::string_view field, std::string_view key)
+    {
+        auto const* const value = row.Find(field);
+        return value != nullptr && value->AsString() != nullptr && *value->AsString() == key;
+    }
+
+    /// Which member `key` is matched against: ONE rule, the first that matches any row -- the row's key, then (for a
+    /// row naming a machine) its node id, then its display name -- so a display name equal to another member's id
+    /// never selects two rows, as `node` resolution never does.
+    /// @param rows The section's `keys`.
     /// @param dimension Which keyed history.
     /// @param key What the caller named.
-    /// @return True when it matches.
-    [[nodiscard]] bool KeyedRowMatches(Json::Value const& row,
-                                       Distributed::KeyedDimensionRow const& dimension,
-                                       std::string_view key)
+    /// @return The member to match by, or nothing when no row matches by any.
+    [[nodiscard]] std::optional<std::string_view> KeySelectorField(Json::Array const& rows,
+                                                                   Distributed::KeyedDimensionRow const& dimension,
+                                                                   std::string_view key)
     {
-        auto const equals = [&row, key](std::string_view field) {
-            auto const* const value = row.Find(field);
-            return value != nullptr && value->AsString() != nullptr && *value->AsString() == key;
-        };
-        return equals(dimension.keyField) || (dimension.namesMachines && (equals("node_id") || equals("display_name")));
+        auto const fields =
+            std::array { dimension.keyField, std::string_view { "node_id" }, std::string_view { "display_name" } };
+        auto const consulted = std::span { fields }.first(dimension.namesMachines ? fields.size() : 1);
+        for (auto const field: consulted)
+            if (std::ranges::any_of(rows, [&](Json::Value const& row) { return RowFieldIs(row, field, key); }))
+                return field;
+        return std::nullopt;
     }
 
     /// The `history` tool for a keyed series: the leader's `/fleet.json` section for it, returned exactly as the
@@ -838,11 +851,15 @@ namespace
                                      dimension.section,
                                      document->reply.answeredBy));
         // Narrowed in place, so every other member of the section stays exactly what the document wrote.
+        auto const selector =
+            key.has_value() ? KeySelectorField(*listed->AsArray(), dimension, *key) : std::optional<std::string_view> {};
         if (key.has_value())
             if (auto* const members = std::get_if<Json::Object>(&section.v); members != nullptr)
                 for (auto& [name, value]: *members)
                     if (auto* const rows = std::get_if<Json::Array>(&value.v); name == "keys" && rows != nullptr)
-                        std::erase_if(*rows, [&](Json::Value const& row) { return !KeyedRowMatches(row, dimension, *key); });
+                        std::erase_if(*rows, [&](Json::Value const& row) {
+                            return !selector.has_value() || !RowFieldIs(row, *selector, *key);
+                        });
         auto const named = section.Find("keys")->AsArray()->size();
 
         auto const numberAt = [&section](std::string_view field) {
@@ -864,17 +881,30 @@ namespace
             since != nullptr && since->AsInt().has_value() ? Rfc3339(*since->AsInt()) : std::string { "never" };
         auto selected = std::string {};
         if (key.has_value() && named == 0)
-            selected = std::format("; no row is \"{}\" in this window -- a folded key's counts are in other", *key);
+            selected = std::format("; no row is \"{}\" in this window -- if it was folded, its counts are in other", *key);
         else if (key.has_value())
             selected = std::format("; the row for \"{}\"", *key);
-        auto text = std::format("{} over {}: {} compile(s) granted, {} {} named{}{}; counted by this leader since {}; {}",
+        auto const* const unattributed = section.Find("unattributed");
+        auto const unattributedText =
+            unattributed != nullptr && !unattributed->IsNull()
+                ? std::format("; unattributed: {}",
+                              unattributed->Find("total") != nullptr ? unattributed->Find("total")->AsUint().value_or(0)
+                                                                     : std::uint64_t { 0 })
+                : std::string {};
+        // Over the minutes the leader COUNTED, never "since" an instant alone: a demotion's gap, or a bucket watched
+        // for one minute of sixty, is a part of the window nobody counted, and the total is that part's.
+        auto text = std::format("{} over {}: {} compile(s) granted, {} {} named{}{}{}; counted for {} of the window's {} "
+                                "minute(s), first at {}; {}",
                                 dimension.series,
                                 range.key,
                                 numberAt("total"),
                                 named,
                                 dimension.noun,
                                 otherText,
+                                unattributedText,
                                 selected,
+                                numberAt("observed_minutes"),
+                                numberAt("window_minutes"),
                                 sinceText,
                                 Provenance(document->reply));
         result.emplace_back(std::string { dimension.section }, std::move(section));
@@ -1116,7 +1146,7 @@ namespace
         R"("bucket_seconds":{"type":"integer"},"full_coverage":{"type":"integer"},)"
         R"("buckets":{"type":"array","description":"Oldest first: start (RFC 3339 UTC), value (null for a gap), coverage (samples, null when unsampled), backfilled. A slot series carries scope, node_id, display_name, unit, bucket_seconds, full_coverage and buckets."},)"
         R"("key":{"type":["string","null"],"description":"A keyed series: the row selected, or null for every row."},)"
-        R"("requesters":{"type":["object","null"],"description":"The requesters series: /fleet.json's requesters section exactly (only `key` narrows its keys). bucket_starts_ms and coverage_since_ms in milliseconds since the epoch; observed per bucket; each key row has key (identity key), node_id, display_name (null when no member holds the key), total, earlier_counts (none, in-other: its earlier counts were folded into other, unknown) and buckets (null where the leader was not counting); other (null until a key was folded) has keys_folded, total and buckets. null when the answering leader keeps none."},)"
+        R"("requesters":{"type":["object","null"],"description":"The requesters series: /fleet.json's requesters section exactly (only `key` narrows its keys). counts says what total counts; bucket_starts_ms and coverage_since_ms in milliseconds since the epoch; coverage per bucket in minutes counted of full_coverage, observed_minutes of window_minutes for the window; keys_kept_max is the ceiling; each key row has key (identity key), node_id, display_name (null when no member holds the key), total, earlier_counts (none, in-other: its earlier counts were folded into other, unknown) and buckets (null where the leader was not counting); other (null until a key was folded) has keys_folded, total and buckets; unattributed (null until a grant named no machine) has total and buckets. null when the answering leader keeps none."},)"
         R"("toolchain_demand":{"type":["object","null"],"description":"The toolchain-demand series: /fleet.json's toolchain_demand section exactly, rows keyed by fingerprint, otherwise as requesters."}}})";
 
     constexpr std::string_view EnrollmentStatusOutput =
@@ -1179,12 +1209,16 @@ std::vector<Mcp::ToolRow> FleetReadTools(IMcpUpstream& upstream, IAppliedCluster
                            "minute, shares percent, slot levels counts, cpu-busy permille. bucket_seconds is in SECONDS "
                            "and each start is RFC 3339 UTC. cpu-busy needs `node`; the dispatch series refuse it. "
                            "requesters and toolchain-demand are compiles the leader's queue GRANTED (on a worker or on "
-                           "the requesting machine; never a refusal, an abandoned wait or a duplicate answered by "
-                           "another compile's object), per requesting machine and per toolchain, returned exactly as "
+                           "the requesting machine, or by a fail-open lease; one per compile -- never a refusal, an "
+                           "abandoned wait, a duplicate answered by another compile's object, nor a retry of a compile "
+                           "already granted), per requesting machine and per toolchain, returned exactly as "
                            "/fleet.json's requesters and toolchain_demand sections, with `key` selecting one row. The "
-                           "most recently active 256 (--history-requesters) are kept by name and the rest are summed "
-                           "into `other`, exactly. These are counted by the LEADER and are not handed over at an "
-                           "election: a new leader starts empty, and coverage_since_ms says from when it counted. An "
+                           "keys_kept_max most recently active (--history-requesters, default 256) are kept by name, "
+                           "the rest summed into `other`, and what names no machine or toolchain into `unattributed`, "
+                           "exactly. coverage gives the minutes counted per bucket of full_coverage, and "
+                           "observed_minutes of window_minutes the window's: a total is over the minutes counted. "
+                           "These are counted by the LEADER and are not handed over at an election: a new leader starts "
+                           "empty, and a demotion is a gap. An "
                            "unknown series, range or node is refused with the valid ones listed. `term` is the term "
                            "THIS node holds.",
             .inputSchema = HistoryInput(),

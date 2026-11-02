@@ -4156,24 +4156,35 @@ and the dispatch series refuse it.
 
 **Who asked, and which toolchain.** `/fleet.json` carries two more sections over the
 range asked for: `requesters` (compiles granted per requesting machine) and
-`toolchain_demand` (per toolchain fingerprint). Each counts a compile once, when the
-leader's queue **grants** it -- on a worker or on the requesting machine itself -- and
+`toolchain_demand` (per toolchain fingerprint); each says what it counts in its own
+`counts` field. A compile is counted once, when the leader **grants** it -- a queued
+admission placed on a worker or on the requesting machine, or a fail-open lease -- and
 never a request refused, one whose connection closed before its grant, or a duplicate
-answered by another compile's object; a worker refusal that puts the request back is
-not a second compile. A requester is the machine the queue charged: the identity key its
-connection proved, or the leader itself for a caller on the leader's own machine, and
-never an endpoint, a worker id or a hostname. Each row names its machine by `node_id` and
-`display_name` (both `null` when no member holds that key). A bucket the leader was not
-counting in is `null`, never `0`. The most recently active `--history-requesters` keys
-(default 256, at most 1024, `0` refused; restart-only; it governs both sections) are kept
-by name, and the rest are summed into `other`, whose `keys_folded` says how many -- the
-totals stay exact. A key folded once and seen again says `earlier_counts: in-other`: its
-row shows only what it did since. These are the leader's own records, kept in
-`requester-history.bin` and `toolchain-history.bin` beside the other histories, and they
-are **not handed over at an election**: a new leader starts empty, `coverage_since_ms`
-says from when it has counted, and a node that does not lead answers both sections
-`null`. The MCP `history` tool returns either section exactly as written
-(`series: requesters` or `toolchain-demand`, with `key` selecting one row).
+answered by another compile's object. A request that asks **again** for a compile the
+leader already granted -- the launcher's local retry after the granted worker failed
+it, or the lease it falls back to after an admission broke past its grant -- says so on
+the wire (ADMIT's and LEASE's last field) and is not counted again. A requester is the
+machine the queue charged: the identity key its connection proved, or the leader itself
+for a caller on the leader's own machine; a lease asked under a machine ticket names no
+machine and is counted in `unattributed`, as is a toolchain with no fingerprint --
+never guessed from an address, a worker id or a hostname. Each row names its machine by
+`node_id` and `display_name` (both `null` when no member holds that key). Coverage is
+stated as the slot series state it: `coverage` gives the minutes the leader counted in
+each bucket against `full_coverage`, and `observed_minutes` of `window_minutes` the
+window's -- a total is over the minutes counted, so an hour watched for one minute
+reads `1` of `60` and a demotion is a gap of zeros, never part of a whole. A bucket the
+leader was not counting in is `null`, never `0`. The most recently active
+`--history-requesters` keys (`keys_kept_max`; default 256, at most 1024, `0` refused;
+restart-only; it governs both sections) are kept by name, and the rest are summed into
+`other`, whose `keys_folded` says how many -- the totals stay exact. A key folded once
+and seen again says `earlier_counts: in-other`: its row shows only what it did since.
+These are the leader's own records, kept in `requester-history.bin` and
+`toolchain-history.bin` beside the other histories, and they are **not handed over at
+an election**: a new leader starts empty, `coverage_since_ms` is the instant it first
+counted, and a node that does not lead answers both sections `null`. The MCP `history`
+tool returns either section exactly as written (`series: requesters` or
+`toolchain-demand`, with `key` selecting one row: by its key, else a node id, else a
+display name, whichever matches first).
 
 Three of the seven are derived from the **history** rather than the snapshot, so both
 surfaces take `range` exactly as the page does, and refuse an unknown one for the same

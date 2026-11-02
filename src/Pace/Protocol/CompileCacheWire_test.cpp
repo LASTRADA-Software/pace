@@ -5497,16 +5497,17 @@ TEST_CASE("A LEASE carries the client's unreachable workers, and none is an empt
     auto const noneView = DecodeLeasePayload(std::span<std::byte const> { none }.subspan(RequestHeaderSize));
     REQUIRE(noneView.has_value());
     CHECK(Unwrap(noneView).excluded.empty());
-    CHECK(OpFieldCount(Op::Lease) == 5);
+    CHECK(OpFieldCount(Op::Lease) == 6);
 }
 
 TEST_CASE("A LEASE naming too many, an empty or an over-long exclusion is refused", "[wire][lease][exclusion]")
 {
     auto const leaseWith = [](std::vector<std::span<std::byte const>> const& entries) {
         auto const list = WireFields::Encode(WireFields::FieldList { entries });
-        // The label after the list, empty: a LEASE carries both, and the arity is exact.
+        // The label after the list, empty, then the ask origin: a LEASE carries all, and the arity is exact.
+        static constexpr auto firstAsk = std::array { std::byte { 0 } };
         auto const fields = std::vector<std::span<std::byte const>> {
-            AsBytes("f"), AsBytes("k"), {}, std::span<std::byte const> { list }, {}
+            AsBytes("f"), AsBytes("k"), {}, std::span<std::byte const> { list }, {}, std::span<std::byte const> { firstAsk }
         };
         return WireFields::Encode(WireFields::FieldList { fields });
     };
@@ -5788,22 +5789,23 @@ TEST_CASE("A FLEET-SUMMARY request and its reply at version 17 are exactly these
     CHECK(DecodeFleetSummaryReply(golden) == std::optional { reply });
 }
 
-TEST_CASE("A LEASE request at version 17 is its five fields in this order, exactly these bytes", "[wire][lease]")
+TEST_CASE("A LEASE request at version 17 is its six fields in this order, exactly these bytes", "[wire][lease]")
 {
-    // fingerprint, key, codecs, exclusions (nested), toolchain label -- the order lane 0 fixes here.
+    // fingerprint, key, codecs, exclusions (nested), toolchain label, ask origin -- the order lane 0 fixes here.
     auto const excluded = std::array<std::string_view, 1> { "e:1" };
     auto const frame = EncodeLease(LeaseRequest {
         .fingerprint = "f", .key = "k", .acceptedCodecs = { 0x01 }, .excluded = excluded, .toolchainLabel = "L" });
     // clang-format off
     auto const golden = Bytes({
         0xFC, 0x11, 0x06,             // magic, version 17, op = Lease
-        0x00, 0x00, 0x00, 0x1F,       // payload = 5 + 5 + 5 + 11 + 5 = 31
+        0x00, 0x00, 0x00, 0x24,       // payload = 5 + 5 + 5 + 11 + 5 + 5 = 36
         0x00, 0x00, 0x00, 0x01, 'f',  // fingerprint
         0x00, 0x00, 0x00, 0x01, 'k',  // key
         0x00, 0x00, 0x00, 0x01, 0x01, // accepted codecs: one id
         0x00, 0x00, 0x00, 0x07,       // exclusions, nested:
         0x00, 0x00, 0x00, 0x03, 'e', ':', '1', //   one endpoint
         0x00, 0x00, 0x00, 0x01, 'L',  // toolchain label
+        0x00, 0x00, 0x00, 0x01, 0x00, // ask origin: First
     });
     // clang-format on
     CHECK(frame == golden);
@@ -6220,7 +6222,57 @@ TEST_CASE("An ADMIT request round-trips every field", "[wire][admission]")
                                   .storable = true,
                                   .acceptedCodecs = { 1, 2 },
                                   .excluded = { "10.0.0.7:6676", "pc-09:6676" },
-                                  .toolchainLabel = "clang 20.1.8" });
+                                  .toolchainLabel = "clang 20.1.8",
+                                  .origin = AskOrigin::First });
+}
+
+TEST_CASE("ADMIT and LEASE carry the ask origin as their last byte, pinned", "[wire][admission][fleet-keyed-history]")
+{
+    // The VALUES travel: a leader that read another byte as `AfterGrant` would stop counting first asks.
+    CHECK(static_cast<std::uint8_t>(AskOrigin::First) == 0);
+    CHECK(static_cast<std::uint8_t>(AskOrigin::AfterGrant) == 1);
+    CHECK(static_cast<std::uint8_t>(AskOrigin::Last) == 2);
+    CHECK(OpFieldCount(Op::Admit) == 10);
+    CHECK(OpFieldCount(Op::Lease) == 6);
+
+    for (auto const origin: { AskOrigin::First, AskOrigin::AfterGrant })
+    {
+        INFO("origin " << static_cast<int>(origin));
+        auto admit = SampleAdmit({});
+        admit.origin = origin;
+        auto const admitFrame = EncodeAdmit(admit);
+        // The last field: a four-byte length of one, then the byte.
+        CHECK(std::ranges::equal(std::span { admitFrame }.last(5),
+                                 Bytes({ 0x00, 0x00, 0x00, 0x01, static_cast<int>(origin) })));
+        CHECK(Unwrap(DecodeAdmitPayload(PayloadOfFrame(admitFrame))).origin == origin);
+
+        auto const leaseFrame =
+            EncodeLease(LeaseRequest { .fingerprint = "f", .key = "k", .acceptedCodecs = {}, .origin = origin });
+        CHECK(std::ranges::equal(std::span { leaseFrame }.last(5),
+                                 Bytes({ 0x00, 0x00, 0x00, 0x01, static_cast<int>(origin) })));
+        CHECK(Unwrap(DecodeLeasePayload(PayloadOfFrame(leaseFrame))).origin == origin);
+    }
+
+    // An origin byte past the last enumerator, or of another width, is refused -- never read as a first ask.
+    auto const refuses = [](std::vector<std::byte> const& frame, Op op, std::vector<std::byte> const& replacement) {
+        auto const payload = std::vector<std::byte>(PayloadOfFrame(frame).begin(), PayloadOfFrame(frame).end());
+        auto const fields = Unwrap(WireFields::SplitAll(payload));
+        std::vector<std::span<std::byte const>> parts { fields.begin(), fields.end() };
+        parts.back() = replacement;
+        auto const bad = WireFields::Encode(WireFields::FieldList { parts });
+        return op == Op::Admit ? !DecodeAdmitPayload(bad).has_value() : !DecodeLeasePayload(bad).has_value();
+    };
+    auto const admitFrame = EncodeAdmit(SampleAdmit({}));
+    auto const leaseFrame = EncodeLease(LeaseRequest { .fingerprint = "f", .key = "k", .acceptedCodecs = {} });
+    for (auto const op: { Op::Admit, Op::Lease })
+    {
+        auto const& frame = op == Op::Admit ? admitFrame : leaseFrame;
+        CHECK(refuses(frame, op, Bytes({ 2 })));
+        CHECK(refuses(frame, op, Bytes({ 0, 0 })));
+        CHECK(refuses(frame, op, {}));
+        // The control: a known byte is read.
+        CHECK_FALSE(refuses(frame, op, Bytes({ 1 })));
+    }
 }
 
 TEST_CASE("A LOCAL-ONLY, not-storable ADMIT with nothing to say round-trips empty fields", "[wire][admission]")

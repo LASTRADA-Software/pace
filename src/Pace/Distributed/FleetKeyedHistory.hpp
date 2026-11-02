@@ -149,6 +149,13 @@ static_assert(RowsInEnumeratorOrder(EarlierCountsTable, &EarlierCountsRow::answe
     return EarlierCountsTable[static_cast<std::size_t>(answer)].word;
 }
 
+/// What a keyed section's `total` counts, said IN the document (`counts`) so a reader of `/fleet.json` alone cannot
+/// mistake it for compiles served: one spelling for the JSON and the MCP description.
+inline constexpr std::string_view KeyedCountsWhat =
+    "compiles the leader granted -- queued admissions and fail-open leases -- one per compile: a request asking "
+    "again for a compile already granted is not counted again, and a compile that never reached the leader is not "
+    "seen";
+
 /// One key's counts over a view.
 struct KeyedSeries
 {
@@ -166,24 +173,38 @@ struct OtherRow
     std::vector<std::optional<std::uint64_t>> buckets; ///< One per view bucket; absent where nobody was counting.
 };
 
+/// What could not be named: a requester that identified no machine, or a toolchain with no fingerprint.
+struct UnattributedRow
+{
+    std::uint64_t total {};                            ///< Its counts over the view's observed buckets.
+    std::vector<std::optional<std::uint64_t>> buckets; ///< One per view bucket; absent where nobody was counting.
+};
+
 /// What a keyed history holds over one range.
 ///
-/// Totals are exact: `total` is the sum of every key's total and `other`'s, over the observed buckets.
+/// Totals are exact: `total` is the sum of every key's total, `other`'s and `unattributed`'s, over the observed
+/// buckets -- and a total over a window watched in part is that part's: `observedMinutes` of `windowMinutes`.
 struct KeyedView
 {
     FleetRange range { FleetRange::Day };   ///< The window.
     std::vector<std::int64_t> bucketStarts; ///< Each view bucket's start, in ms since the epoch, oldest first.
-    std::vector<bool> observed;             ///< Whether this store was counting during each bucket.
+    /// Minutes this store was counting during each bucket: 0 for none, `fullCoverage` for all of it.
+    std::vector<std::uint32_t> coverage;
     /// From when it has counted: the first instant it observed while the rings hold it, else the oldest bucket start
     /// they still hold; absent when it never observed anything.
     std::optional<std::int64_t> coverageSince;
-    std::uint64_t total {};        ///< Every count in the window: the keys' and `other`'s.
-    std::vector<KeyedSeries> keys; ///< Keys with counts in the window, most first, then by key.
-    std::optional<OtherRow> other; ///< Engaged once any key was folded, whatever it holds in the window.
+    std::uint64_t total {};                      ///< Every count in the window: the keys', `other`'s and `unattributed`'s.
+    std::vector<KeyedSeries> keys;               ///< Keys with counts in the window, most first, then by key.
+    std::optional<OtherRow> other;               ///< Engaged once any key was folded, whatever it holds in the window.
+    std::optional<UnattributedRow> unattributed; ///< Engaged once anything was counted unattributed.
+    std::uint32_t fullCoverage {};               ///< Minutes in one full bucket of this range.
+    std::uint64_t observedMinutes {};            ///< Minutes counted over the whole window.
+    std::uint64_t windowMinutes {};              ///< Minutes the whole window spans.
+    std::size_t maxKeys {};                      ///< How many keys the store keeps by name (`--history-requesters`).
 };
 
-/// What one store can hold at most, exactly: every kept key and `other` holding one tally in every slot of every
-/// ring, plus the observation rings. The steady state of a store whose every key is busy every minute for a year.
+/// What one store can hold at most, exactly: every kept key, `other` and `unattributed` holding one tally in every slot of
+/// every ring, plus the observation rings. The steady state of a store whose every key is busy every minute for a year.
 /// @param maxKeys The store's key ceiling.
 /// @return Bytes.
 [[nodiscard]] constexpr std::size_t KeyedHistoryWorstCaseBytes(std::size_t maxKeys) noexcept
@@ -192,7 +213,10 @@ struct KeyedView
     for (auto const& row: FleetRingTable)
         slots += row.slots;
     constexpr std::size_t TallyBytes = 2 * sizeof(std::int64_t);
-    return ((maxKeys + 1) * slots * TallyBytes) + (slots * sizeof(std::int64_t));
+    // The kept keys, `other` and `unattributed` each hold a tally per slot; each observation slot is a bucket number
+    // and a minute count.
+    constexpr std::size_t CoverBytes = sizeof(std::int64_t) + sizeof(std::uint64_t);
+    return ((maxKeys + 2) * slots * TallyBytes) + (slots * CoverBytes);
 }
 
 /// Counts per key over the history rings, kept while this node LEADS (the caller decides that).
@@ -221,6 +245,11 @@ class FleetKeyedHistory
     /// @param n How many.
     /// @return False when the key is not text this store accepts; nothing is counted then.
     bool Count(std::string_view key, std::uint64_t n = 1);
+
+    /// Count @p n events that name no key -- a requester that identified no machine, a toolchain with no fingerprint
+    /// -- in the bucket holding now: kept in the explicit `unattributed` row, never dropped and never guessed.
+    /// @param n How many.
+    void CountUnattributed(std::uint64_t n = 1);
 
     /// Mark the bucket holding now as observed in every ring, so a minute with no event reads zero rather than absent.
     ///
@@ -271,6 +300,13 @@ class FleetKeyedHistory
         EarlierCounts earlier { EarlierCounts::None };    ///< Whether it has a past in `other`.
     };
 
+    /// One ring slot's observation: which bucket it holds and how many distinct minutes of it were counted.
+    struct Cover
+    {
+        std::int64_t bucket { -1 }; ///< The bucket number held, or -1 for none.
+        std::uint32_t minutes {};   ///< Distinct minutes observed in it.
+    };
+
     void CountLocked(std::string_view key, std::uint64_t n, std::int64_t now);
     void ObserveLocked(std::int64_t now);
     void FoldIntoOtherLocked(std::map<std::string, KeyRecord, std::less<>>::iterator victim);
@@ -283,10 +319,11 @@ class FleetKeyedHistory
     core::platform::WallClockRef _wall;
     mutable std::mutex _mutex;
 
-    /// One ring of observed bucket numbers per `FleetRingTable` row: slot `n % slots` holds `n`, or -1.
-    EnumTable<FleetRing, std::vector<std::int64_t>> _observed;
+    /// One ring of observations per `FleetRingTable` row: slot `n % slots` holds bucket `n` and its minutes.
+    EnumTable<FleetRing, std::vector<Cover>> _observed;
     std::map<std::string, KeyRecord, std::less<>> _keys;
     std::optional<KeyRecord> _other;
+    std::optional<KeyRecord> _unattributed;
     std::size_t _keysFolded { 0 };
 
     /// Keys folded into `other`, oldest first, so one that returns can say so; bounded (`RememberedFoldsPerKey`).

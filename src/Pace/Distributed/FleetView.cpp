@@ -1876,20 +1876,28 @@ namespace
             return;
         }
         auto const& range = FleetRangeTable[static_cast<std::size_t>(view->range)];
-        out += "{\"range\":";
+        out += "{\"counts\":";
+        Json::AppendString(out, KeyedCountsWhat);
+        out += ",\"range\":";
         Json::AppendString(out, range.key);
         out += std::format(R"(,"bucket_seconds":{},"bucket_starts_ms":[)",
                            std::chrono::duration_cast<std::chrono::seconds>(range.bucket).count());
         auto firstStart = true;
         for (auto const start: view->bucketStarts)
             out += std::format("{}{}", std::exchange(firstStart, false) ? "" : ",", start);
-        out += R"(],"observed":[)";
-        auto firstObserved = true;
-        for (auto const observed: view->observed)
-            out += std::format("{}{}", std::exchange(firstObserved, false) ? "" : ",", observed ? "true" : "false");
-        out += R"(],"coverage_since_ms":)";
+        // Coverage as the slot series state it: minutes counted per bucket against a full bucket's, so an hour the
+        // leader watched for one minute reads 1 of 60 rather than passing for a whole hour's count, and the window's
+        // own figure beside the total -- a total over part of a window is that part's.
+        out += R"(],"coverage":[)";
+        auto firstCoverage = true;
+        for (auto const minutes: view->coverage)
+            out += std::format("{}{}", std::exchange(firstCoverage, false) ? "" : ",", minutes);
+        out += std::format(R"(],"full_coverage":{},"observed_minutes":{},"window_minutes":{},"coverage_since_ms":)",
+                           view->fullCoverage,
+                           view->observedMinutes,
+                           view->windowMinutes);
         out += view->coverageSince.has_value() ? std::format("{}", *view->coverageSince) : std::string { "null" };
-        out += std::format(R"(,"total":{},"keys":[)", view->total);
+        out += std::format(R"(,"keys_kept_max":{},"total":{},"keys":[)", view->maxKeys, view->total);
         auto firstKey = true;
         for (auto const& key: view->keys)
         {
@@ -1926,6 +1934,15 @@ namespace
             Json::AppendString(out, row.noun);
             out += std::format(R"(,"total":{},"buckets":)", view->other->total);
             AppendKeyedBuckets(out, view->other->buckets);
+            out += '}';
+        }
+        else
+            out += "null";
+        out += R"(,"unattributed":)";
+        if (view->unattributed.has_value())
+        {
+            out += std::format(R"({{"total":{},"buckets":)", view->unattributed->total);
+            AppendKeyedBuckets(out, view->unattributed->buckets);
             out += '}';
         }
         else

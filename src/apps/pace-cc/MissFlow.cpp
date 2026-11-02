@@ -64,9 +64,25 @@ namespace
             return _total;
         }
 
+        /// The leader granted this compile a place to RUN (a worker or here) -- not `Stored`, which runs nothing.
+        void CompileGranted() noexcept
+        {
+            _compileGranted = true;
+        }
+
+        /// What every later request of this invocation tells the leader: once it granted this compile, asking
+        /// again -- the local retry after a granted worker failed, the lease after an admission broke -- is the SAME
+        /// compile, and the leader's demand history must not count it twice (`AskOrigin`).
+        /// @return `AfterGrant` once a compile was granted, else `First`.
+        [[nodiscard]] CompileCacheWire::AskOrigin Origin() const noexcept
+        {
+            return _compileGranted ? CompileCacheWire::AskOrigin::AfterGrant : CompileCacheWire::AskOrigin::First;
+        }
+
       private:
         std::optional<std::uint64_t> _opening;
         std::optional<std::uint64_t> _total;
+        bool _compileGranted { false };
     };
 
     /// A session's answer, with the failure told to the launcher and the wait recorded.
@@ -81,6 +97,8 @@ namespace
         if (answer.has_value())
         {
             waits.Granted(answer->queuedMs);
+            if (answer->kind != CompileCacheWire::GrantKind::Stored)
+                waits.CompileGranted();
             seams.granted(*answer);
         }
         else if (seams.failedOpen)
@@ -131,7 +149,7 @@ namespace
     /// @return A report when the compile ran here, else what to do next.
     [[nodiscard]] Placement Admit(MissSeams const& seams, Waits& waits)
     {
-        auto session = seams.open(std::nullopt);
+        auto session = seams.open(std::nullopt, waits.Origin());
         if (session == nullptr)
             return Unplaced::FailOpen;
         auto ticket = Read(seams, waits, session->Await());
@@ -210,7 +228,7 @@ namespace
     /// @return A report when the compile ran under this admission, else what to do next.
     [[nodiscard]] Placement AdmitHere(MissSeams const& seams, Waits& waits, WorkerFailed const& failed)
     {
-        auto session = seams.open(std::string_view { failed.endpoint });
+        auto session = seams.open(std::string_view { failed.endpoint }, waits.Origin());
         if (session == nullptr)
             return Unplaced::FailOpen;
         auto const ticket = Read(seams, waits, session->Await());
@@ -242,9 +260,10 @@ namespace
     /// What a launcher with no queue does, which is what one that cannot reach it does.
     /// @param seams What to run.
     /// @return The report.
-    [[nodiscard]] MissReport FailOpen(MissSeams const& seams)
+    /// @param origin Whether a grant this invocation already received makes this lease a second ask for one compile.
+    [[nodiscard]] MissReport FailOpen(MissSeams const& seams, CompileCacheWire::AskOrigin origin)
     {
-        auto run = seams.dispatchUnadmitted();
+        auto run = seams.dispatchUnadmitted(origin);
         if (!run.has_value())
             return CompileUnadmitted(seams);
         bool stored = false;
@@ -379,7 +398,7 @@ MissReport RunMiss(MissSeams const& seams)
         if (std::get<Unplaced>(placed) == Unplaced::FailOpen)
             break;
     }
-    auto report = FailOpen(seams);
+    auto report = FailOpen(seams, waits.Origin());
     report.queuedMs = waits.Total();
     return report;
 }

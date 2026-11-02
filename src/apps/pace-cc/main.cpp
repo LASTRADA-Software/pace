@@ -2716,7 +2716,8 @@ void RecordPlanRefusal(InvocationRecord& record, PlanRefusal const& refusal)
                                                     DispatchPlan const& plan,
                                                     std::vector<std::string> const& dependencyPaths,
                                                     Cc::AdmitTicket const* granted,
-                                                    std::string_view admissionSource)
+                                                    std::string_view admissionSource,
+                                                    Wire::AskOrigin origin = Wire::AskOrigin::First)
 {
     // Read AGAIN here, for the worker exclusions and to be told what this dispatch learned: the plan
     // asked it once, and a launcher that waited in a queue may be reading a newer one.
@@ -2850,7 +2851,8 @@ void RecordPlanRefusal(InvocationRecord& record, PlanRefusal const& refusal)
                                                .sourceRootReplacement = sourceRootReplacement,
                                                .excludedWorkers = excludedWorkers,
                                                .toolchainLabel = plan.toolchainLabel,
-                                               .admissionSourcePath = admissionSource };
+                                               .admissionSourcePath = admissionSource,
+                                               .askOrigin = origin };
     // An admission already placed this compile: the queue chose the worker and minted the token, so
     // there is no LEASE to ask for and no RELEASE to send. The grant's age starts when it ARRIVED.
     auto const outcome = granted != nullptr
@@ -3111,13 +3113,18 @@ void NoteAdmissionFailedOpen(InvocationRecord const& record,
     Cc::MissSeams const seams {
         // Whatever the flow asks -- a worker cannot have failed a compile no worker was granted -- the
         // request stays the local-only one above.
-        .open = [&](std::optional<std::string_view>) { return OpenAdmission(record, cfg, record.fetched, admit, memo); },
+        .open =
+            [&](std::optional<std::string_view>, Wire::AskOrigin origin) {
+                auto asked = admit;
+                asked.origin = origin;
+                return OpenAdmission(record, cfg, record.fetched, asked, memo);
+            },
         // Nothing is stored, so nothing is ever answered `Stored`; a miss is what one would read as.
         .serveStored = []() { return Cc::StoredFetch { .kind = Cc::StoredFetchKind::Missed, .code = 0 }; },
         // Local-only, and no plan was made: nothing a fleet refused.
         .granted = [](Cc::AdmitTicket const&) {},
         .dispatchAdmitted = [](Cc::AdmitTicket const&) { return Cc::AdmittedDispatch {}; },
-        .dispatchUnadmitted = []() -> std::optional<Cc::CompileRun> { return std::nullopt; },
+        .dispatchUnadmitted = [](Wire::AskOrigin) -> std::optional<Cc::CompileRun> { return std::nullopt; },
         .compileLocal = [&]() { return RunCaptureSplit(args); },
         .finish = [&](Cc::CompileRun& run,
                       bool&) { return ReplayPlainCompile(run, Cc::StreamGrammar(cmd.flavor), cfg.showIncludesMarker); },
@@ -3848,16 +3855,22 @@ std::optional<int> CachedCompile::AdmitAndCompile()
 
     Cc::MissSeams const seams {
         .open =
-            [&](std::optional<std::string_view> failedWorker) {
+            [&](std::optional<std::string_view> failedWorker, Wire::AskOrigin origin) {
                 if (!failedWorker.has_value())
-                    return OpenAdmission(record, cfg, fetchKind, admit, admitMemo);
+                {
+                    auto asked = admit;
+                    asked.origin = origin;
+                    return OpenAdmission(record, cfg, fetchKind, asked, admitMemo);
+                }
                 // A worker failed this compile: it runs HERE now, so it is asked for as a local compile, and
-                // the worker that failed it is excluded along with the ones the memo already names.
+                // the worker that failed it is excluded along with the ones the memo already names. The leader
+                // granted it once already, which the request says, so it is counted once.
                 auto excludedAgain = excludedWorkers;
                 excludedAgain.push_back(*failedWorker);
                 auto here = admit;
                 here.kind = Wire::AdmitKind::LocalOnly;
                 here.excluded = excludedAgain;
+                here.origin = origin;
                 return OpenAdmission(record, cfg, fetchKind, here, admitMemo);
             },
         .serveStored =
@@ -3888,7 +3901,7 @@ std::optional<int> CachedCompile::AdmitAndCompile()
         },
         // Today's path when no queue answers: a LEASE, which needs a scheduler named -- and is not dialled
         // at one a launcher a moment ago could not reach, exactly as before a queue existed.
-        .dispatchUnadmitted = [&]() -> std::optional<Cc::CompileRun> {
+        .dispatchUnadmitted = [&](Wire::AskOrigin origin) -> std::optional<Cc::CompileRun> {
             if (!plan.has_value() || !DispatchConfigured(cfg))
                 return std::nullopt;
             if (admitMemo.Remembers(Cc::MemoKind::SchedulerUnreached, cfg.schedulerAddr, admitClock.now()))
@@ -3900,7 +3913,7 @@ std::optional<int> CachedCompile::AdmitAndCompile()
                                                    cfg.schedulerAddr));
                 return std::nullopt;
             }
-            return TryRemoteCompile(record, cfg, cmd, argv, key, *plan, dispatchDependencies, nullptr, {}).run;
+            return TryRemoteCompile(record, cfg, cmd, argv, key, *plan, dispatchDependencies, nullptr, {}, origin).run;
         },
         .compileLocal = [&]() { return RunCaptureSplit(argv); },
         .finish = [this](Cc::CompileRun& run, bool& stored) { return FinishMiss(run, stored); },

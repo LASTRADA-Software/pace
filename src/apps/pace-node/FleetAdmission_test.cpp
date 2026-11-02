@@ -238,7 +238,7 @@ struct Plan
                                               .toolchainLabel = {} };
     std::uint64_t held = 0;
     auto const seams = Cc::MissSeams {
-        .open = [&](std::optional<std::string_view>) -> std::unique_ptr<Cc::IAdmitSession> {
+        .open = [&](std::optional<std::string_view>, Wire::AskOrigin) -> std::unique_ptr<Cc::IAdmitSession> {
             return Cc::OpenAdmitSession(endpoint, Cc::Credential {}, request, Cc::DefaultAdmitBudget(), Cc::AdmitNote {});
         },
         .serveStored =
@@ -256,7 +256,7 @@ struct Plan
                 world.Granted(held);
             },
         .dispatchAdmitted = [](Cc::AdmitTicket const&) { return Cc::AdmittedDispatch {}; },
-        .dispatchUnadmitted = []() -> std::optional<Cc::CompileRun> { return std::nullopt; },
+        .dispatchUnadmitted = [](Wire::AskOrigin) -> std::optional<Cc::CompileRun> { return std::nullopt; },
         .compileLocal =
             [&] {
                 world.NoteSpawn();

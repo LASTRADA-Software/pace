@@ -1478,6 +1478,12 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     /// @param held The ticket record.
     void ReportDemandOnce(AdmissionTicket& held);
 
+    /// Tell the demand sink a fail-open lease was granted, attributed like an admission's charge or unattributed.
+    /// Takes `_admissionMutex`, which guards the sink; the caller holds none of the scheduler's locks.
+    /// @param caller The connection that asked.
+    /// @param fingerprint The toolchain it named.
+    void ReportLeaseDemand(CallerContext const& caller, std::string_view fingerprint);
+
     /// Turn one decision into a verdict: re-gate, mint the lease, encode the grant.
     /// Caller holds `_admissionMutex`.
     /// @param decision What the queue admitted.

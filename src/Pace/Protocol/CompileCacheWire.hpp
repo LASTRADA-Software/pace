@@ -2413,7 +2413,7 @@ inline constexpr std::array OpTable {
                    .identity = IdentityRequirement::ProvenNodeOnly },
     OpDescriptor { .code = Op::Lease,
                    .name = "lease",
-                   .fieldCount = 5, // fingerprint, key, accepted codecs, exclusions, toolchain label
+                   .fieldCount = 6, // fingerprint, key, accepted codecs, exclusions, toolchain label, ask origin
                    .legalStatuses = static_cast<std::uint8_t>(StatusBit(Status::Ok) | StatusBit(Status::Error)),
                    .preAuth = RequiresAuth,
                    .maxPayload = BoundedTo(MaxControlPayload),
@@ -2532,8 +2532,8 @@ inline constexpr std::array OpTable {
     // from a dead leader against its sliding idle bound. A queue is as long as the queue is.
     OpDescriptor { .code = Op::Admit,
                    .name = "admit",
-                   .fieldCount = 9, // kind, fingerprint, cacheKey, sourcePath, treeLabel, storable, codecs, exclusions,
-                                    // toolchain label
+                   .fieldCount = 10, // kind, fingerprint, cacheKey, sourcePath, treeLabel, storable, codecs,
+                                     // exclusions, toolchain label, ask origin
                    .legalStatuses = static_cast<std::uint8_t>(StatusBit(Status::Ok) | StatusBit(Status::Error)
                                                               | StatusBit(Status::Progress)),
                    .preAuth = RequiresAuth,
@@ -4984,6 +4984,24 @@ inline constexpr std::size_t MaxNodeVersionBytes = 128;
 /// on the wire.
 inline constexpr std::size_t MaxDisplayNameBytes = 255;
 
+/// Whether a request asks the leader for a compile for the FIRST time, or once more for a compile the leader
+/// already GRANTED in this same invocation: the re-admission after a granted worker failed the compile
+/// (`LocalOnly`, that worker excluded), or the fail-open `LEASE` after an admission broke past its grant.
+///
+/// What lets the leader's demand history count one compile ONCE (`ICompileDemandSink`): the leader cannot tell
+/// a retry from a first request by anything else it sees -- a first request may be `LocalOnly` with exclusions
+/// too -- and guessing by a time window or an address would be a wrong count that looks right. The client's own
+/// statement: a client that misstates it moves only its own row. Carried by ADMIT and LEASE, the last field of
+/// each. Explicit values: transmitted. `Last` is the count, never a value.
+enum class AskOrigin : std::uint8_t
+{
+    /// The first time the leader is asked for this compile.
+    First = 0,
+    /// The leader already granted this compile once in this invocation; this asks again for the same compile.
+    AfterGrant = 1,
+    Last = 2
+};
+
 /// A client asking the scheduler where to compile.
 struct LeaseRequest
 {
@@ -5006,6 +5024,10 @@ struct LeaseRequest
     /// kept, and what is kept is gated where it enters -- as the key and the fingerprint are, against
     /// `MaxLeaseKeyBytes` and `MaxToolchainFingerprintBytes`. Empty is always acceptable.
     std::string_view toolchainLabel {};
+
+    /// Whether the leader already granted this compile once in this invocation (`AskOrigin`): a fail-open lease
+    /// after an admission broke past its grant says `AfterGrant`, so the compile is not counted twice.
+    AskOrigin origin { AskOrigin::First };
 };
 
 /// The same, as views into a received payload.
@@ -5016,6 +5038,7 @@ struct LeaseView
     CodecList acceptedCodecs;
     std::vector<std::span<std::byte const>> excluded; ///< Borrowed from the payload, newest first.
     std::span<std::byte const> toolchainLabel;        ///< Empty when the client did not say.
+    AskOrigin origin { AskOrigin::First };            ///< Whether this asks again for a granted compile.
 };
 
 /// A client handing a worker one translation unit.
@@ -5998,13 +6021,15 @@ struct WithdrawView
 {
     auto const codecs = EncodeCodecList(request.acceptedCodecs);
     auto const excluded = EncodeExclusions(request.excluded);
+    auto const origin = std::array<std::byte, 1> { static_cast<std::byte>(static_cast<std::uint8_t>(request.origin)) };
     return Detail::EncodeRequest(version,
                                  Op::Lease,
                                  { AsBytes(request.fingerprint),
                                    AsBytes(request.key),
                                    std::span<std::byte const> { codecs },
                                    std::span<std::byte const> { excluded },
-                                   AsBytes(request.toolchainLabel) });
+                                   AsBytes(request.toolchainLabel),
+                                   std::span<std::byte const> { origin } });
 }
 
 /// Split a LEASE payload.
@@ -6018,11 +6043,16 @@ struct WithdrawView
     auto excluded = DecodeExclusions((*fields)[3]);
     if (!excluded.has_value())
         return std::nullopt;
+    auto const& originField = (*fields)[5];
+    if (originField.size() != 1
+        || std::to_integer<std::uint8_t>(originField[0]) >= static_cast<std::uint8_t>(AskOrigin::Last))
+        return std::nullopt;
     return LeaseView { .fingerprint = (*fields)[0],
                        .key = (*fields)[1],
                        .acceptedCodecs = DecodeCodecList((*fields)[2]),
                        .excluded = *std::move(excluded),
-                       .toolchainLabel = (*fields)[4] };
+                       .toolchainLabel = (*fields)[4],
+                       .origin = static_cast<AskOrigin>(std::to_integer<std::uint8_t>(originField[0])) };
 }
 
 /// A client reporting that the job it leased has ended.
@@ -9933,6 +9963,8 @@ struct AdmitRequest
     /// leader with no worker for it NAME what nobody serves (`unserved-toolchain`). UTF-8 and at most
     /// `MaxToolchainLabelBytes`, or the whole request is refused where it enters.
     std::string_view toolchainLabel;
+    /// Whether the leader already granted this compile once in this invocation (`AskOrigin`).
+    AskOrigin origin { AskOrigin::First };
 };
 
 /// The same, as the leader decodes it. OWNS its bytes.
@@ -9947,6 +9979,7 @@ struct AdmitRequestFields
     CodecList acceptedCodecs;
     std::vector<std::string> excluded;
     std::string toolchainLabel;
+    AskOrigin origin { AskOrigin::First };
 
     /// @return True when every field is equal.
     [[nodiscard]] bool operator==(AdmitRequestFields const&) const = default;
@@ -10069,6 +10102,7 @@ namespace Detail
     auto const storable = std::array<std::byte, 1> { static_cast<std::byte>(request.storable ? 1 : 0) };
     auto const codecs = EncodeCodecList(request.acceptedCodecs);
     auto const excluded = EncodeExclusions(request.excluded);
+    auto const origin = Detail::EncodeEnumByte(request.origin);
     return Detail::EncodeRequest(version,
                                  Op::Admit,
                                  { std::span<std::byte const> { kind },
@@ -10079,7 +10113,8 @@ namespace Detail
                                    std::span<std::byte const> { storable },
                                    std::span<std::byte const> { codecs },
                                    std::span<std::byte const> { excluded },
-                                   AsBytes(request.toolchainLabel) });
+                                   AsBytes(request.toolchainLabel),
+                                   std::span<std::byte const> { origin } });
 }
 
 /// Split an ADMIT payload.
@@ -10094,6 +10129,9 @@ namespace Detail
         return std::nullopt;
     auto const kind = Detail::DecodeEnumByte<AdmitKind>((*fields)[0]);
     if (!kind.has_value())
+        return std::nullopt;
+    auto const origin = Detail::DecodeEnumByte<AskOrigin>((*fields)[9]);
+    if (!origin.has_value())
         return std::nullopt;
     auto const& storable = (*fields)[5];
     if (storable.size() != 1 || std::to_integer<std::uint8_t>(storable[0]) > 1)
@@ -10121,6 +10159,7 @@ namespace Detail
     for (auto const endpoint: *excluded)
         out.excluded.emplace_back(AsStringView(endpoint));
     out.toolchainLabel = std::string { AsStringView((*fields)[8]) };
+    out.origin = *origin;
     return out;
 }
 

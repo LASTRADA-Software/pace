@@ -905,6 +905,12 @@ struct KeyedFleet
             demand.CompileGranted(RawMachine(memberKey), "gcc-14-abc");
         wall.Advance(std::chrono::seconds { 1 });
         demand.CompileGranted(RawMachine(Testing::TestKeyPair("late").PublicKey()), "gcc-14-abc");
+        Render();
+    }
+
+    /// Render the document from the snapshot and the histories as they stand.
+    void Render()
+    {
         auto view = Dist::FleetHistoryView { .range = Dist::FleetRange::Day, .buckets = {}, .durable = false, .keyed = {} };
         for (auto const& row: Dist::KeyedDimensionTable)
             view.keyed[static_cast<std::size_t>(row.dimension)] = demand.Of(row.dimension).View(Dist::FleetRange::Day);
@@ -1026,4 +1032,25 @@ TEST_CASE("a leader that keeps no keyed history is answered null, never an empty
     REQUIRE_FALSE(result.isError);
     CHECK(At(result.structured, "toolchain_demand").IsNull());
     CHECK(result.text.contains("keeps no such history"));
+}
+
+TEST_CASE("history's key resolves by ONE rule, so a display name equal to another member's id selects one row",
+          "[node][mcp][fleet-tools][fleet-keyed-history]")
+{
+    // Member n1 is named "office-pc"; a second member's ID is "office-pc" and holds the "late" machine's key. The
+    // key is matched against the row's key, then node ids, then display names -- the first that matches any row.
+    KeyedFleet fleet;
+    auto other = Cluster::ClusterMember {};
+    other.id = "office-pc";
+    other.publicKey = Testing::TestKeyPair("late").PublicKey();
+    UnwrapMutable(fleet.snapshot.cluster).members.push_back(other);
+    fleet.Render();
+
+    auto upstream = LeaderUpstream();
+    upstream.AnswerOk(fleet.body);
+    auto const result = Call(upstream, "history", R"({"series":"requesters","range":"24h","key":"office-pc"})");
+    REQUIRE_FALSE(result.isError);
+    auto const& keys = Elements(At(At(result.structured, "requesters"), "keys"));
+    REQUIRE(keys.size() == 1);
+    CHECK(Text(At(keys[0], "node_id")) == R"("office-pc")");
 }

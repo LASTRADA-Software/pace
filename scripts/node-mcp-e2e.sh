@@ -544,7 +544,7 @@ for keyed in requesters:requesters toolchain-demand:toolchain_demand; do
     series="${keyed%%:*}"
     section="${keyed#*:}"
     json_check "history ${series}" "$(call_action history "{\"series\":\"${series}\",\"range\":\"1h\"}")" \
-        "${OK} and ${SC}['series'] == '${series}' and ${SC}['key'] is None and isinstance(${SC}['${section}'], dict) and isinstance(${SC}['${section}']['coverage_since_ms'], int) and sum(1 for o in ${SC}['${section}']['observed'] if o) >= 1 and ${SC}['${section}']['coverage_since_ms'] >= ${SC}['${section}']['bucket_starts_ms'][0] and ${SC}['${section}']['keys'] == [] and ${SC}['${section}']['other'] is None and ${SC}['${section}']['total'] == 0 and len(${SC}['${section}']['bucket_starts_ms']) == 60"
+        "${OK} and ${SC}['series'] == '${series}' and ${SC}['key'] is None and isinstance(${SC}['${section}'], dict) and isinstance(${SC}['${section}']['coverage_since_ms'], int) and ${SC}['${section}']['observed_minutes'] >= 1 and sum(${SC}['${section}']['coverage']) == ${SC}['${section}']['observed_minutes'] and ${SC}['${section}']['full_coverage'] == 1 and ${SC}['${section}']['window_minutes'] == 60 and ${SC}['${section}']['unattributed'] is None and isinstance(${SC}['${section}']['counts'], str) and ${SC}['${section}']['coverage_since_ms'] >= ${SC}['${section}']['bucket_starts_ms'][0] and ${SC}['${section}']['keys'] == [] and ${SC}['${section}']['other'] is None and ${SC}['${section}']['total'] == 0 and len(${SC}['${section}']['bucket_starts_ms']) == 60"
 done
 json_check "history requesters with node" "$(call_action history "{\"series\":\"requesters\",\"range\":\"1h\",\"node\":\"${self_id}\"}")" \
     "d['result']['isError'] is True and '\`key\`' in d['result']['content'][0]['text']"

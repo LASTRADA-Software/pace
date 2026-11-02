@@ -1402,3 +1402,100 @@ TEST_CASE("SchedulerAdmission.a-granted-compile-is-reported-once-by-machine-and-
         CHECK(demand.grants.empty());
     }
 }
+
+TEST_CASE("SchedulerAdmission.a-local-retry-after-a-granted-worker-failed-is-not-a-second-compile",
+          "[distributed][admission][scheduler][fleet-keyed-history]")
+{
+    // pace-cc's `AdmitHere`: the granted worker failed the compile, the grant is settled `NotStored`, and the SAME
+    // compile is asked for again as a new LocalOnly ticket -- which says so (`AskOrigin::AfterGrant`).
+    Fleet fleet;
+    RecordingDemandSink demand;
+    fleet.service.SetDemandSink(&demand);
+    (void) fleet.RegisterWorker();
+    fleet.Report(MachineOf(fleet.workerKey.PublicKey()));
+    fleet.Report(fleet.service.OwnMachineId());
+
+    auto const first = fleet.Admit("k1");
+    REQUIRE(GrantOf(fleet.service.PumpAdmission().at(0)).kind == Wire::GrantKind::Worker);
+    REQUIRE(fleet.service.SettleAdmission(first, Settlement { .outcome = Wire::SettleOutcome::NotStored, .peakBytes = {} })
+            == SettleResult::Settled);
+
+    auto const retry = fleet.service.Admit(
+        Fleet::Insider,
+        [] { return Fleet::Insider; },
+        fleet.service.OwnMachineId(),
+        Wire::AdmitRequestFields { .kind = Wire::AdmitKind::LocalOnly,
+                                   .fingerprint = std::string { Toolchain },
+                                   .cacheKey = "k1",
+                                   .sourcePath = "src/a.cpp",
+                                   .treeLabel = "tree",
+                                   .storable = true,
+                                   .acceptedCodecs = {},
+                                   .excluded = { std::string { WorkerEndpoint } },
+                                   .toolchainLabel = {},
+                                   .origin = Wire::AskOrigin::AfterGrant });
+    REQUIRE(retry.has_value());
+    REQUIRE(GrantOf(fleet.service.PumpAdmission().at(0)).kind == Wire::GrantKind::Local);
+    // One compile: one count, for that requester and that toolchain.
+    REQUIRE(demand.grants.size() == 1);
+    CHECK(demand.grants[0].requester == fleet.service.OwnMachineId());
+    CHECK(demand.grants[0].fingerprint == Toolchain);
+}
+
+TEST_CASE("SchedulerAdmission.a-fail-open-lease-is-counted-once-and-attributed-like-an-admission",
+          "[distributed][admission][scheduler][fleet-keyed-history]")
+{
+    Fleet fleet;
+    RecordingDemandSink demand;
+    fleet.service.SetDemandSink(&demand);
+    (void) fleet.RegisterWorker(/*slots=*/8);
+    auto const lease = [&](CallerContext const& caller, std::string const& key, Wire::AskOrigin origin) {
+        return fleet.service.Lease(caller,
+                                   Wire::LeaseRequest { .fingerprint = Toolchain,
+                                                        .key = key,
+                                                        .acceptedCodecs = {},
+                                                        .excluded = {},
+                                                        .toolchainLabel = {},
+                                                        .origin = origin });
+    };
+    auto const proven = Testing::TestKeyPair("lease-requester").PublicKey();
+
+    SECTION("a proven caller: under the key it proved")
+    {
+        auto const caller = CallerContext { .membership = Membership::Member,
+                                            .peerId = "10.0.0.5",
+                                            .provenNodeId = "n5",
+                                            .provenKey = proven,
+                                            .identified = true };
+        REQUIRE(lease(caller, "k1", Wire::AskOrigin::First).status == Wire::Status::Ok);
+        REQUIRE(demand.grants.size() == 1);
+        CHECK(demand.grants[0].requester == MachineOf(proven));
+        CHECK(demand.grants[0].fingerprint == Toolchain);
+    }
+    SECTION("a caller on this machine: under this leader's own key")
+    {
+        REQUIRE(lease(Fleet::Insider, "k1", Wire::AskOrigin::First).status == Wire::Status::Ok);
+        REQUIRE(demand.grants.size() == 1);
+        CHECK(demand.grants[0].requester == fleet.service.OwnMachineId());
+    }
+    SECTION("a caller that identified no machine (a ticket): unattributed, never its address")
+    {
+        auto const caller = CallerContext { .membership = Membership::Member, .peerId = "10.0.0.8", .identified = true };
+        REQUIRE(lease(caller, "k1", Wire::AskOrigin::First).status == Wire::Status::Ok);
+        REQUIRE(demand.grants.size() == 1);
+        CHECK(demand.grants[0].requester.empty());
+        CHECK(demand.grants[0].fingerprint == Toolchain);
+    }
+    SECTION("a lease after an admission broke past its grant is the same compile: not counted")
+    {
+        REQUIRE(lease(Fleet::Insider, "k1", Wire::AskOrigin::AfterGrant).status == Wire::Status::Ok);
+        CHECK(demand.grants.empty());
+    }
+    SECTION("a lease refused counts nothing")
+    {
+        REQUIRE(lease(Fleet::Insider, "k1", Wire::AskOrigin::First).status == Wire::Status::Ok);
+        // The same key again is refused AlreadyInFlight: no grant, no count.
+        CHECK(lease(Fleet::Insider, "k1", Wire::AskOrigin::First).status == Wire::Status::Error);
+        CHECK(demand.grants.size() == 1);
+    }
+}

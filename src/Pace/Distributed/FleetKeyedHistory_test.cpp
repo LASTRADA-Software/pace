@@ -196,9 +196,9 @@ TEST_CASE("a keyed bucket nobody counted in is absent, one observed with no coun
     CHECK(buckets[57] == std::optional<std::uint64_t> { 0 });
     CHECK_FALSE(buckets[58].has_value());
     CHECK_FALSE(buckets[59].has_value());
-    CHECK(view.observed[56]);
-    CHECK(view.observed[57]);
-    CHECK_FALSE(view.observed[58]);
+    CHECK(view.coverage[56] == 1);
+    CHECK(view.coverage[57] == 1);
+    CHECK(view.coverage[58] == 0);
 }
 
 TEST_CASE("a key that is not text, or too long, is refused and counts nothing", "[distributed][fleet-keyed-history]")
@@ -239,7 +239,7 @@ TEST_CASE("new leader reports coverage_since", "[distributed][fleet-keyed-histor
     REQUIRE(restored.Load(scratch.Path() / "requester-history.bin"));
     CHECK(restored.View(FleetRange::TwelveMonths).coverageSince == std::optional<std::int64_t> { elected });
     // Windows before that are absent, never zero.
-    CHECK_FALSE(view.observed.front());
+    CHECK(view.coverage.front() == 0);
 }
 
 TEST_CASE("persist/load round trip", "[distributed][fleet-keyed-history]")
@@ -268,8 +268,8 @@ TEST_CASE("persist/load round trip", "[distributed][fleet-keyed-history]")
     CHECK(Unwrap(view.other).total == 3);
     REQUIRE(RowOf(view, "c") != nullptr);
     CHECK(RowOf(view, "c")->total == 2);
-    CHECK(view.observed[59]);
-    CHECK(view.observed[56]);
+    CHECK(view.coverage[59] == 1);
+    CHECK(view.coverage[56] == 1);
 
     // The folded name survived: "a" coming back says so.
     wall.Advance(std::chrono::seconds { 1 });
@@ -361,7 +361,11 @@ TEST_CASE("a hostile keyed file starts empty and never crashes", "[distributed][
           .body = head + u64(1) + u64(1) + "k" + u64(0) + u64(7) + emptyRings() + u64(0) + u64(0) },
         { .what = "a negative observed bucket",
           .body = u64(0) + u64(0) + u64(0) + u64(0) + u64(1) + u64(~std::uint64_t { 0 }) },
-        { .what = "trailing bytes", .body = head + u64(0) + u64(0) + u64(0) + "x" },
+        { .what = "trailing bytes", .body = head + u64(0) + u64(0) + u64(0) + u64(0) + "x" },
+        { .what = "an observation counting more minutes than its bucket spans",
+          .body = u64(0) + u64(0) + u64(0) + u64(0) + u64(1) + u64(5) + u64(2) },
+        { .what = "an observation counting no minute",
+          .body = u64(0) + u64(0) + u64(0) + u64(0) + u64(1) + u64(5) + u64(0) },
         { .what = "a forgotten flag that is not a flag",
           .body = u64(0) + u64(2) + u64(0) + u64(0) + emptyRings() + u64(0) + u64(0) + u64(0) },
     };
@@ -376,7 +380,7 @@ TEST_CASE("a hostile keyed file starts empty and never crashes", "[distributed][
     }
 
     // The control: the well-formed empty body loads.
-    WriteFile(file, RequesterMagic, 1, head + u64(0) + u64(0) + u64(0));
+    WriteFile(file, RequesterMagic, 1, head + u64(0) + u64(0) + u64(0) + u64(0));
     FleetKeyedHistory history { KeyedDimension::Requesters, 4, wall };
     CHECK(history.Load(file));
 }
@@ -392,22 +396,92 @@ TEST_CASE("compile demand files a requester under its key text and a toolchain u
 
     demand.CompileGranted(raw, "fp-1");
     demand.CompileGranted(raw, "fp-1");
-    // A local-only request that did not know its toolchain counts for its requester alone.
+    // A local-only request that did not know its toolchain: its toolchain is unattributed, never dropped.
     demand.CompileGranted(raw, "");
-    // A requester that is no key names no machine.
-    demand.CompileGranted("not-a-key", "fp-2");
+    // A requester that identified no machine (a lease under a ticket): unattributed, never guessed.
+    demand.CompileGranted("", "fp-2");
 
     auto const requesters = demand.Of(KeyedDimension::Requesters).View(FleetRange::OneHour);
     REQUIRE(requesters.keys.size() == 1);
     CHECK(requesters.keys.front().key == FormatEd25519PublicKey(key));
-    CHECK(requesters.total == 3);
+    CHECK(requesters.keys.front().total == 3);
+    REQUIRE(requesters.unattributed.has_value());
+    CHECK(Unwrap(requesters.unattributed).total == 1);
+    CHECK(requesters.total == 4);
 
     auto const toolchains = demand.Of(KeyedDimension::ToolchainDemand).View(FleetRange::OneHour);
-    CHECK(toolchains.total == 3);
+    REQUIRE(toolchains.unattributed.has_value());
+    CHECK(Unwrap(toolchains.unattributed).total == 1);
+    // Both stores count every grant, so their totals agree.
+    CHECK(toolchains.total == 4);
     auto const rows = DemandRowsOf(toolchains);
     REQUIRE(rows.size() == 2);
     CHECK(rows[0].fingerprint == "fp-1");
     CHECK(rows[0].compiles == 2);
     CHECK(rows[1].fingerprint == "fp-2");
     CHECK(rows[1].compiles == 1);
+}
+
+TEST_CASE("an hour the leader counted for one minute reads 1 of 60, never a whole hour",
+          "[distributed][fleet-keyed-history]")
+{
+    PlacedWallClock wall;
+    FleetKeyedHistory history { KeyedDimension::Requesters, DefaultHistoryKeys, wall };
+    // Elected at minute 58 of an hour: one fold, one grant, in the same minute.
+    wall.Advance(std::chrono::minutes { 58 });
+    history.Fold();
+    REQUIRE(history.Count("m"));
+    REQUIRE(history.Count("m"));
+    wall.Advance(std::chrono::hours { 3 });
+
+    auto const week = history.View(FleetRange::Week);
+    REQUIRE(week.fullCoverage == 60);
+    auto const watched = std::ranges::find_if(week.coverage, [](std::uint32_t minutes) { return minutes > 0; });
+    REQUIRE(watched != week.coverage.end());
+    CHECK(*watched == 1);
+    CHECK(week.observedMinutes == 1);
+    CHECK(week.windowMinutes == 60ULL * 168);
+    CHECK(week.total == 2);
+
+    // A minute folded twice is ONE minute counted.
+    FleetKeyedHistory twice { KeyedDimension::Requesters, DefaultHistoryKeys, wall };
+    twice.Fold();
+    twice.Fold();
+    REQUIRE(twice.Count("m"));
+    CHECK(twice.View(FleetRange::Week).observedMinutes == 1);
+}
+
+TEST_CASE("a demotion's gap shows in coverage: the leader counted before and after, not between",
+          "[distributed][fleet-keyed-history]")
+{
+    PlacedWallClock wall;
+    FleetKeyedHistory history { KeyedDimension::Requesters, DefaultHistoryKeys, wall };
+    // Led for three minutes, demoted for an hour (nothing folds), re-elected for two.
+    for ([[maybe_unused]] auto const minute: std::views::iota(0, 3))
+    {
+        history.Fold();
+        REQUIRE(history.Count("m"));
+        wall.Advance(std::chrono::minutes { 1 });
+    }
+    wall.Advance(std::chrono::hours { 1 });
+    for ([[maybe_unused]] auto const minute: std::views::iota(0, 2))
+    {
+        history.Fold();
+        REQUIRE(history.Count("m"));
+        wall.Advance(std::chrono::minutes { 1 });
+    }
+
+    auto const day = history.View(FleetRange::Day);
+    CHECK(day.total == 5);
+    // Five minutes counted of the day's 1440: the hour another leader granted in is not counted here, and says so.
+    CHECK(day.observedMinutes == 5);
+    CHECK(day.windowMinutes == 1440);
+    // The buckets between the two stints read zero minutes, and their counts absent.
+    auto const first = std::ranges::find_if(day.coverage, [](std::uint32_t m) { return m > 0; });
+    auto const last = std::ranges::find_if(day.coverage | std::views::reverse, [](std::uint32_t m) { return m > 0; });
+    auto const between = std::ranges::count(std::ranges::subrange(first, last.base()), 0U);
+    CHECK(between >= 10); // an hour of five-minute buckets, less the stints' own
+    REQUIRE(day.keys.size() == 1);
+    auto const gaps = std::ranges::count_if(day.keys.front().buckets, [](auto const& b) { return !b.has_value(); });
+    CHECK(static_cast<std::size_t>(gaps) == static_cast<std::size_t>(std::ranges::count(day.coverage, 0U)));
 }

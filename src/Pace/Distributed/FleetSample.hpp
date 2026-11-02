@@ -421,9 +421,12 @@ class IFleetHistorySink
 /// Where the leader's admission queue reports each compile it GRANTS, for the keyed history (who asked, which
 /// toolchain).
 ///
-/// Called once per admission ticket, at the first decision that runs a compile -- on a worker or on the requesting
-/// machine itself -- and never for a request refused, abandoned before its grant, or answered `Stored` (another
-/// compile of the same key stored it). A worker refusal that puts the ticket back is not a second grant.
+/// Called once per COMPILE the leader grants: an admission ticket's first decision that runs it -- on a worker or
+/// on the requesting machine itself -- or a fail-open lease. Never for a request refused, abandoned before its
+/// grant, or answered `Stored` (another compile of the same key stored it); never for a worker refusal that puts the
+/// ticket back; and never for a request that says it asks again for a compile already granted
+/// (`CompileCacheWire::AskOrigin::AfterGrant`: the local retry after a granted worker failed, the lease after an
+/// admission broke).
 class ICompileDemandSink
 {
   public:
@@ -436,7 +439,8 @@ class ICompileDemandSink
 
     /// One compile granted.
     /// @param requester The machine the queue charged: the identity key its connection PROVED, raw, or this leader's
-    ///        own for a caller on this machine -- never an endpoint, a worker id or a hostname.
+    ///        own for a caller on this machine -- never an endpoint, a worker id or a hostname. Empty when the
+    ///        caller identified no machine (a lease asked under a ticket): counted unattributed.
     /// @param fingerprint The toolchain the request named; empty for a local-only request that did not know it.
     virtual void CompileGranted(std::string_view requester, std::string_view fingerprint) = 0;
 };

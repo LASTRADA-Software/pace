@@ -85,6 +85,14 @@ namespace
             tallies.pop_front();
     }
 
+    /// How many base-ring minutes one bucket of @p ring spans: the most minutes its coverage can count.
+    /// @param ring Which ring.
+    /// @return Its bucket width over the sample interval.
+    [[nodiscard]] constexpr std::uint32_t MinutesPerBucket(FleetRing ring) noexcept
+    {
+        return static_cast<std::uint32_t>(RingWidth(ring) / RingWidth(FleetRing::Minute));
+    }
+
     /// Sum one key's tallies over ring buckets `[first, last]`.
     template <typename Tallies>
     [[nodiscard]] std::uint64_t SumWithin(Tallies const& tallies, std::int64_t first, std::int64_t last)
@@ -107,7 +115,7 @@ FleetKeyedHistory::FleetKeyedHistory(KeyedDimension dimension, std::size_t maxKe
     _wall { wall }
 {
     for (auto const& row: FleetRingTable)
-        _observed[static_cast<std::size_t>(row.ring)].assign(row.slots, std::int64_t { -1 });
+        _observed[static_cast<std::size_t>(row.ring)].assign(row.slots, Cover {});
 }
 
 std::int64_t FleetKeyedHistory::NowMillis() const noexcept
@@ -137,14 +145,39 @@ void FleetKeyedHistory::ObserveLocked(std::int64_t now)
     if (now < 0)
         return;
     _firstObserved = std::min(_firstObserved.value_or(now), now);
+    // Coverage counts distinct MINUTES: the minute ring decides whether this minute is new, and only a new one adds
+    // to every coarser bucket it falls in -- so an hour watched for one minute reads 1 of 60, never "observed".
+    auto const minute = now / RingWidth(FleetRing::Minute);
+    auto const& minuteSlot = _observed[static_cast<std::size_t>(FleetRing::Minute)]
+                                      [static_cast<std::size_t>(minute % RingSlots(FleetRing::Minute))];
+    // Already counted, or older than the minute ring's lap (a clock stepped backwards): nothing new was seen.
+    if (minuteSlot.bucket >= minute)
+        return;
     for (auto const& row: FleetRingTable)
     {
-        auto& ring = _observed[static_cast<std::size_t>(row.ring)];
         auto const number = now / RingWidth(row.ring);
-        auto& slot = ring[static_cast<std::size_t>(number % RingSlots(row.ring))];
-        // A newer lap is never overwritten by an older one: a clock stepped backwards must not erase what was seen.
-        slot = std::max(slot, number);
+        auto& slot = _observed[static_cast<std::size_t>(row.ring)][static_cast<std::size_t>(number % RingSlots(row.ring))];
+        if (slot.bucket < number)
+            slot = Cover { .bucket = number, .minutes = 1 };
+        else if (slot.bucket == number)
+            slot.minutes = std::min(slot.minutes + 1, MinutesPerBucket(row.ring));
+        // A slot holding a NEWER lap is never overwritten by an older one.
     }
+}
+
+void FleetKeyedHistory::CountUnattributed(std::uint64_t n)
+{
+    auto const now = NowMillis();
+    auto const guard = std::scoped_lock { _mutex };
+    if (now < 0)
+        return;
+    ObserveLocked(now);
+    if (!_unattributed.has_value())
+        _unattributed.emplace();
+    for (auto const& row: FleetRingTable)
+        AddTally(
+            _unattributed->rings[static_cast<std::size_t>(row.ring)], now / RingWidth(row.ring), n, RingSlots(row.ring));
+    _unattributed->lastActiveMillis = std::max(_unattributed->lastActiveMillis, now);
 }
 
 void FleetKeyedHistory::CountLocked(std::string_view key, std::uint64_t n, std::int64_t now)
@@ -238,13 +271,19 @@ KeyedView FleetKeyedHistory::View(FleetRange range) const
 
     KeyedView view;
     view.range = range;
+    view.maxKeys = _maxKeys;
+    view.fullCoverage = static_cast<std::uint32_t>(FullCoverageOf(range));
+    view.windowMinutes = static_cast<std::uint64_t>(view.fullCoverage) * row.points;
     view.bucketStarts.reserve(row.points);
-    view.observed.reserve(row.points);
+    view.coverage.reserve(row.points);
 
     auto const guard = std::scoped_lock { _mutex };
     auto const& observed = _observed[ringIndex];
-    auto const seen = [&observed, ring](std::int64_t number) {
-        return number >= 0 && observed[static_cast<std::size_t>(number % RingSlots(ring))] == number;
+    auto const minutesOf = [&observed, ring](std::int64_t number) -> std::uint32_t {
+        if (number < 0)
+            return 0;
+        auto const& slot = observed[static_cast<std::size_t>(number % RingSlots(ring))];
+        return slot.bucket == number ? slot.minutes : 0;
     };
 
     // Which ring buckets each view bucket folds, computed once and shared by every key.
@@ -256,8 +295,11 @@ KeyedView FleetKeyedHistory::View(FleetRange range) const
         auto const first = start / ringWidth;
         auto const last = first + perBucket - 1;
         view.bucketStarts.push_back(start);
-        auto const any = std::ranges::any_of(std::views::iota(first, last + 1), seen);
-        view.observed.push_back(any);
+        auto minutes = std::uint32_t { 0 };
+        for (auto const number: std::views::iota(first, last + 1))
+            minutes += minutesOf(number);
+        view.coverage.push_back(minutes);
+        view.observedMinutes += minutes;
         spans.emplace_back(first, last);
     }
 
@@ -267,7 +309,7 @@ KeyedView FleetKeyedHistory::View(FleetRange range) const
         auto total = std::uint64_t { 0 };
         for (auto const index: std::views::iota(std::size_t { 0 }, spans.size()))
         {
-            if (!view.observed[index])
+            if (view.coverage[index] == 0)
             {
                 buckets.emplace_back(std::nullopt);
                 continue;
@@ -298,6 +340,12 @@ KeyedView FleetKeyedHistory::View(FleetRange range) const
         view.total = SaturatingAdd(view.total, total);
         view.other = OtherRow { .keysFolded = _keysFolded, .total = total, .buckets = std::move(buckets) };
     }
+    if (_unattributed.has_value())
+    {
+        auto [buckets, total] = seriesOf(*_unattributed);
+        view.total = SaturatingAdd(view.total, total);
+        view.unattributed = UnattributedRow { .total = total, .buckets = std::move(buckets) };
+    }
 
     // From when this store has counted, whichever window was asked -- the start of this leader's record, since a new
     // leader starts empty. The first instant it observed, exactly, while the rings still hold it; once that has lapped
@@ -305,10 +353,10 @@ KeyedView FleetKeyedHistory::View(FleetRange range) const
     // ring's: a leader elected at 09:12 would say it had counted since midnight.
     auto oldestHeld = std::optional<std::int64_t> {};
     for (auto const& each: FleetRingTable)
-        for (auto const number: _observed[static_cast<std::size_t>(each.ring)])
-            if (number >= 0)
+        for (auto const& cover: _observed[static_cast<std::size_t>(each.ring)])
+            if (cover.bucket >= 0)
             {
-                auto const start = number * RingWidth(each.ring);
+                auto const start = cover.bucket * RingWidth(each.ring);
                 oldestHeld = std::min(oldestHeld.value_or(start), start);
             }
     if (oldestHeld.has_value())
@@ -326,7 +374,7 @@ bool FleetKeyedHistory::Empty() const
 {
     auto const guard = std::scoped_lock { _mutex };
     return std::ranges::all_of(_observed, [](auto const& ring) {
-        return std::ranges::all_of(ring, [](std::int64_t const number) { return number < 0; });
+        return std::ranges::all_of(ring, [](Cover const& cover) { return cover.bucket < 0; });
     });
 }
 
@@ -428,10 +476,14 @@ bool FleetKeyedHistory::Save(std::filesystem::path const& path) const
         for (auto const& row: FleetRingTable)
         {
             auto const& ring = _observed[static_cast<std::size_t>(row.ring)];
-            AppendU64(file, static_cast<std::uint64_t>(std::ranges::count_if(ring, [](auto n) { return n >= 0; })));
-            for (auto const number: ring)
-                if (number >= 0)
-                    AppendU64(file, static_cast<std::uint64_t>(number));
+            AppendU64(file,
+                      static_cast<std::uint64_t>(std::ranges::count_if(ring, [](Cover const& c) { return c.bucket >= 0; })));
+            for (auto const& cover: ring)
+                if (cover.bucket >= 0)
+                {
+                    AppendU64(file, static_cast<std::uint64_t>(cover.bucket));
+                    AppendU64(file, cover.minutes);
+                }
         }
         AppendU64(file, _keys.size());
         for (auto const& [key, record]: _keys)
@@ -442,6 +494,9 @@ bool FleetKeyedHistory::Save(std::filesystem::path const& path) const
         AppendU64(file, _other.has_value() ? 1U : 0U);
         if (_other.has_value())
             AppendRecord(file, *_other);
+        AppendU64(file, _unattributed.has_value() ? 1U : 0U);
+        if (_unattributed.has_value())
+            AppendRecord(file, *_unattributed);
         AppendU64(file, _foldedOrder.size());
         for (auto const& key: _foldedOrder)
             AppendText(file, key);
@@ -472,24 +527,28 @@ bool FleetKeyedHistory::Load(std::filesystem::path const& path)
     if (!reader.Take(hasFirst) || !reader.Take(first) || hasFirst > 1 || static_cast<std::int64_t>(first) < 0)
         return false;
 
-    EnumTable<FleetRing, std::vector<std::int64_t>> observed;
+    EnumTable<FleetRing, std::vector<Cover>> observed;
     for (auto const& row: FleetRingTable)
     {
         auto& ring = observed[static_cast<std::size_t>(row.ring)];
-        ring.assign(row.slots, std::int64_t { -1 });
+        ring.assign(row.slots, Cover {});
         std::uint64_t count = 0;
         if (!reader.Take(count) || count > row.slots)
             return false;
         for ([[maybe_unused]] auto const index: std::views::iota(std::uint64_t { 0 }, count))
         {
             std::uint64_t raw = 0;
-            if (!reader.Take(raw))
+            std::uint64_t minutes = 0;
+            if (!reader.Take(raw) || !reader.Take(minutes))
                 return false;
             auto const number = static_cast<std::int64_t>(raw);
-            if (number < 0)
+            // A minute count no write of this build produces -- none, or more minutes than the bucket spans -- is
+            // a damaged file, refused rather than rendered as coverage that never was.
+            if (number < 0 || minutes == 0 || minutes > MinutesPerBucket(row.ring))
                 return false;
             auto& slot = ring[static_cast<std::size_t>(number % RingSlots(row.ring))];
-            slot = std::max(slot, number);
+            if (slot.bucket < number)
+                slot = Cover { .bucket = number, .minutes = static_cast<std::uint32_t>(minutes) };
         }
     }
 
@@ -516,6 +575,16 @@ bool FleetKeyedHistory::Load(std::filesystem::path const& path)
         if (!TakeRecord(reader, *other))
             return false;
     }
+    std::uint64_t hasUnattributed = 0;
+    if (!reader.Take(hasUnattributed) || hasUnattributed > 1)
+        return false;
+    std::optional<KeyRecord> unattributed;
+    if (hasUnattributed == 1)
+    {
+        unattributed.emplace();
+        if (!TakeRecord(reader, *unattributed))
+            return false;
+    }
 
     std::uint64_t foldedCount = 0;
     if (!reader.Take(foldedCount) || foldedCount > RememberedFoldsPerKey * MaxHistoryKeys)
@@ -536,6 +605,7 @@ bool FleetKeyedHistory::Load(std::filesystem::path const& path)
     _observed = std::move(observed);
     _keys = std::move(keys);
     _other = std::move(other);
+    _unattributed = std::move(unattributed);
     _keysFolded = static_cast<std::size_t>(folded);
     _foldedForgotten = forgotten == 1;
     _firstObserved = hasFirst == 1 ? std::optional { static_cast<std::int64_t>(first) } : std::nullopt;
@@ -570,15 +640,19 @@ CompileDemandHistory::CompileDemandHistory(std::size_t maxKeys, core::platform::
 
 void CompileDemandHistory::CompileGranted(std::string_view requester, std::string_view fingerprint)
 {
-    // The queue's machine id is a raw identity key; anything else names no machine and is not counted as one.
+    // Both stores count every grant, so their totals agree: what cannot be named -- a requester that is no
+    // identity key (a lease asked under a ticket), a fingerprint that is empty (a local-only request that did not
+    // know it) or not text -- is counted UNATTRIBUTED, never dropped and never guessed.
     if (requester.size() == Ed25519PublicKeyBytes)
     {
         Ed25519PublicKey key {};
         std::ranges::transform(requester, key.begin(), [](char const byte) { return static_cast<std::byte>(byte); });
         _requesters.Count(FormatEd25519PublicKey(key));
     }
-    if (!fingerprint.empty())
-        _toolchains.Count(fingerprint);
+    else
+        _requesters.CountUnattributed();
+    if (!_toolchains.Count(fingerprint))
+        _toolchains.CountUnattributed();
 }
 
 void CompileDemandHistory::Fold()
