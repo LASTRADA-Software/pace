@@ -299,6 +299,13 @@ struct NodeConfig
     /// row's provenance, so a registration replays what was typed and never today's core count.
     std::optional<std::uint32_t> machineSlots;
 
+    /// How many keys each of the leader's keyed compile histories keeps by name, when the operator named a number
+    /// (`--history-requesters`): requesting machines, and separately toolchains -- one option governs both.
+    ///
+    /// Absent is `Distributed::DefaultHistoryKeys` (`HistoryKeysOf`). The rest fold into an `other` row whose counts
+    /// stay exact. An `optional` for `slots` reason: it is this row's provenance.
+    std::optional<std::uint32_t> historyRequesters;
+
     /// The memory the fleet's queue may have this machine's compiles hold at once, when the operator
     /// named one (`--machine-memory-budget`, bytes after `N%` is resolved against host RAM).
     ///
@@ -1039,6 +1046,12 @@ inline constexpr std::uint64_t DefaultCompileEstimateBytes = 2ULL << 30;
 /// @param cfg The parsed configuration.
 /// @return The estimate, in bytes.
 [[nodiscard]] std::uint64_t CompileEstimateDefaultOf(NodeConfig const& cfg) noexcept;
+
+/// How many keys each keyed compile history keeps: `--history-requesters`, or `Distributed::DefaultHistoryKeys` when
+/// it names none.
+/// @param cfg The parsed configuration.
+/// @return The ceiling, at least one.
+[[nodiscard]] std::size_t HistoryKeysOf(NodeConfig const& cfg) noexcept;
 
 /// The least in-flight compile budget a worker may run with: the larger of the per-request
 /// ceiling (`CompileRequestMaxOf`) and the listener's COMPILE frame cap floor.

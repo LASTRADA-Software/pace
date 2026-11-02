@@ -1292,7 +1292,7 @@ namespace
 /// A day of buckets carrying a rising counter, so every chart has something to draw.
 [[nodiscard]] FleetHistoryView SomeHistory(FleetRange range = FleetRange::Day, bool durable = true)
 {
-    FleetHistoryView view { .range = range, .buckets = {}, .durable = durable };
+    FleetHistoryView view { .range = range, .buckets = {}, .durable = durable, .keyed = {} };
     for (auto const index: std::views::iota(0, 8))
     {
         FleetBucket bucket {};

@@ -8,6 +8,7 @@
 #include <Pace/Core/Json.hpp>
 #include <Pace/Distributed/FleetChart.hpp>
 #include <Pace/Distributed/FleetHistory.hpp>
+#include <Pace/Distributed/FleetKeyedHistory.hpp>
 #include <Pace/Distributed/FleetView.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
 #include <Pace/Protocol/NodeConditionWire.hpp>
@@ -29,6 +30,7 @@
 #include <vector>
 
 #include <core/Ranges.hpp>
+#include <tests/FleetHistoryFakes.hpp>
 #include <tests/RaftPeerKeyFakes.hpp>
 #include <tests/Unwrap.hpp>
 
@@ -876,4 +878,152 @@ TEST_CASE("history passes the leader's refusal of a node selector through as a t
     auto const result = Call(upstream, "history", R"({"series":"cpu-busy","range":"1h","node":"n2"})", TwoMembers());
     CHECK(result.isError);
     CHECK(result.text.contains("no history for n2"));
+}
+
+namespace
+{
+/// @param key An identity key.
+/// @return It as the queue spells a machine: the raw bytes.
+[[nodiscard]] std::string RawMachine(Ed25519PublicKey const& key)
+{
+    return std::string { reinterpret_cast<char const*>(key.data()), key.size() };
+}
+
+/// The scripted fleet, with member n1 holding a real key and a display name, and its leader's keyed histories:
+/// n1 asked three compiles of one toolchain, another machine one of another, and a third machine one more -- so with
+/// a ceiling of two, the least recently active is folded into `other`.
+struct KeyedFleet
+{
+    KeyedFleet()
+    {
+        auto& member = UnwrapMutable(snapshot.cluster).members.at(0);
+        member.publicKey = memberKey;
+        member.displayName = "office-pc";
+        demand.CompileGranted(RawMachine(Testing::TestKeyPair("early").PublicKey()), "clang-19-def");
+        wall.Advance(std::chrono::seconds { 1 });
+        for ([[maybe_unused]] auto const index: std::views::iota(0, 3))
+            demand.CompileGranted(RawMachine(memberKey), "gcc-14-abc");
+        wall.Advance(std::chrono::seconds { 1 });
+        demand.CompileGranted(RawMachine(Testing::TestKeyPair("late").PublicKey()), "gcc-14-abc");
+        auto view = Dist::FleetHistoryView { .range = Dist::FleetRange::Day, .buckets = {}, .durable = false, .keyed = {} };
+        for (auto const& row: Dist::KeyedDimensionTable)
+            view.keyed[static_cast<std::size_t>(row.dimension)] = demand.Of(row.dimension).View(Dist::FleetRange::Day);
+        body = Dist::RenderFleetJson(snapshot, view);
+        document = Unwrap(Json::Parse(body, McpFleet::FleetDocumentLimits));
+    }
+
+    Ed25519PublicKey const memberKey = Testing::TestKeyPair("n1").PublicKey();
+    Dist::FleetSnapshot snapshot = ScriptedFleet();
+    Testing::PlacedWallClock wall;
+    Dist::CompileDemandHistory demand { 2, wall };
+    std::string body;
+    Json::Value document;
+};
+} // namespace
+
+TEST_CASE("requesters tool output equals fleet.json requesters section", "[node][mcp][fleet-tools][fleet-keyed-history]")
+{
+    KeyedFleet const fleet;
+    for (auto const& row: Dist::KeyedDimensionTable)
+    {
+        INFO("series " << row.series);
+        auto upstream = LeaderUpstream();
+        upstream.AnswerOk(fleet.body);
+        auto const result = Call(upstream, "history", std::format(R"({{"series":"{}","range":"24h"}})", row.series));
+        REQUIRE_FALSE(result.isError);
+        CheckEnvelope(result.structured);
+        // Asked of the leader for the ONE document /fleet.json serves, over the range named.
+        auto const asked = FleetTextAsked(upstream);
+        CHECK(asked.format == Wire::FleetTextFormat::Json);
+        CHECK(asked.range == "24h");
+        // The section, exactly as the document writes it: one derivation, two readers.
+        CHECK(Text(At(result.structured, row.section)) == Text(At(fleet.document, row.section)));
+        CHECK(At(result.structured, "key").IsNull());
+    }
+
+    // And what that section says: n1 named by member id and display name, a machine no member holds named by
+    // nobody, the folded one counted in `other`, and the total exact.
+    auto const& requesters = At(fleet.document, "requesters");
+    CHECK(At(requesters, "total").AsInt() == std::optional<std::int64_t> { 5 });
+    auto const& keys = Elements(At(requesters, "keys"));
+    REQUIRE(keys.size() == 2);
+    CHECK(Text(At(keys[0], "key")) == Text(Json::Value { .v = FormatEd25519PublicKey(fleet.memberKey) }));
+    CHECK(Text(At(keys[0], "node_id")) == R"("n1")");
+    CHECK(Text(At(keys[0], "display_name")) == R"("office-pc")");
+    CHECK(At(keys[0], "total").AsInt() == std::optional<std::int64_t> { 3 });
+    CHECK(Text(At(keys[0], "earlier_counts")) == R"("none")");
+    CHECK(At(keys[1], "node_id").IsNull());
+    CHECK(At(keys[1], "display_name").IsNull());
+    auto const& other = At(requesters, "other");
+    CHECK(At(other, "keys_folded").AsInt() == std::optional<std::int64_t> { 1 });
+    CHECK(At(other, "total").AsInt() == std::optional<std::int64_t> { 1 });
+    CHECK(Text(At(other, "noun")) == R"("machines")");
+    CHECK_FALSE(At(requesters, "coverage_since_ms").IsNull());
+
+    auto const& demand = At(fleet.document, "toolchain_demand");
+    auto const& toolchains = Elements(At(demand, "keys"));
+    REQUIRE_FALSE(toolchains.empty());
+    CHECK(Text(At(toolchains[0], "fingerprint")) == R"("gcc-14-abc")");
+    CHECK(At(toolchains[0], "total").AsInt() == std::optional<std::int64_t> { 4 });
+    CHECK(toolchains[0].Find("node_id") == nullptr);
+}
+
+TEST_CASE("history's key selects one row of a keyed series, by key, node id or display name",
+          "[node][mcp][fleet-tools][fleet-keyed-history]")
+{
+    KeyedFleet const fleet;
+    auto const keyText = FormatEd25519PublicKey(fleet.memberKey);
+    for (auto const& selector: { keyText, std::string { "n1" }, std::string { "office-pc" } })
+    {
+        INFO("key " << selector);
+        auto upstream = LeaderUpstream();
+        upstream.AnswerOk(fleet.body);
+        auto const result =
+            Call(upstream, "history", std::format(R"({{"series":"requesters","range":"24h","key":"{}"}})", selector));
+        REQUIRE_FALSE(result.isError);
+        auto const& keys = Elements(At(At(result.structured, "requesters"), "keys"));
+        REQUIRE(keys.size() == 1);
+        CHECK(Text(At(keys[0], "node_id")) == R"("n1")");
+        // Everything but the rows is the document's: the total and `other` still say the whole.
+        CHECK(Text(At(At(result.structured, "requesters"), "other")) == Text(At(At(fleet.document, "requesters"), "other")));
+        CHECK(Text(At(result.structured, "key")) == Text(Json::Value { .v = selector }));
+    }
+
+    auto upstream = LeaderUpstream();
+    upstream.AnswerOk(fleet.body);
+    auto const none = Call(upstream, "history", R"({"series":"requesters","range":"24h","key":"nobody"})");
+    REQUIRE_FALSE(none.isError);
+    CHECK(Elements(At(At(none.structured, "requesters"), "keys")).empty());
+    CHECK(none.text.contains("in other"));
+}
+
+TEST_CASE("history refuses node on a keyed series and key on a slot series, asking nothing",
+          "[node][mcp][fleet-tools][fleet-keyed-history]")
+{
+    auto upstream = LeaderUpstream();
+    auto const node = Call(upstream, "history", R"({"series":"requesters","range":"24h","node":"n1"})");
+    CHECK(node.isError);
+    CHECK(node.text.contains("`key`"));
+    auto const key = Call(upstream, "history", R"({"series":"dispatched","range":"24h","key":"x"})");
+    CHECK(key.isError);
+    CHECK(key.text.contains("toolchain-demand"));
+    auto const unknown = Call(upstream, "history", R"({"series":"made-up","range":"24h"})");
+    CHECK(unknown.isError);
+    for (auto const& row: Dist::KeyedDimensionTable)
+        CHECK(unknown.text.contains(row.series));
+    CHECK(upstream.calls.empty());
+}
+
+TEST_CASE("a leader that keeps no keyed history is answered null, never an empty history",
+          "[node][mcp][fleet-tools][fleet-keyed-history]")
+{
+    auto const [body, document] = ScriptedDocument();
+    CHECK(At(document, "requesters").IsNull());
+    CHECK(At(document, "toolchain_demand").IsNull());
+    auto upstream = LeaderUpstream();
+    upstream.AnswerOk(body);
+    auto const result = Call(upstream, "history", R"({"series":"toolchain-demand","range":"7d"})");
+    REQUIRE_FALSE(result.isError);
+    CHECK(At(result.structured, "toolchain_demand").IsNull());
+    CHECK(result.text.contains("keeps no such history"));
 }

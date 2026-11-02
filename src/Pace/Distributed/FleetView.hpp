@@ -7,6 +7,7 @@
 #include <Pace/Core/FigureText.hpp>
 #include <Pace/Core/MachineName.hpp>
 #include <Pace/Distributed/FleetHistory.hpp>
+#include <Pace/Distributed/FleetKeyedHistory.hpp>
 #include <Pace/Distributed/SchedulerService.hpp>
 #include <Pace/Distributed/WorkerRegistry.hpp>
 #include <Pace/Metrics/IMetricsSink.hpp>
@@ -876,6 +877,12 @@ struct FleetHistoryView
     /// and it is not the same promise as a durable one -- so the page says so
     /// rather than letting an operator find out at the next restart.
     bool durable { false };
+    /// The leader's keyed compile histories over `range`, one per `KeyedDimension` (`/fleet.json`'s `requesters` and
+    /// `toolchain_demand`).
+    ///
+    /// Absent -- rendered `null` -- on a node that keeps none or does not LEAD: the stores count what a leader's queue
+    /// granted, and a follower's, or a demoted leader's, holds only the windows it led, which is no fleet's answer now.
+    EnumTable<KeyedDimension, std::optional<KeyedView>> keyed {};
 };
 
 /// Render a fleet snapshot as one self-contained HTML page.

@@ -188,6 +188,7 @@ namespace
         Shown("--admin-listen", &Text<&NodeConfig::adminListen>),
         Shown("--mcp-listen", &Text<&NodeConfig::mcpListen>),
         Shown("--dashboard", &Flag<&NodeConfig::dashboard>),
+        Shown("--history-requesters", &OptionalNumber<&NodeConfig::historyRequesters>),
         SecretFilePath("--dashboard-token-file", &Path<&NodeConfig::dashboardTokenFile>),
         Shown("--tls-self-signed", &Flag<&NodeConfig::tlsSelfSigned>),
         Shown("--tls-cert", &Path<&NodeConfig::tlsCertFile>),

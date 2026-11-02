@@ -1,17 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <Pace/Consensus/DurableFile.hpp>
-#include <Pace/Core/ByteAppender.hpp>
-#include <Pace/Core/Crc32c.hpp>
-#include <Pace/Core/Endian.hpp>
 #include <Pace/Core/WireFields.hpp>
 #include <Pace/Distributed/FleetHistory.hpp>
+#include <Pace/Distributed/HistoryEnvelope.hpp>
 
 #include <algorithm>
 #include <array>
-#include <fstream>
 #include <ranges>
 #include <span>
-#include <sstream>
 #include <utility>
 
 namespace Pace::Distributed
@@ -19,6 +14,8 @@ namespace Pace::Distributed
 
 namespace
 {
+    using namespace HistoryEnvelope;
+
     /// One ring's bucket width, in milliseconds.
     /// @param ring Which ring.
     /// @return Its bucket width.
@@ -27,24 +24,6 @@ namespace
         return std::chrono::duration_cast<std::chrono::milliseconds>(FleetRingTable[static_cast<std::size_t>(ring)].bucket)
             .count();
     }
-
-    /// What a store's file says about itself.
-    ///
-    /// A file that could not say which build wrote it makes an upgrade a silent
-    /// corruption, which is the reasoning `ClusterState`'s own version byte records.
-    /// Unlike that one, an OLDER version is not necessarily an error: `HistoryFormats`
-    /// carries a reader for one and inflates it forward.
-    ///
-    /// A descriptor rather than a base class, because the two stores share the
-    /// framing and nothing else -- one holds rings, the other a body per machine. A
-    /// third store is then a third constant, and it gets the durability, the checksum
-    /// and the never-overwrite-a-newer-file rule by construction rather than by
-    /// somebody remembering to copy them.
-    struct FileEnvelope
-    {
-        std::array<char, 4> magic; ///< What this file is.
-        std::uint8_t newest;       ///< The newest version this build writes.
-    };
 
     /// A node's own series: three rings in one file.
     ///
@@ -66,9 +45,6 @@ namespace
     /// the absence mask -- and files each series under the identity key it was proven under
     /// (`[endpoint][high-water][key][body]`), which is what a machine's own series is looked up BY.
     constexpr FileEnvelope NodeStoreFile { .magic = { 'F', 'C', 'N', 'H' }, .newest = 3 };
-
-    /// Magic, version byte, body length, body checksum.
-    constexpr std::size_t EnvelopeSize = 4 + 1 + (sizeof(std::uint64_t) * 2);
 
     /// What one bucket costs in a body: five scalars, the readings, and the fold.
     ///
@@ -264,21 +240,6 @@ namespace
         return out;
     }
 
-    /// Big-endian, because that is what every other encoder in this tree writes;
-    /// the choice is arbitrary for a private file and consistency is not.
-    ///
-    /// Kept as a named helper over `ByteAppender` rather than spelled at each of its
-    /// fifteen call sites, because the sentence above is what it is for. What it no
-    /// longer does is state the byte order a second time (#305): this file's records
-    /// are `[u64 length][bytes]`, which is NOT the `[u32 length][bytes]` grammar
-    /// `AppendField` writes, so the framing stays here and only the integer is shared.
-    /// @param out The buffer.
-    /// @param value Host-order value.
-    void AppendU64(std::string& out, std::uint64_t value)
-    {
-        ByteAppender { out }.AppendU64(value);
-    }
-
     /// Stamp a big-endian word over one already appended.
     /// @param out The buffer.
     /// @param offset Where the word sits.
@@ -287,162 +248,6 @@ namespace
     {
         WireFields::PutBigEndian<std::uint64_t>(std::as_writable_bytes(std::span { out }), offset, value);
     }
-
-    [[nodiscard]] std::uint64_t ReadU64(std::string_view bytes, std::size_t offset) noexcept
-    {
-        return ReadBigEndian<std::uint64_t>(
-            std::span { reinterpret_cast<std::byte const*>(bytes.data()) + offset, sizeof(std::uint64_t) });
-    }
-
-    /// A buffer with the header's bytes reserved in front, ready for a body.
-    ///
-    /// The body is appended straight into the buffer that becomes the file, because
-    /// a received-histories store is most of a megabyte per machine: composing the
-    /// body separately would copy all of it twice, once to join the header and once
-    /// again to reach the stream.
-    /// @return The buffer, `EnvelopeSize` placeholder bytes long.
-    [[nodiscard]] std::string FramedBuffer()
-    {
-        return std::string(EnvelopeSize, char { 0 });
-    }
-
-    /// Stamp the header onto such a buffer and put it where a crash cannot leave
-    /// half of it.
-    /// @param path Where the file belongs.
-    /// @param envelope What to stamp.
-    /// @param file The whole file: header space, then the body.
-    /// @param which Which state file it is, and so who may read it.
-    /// @return True when the file was replaced.
-    [[nodiscard]] bool WriteFramed(std::filesystem::path const& path,
-                                   FileEnvelope const& envelope,
-                                   std::string& file,
-                                   StateFile which)
-    {
-        std::string_view const body { file.data() + EnvelopeSize, file.size() - EnvelopeSize };
-
-        std::string header;
-        header.reserve(EnvelopeSize);
-        header.append(envelope.magic.data(), envelope.magic.size());
-        header.push_back(static_cast<char>(envelope.newest));
-        AppendU64(header, body.size());
-        AppendU64(header, Crc32c::Compute(std::span { reinterpret_cast<std::byte const*>(body.data()), body.size() }));
-        std::ranges::copy(header, file.begin());
-
-        // Through the node's one durable writer: a crash leaves the previous file whole rather than
-        // half of this one, and what lands is synced and its close checked, as every state file is.
-        return Consensus::ReplaceFileAtomically(path, std::as_bytes(std::span { file }), which).has_value();
-    }
-
-    /// What reading a framed file produced.
-    enum class FramedOutcome : std::uint8_t
-    {
-        Ok,      ///< The body is there and its checksum matched.
-        Missing, ///< Absent, short, not ours, or damaged: start empty, overwrite freely.
-        Newer,   ///< Ours, and written by a LATER build: start empty and NEVER write.
-    };
-
-    /// A framed file's contents.
-    ///
-    /// `body` OWNS its bytes rather than viewing a buffer this returned by value: a
-    /// struct a decoder hands back must not borrow from what it decoded, or the
-    /// obvious spelling is a use-after-free.
-    struct FramedFile
-    {
-        FramedOutcome outcome { FramedOutcome::Missing }; ///< Whether there is anything to read.
-        std::uint8_t version { 0 };                       ///< Which build's shape the body is in.
-        std::string body;                                 ///< The bytes after the header.
-    };
-
-    /// Read a framed file and check everything about it except the shape of its body.
-    /// @param path Where to look.
-    /// @param envelope What the file must claim to be.
-    /// @return The body, or why there is none.
-    [[nodiscard]] FramedFile ReadFramed(std::filesystem::path const& path, FileEnvelope const& envelope)
-    {
-        std::ifstream in { path, std::ios::binary };
-        if (!in)
-            return {};
-
-        // Sized and read in one go rather than through `istreambuf_iterator`: GCC at
-        // -O3 inlines that far enough to trip `-Werror=null-dereference`, which this
-        // codebase has already worked around twice.
-        in.seekg(0, std::ios::end);
-        auto const end = in.tellg();
-        if (end < 0)
-            return {};
-        in.seekg(0, std::ios::beg);
-
-        std::string raw(static_cast<std::size_t>(end), char { 0 });
-        in.read(raw.data(), static_cast<std::streamsize>(raw.size()));
-        if (in.gcount() != static_cast<std::streamsize>(raw.size()))
-            return {};
-
-        if (raw.size() < EnvelopeSize)
-            return {};
-        if (!std::equal(envelope.magic.begin(), envelope.magic.end(), raw.begin()))
-            return {};
-
-        auto const version = static_cast<std::uint8_t>(raw[envelope.magic.size()]);
-        // The magic matched, so this IS one of ours -- and a version above the newest
-        // this build writes was written by a LATER one. Everything else here is
-        // recoverable by waiting; overwriting a year of readings that the newer build
-        // could still have read is not.
-        if (version > envelope.newest)
-            return FramedFile { .outcome = FramedOutcome::Newer, .version = version, .body = {} };
-
-        auto const declared = ReadU64(raw, envelope.magic.size() + 1);
-        auto const checksum = ReadU64(raw, envelope.magic.size() + 1 + sizeof(std::uint64_t));
-        // The header is dropped rather than copied past: what is left IS the body.
-        raw.erase(0, EnvelopeSize);
-        if (raw.size() != declared)
-            return {};
-        if (Crc32c::Compute(std::span { reinterpret_cast<std::byte const*>(raw.data()), raw.size() }) != checksum)
-            return {};
-
-        return FramedFile { .outcome = FramedOutcome::Ok, .version = version, .body = std::move(raw) };
-    }
-
-    /// A cursor over a file's body, so a reader cannot walk off the end by omission.
-    class BodyReader
-    {
-      public:
-        /// @param body The bytes after the header.
-        explicit BodyReader(std::string_view body) noexcept:
-            _body { body }
-        {
-        }
-
-        /// @param into Where the next big-endian `uint64` lands.
-        /// @return False when the body is exhausted, leaving @p into untouched.
-        bool Take(std::uint64_t& into) noexcept
-        {
-            if (_cursor + sizeof(std::uint64_t) > _body.size())
-                return false;
-            into = ReadU64(_body, _cursor);
-            _cursor += sizeof(std::uint64_t);
-            return true;
-        }
-
-        /// @param length How many bytes to take.
-        /// @param into A view of them, valid as long as the body is.
-        /// @return False when the body is exhausted, leaving @p into untouched.
-        ///
-        /// Written as a remaining-length comparison rather than `_cursor + length`,
-        /// because a length read off a damaged file can overflow that sum and let a
-        /// bounds check pass on a span that runs off the end.
-        bool Take(std::uint64_t length, std::string_view& into) noexcept
-        {
-            if (length > _body.size() - _cursor)
-                return false;
-            into = _body.substr(_cursor, static_cast<std::size_t>(length));
-            _cursor += static_cast<std::size_t>(length);
-            return true;
-        }
-
-      private:
-        std::string_view _body;
-        std::size_t _cursor { 0 };
-    };
 
     /// The rings a reader recovered, before they are installed.
     struct LoadedHistory

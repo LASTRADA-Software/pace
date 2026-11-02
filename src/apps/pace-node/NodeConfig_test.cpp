@@ -26,6 +26,7 @@
 #include <Pace/Core/HostPort.hpp>
 #include <Pace/Core/ISecureRandom.hpp>
 #include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/FleetKeyedHistory.hpp>
 #include <Pace/Platform/ServiceControl.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
 
@@ -539,6 +540,7 @@ TEST_CASE("NodeConfig: every flag that is worker state reaches the supervisor", 
     cfg.machineSlots = 14;
     cfg.machineMemoryBudgetBytes = 20ULL * 1024 * 1024 * 1024;
     cfg.compileEstimateDefaultBytes = 3ULL * 1024 * 1024 * 1024;
+    cfg.historyRequesters = 64;
     // Worker state like any other, and the one that supplies most of the rest: a
     // registration that dropped it would come back at every boot knowing only what
     // was typed alongside --install-service, which for a package install is close
@@ -7293,5 +7295,59 @@ TEST_CASE("NodeConfig.machine-flags-parse", "[node][config][machinebudget]")
             return FlagMatches(arg, "--machine-slots") || FlagMatches(arg, "--machine-memory-budget")
                    || FlagMatches(arg, "--compile-estimate-default");
         }));
+    }
+}
+
+TEST_CASE("NodeConfig: --history-requesters=0 refused", "[node][config][fleet-keyed-history]")
+{
+    SECTION("the grammar: a count from one to the ceiling")
+    {
+        auto const typed = ParseNodeArgv({ "--history-requesters=64" });
+        REQUIRE(typed.has_value());
+        CHECK(typed->historyRequesters == std::optional<std::uint32_t> { 64 });
+        CHECK(HistoryKeysOf(*typed) == 64);
+        auto const ceilingFlag = std::format("--history-requesters={}", Distributed::MaxHistoryKeys);
+        auto const ceiling = ParseNodeArgv({ ceilingFlag.c_str() });
+        REQUIRE(ceiling.has_value());
+        CHECK(HistoryKeysOf(*ceiling) == Distributed::MaxHistoryKeys);
+    }
+
+    SECTION("absent is the spec's 256, and absent")
+    {
+        auto const bare = Unwrap(ParseNodeArgv({}));
+        CHECK_FALSE(bare.historyRequesters.has_value());
+        CHECK(HistoryKeysOf(bare) == Distributed::DefaultHistoryKeys);
+        CHECK(Distributed::DefaultHistoryKeys == 256);
+    }
+
+    SECTION("zero, past the ceiling and nonsense are refused by the row, naming why")
+    {
+        auto const zero = ParseNodeArgv({ "--history-requesters=0" });
+        REQUIRE_FALSE(zero.has_value());
+        CHECK(zero.error().context.contains("more than zero"));
+        auto const overFlag = std::format("--history-requesters={}", Distributed::MaxHistoryKeys + 1);
+        auto const over = ParseNodeArgv({ overFlag.c_str() });
+        REQUIRE_FALSE(over.has_value());
+        CHECK(over.error().context.contains(std::format("at most {}", Distributed::MaxHistoryKeys)));
+        CHECK_FALSE(ParseNodeArgv({ "--history-requesters=many" }).has_value());
+        CHECK_FALSE(FromFileAndArgv({ Setting("history_requesters", { "0" }) }, {}).has_value());
+    }
+
+    SECTION("the YAML key spells the flag, and the command line still wins")
+    {
+        auto const fromFile = FromFileAndArgv({ Setting("history_requesters", { "32" }) }, {});
+        REQUIRE(fromFile.has_value());
+        CHECK(fromFile->historyRequesters == std::optional<std::uint32_t> { 32 });
+        auto const overridden = FromFileAndArgv({ Setting("history_requesters", { "32" }) }, { "--history-requesters=8" });
+        REQUIRE(overridden.has_value());
+        CHECK(overridden->historyRequesters == std::optional<std::uint32_t> { 8 });
+    }
+
+    SECTION("restart-only")
+    {
+        auto const* const row =
+            core::findIfOrNull(NodeOptions(), [](auto const& option) { return option.primary == "--history-requesters"; });
+        REQUIRE(row != nullptr);
+        CHECK(row->reloadable == Reloadable::No);
     }
 }

@@ -818,6 +818,13 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     /// @param sink Where to route it; must outlive this service.
     void SetHistorySink(IFleetHistorySink* sink) noexcept;
 
+    /// Where each compile the admission queue grants is reported, for the keyed history; null to report none.
+    ///
+    /// A setter for `SetHistorySink`'s reason: the store lives in the sampler, built after this service. Taken under
+    /// the admission lock, so unwiring it at teardown cannot race a grant being decided.
+    /// @param sink Where to report; must outlive this service or be unwired first.
+    void SetDemandSink(ICompileDemandSink* sink) noexcept;
+
     /// Publish this node's current standing in the cluster.
     ///
     /// Called by the consensus driver whenever leadership moves. Kept as a setter
@@ -1432,6 +1439,10 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
         core::platform::SteadyTimePoint enqueuedAt; ///< For `queued`.
         core::platform::SteadyTimePoint parkedAt;   ///< For `waited`: the enqueue, or the last requeue.
         std::optional<Distributed::Lease> lease;    ///< Engaged once granted on a worker.
+        MachineId machine;                          ///< The machine the queue charges: who asked, for the keyed history.
+        /// Whether this ticket's grant was reported to the demand sink: once per ticket, so a worker refusal that puts
+        /// it back and a later grant is still one compile asked for.
+        bool demandReported { false };
     };
 
     /// `AdmissionReport::queue`. Caller holds `_admissionMutex`.
@@ -1462,6 +1473,10 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     /// @param held The ticket record; its lease is taken.
     /// @param end Who ended it; only `Settled` counts a release, and only of a lease actually held.
     void ReleaseAdmissionLease(AdmissionTicket& held, AdmissionLeaseEnd end);
+
+    /// Tell the demand sink this ticket's compile was granted, unless it already was. Caller holds `_admissionMutex`.
+    /// @param held The ticket record.
+    void ReportDemandOnce(AdmissionTicket& held);
 
     /// Turn one decision into a verdict: re-gate, mint the lease, encode the grant.
     /// Caller holds `_admissionMutex`.
@@ -1547,6 +1562,8 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     /// driver thread (demotion). Order: this is taken BEFORE the registry and the lease table own
     /// locks, never after.
     mutable std::mutex _admissionMutex;
+    /// Where each grant is reported (`SetDemandSink`); guarded by `_admissionMutex`.
+    ICompileDemandSink* _demand { nullptr };
     PeakEstimates _estimates;                                      ///< Guarded by `_admissionMutex`.
     RegistryPlacement _placement;                                  ///< Reads `_workers`, which locks for itself.
     AdmissionQueue _queue;                                         ///< Guarded by `_admissionMutex`.

@@ -351,9 +351,9 @@ namespace
     [[nodiscard]] Distributed::FleetHistoryView HistoryViewFor(IFleetHistoryView const* history,
                                                                Distributed::FleetRange range)
     {
-        Distributed::FleetHistoryView view { .range = range,
-                                             .buckets = {},
-                                             .durable = history != nullptr && history->Durable() };
+        Distributed::FleetHistoryView view {
+            .range = range, .buckets = {}, .durable = history != nullptr && history->Durable(), .keyed = {}
+        };
         if (history != nullptr)
             view.buckets = history->Buckets(range);
         return view;
@@ -438,9 +438,9 @@ namespace
         // A follower answers as it answers for the fleet -- comment lines naming the leader, no table -- since
         // what it was handed is a fraction of the fleet's handover, rendered by the same renderer below.
         auto const leads = Distributed::LeadsTheFleet(snapshot);
-        Distributed::FleetHistoryView view { .range = range,
-                                             .buckets = {},
-                                             .durable = history != nullptr && history->Durable() };
+        Distributed::FleetHistoryView view {
+            .range = range, .buckets = {}, .durable = history != nullptr && history->Durable(), .keyed = {}
+        };
         if (leads)
         {
             if (history == nullptr)
@@ -549,7 +549,13 @@ std::expected<FleetTextDocument, FleetTextDeclined> AnswerFleetText(Distributed:
     if (!nodeId.empty())
         return AnswerMachineSeries(snapshot, history, section, format, nodeId, *range);
 
-    auto const view = HistoryViewFor(history, *range);
+    auto view = HistoryViewFor(history, *range);
+    // The keyed compile histories ride the JSON document alone, and only from a LEADER: they count what its queue
+    // granted, and a follower's -- or a demoted leader's -- store holds only the windows it led, which is no fleet's
+    // answer now. Rendered `null` otherwise, never an empty history.
+    if (format == CompileCacheWire::FleetTextFormat::Json && history != nullptr && Distributed::LeadsTheFleet(snapshot))
+        for (auto const& row: Distributed::KeyedDimensionTable)
+            view.keyed[static_cast<std::size_t>(row.dimension)] = history->Keyed(row.dimension, *range);
     return FleetTextDocument { .leads = Distributed::LeadsTheFleet(snapshot),
                                .leaderEndpoint = snapshot.leaderEndpoint,
                                .body = format == CompileCacheWire::FleetTextFormat::Json
@@ -959,6 +965,8 @@ std::string_view HistoryFileNameOf(HistoryFile which) noexcept
         FileNameRow { .which = HistoryFile::Node, .name = StateFileName(StateFile::NodeHistory) },
         FileNameRow { .which = HistoryFile::Fleet, .name = StateFileName(StateFile::FleetHistory) },
         FileNameRow { .which = HistoryFile::Received, .name = StateFileName(StateFile::ReceivedHistory) },
+        FileNameRow { .which = HistoryFile::Requesters, .name = StateFileName(StateFile::RequesterHistory) },
+        FileNameRow { .which = HistoryFile::Toolchains, .name = StateFileName(StateFile::ToolchainHistory) },
     };
     static_assert(RowsInEnumeratorOrder(fileNames, &FileNameRow::which));
     return fileNames[static_cast<std::size_t>(which)].name;
@@ -981,7 +989,9 @@ HistoryPaths HistoryPaths::For(NodeConfig const& cfg)
 {
     return HistoryPaths { .fleet = HistoryPathFor(cfg, HistoryFile::Fleet),
                           .node = HistoryPathFor(cfg, HistoryFile::Node),
-                          .received = HistoryPathFor(cfg, HistoryFile::Received) };
+                          .received = HistoryPathFor(cfg, HistoryFile::Received),
+                          .requesters = HistoryPathFor(cfg, HistoryFile::Requesters),
+                          .toolchains = HistoryPathFor(cfg, HistoryFile::Toolchains) };
 }
 
 std::filesystem::path FleetHistoryPath(NodeConfig const& cfg)
@@ -995,7 +1005,8 @@ FleetSampler::FleetSampler(std::optional<Distributed::FleetSources> sources,
                            core::platform::WallClockRef wall,
                            HistoryPaths paths,
                            ILogger& logger,
-                           std::unique_ptr<IHostLoadSampler> load):
+                           std::unique_ptr<IHostLoadSampler> load,
+                           std::size_t historyKeys):
     _sources { sources },
     _metrics { metrics },
     _nodeFacts { std::move(node) },
@@ -1003,6 +1014,7 @@ FleetSampler::FleetSampler(std::optional<Distributed::FleetSources> sources,
     _fleet { wall },
     _node { wall },
     _received { wall },
+    _demand { historyKeys, wall },
     // Every store is a row, so restoring and saving are one loop each. The received
     // store is here rather than beside the loop because a store restored and never
     // saved is a year of readings discovered missing at the next restart -- and what
@@ -1039,7 +1051,9 @@ FleetSampler::FleetSampler(std::optional<Distributed::FleetSources> sources,
                           },
                       .save = [this](auto const& at) { return _received.Save(at, StateFile::ReceivedHistory); },
                       .readOnly = [this] { return _received.ReadOnly(); },
-                      .worthWriting = [this] { return _received.Count() > 0; } } },
+                      .worthWriting = [this] { return _received.Count() > 0; } },
+              KeyedStore(std::move(paths.requesters), Distributed::KeyedDimension::Requesters),
+              KeyedStore(std::move(paths.toolchains), Distributed::KeyedDimension::ToolchainDemand) },
     _logger { logger }
 {
     // Every failure to read starts empty and says so once. History is a
@@ -1076,6 +1090,14 @@ FleetSampler::FleetSampler(std::optional<Distributed::FleetSources> sources,
                  PerSeriesKiB,
                  PerSeriesKiB * 2,
                  PerSeriesKiB);
+    // The keyed histories grow with activity rather than being allocated whole, so their figure is a CEILING: every
+    // kept key busy in every bucket of every ring.
+    _logger.Logf(LogLevel::Info,
+                 "a leader's compile history keeps {} requesting machines and {} toolchains by name, the rest in an "
+                 "\"other\" row; at most {} KiB per history",
+                 historyKeys,
+                 historyKeys,
+                 Distributed::KeyedHistoryWorstCaseBytes(historyKeys) / 1024);
 
     _thread = std::jthread { [this](std::stop_token const& stop) {
         auto sinceSave = std::chrono::steady_clock::duration::zero();
@@ -1096,6 +1118,17 @@ FleetSampler::FleetSampler(std::optional<Distributed::FleetSources> sources,
             sinceSave += Distributed::FleetHistory::SampleInterval;
         }
     } };
+}
+
+FleetSampler::Store FleetSampler::KeyedStore(std::filesystem::path path, Distributed::KeyedDimension dimension)
+{
+    // One row per keyed history, from its dimension: the two differ in nothing but which store and what it is called.
+    return Store { .path = std::move(path),
+                   .what = Distributed::KeyedDimensionOf(dimension).section,
+                   .load = [this, dimension](auto const& at) { return _demand.Of(dimension).Load(at); },
+                   .save = [this, dimension](auto const& at) { return _demand.Of(dimension).Save(at); },
+                   .readOnly = [this, dimension] { return _demand.Of(dimension).ReadOnly(); },
+                   .worthWriting = [this, dimension] { return !_demand.Of(dimension).Empty(); } };
 }
 
 FleetSampler::~FleetSampler()
@@ -1157,6 +1190,9 @@ bool FleetSampler::SampleOnce()
         return false;
     // A slot with no fleet total -- a load ratio -- is no fleet's reading, so the fleet series carries it absent.
     _fleet.Record(SampleFrom(snapshot), Distributed::SlotsWithoutFleetTotal());
+    // The keyed histories' minute is observed for the same reason and only here: a minute this node led and granted
+    // nothing reads zero, and one it did not lead stays absent.
+    _demand.Fold();
     return true;
 }
 

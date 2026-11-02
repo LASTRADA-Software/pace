@@ -309,6 +309,12 @@
 # LEADS; anyone else names the leader rather than showing half a fleet.
 #dashboard: false
 
+# how many requesting machines -- and, separately, how many toolchains -- the
+# leader's compile history keeps by name (default 256, at most 1024). The
+# least recently active beyond that fold into one "other" row whose counts
+# stay exact. 0 is refused. Read at startup only.
+#history_requesters:
+
 # credential the dashboard requires, as Basic or Bearer. A FILE and not a
 # flag: a command line is readable through ps. Its own secret rather than
 # --requirepass, which every member of the fleet already holds. Required

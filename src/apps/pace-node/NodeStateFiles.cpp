@@ -193,6 +193,16 @@ namespace
                            .trusting = "chart readings somebody else wrote",
                            .remedy = HistoryRemedy,
                            .answer = ForeignStateFileAnswer::StartWithout },
+        NodeStateFileRow { .file = StateFile::RequesterHistory,
+                           .holds = "the compiles each requesting machine was granted",
+                           .trusting = "report compile counts somebody else wrote",
+                           .remedy = HistoryRemedy,
+                           .answer = ForeignStateFileAnswer::StartWithout },
+        NodeStateFileRow { .file = StateFile::ToolchainHistory,
+                           .holds = "the compiles each toolchain was granted",
+                           .trusting = "report compile counts somebody else wrote",
+                           .remedy = HistoryRemedy,
+                           .answer = ForeignStateFileAnswer::StartWithout },
         NodeStateFileRow { .file = StateFile::Archive,
                            .holds = "the consensus stores of clusters this node left",
                            .trusting = "keep, as the store of a cluster it left, one somebody else put there",
@@ -371,7 +381,7 @@ std::string StateFileUnreadableHint(std::filesystem::path const& path)
 
 HistoryPaths SetAsideForeignHistory(HistoryPaths paths, INodeKeyFileGuard& guard, ILogger& logger)
 {
-    for (auto* const path: { &paths.fleet, &paths.node, &paths.received })
+    for (auto* const path: { &paths.fleet, &paths.node, &paths.received, &paths.requesters, &paths.toolchains })
     {
         auto absent = std::error_code {};
         if (path->empty() || !std::filesystem::exists(*path, absent))

@@ -1253,6 +1253,12 @@ void SchedulerService::SetHistorySink(IFleetHistorySink* sink) noexcept
     _history = sink;
 }
 
+void SchedulerService::SetDemandSink(ICompileDemandSink* sink) noexcept
+{
+    auto const guard = std::scoped_lock { _admissionMutex };
+    _demand = sink;
+}
+
 SchedulerReply SchedulerService::AnnounceNode(CallerContext const& caller,
                                               NodePresence const& presence,
                                               std::span<FleetBucket const> history)

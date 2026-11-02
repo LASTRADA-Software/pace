@@ -1302,3 +1302,103 @@ TEST_CASE("SchedulerAdmission.fleet-collects-every-lease-past-the-page-window",
     CHECK(snapshot.outstandingLeases.size() == Granted);
     CHECK(RenderFleetJson(snapshot, FleetHistoryView {}).contains(R"("leases-outstanding-truncated":0)"));
 }
+
+namespace
+{
+/// Every grant the demand sink was told of, in order.
+class RecordingDemandSink final: public ICompileDemandSink
+{
+  public:
+    struct Grant
+    {
+        std::string requester;   ///< The machine the queue charged, raw.
+        std::string fingerprint; ///< The toolchain the request named.
+    };
+
+    void CompileGranted(std::string_view requester, std::string_view fingerprint) override
+    {
+        grants.push_back(Grant { .requester = std::string { requester }, .fingerprint = std::string { fingerprint } });
+    }
+
+    std::vector<Grant> grants;
+};
+} // namespace
+
+TEST_CASE("SchedulerAdmission.a-granted-compile-is-reported-once-by-machine-and-toolchain",
+          "[distributed][admission][scheduler][fleet-keyed-history]")
+{
+    Fleet fleet;
+    RecordingDemandSink demand;
+    fleet.service.SetDemandSink(&demand);
+    (void) fleet.RegisterWorker(/*slots=*/2);
+    auto const workerMachine = MachineOf(fleet.workerKey.PublicKey());
+    fleet.Report(workerMachine);
+    fleet.Report(fleet.service.OwnMachineId());
+
+    SECTION("a worker grant, from a forwarded machine")
+    {
+        auto const forwarded = MachineOf(Testing::TestKeyPair("requester").PublicKey());
+        fleet.Report(forwarded);
+        (void) fleet.Admit("k1", Wire::AdmitKind::Dispatchable, false, {}, {}, forwarded);
+        REQUIRE(GrantOf(fleet.service.PumpAdmission().at(0)).kind == Wire::GrantKind::Worker);
+        REQUIRE(demand.grants.size() == 1);
+        CHECK(demand.grants[0].requester == forwarded);
+        CHECK(demand.grants[0].fingerprint == Toolchain);
+    }
+    SECTION("a local grant counts, on this node's own machine")
+    {
+        (void) fleet.Admit("k1", Wire::AdmitKind::LocalOnly);
+        REQUIRE(GrantOf(fleet.service.PumpAdmission().at(0)).kind == Wire::GrantKind::Local);
+        REQUIRE(demand.grants.size() == 1);
+        CHECK(demand.grants[0].requester == fleet.service.OwnMachineId());
+    }
+    SECTION("a worker refusal and the grant after it are one compile asked for")
+    {
+        auto const ticket = fleet.Admit("k1");
+        REQUIRE(GrantOf(fleet.service.PumpAdmission().at(0)).kind == Wire::GrantKind::Worker);
+        REQUIRE(fleet.service.SettleAdmission(ticket,
+                                              Settlement { .outcome = Wire::SettleOutcome::WorkerRefused, .peakBytes = {} })
+                == SettleResult::Requeued);
+        fleet.Report(workerMachine);
+        auto const again = fleet.service.PumpAdmission();
+        REQUIRE(again.size() == 1);
+        REQUIRE(GrantOf(again[0]).kind == Wire::GrantKind::Worker);
+        CHECK(demand.grants.size() == 1);
+    }
+    SECTION("a duplicate answered by another compile's object counts nothing")
+    {
+        auto const first = fleet.Admit("same", Wire::AdmitKind::Dispatchable, /*storable=*/true);
+        (void) fleet.Admit("same", Wire::AdmitKind::Dispatchable, /*storable=*/true);
+        REQUIRE(fleet.service.PumpAdmission().size() == 1);
+        REQUIRE(fleet.service.SettleAdmission(first, Settlement { .outcome = Wire::SettleOutcome::Stored, .peakBytes = {} })
+                == SettleResult::Settled);
+        auto const woken = fleet.service.PumpAdmission();
+        REQUIRE(woken.size() == 1);
+        REQUIRE(GrantOf(woken[0]).kind == Wire::GrantKind::Stored);
+        CHECK(demand.grants.size() == 1);
+    }
+    SECTION("a request abandoned before its grant counts nothing")
+    {
+        auto const ticket = fleet.Admit("k1");
+        fleet.service.AbandonAdmission(ticket);
+        CHECK(fleet.service.PumpAdmission().empty());
+        CHECK(demand.grants.empty());
+    }
+    SECTION("a request refused at its grant counts nothing")
+    {
+        (void) fleet.Admit("k1", Wire::AdmitKind::Dispatchable, false, [] {
+            return CallerContext { .membership = Membership::Outsider, .peerId = "10.9.9.9" };
+        });
+        auto const verdicts = fleet.service.PumpAdmission();
+        REQUIRE(verdicts.size() == 1);
+        REQUIRE(verdicts[0].refusal.has_value());
+        CHECK(demand.grants.empty());
+    }
+    SECTION("an unwired sink is told nothing and nothing breaks")
+    {
+        fleet.service.SetDemandSink(nullptr);
+        (void) fleet.Admit("k1");
+        REQUIRE(fleet.service.PumpAdmission().size() == 1);
+        CHECK(demand.grants.empty());
+    }
+}

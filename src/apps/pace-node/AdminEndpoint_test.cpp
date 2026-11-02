@@ -1151,7 +1151,11 @@ TEST_CASE("A sampler with a path writes its history and reads it back", "[node][
     auto const file = scratch.Path() / "history.bin";
     auto const nodeFile = scratch.Path() / "node-history.bin";
     auto const receivedFile = scratch.Path() / "received-history.bin";
-    HistoryPaths const paths { .fleet = file, .node = nodeFile, .received = receivedFile };
+    HistoryPaths const paths { .fleet = file,
+                               .node = nodeFile,
+                               .received = receivedFile,
+                               .requesters = scratch.Path() / "requester-history.bin",
+                               .toolchains = scratch.Path() / "toolchain-history.bin" };
 
     core::platform::ManualClock clock;
     AtomicMetricsSink metrics;
@@ -1187,7 +1191,11 @@ TEST_CASE("What the other machines handed over survives a leader restart", "[nod
     auto const file = scratch.Path() / "history.bin";
     auto const nodeFile = scratch.Path() / "node-history.bin";
     auto const receivedFile = scratch.Path() / "received-history.bin";
-    HistoryPaths const paths { .fleet = file, .node = nodeFile, .received = receivedFile };
+    HistoryPaths const paths { .fleet = file,
+                               .node = nodeFile,
+                               .received = receivedFile,
+                               .requesters = scratch.Path() / "requester-history.bin",
+                               .toolchains = scratch.Path() / "toolchain-history.bin" };
 
     core::platform::ManualClock clock;
     AtomicMetricsSink metrics;
@@ -1897,7 +1905,11 @@ TEST_CASE("A history a newer build wrote stops the sampler promising durability"
     auto const file = scratch.Path() / "history.bin";
     auto const nodeFile = scratch.Path() / "node-history.bin";
     auto const receivedFile = scratch.Path() / "received-history.bin";
-    HistoryPaths const paths { .fleet = file, .node = nodeFile, .received = receivedFile };
+    HistoryPaths const paths { .fleet = file,
+                               .node = nodeFile,
+                               .received = receivedFile,
+                               .requesters = scratch.Path() / "requester-history.bin",
+                               .toolchains = scratch.Path() / "toolchain-history.bin" };
 
     core::platform::ManualClock clock;
     AtomicMetricsSink metrics;
@@ -2483,4 +2495,94 @@ TEST_CASE("A node selector draws one machine's series, found by the key its memb
                                      [](Distributed::NodeReport const& node) { return node.memberId == "machine-a"; }));
         CHECK(ask("series", CompileCacheWire::FleetTextFormat::Text, "machine-a").has_value());
     }
+}
+
+TEST_CASE("The keyed compile histories fold only while leading and reach /fleet.json through the one door",
+          "[node][admin][fleethistory][fleet-keyed-history]")
+{
+    core::platform::ManualClock clock;
+    AtomicMetricsSink metrics;
+    NullLogger logger;
+    Testing::PlacedWallClock wall;
+    core::platform::ManualWallClock wallClock;
+    auto const signer = Testing::TestLeaseSigner();
+    Distributed::SchedulerService scheduler { clock, wallClock, metrics, logger, signer, {} };
+    Distributed::FleetSources const sources { .scheduler = &scheduler, .cluster = nullptr, .metrics = &metrics };
+    // A follower before the sampler exists, so its thread's first sample folds nothing either.
+    scheduler.SetRole(Distributed::SchedulerRole::Follower, "10.0.0.9:6676", Distributed::StandaloneSchedulerTerm);
+    FleetSampler sampler { sources, metrics, NodeFacts(), wall, {}, logger };
+    auto const& requesters = sampler.Demand().Of(Distributed::KeyedDimension::Requesters);
+
+    auto const document = [&] {
+        auto const answer =
+            AnswerFleetText(Distributed::CollectFleet(sources), &sampler, {}, "1h", CompileCacheWire::FleetTextFormat::Json);
+        REQUIRE(answer.has_value());
+        return Unwrap(Json::Parse(answer->body, Json::ParseLimits { .maxBytes = 1U << 20U }));
+    };
+
+    // A follower folds nothing and answers no keyed history: what it holds is no fleet's answer.
+    CHECK_FALSE(sampler.SampleOnce());
+    CHECK(requesters.Empty());
+    CHECK(document().Find("requesters")->IsNull());
+    CHECK(document().Find("toolchain_demand")->IsNull());
+
+    // A leader folds its minute, so a minute it granted nothing in reads zero rather than absent.
+    scheduler.SetRole(Distributed::SchedulerRole::Leader, {}, Distributed::StandaloneSchedulerTerm);
+    REQUIRE(sampler.SampleOnce());
+    CHECK_FALSE(requesters.Empty());
+    auto const key = Testing::TestKeyPair("requester").PublicKey();
+    sampler.Demand().CompileGranted(std::string { reinterpret_cast<char const*>(key.data()), key.size() }, "gcc-14");
+
+    auto const led = document();
+    auto const* const section = led.Find("requesters");
+    REQUIRE(section != nullptr);
+    REQUIRE_FALSE(section->IsNull());
+    CHECK(section->Find("total")->AsInt() == std::optional<std::int64_t> { 1 });
+    CHECK(*section->Find("range")->AsString() == "1h");
+    CHECK_FALSE(section->Find("coverage_since_ms")->IsNull());
+    CHECK(led.Find("toolchain_demand")->Find("total")->AsInt() == std::optional<std::int64_t> { 1 });
+    // The text tables carry no keyed history: it rides the JSON document alone.
+    auto const text =
+        AnswerFleetText(Distributed::CollectFleet(sources), &sampler, {}, "1h", CompileCacheWire::FleetTextFormat::Text);
+    REQUIRE(text.has_value());
+    CHECK_FALSE(text->body.contains("toolchain_demand"));
+
+    // Demoted, it answers null again -- the store keeps what it counted, and serves it as nobody's fleet answer.
+    scheduler.SetRole(Distributed::SchedulerRole::Follower, "10.0.0.9:6676", Distributed::StandaloneSchedulerTerm);
+    CHECK(document().Find("requesters")->IsNull());
+    CHECK_FALSE(requesters.Empty());
+}
+
+TEST_CASE("A sampler with paths writes its keyed histories and reads them back",
+          "[node][admin][fleethistory][fleet-keyed-history]")
+{
+    Testing::ScratchDirectory const scratch { "fleet-sampler-keyed" };
+    HistoryPaths const paths { .fleet = {},
+                               .node = {},
+                               .received = {},
+                               .requesters = scratch.Path() / "requester-history.bin",
+                               .toolchains = scratch.Path() / "toolchain-history.bin" };
+    core::platform::ManualClock clock;
+    AtomicMetricsSink metrics;
+    NullLogger logger;
+    Testing::PlacedWallClock wall;
+    core::platform::ManualWallClock wallClock;
+    auto const signer = Testing::TestLeaseSigner();
+    Distributed::SchedulerService scheduler { clock, wallClock, metrics, logger, signer, {} };
+    scheduler.SetRole(Distributed::SchedulerRole::Leader, {}, Distributed::StandaloneSchedulerTerm);
+    Distributed::FleetSources const sources { .scheduler = &scheduler, .cluster = nullptr, .metrics = &metrics };
+    auto const key = Testing::TestKeyPair("requester").PublicKey();
+    {
+        FleetSampler sampler { sources, metrics, NodeFacts(), wall, paths, logger, nullptr, 4 };
+        sampler.Demand().CompileGranted(std::string { reinterpret_cast<char const*>(key.data()), key.size() }, "gcc-14");
+    }
+    CHECK(std::filesystem::exists(paths.requesters));
+    CHECK(std::filesystem::exists(paths.toolchains));
+
+    FleetSampler restored { sources, metrics, NodeFacts(), wall, paths, logger, nullptr, 4 };
+    auto const view = restored.Demand().Of(Distributed::KeyedDimension::Requesters).View(Distributed::FleetRange::OneHour);
+    REQUIRE(view.keys.size() == 1);
+    CHECK(view.keys.front().key == FormatEd25519PublicKey(key));
+    CHECK(restored.Demand().Of(Distributed::KeyedDimension::ToolchainDemand).View(Distributed::FleetRange::OneHour).total
+          == 1);
 }

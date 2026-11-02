@@ -84,7 +84,9 @@ target_sources(Pace
         Distributed/SchedulerAdmission.cpp
         Distributed/SchedulerService.cpp
         Distributed/SchedulerProtocol.cpp
+        Distributed/HistoryEnvelope.cpp
         Distributed/FleetHistory.cpp
+        Distributed/FleetKeyedHistory.cpp
         Distributed/FleetChart.cpp
         Distributed/FleetView.cpp
         Core/BufferPool.cpp

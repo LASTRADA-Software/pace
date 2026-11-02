@@ -70,8 +70,11 @@ namespace McpFleet
     /// **A document of another schema is refused**, not read: a projection knows this build's keys and units,
     /// and a generation it does not know could carry a key of the same name meaning something else.
     /// @param upstream How the leader is reached.
+    /// @param range The window the history-derived parts answer for (`FleetRangeTable` key); empty is the day
+    ///        `/fleet.json` defaults to.
     /// @return The document, or the tool error to answer.
-    [[nodiscard]] std::expected<FleetDocument, Mcp::ToolResult> AskFleetDocument(IMcpUpstream& upstream);
+    [[nodiscard]] std::expected<FleetDocument, Mcp::ToolResult> AskFleetDocument(IMcpUpstream& upstream,
+                                                                                 std::string_view range = {});
 } // namespace McpFleet
 
 /// The fleet-scope read tools: `fleet_overview`, `running_compiles`, `conditions`, `history` and

@@ -59,6 +59,10 @@
 #                                         gap and the first sampled one a gap too (no CPU interval yet), never 0;
 #                                         asked of the fleet, refused naming `node`. Last, so
 #                                         2f/2g pay for the node uptime it waits on.
+#   2i. the keyed histories answer      — requesters and toolchain-demand on that same scheduler: each an object
+#                                         (it leads) counted since a stated instant, observed minutes, nothing
+#                                         granted on a fleet with no launcher (total 0, no key, no other); refused
+#                                         with `node`. No wait of its own: 2h's sampled minutes are what it reads.
 #   3. A legacy client is answered      — `initialize` answers `2025-11-25`.
 #   4. It is not a scrape endpoint      — `GET /metrics` on the MCP port is a 404.
 #   5. A network address refuses        — `--mcp-listen=0.0.0.0:<port>` ends the
@@ -527,6 +531,24 @@ json_check "history cpu-busy for this node" "$cpu_body" \
 json_check "history cpu-busy without node" "$(call_action history '{"series":"cpu-busy","range":"1h"}')" \
     "d['result']['isError'] is True and '\`node\`' in d['result']['content'][0]['text']"
 e2e_note "history answered cpu-busy for ${self_id} (e2e-box): $(python3 -I -c "import json,sys; b=json.loads(sys.stdin.read())['result']['structuredContent']['buckets']; print(sum(1 for x in b if x['coverage'] is not None), 'sampled,', sum(1 for x in b if x['value'] is not None), 'with a reading')" <<< "$cpu_body"), gaps kept; refused without node"
+
+# ------------------------------------------- 2i. the keyed histories answer, as the leader counts them
+# Who asked and which toolchain: `requesters` and `toolchain-demand`, the leader's own `/fleet.json` sections. This
+# fleet runs no launcher, so nothing was GRANTED and both are empty -- asserted as a SHAPE: the section is an object
+# (this node leads), `coverage_since_ms` is a number inside this hour (the instant its sampler first folded while
+# leading -- never the day ring's midnight), at least one minute is observed (the sampler folds once a minute, and the
+# uptime 2h waited for spans at least one fold while leading), no key is named and nothing is folded, and the
+# total is 0 -- a zero of a counted window, distinct from the `null` of a node that keeps none. No wait of its own:
+# 2h already waited for the sampled minutes this reads. Asked with `node`, it is refused naming `key`.
+for keyed in requesters:requesters toolchain-demand:toolchain_demand; do
+    series="${keyed%%:*}"
+    section="${keyed#*:}"
+    json_check "history ${series}" "$(call_action history "{\"series\":\"${series}\",\"range\":\"1h\"}")" \
+        "${OK} and ${SC}['series'] == '${series}' and ${SC}['key'] is None and isinstance(${SC}['${section}'], dict) and isinstance(${SC}['${section}']['coverage_since_ms'], int) and sum(1 for o in ${SC}['${section}']['observed'] if o) >= 1 and ${SC}['${section}']['coverage_since_ms'] >= ${SC}['${section}']['bucket_starts_ms'][0] and ${SC}['${section}']['keys'] == [] and ${SC}['${section}']['other'] is None and ${SC}['${section}']['total'] == 0 and len(${SC}['${section}']['bucket_starts_ms']) == 60"
+done
+json_check "history requesters with node" "$(call_action history "{\"series\":\"requesters\",\"range\":\"1h\",\"node\":\"${self_id}\"}")" \
+    "d['result']['isError'] is True and '\`key\`' in d['result']['content'][0]['text']"
+e2e_note "history answered requesters and toolchain-demand: counted since the leader's first fold, nothing granted, refused with node"
 
 stop_and_require_clean_exit "$action_pid" "the acting scheduler" 30 "${workdir}/node.log"
 node_pid=""

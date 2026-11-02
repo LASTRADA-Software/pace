@@ -1862,13 +1862,17 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
                                  logger,
                                  // Its OWN sampler: one holds the previous CPU counters, so sharing the presence
                                  // loop's would cut that loop's interval and this one's.
-                                 MakeHostLoadSampler(MakeSystemCounterSource()) };
+                                 MakeHostLoadSampler(MakeSystemCounterSource()),
+                                 Node::HistoryKeysOf(cfg) };
 
     // Wired here because this is the one scope holding both: the scheduler tier is
     // built before the sampler that receives for it, so the sink cannot be a
     // constructor argument on either.
     if (schedulerTier != nullptr)
+    {
         schedulerTier->SetHistorySink(&sampler.Received());
+        schedulerTier->SetDemandSink(&sampler.Demand());
+    }
 
     // What a live-stats stream reads: the same provider, fleet and sampler the admin surface is
     // handed below, so a panel and `/metrics` cannot disagree about this machine. The attachment
@@ -2094,7 +2098,10 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     // registry -- outlives the store it routes to. A heartbeat arriving in that
     // window would file a machine's buckets through a pointer to a destroyed one.
     if (schedulerTier != nullptr)
+    {
         schedulerTier->SetHistorySink(nullptr);
+        schedulerTier->SetDemandSink(nullptr);
+    }
 
     // Unblocks the admin accept loop so its jthread can join -- without this the
     // destructor's implicit join waits on a thread parked in accept(), and a worker

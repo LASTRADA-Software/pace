@@ -64,12 +64,14 @@ namespace
 
 // ------------------------------------------------------------ the fleet document
 
-std::expected<McpFleet::FleetDocument, Mcp::ToolResult> McpFleet::AskFleetDocument(IMcpUpstream& upstream)
+std::expected<McpFleet::FleetDocument, Mcp::ToolResult> McpFleet::AskFleetDocument(IMcpUpstream& upstream,
+                                                                                   std::string_view range)
 {
-    // No section, which a Json read refuses; no range, which is the day `/fleet.json` defaults to and only
-    // the `kpi` figures read.
+    // No section, which a Json read refuses. The range is the day `/fleet.json` defaults to unless one is named: only
+    // the `kpi` figures and the keyed histories read it.
     auto reply = AskLeader(upstream,
-                           Wire::EncodeFleetTextRequest(Wire::FleetTextRequest { .format = Wire::FleetTextFormat::Json }),
+                           Wire::EncodeFleetTextRequest(Wire::FleetTextRequest { .range = std::string { range },
+                                                                                 .format = Wire::FleetTextFormat::Json }),
                            "fleet-text");
     if (!reply.has_value())
         return std::unexpected { std::move(reply.error()) };
@@ -764,6 +766,121 @@ namespace
         return buckets;
     }
 
+    /// Whether one row of a keyed section is the one `key` selects: its key exactly, or -- for a row naming a
+    /// machine -- that machine's node id or display name, exactly.
+    /// @param row A row of the section's `keys`.
+    /// @param dimension Which keyed history.
+    /// @param key What the caller named.
+    /// @return True when it matches.
+    [[nodiscard]] bool KeyedRowMatches(Json::Value const& row,
+                                       Distributed::KeyedDimensionRow const& dimension,
+                                       std::string_view key)
+    {
+        auto const equals = [&row, key](std::string_view field) {
+            auto const* const value = row.Find(field);
+            return value != nullptr && value->AsString() != nullptr && *value->AsString() == key;
+        };
+        return equals(dimension.keyField) || (dimension.namesMachines && (equals("node_id") || equals("display_name")));
+    }
+
+    /// The `history` tool for a keyed series: the leader's `/fleet.json` section for it, returned exactly as the
+    /// document writes it -- one derivation, two readers -- with only `key` narrowing its rows.
+    /// @param upstream How the leader is reached.
+    /// @param dimension Which keyed history.
+    /// @param range Which window.
+    /// @param call The call, for `node` and `key`.
+    /// @return The answer.
+    [[nodiscard]] Mcp::ToolResult KeyedHistory(IMcpUpstream& upstream,
+                                               Distributed::KeyedDimensionRow const& dimension,
+                                               Distributed::FleetRangeRow const& range,
+                                               Mcp::ToolCall const& call)
+    {
+        if (auto const* const node = call.arguments.Find("node"); node != nullptr && !node->IsNull())
+            return Error(std::format("series \"{}\" is the leader's own count of what its queue granted, which no "
+                                     "single machine's history answers for; omit `node`, and select one row with `key`",
+                                     dimension.series));
+        auto const* const keyArgument = call.arguments.Find("key");
+        auto const key = keyArgument != nullptr && !keyArgument->IsNull() && keyArgument->AsString() != nullptr
+                             ? std::optional<std::string> { *keyArgument->AsString() }
+                             : std::nullopt;
+        if (keyArgument != nullptr && !keyArgument->IsNull() && !key.has_value())
+            return Error("`key` must be a string, matched exactly");
+
+        auto document = AskFleetDocument(upstream, range.key);
+        if (!document.has_value())
+            return std::move(document.error());
+        auto const* const found = document->root.Find(dimension.section);
+        if (found == nullptr)
+            return Error(std::format("the fleet document {} answered carries no \"{}\" section; nothing it said is "
+                                     "reported",
+                                     document->reply.answeredBy,
+                                     dimension.section));
+        auto section = *found;
+
+        auto result = Envelope(document->reply);
+        result.emplace_back("series", Str(std::string { dimension.series }));
+        result.emplace_back("range", Str(std::string { range.key }));
+        result.emplace_back("key", StrOrNull(key));
+        if (section.IsNull())
+        {
+            result.emplace_back(std::string { dimension.section }, Null());
+            return Answer(std::move(result),
+                          std::format("{} over {}: {} keeps no such history -- it counts only while it leads; {}",
+                                      dimension.series,
+                                      range.key,
+                                      document->reply.answeredBy,
+                                      Provenance(document->reply)));
+        }
+
+        auto const* const listed = section.Find("keys");
+        if (listed == nullptr || listed->AsArray() == nullptr)
+            return Error(std::format("the \"{}\" section {} answered has no list of keys; nothing it said is reported",
+                                     dimension.section,
+                                     document->reply.answeredBy));
+        // Narrowed in place, so every other member of the section stays exactly what the document wrote.
+        if (key.has_value())
+            if (auto* const members = std::get_if<Json::Object>(&section.v); members != nullptr)
+                for (auto& [name, value]: *members)
+                    if (auto* const rows = std::get_if<Json::Array>(&value.v); name == "keys" && rows != nullptr)
+                        std::erase_if(*rows, [&](Json::Value const& row) { return !KeyedRowMatches(row, dimension, *key); });
+        auto const named = section.Find("keys")->AsArray()->size();
+
+        auto const numberAt = [&section](std::string_view field) {
+            auto const* const value = section.Find(field);
+            return value != nullptr ? value->AsUint().value_or(0) : std::uint64_t { 0 };
+        };
+        auto const* const other = section.Find("other");
+        auto const otherText =
+            other != nullptr && !other->IsNull()
+                ? std::format("; other ({} {} folded): {}",
+                              other->Find("keys_folded") != nullptr ? other->Find("keys_folded")->AsUint().value_or(0)
+                                                                    : std::uint64_t { 0 },
+                              dimension.noun,
+                              other->Find("total") != nullptr ? other->Find("total")->AsUint().value_or(0)
+                                                              : std::uint64_t { 0 })
+                : std::string {};
+        auto const* const since = section.Find("coverage_since_ms");
+        auto const sinceText =
+            since != nullptr && since->AsInt().has_value() ? Rfc3339(*since->AsInt()) : std::string { "never" };
+        auto selected = std::string {};
+        if (key.has_value() && named == 0)
+            selected = std::format("; no row is \"{}\" in this window -- a folded key's counts are in other", *key);
+        else if (key.has_value())
+            selected = std::format("; the row for \"{}\"", *key);
+        auto text = std::format("{} over {}: {} compile(s) granted, {} {} named{}{}; counted by this leader since {}; {}",
+                                dimension.series,
+                                range.key,
+                                numberAt("total"),
+                                named,
+                                dimension.noun,
+                                otherText,
+                                selected,
+                                sinceText,
+                                Provenance(document->reply));
+        result.emplace_back(std::string { dimension.section }, std::move(section));
+        return Answer(std::move(result), std::move(text));
+    }
+
     [[nodiscard]] Mcp::ToolResult History(IMcpUpstream& upstream,
                                           IAppliedClusterView const& cluster,
                                           std::string const& selfId,
@@ -774,11 +891,15 @@ namespace
 
         // Judged HERE, against this build's tables, before anything is asked: the refusal lists what this node
         // would accept, read off the tables the renderers walk, never restated.
-        auto const* const series = Distributed::FleetSeriesFromKey(seriesKey);
-        if (series == nullptr)
-            return Error(std::format("unknown series \"{}\"; the series are: {}",
+        auto const* const keyed =
+            core::findIfOrNull(Distributed::KeyedDimensionTable,
+                               [&seriesKey](Distributed::KeyedDimensionRow const& row) { return row.series == seriesKey; });
+        auto const* const series = keyed == nullptr ? Distributed::FleetSeriesFromKey(seriesKey) : nullptr;
+        if (series == nullptr && keyed == nullptr)
+            return Error(std::format("unknown series \"{}\"; the series are: {}, {}",
                                      seriesKey,
-                                     KeysOf(Distributed::FleetSeriesTable, &Distributed::FleetSeriesRow::key)));
+                                     KeysOf(Distributed::FleetSeriesTable, &Distributed::FleetSeriesRow::key),
+                                     KeysOf(Distributed::KeyedDimensionTable, &Distributed::KeyedDimensionRow::series)));
         auto const* const range =
             core::findIfOrNull(Distributed::FleetRangeTable,
                                [&rangeKey](Distributed::FleetRangeRow const& row) { return row.key == rangeKey; });
@@ -786,6 +907,12 @@ namespace
             return Error(std::format("unknown range \"{}\"; the ranges are: {}",
                                      rangeKey,
                                      KeysOf(Distributed::FleetRangeTable, &Distributed::FleetRangeRow::key)));
+        if (keyed != nullptr)
+            return KeyedHistory(upstream, *keyed, *range, call);
+        if (auto const* const keyArgument = call.arguments.Find("key"); keyArgument != nullptr && !keyArgument->IsNull())
+            return Error(std::format("`key` selects one row of a keyed series ({}), and series \"{}\" has none",
+                                     KeysOf(Distributed::KeyedDimensionTable, &Distributed::KeyedDimensionRow::series),
+                                     series->key));
 
         // Whose series: the fleet's, or one machine's. Which a series HAS is read off the slot table's columns,
         // never restated: a load ratio has no fleet figure (`FleetTotal::None`), a dispatch outcome no machine
@@ -970,22 +1097,27 @@ namespace
             };
             return std::format(
                 R"({{"type":"object","required":["series","range"],"properties":{{)"
-                R"("series":{{"type":"string","enum":[{}],"description":"A series, as /fleet/series.json keys it. cpu-busy (permille) is one machine's own reading and needs `node`; the dispatch series (dispatched and the refusal reasons) are the scheduler's and refuse it."}},)"
+                R"("series":{{"type":"string","enum":[{},{}],"description":"A series, as /fleet/series.json keys it, or a keyed one: requesters (compiles granted per requesting machine) and toolchain-demand (per toolchain fingerprint), as /fleet.json's requesters and toolchain_demand sections. cpu-busy (permille) is one machine's own reading and needs `node`; the dispatch series and the keyed series are the scheduler's and refuse it."}},)"
                 R"("range":{{"type":"string","enum":[{}],"description":"How far back, as the dashboard's range buttons name it."}},)"
-                R"("node":{{"type":"string","description":"One machine's own series instead of the fleet's: a member id or display name, matched exactly."}}}},"additionalProperties":false}})",
+                R"("node":{{"type":"string","description":"One machine's own series instead of the fleet's: a member id or display name, matched exactly."}},)"
+                R"("key":{{"type":"string","description":"A keyed series only: keep the one row whose key is this, exactly -- a requester's identity key, node id or display name; a toolchain's fingerprint."}}}},"additionalProperties":false}})",
                 quoted(Distributed::FleetSeriesTable, &Distributed::FleetSeriesRow::key),
+                quoted(Distributed::KeyedDimensionTable, &Distributed::KeyedDimensionRow::series),
                 quoted(Distributed::FleetRangeTable, &Distributed::FleetRangeRow::key));
         }();
         return schema;
     }
 
     constexpr std::string_view HistoryOutput =
-        R"({"type":"object","required":["answered_by","term","term_scope","scope","node_id","display_name","series","range","unit","bucket_seconds","full_coverage","buckets"],"properties":{)"
+        R"({"type":"object","required":["answered_by","term","term_scope","series","range"],"properties":{)"
         R"("answered_by":{"type":"string"},"term":{"type":["integer","null"]},"term_scope":{"const":"this-node"},)"
         R"("scope":{"enum":["fleet","node"]},"node_id":{"type":["string","null"],"description":"The machine whose series this is; null for the fleet's."},"display_name":{"type":["string","null"]},)"
         R"("series":{"type":"string"},"range":{"type":"string"},"unit":{"type":"string"},)"
         R"("bucket_seconds":{"type":"integer"},"full_coverage":{"type":"integer"},)"
-        R"("buckets":{"type":"array","description":"Oldest first: start (RFC 3339 UTC), value (null for a gap), coverage (samples, null when unsampled), backfilled."}}})";
+        R"("buckets":{"type":"array","description":"Oldest first: start (RFC 3339 UTC), value (null for a gap), coverage (samples, null when unsampled), backfilled. A slot series carries scope, node_id, display_name, unit, bucket_seconds, full_coverage and buckets."},)"
+        R"("key":{"type":["string","null"],"description":"A keyed series: the row selected, or null for every row."},)"
+        R"("requesters":{"type":["object","null"],"description":"The requesters series: /fleet.json's requesters section exactly (only `key` narrows its keys). bucket_starts_ms and coverage_since_ms in milliseconds since the epoch; observed per bucket; each key row has key (identity key), node_id, display_name (null when no member holds the key), total, earlier_counts (none, in-other: its earlier counts were folded into other, unknown) and buckets (null where the leader was not counting); other (null until a key was folded) has keys_folded, total and buckets. null when the answering leader keeps none."},)"
+        R"("toolchain_demand":{"type":["object","null"],"description":"The toolchain-demand series: /fleet.json's toolchain_demand section exactly, rows keyed by fingerprint, otherwise as requesters."}}})";
 
     constexpr std::string_view EnrollmentStatusOutput =
         R"({"type":"object","required":["answered_by","term","term_scope","enrollment","auto_approve_left_s","pending"],"properties":{)"
@@ -1045,7 +1177,14 @@ std::vector<Mcp::ToolRow> FleetReadTools(IMcpUpstream& upstream, IAppliedCluster
                            "history /fleet/series.json serves: the fleet's, or with `node` one machine's own, kept by "
                            "the leader from what that machine handed over. `unit` names each series' unit: rates per "
                            "minute, shares percent, slot levels counts, cpu-busy permille. bucket_seconds is in SECONDS "
-                           "and each start is RFC 3339 UTC. cpu-busy needs `node`; the dispatch series refuse it. An "
+                           "and each start is RFC 3339 UTC. cpu-busy needs `node`; the dispatch series refuse it. "
+                           "requesters and toolchain-demand are compiles the leader's queue GRANTED (on a worker or on "
+                           "the requesting machine; never a refusal, an abandoned wait or a duplicate answered by "
+                           "another compile's object), per requesting machine and per toolchain, returned exactly as "
+                           "/fleet.json's requesters and toolchain_demand sections, with `key` selecting one row. The "
+                           "most recently active 256 (--history-requesters) are kept by name and the rest are summed "
+                           "into `other`, exactly. These are counted by the LEADER and are not handed over at an "
+                           "election: a new leader starts empty, and coverage_since_ms says from when it counted. An "
                            "unknown series, range or node is refused with the valid ones listed. `term` is the term "
                            "THIS node holds.",
             .inputSchema = HistoryInput(),

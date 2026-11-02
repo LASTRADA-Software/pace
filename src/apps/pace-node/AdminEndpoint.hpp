@@ -10,6 +10,7 @@
 #include <Pace/Core/Logger.hpp>
 #include <Pace/Core/SecureBytes.hpp>
 #include <Pace/Distributed/FleetHistory.hpp>
+#include <Pace/Distributed/FleetKeyedHistory.hpp>
 #include <Pace/Distributed/FleetView.hpp>
 #include <Pace/Metrics/IMetricsSink.hpp>
 #include <Pace/Metrics/PrometheusFormatter.hpp>
@@ -196,9 +197,11 @@ struct NodeScrapeSources
 /// exists to hold every one of them.
 enum class HistoryFile : std::uint8_t
 {
-    Node = 0, ///< This machine's own series.
-    Fleet,    ///< The fleet-wide series, recorded while leading.
-    Received, ///< What every other machine handed over.
+    Node = 0,   ///< This machine's own series.
+    Fleet,      ///< The fleet-wide series, recorded while leading.
+    Received,   ///< What every other machine handed over.
+    Requesters, ///< Compiles granted per requesting machine, counted while leading.
+    Toolchains, ///< Compiles granted per toolchain fingerprint, counted while leading.
     Last
 };
 
@@ -219,13 +222,15 @@ enum class HistoryFile : std::uint8_t
 /// Every history path a node keeps, so the sampler takes one argument rather than three.
 struct HistoryPaths
 {
-    std::filesystem::path fleet;    ///< The fleet-wide series.
-    std::filesystem::path node;     ///< This machine's own series.
-    std::filesystem::path received; ///< What the other machines handed over.
+    std::filesystem::path fleet;         ///< The fleet-wide series.
+    std::filesystem::path node;          ///< This machine's own series.
+    std::filesystem::path received;      ///< What the other machines handed over.
+    std::filesystem::path requesters {}; ///< Compiles granted per requesting machine.
+    std::filesystem::path toolchains {}; ///< Compiles granted per toolchain.
 
     /// Every path this configuration names.
     /// @param cfg The parsed configuration.
-    /// @return The three, each empty when this node keeps no state directory.
+    /// @return Every one, each empty when this node keeps no state directory.
     [[nodiscard]] static HistoryPaths For(NodeConfig const& cfg);
 };
 
@@ -264,6 +269,21 @@ class IFleetHistoryView
     /// @return The buckets, oldest first, gaps included; nullopt when no series is filed under that key.
     [[nodiscard]] virtual std::optional<std::vector<Distributed::FleetBucket>> MachineBuckets(
         std::string_view identityKey, Distributed::FleetRange range) const = 0;
+
+    /// One keyed compile history over a window -- the third thing a route may read, through this same door.
+    ///
+    /// Not pure: a view that keeps no keyed history -- every test double of the series alone -- answers absent,
+    /// which renders `null`, the truth about it.
+    /// @param dimension Which keyed history.
+    /// @param range Which window.
+    /// @return The view, or absent when this record keeps none.
+    [[nodiscard]] virtual std::optional<Distributed::KeyedView> Keyed(Distributed::KeyedDimension dimension,
+                                                                      Distributed::FleetRange range) const
+    {
+        (void) dimension;
+        (void) range;
+        return std::nullopt;
+    }
 };
 
 /// The fleet document for one selection: the ONE renderer `/fleet.txt` and the `fleet-text` verb
@@ -347,7 +367,8 @@ class FleetSampler final: public IFleetHistoryView
                  core::platform::WallClockRef wall,
                  HistoryPaths paths,
                  ILogger& logger,
-                 std::unique_ptr<IHostLoadSampler> load = nullptr);
+                 std::unique_ptr<IHostLoadSampler> load = nullptr,
+                 std::size_t historyKeys = Distributed::DefaultHistoryKeys);
 
     /// Stops the thread and writes every store out one last time.
     ~FleetSampler() override;
@@ -375,6 +396,25 @@ class FleetSampler final: public IFleetHistoryView
     [[nodiscard]] Distributed::FleetNodeHistories& Received() noexcept
     {
         return _received;
+    }
+
+    /// Where the admission queue reports each compile it grants: the requester and toolchain histories.
+    ///
+    /// Counted by whoever grants -- only a leader does -- and folded per minute by this sampler only while it leads,
+    /// so a minute this node did not lead reads absent.
+    [[nodiscard]] Distributed::CompileDemandHistory& Demand() noexcept
+    {
+        return _demand;
+    }
+
+    /// `IFleetHistoryView`: one keyed compile history.
+    /// @param dimension Which keyed history.
+    /// @param range Which window.
+    /// @return Its view.
+    [[nodiscard]] std::optional<Distributed::KeyedView> Keyed(Distributed::KeyedDimension dimension,
+                                                              Distributed::FleetRange range) const override
+    {
+        return _demand.Of(dimension).View(range);
     }
 
     /// The next batch of this machine's closed buckets to hand over.
@@ -498,6 +538,12 @@ class FleetSampler final: public IFleetHistoryView
 
     void Persist();
 
+    /// The store row for one keyed history.
+    /// @param path Where it is kept; empty is memory-only.
+    /// @param dimension Which keyed history.
+    /// @return The row.
+    [[nodiscard]] Store KeyedStore(std::filesystem::path path, Distributed::KeyedDimension dimension);
+
     /// What the fleet series reads, or nullopt on a node with no scheduler.
     std::optional<Distributed::FleetSources> _sources;
     IMetricsSink const& _metrics;
@@ -508,8 +554,10 @@ class FleetSampler final: public IFleetHistoryView
     Distributed::FleetHistory _fleet;
     Distributed::FleetHistory _node;
     Distributed::FleetNodeHistories _received;
-    /// The three, fleet first. Declared AFTER everything they reach into.
-    std::array<Store, 3> _stores;
+    /// Compiles granted per requester and per toolchain, counted while leading.
+    Distributed::CompileDemandHistory _demand;
+    /// Every store, fleet first. Declared AFTER everything they reach into.
+    std::array<Store, 5> _stores;
     /// How far this machine has handed its own series over; -1 before anything has.
     ///
     /// Atomic because the heartbeat thread moves it while the sampler thread writes

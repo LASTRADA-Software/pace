@@ -149,7 +149,9 @@ std::expected<Ticket, SchedulerReply> SchedulerService::Admit(CallerContext cons
                                                 .toolchainLabel = request.toolchainLabel,
                                                 .enqueuedAt = _clock.now(),
                                                 .parkedAt = _clock.now(),
-                                                .lease = std::nullopt });
+                                                .lease = std::nullopt,
+                                                .machine = machine,
+                                                .demandReported = false });
     return ticket;
 }
 
@@ -174,6 +176,14 @@ void SchedulerService::ReleaseAdmissionLease(AdmissionTicket& held, AdmissionLea
     else if (end == AdmissionLeaseEnd::Settled)
         CountReleaseRefusal(released.error());
     held.lease.reset();
+}
+
+void SchedulerService::ReportDemandOnce(AdmissionTicket& held)
+{
+    if (_demand == nullptr || std::exchange(held.demandReported, true))
+        return;
+    // Under `_admissionMutex`: the sink takes only its own stores' locks and calls nothing back.
+    _demand->CompileGranted(held.machine, held.fingerprint);
 }
 
 std::optional<AdmissionVerdict> SchedulerService::GrantFor(Decision const& decision, AdmissionTicket& held)
@@ -250,6 +260,7 @@ std::optional<AdmissionVerdict> SchedulerService::GrantFor(Decision const& decis
                                                                       .workerKey = Wire::AsBytes(worker->identityKey),
                                                                       .reason = Wire::LocalGrantReason::Asked,
                                                                       .dialHint = hint });
+            ReportDemandOnce(held);
             return verdict;
         }
         case Wire::GrantKind::Local:
@@ -277,6 +288,10 @@ std::optional<AdmissionVerdict> SchedulerService::GrantFor(Decision const& decis
                                                                       .workerKey = {},
                                                                       .reason = reason,
                                                                       .dialHint = {} });
+            // A `Stored` answer ran no compile: another of the same key stored the object, so nothing was asked of the
+            // fleet that this request alone caused.
+            if (decision.kind == Wire::GrantKind::Local)
+                ReportDemandOnce(held);
             return verdict;
         }
         case Wire::GrantKind::Last:

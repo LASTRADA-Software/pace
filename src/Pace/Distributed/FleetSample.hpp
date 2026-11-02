@@ -418,4 +418,27 @@ class IFleetHistorySink
                                       std::span<FleetBucket const> buckets) = 0;
 };
 
+/// Where the leader's admission queue reports each compile it GRANTS, for the keyed history (who asked, which
+/// toolchain).
+///
+/// Called once per admission ticket, at the first decision that runs a compile -- on a worker or on the requesting
+/// machine itself -- and never for a request refused, abandoned before its grant, or answered `Stored` (another
+/// compile of the same key stored it). A worker refusal that puts the ticket back is not a second grant.
+class ICompileDemandSink
+{
+  public:
+    ICompileDemandSink() = default;
+    virtual ~ICompileDemandSink() = default;
+    ICompileDemandSink(ICompileDemandSink const&) = delete;
+    ICompileDemandSink& operator=(ICompileDemandSink const&) = delete;
+    ICompileDemandSink(ICompileDemandSink&&) = delete;
+    ICompileDemandSink& operator=(ICompileDemandSink&&) = delete;
+
+    /// One compile granted.
+    /// @param requester The machine the queue charged: the identity key its connection PROVED, raw, or this leader's
+    ///        own for a caller on this machine -- never an endpoint, a worker id or a hostname.
+    /// @param fingerprint The toolchain the request named; empty for a local-only request that did not know it.
+    virtual void CompileGranted(std::string_view requester, std::string_view fingerprint) = 0;
+};
+
 } // namespace Pace::Distributed

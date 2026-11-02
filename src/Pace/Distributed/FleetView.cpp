@@ -1816,6 +1816,124 @@ namespace
     }
 } // namespace
 
+namespace
+{
+    /// Append one series of a keyed view: a number per observed bucket, `null` where nobody was counting.
+    /// @param out The document.
+    /// @param buckets The series.
+    void AppendKeyedBuckets(std::string& out, std::vector<std::optional<std::uint64_t>> const& buckets)
+    {
+        out += '[';
+        auto first = true;
+        for (auto const& bucket: buckets)
+        {
+            if (!std::exchange(first, false))
+                out += ',';
+            if (bucket.has_value())
+                out += std::format("{}", *bucket);
+            else
+                out += "null";
+        }
+        out += ']';
+    }
+
+    /// The member whose identity key spells @p keyText, or null: how a requester row names its machine, by the key
+    /// it PROVED and never by an endpoint.
+    /// @param snapshot The fleet, with the applied state it read.
+    /// @param keyText An identity key's text (`FormatEd25519PublicKey`).
+    /// @return The member, or null when the state holds no member with that key.
+    [[nodiscard]] Cluster::ClusterMember const* MemberWithKeyText(FleetSnapshot const& snapshot, std::string_view keyText)
+    {
+        if (!snapshot.cluster.has_value())
+            return nullptr;
+        return core::findIfOrNull(snapshot.cluster->members, [keyText](Cluster::ClusterMember const& member) {
+            return FormatEd25519PublicKey(member.publicKey) == keyText;
+        });
+    }
+
+    /// Append one keyed history's section: `null` when absent, else the window, its observed buckets, every key with
+    /// counts in it, and `other` once anything was folded.
+    ///
+    /// snake_case throughout, because the MCP `history` tool returns this object exactly as written: one derivation,
+    /// two readers, and no projection between them to drift. A requester names its machine by node id AND display
+    /// name, each `null` when the applied state holds no member with that key or the member has no name -- never
+    /// guessed, and never an endpoint.
+    /// @param out The document.
+    /// @param snapshot The fleet, for the names.
+    /// @param dimension Which keyed history.
+    /// @param view Its view, or absent.
+    void AppendKeyedJson(std::string& out,
+                         FleetSnapshot const& snapshot,
+                         KeyedDimension dimension,
+                         std::optional<KeyedView> const& view)
+    {
+        auto const& row = KeyedDimensionOf(dimension);
+        Json::AppendString(out, row.section);
+        out += ':';
+        if (!view.has_value())
+        {
+            out += "null";
+            return;
+        }
+        auto const& range = FleetRangeTable[static_cast<std::size_t>(view->range)];
+        out += "{\"range\":";
+        Json::AppendString(out, range.key);
+        out += std::format(R"(,"bucket_seconds":{},"bucket_starts_ms":[)",
+                           std::chrono::duration_cast<std::chrono::seconds>(range.bucket).count());
+        auto firstStart = true;
+        for (auto const start: view->bucketStarts)
+            out += std::format("{}{}", std::exchange(firstStart, false) ? "" : ",", start);
+        out += R"(],"observed":[)";
+        auto firstObserved = true;
+        for (auto const observed: view->observed)
+            out += std::format("{}{}", std::exchange(firstObserved, false) ? "" : ",", observed ? "true" : "false");
+        out += R"(],"coverage_since_ms":)";
+        out += view->coverageSince.has_value() ? std::format("{}", *view->coverageSince) : std::string { "null" };
+        out += std::format(R"(,"total":{},"keys":[)", view->total);
+        auto firstKey = true;
+        for (auto const& key: view->keys)
+        {
+            if (!std::exchange(firstKey, false))
+                out += ',';
+            out += '{';
+            Json::AppendString(out, row.keyField);
+            out += ':';
+            Json::AppendString(out, key.key);
+            if (row.namesMachines)
+            {
+                auto const* const member = MemberWithKeyText(snapshot, key.key);
+                out += R"(,"node_id":)";
+                if (member != nullptr)
+                    Json::AppendString(out, member->id);
+                else
+                    out += "null";
+                out += R"(,"display_name":)";
+                if (member != nullptr && !member->displayName.empty())
+                    Json::AppendString(out, member->displayName);
+                else
+                    out += "null";
+            }
+            out += std::format(R"(,"total":{},"earlier_counts":)", key.total);
+            Json::AppendString(out, EarlierCountsWord(key.earlier));
+            out += R"(,"buckets":)";
+            AppendKeyedBuckets(out, key.buckets);
+            out += '}';
+        }
+        out += R"(],"other":)";
+        if (view->other.has_value())
+        {
+            out += std::format(R"({{"keys_folded":{},"noun":)", view->other->keysFolded);
+            Json::AppendString(out, row.noun);
+            out += std::format(R"(,"total":{},"buckets":)", view->other->total);
+            AppendKeyedBuckets(out, view->other->buckets);
+            out += '}';
+        }
+        else
+            out += "null";
+        out += '}';
+    }
+} // namespace
+
 std::string RenderFleetJson(FleetSnapshot const& snapshot, FleetHistoryView const& history)
 {
     std::string out;
@@ -2009,6 +2127,13 @@ std::string RenderFleetJson(FleetSnapshot const& snapshot, FleetHistoryView cons
     out += ',';
     Json::AppendString(out, "registrations");
     out += std::format(":{}", snapshot.registrations);
+
+    // The keyed compile histories (who asked, which toolchain): `null` where this node keeps none or does not lead.
+    for (auto const& row: KeyedDimensionTable)
+    {
+        out += ',';
+        AppendKeyedJson(out, snapshot, row.dimension, history.keyed[static_cast<std::size_t>(row.dimension)]);
+    }
 
     out += '}';
     return out;

@@ -27,6 +27,7 @@
 #include <Pace/Core/EnumTable.hpp>
 #include <Pace/Core/Errors/ConfigError.hpp>
 #include <Pace/Core/HostPort.hpp>
+#include <Pace/Distributed/FleetKeyedHistory.hpp>
 #include <Pace/Platform/Firewall.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
 
@@ -107,6 +108,28 @@ namespace
                 return std::unexpected(ArgvError(ConfigErrorCode::OutOfRange,
                                                  "must be more than zero: a machine with no compile slots would "
                                                  "queue every compile on it for ever"));
+            return *count;
+        });
+    }
+
+    /// `--history-requesters`: how many keys each keyed compile history keeps by name.
+    ///
+    /// Zero is refused: it would keep no machine by name and fold every one into `other`, which answers "who asked"
+    /// with nobody. Above `Distributed::MaxHistoryKeys` is refused too, the bound on what one store may hold.
+    /// @param sv Text to parse.
+    /// @return The count, or why it is not one.
+    [[nodiscard]] std::expected<std::uint32_t, ConfigError> ParseHistoryKeys(std::string_view sv)
+    {
+        return ParseSlots(sv).and_then([](std::optional<std::uint32_t> count) -> std::expected<std::uint32_t, ConfigError> {
+            if (count.value_or(0) == 0)
+                return std::unexpected(ArgvError(ConfigErrorCode::OutOfRange,
+                                                 "must be more than zero: a history that keeps no key by name answers "
+                                                 "\"who asked\" with nobody"));
+            if (*count > Distributed::MaxHistoryKeys)
+                return std::unexpected(
+                    ArgvError(ConfigErrorCode::OutOfRange,
+                              std::format("must be at most {}: the rest are kept, exactly, in the history's \"other\" row",
+                                          Distributed::MaxHistoryKeys)));
             return *count;
         });
     }
@@ -1634,6 +1657,22 @@ std::span<OptionSpec<NodeConfig> const> NodeOptions() noexcept
             .yamlKey = "dashboard",
             .same = FieldEq<&NodeConfig::dashboard>(),
         },
+        // Restart-only (`Reloadable::No`, the default): the ceiling sizes the stores the sampler builds at start, and
+        // lowering it under a running store would fold keys an operator never asked to fold.
+        {
+            .primary = "--history-requesters",
+            .arity = Arity::Value,
+            .operand = "=<n>",
+            .apply = AssignFrom<&NodeConfig::historyRequesters, ParseHistoryKeys>(),
+            .description = "how many requesting machines -- and, separately, how\n"
+                           "many toolchains -- the leader's compile history keeps\n"
+                           "by name (default 256, at most 1024). The least recently\n"
+                           "active beyond that fold into one \"other\" row whose\n"
+                           "counts stay exact. 0 is refused.",
+            .yamlKey = "history_requesters",
+            .same = FieldEq<&NodeConfig::historyRequesters>(),
+            .present = PresentIn<&NodeConfig::historyRequesters>(),
+        },
         {
             .primary = "--dashboard-token-file",
             .arity = Arity::Value,
@@ -2690,6 +2729,8 @@ ServiceSpec MakeNodeServiceSpec(std::filesystem::path const& exePath, NodeConfig
     emitIfExplicit("mcp-listen", cfg.mcpListen, cfg.mcpListenExplicit);
     if (cfg.dashboard)
         argv.emplace_back("--dashboard");
+    // On presence: absent is the default ceiling, and a registration replays only what was typed.
+    emitIfPresent("history-requesters", cfg.historyRequesters);
     // The PATH, never the secret it holds -- the same rule `--requirepass` is
     // refused outright by, one step less strict because a path is not a credential.
     emitPathIfSet("dashboard-token-file", cfg.dashboardTokenFile.string());
@@ -3011,6 +3052,11 @@ std::size_t CompileRequestMaxOf(NodeConfig const& cfg) noexcept
 std::uint64_t CompileEstimateDefaultOf(NodeConfig const& cfg) noexcept
 {
     return cfg.compileEstimateDefaultBytes.value_or(DefaultCompileEstimateBytes);
+}
+
+std::size_t HistoryKeysOf(NodeConfig const& cfg) noexcept
+{
+    return cfg.historyRequesters.value_or(Distributed::DefaultHistoryKeys);
 }
 
 std::size_t CompileByteBudgetOf(NodeConfig const& cfg, std::uint32_t slots) noexcept
