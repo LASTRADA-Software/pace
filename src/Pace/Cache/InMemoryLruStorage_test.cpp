@@ -16,10 +16,12 @@
 #include <vector>
 
 #include <core/platform/Clock.hpp>
+#include <tests/Unwrap.hpp>
 
 using namespace std::chrono_literals;
 using Pace::Testing::Decode;
 using Pace::Testing::MakeBytes;
+using Pace::Testing::Unwrap;
 using Pace::Testing::ValueOf;
 
 TEST_CASE("InMemoryLruStorage Get miss returns found=false", "[cache]")
@@ -805,4 +807,48 @@ TEST_CASE("IStorage::Update on absent key without override uses TimePoint::max()
     REQUIRE(after.has_value());
     REQUIRE(after->found);
     REQUIRE(after->entry.expiry == core::platform::SteadyTimePoint::max());
+}
+
+TEST_CASE("memory shrink evicts to budget", "[cache][resize]")
+{
+    // Eviction in memory has no I/O to bound, so a shrink fits before it returns and
+    // leaves nothing for a later step; the newest entries are the ones kept.
+    Pace::InMemoryLruStorage storage { 0 };
+    core::platform::ManualClock clock;
+    for (auto const i: std::views::iota(0, 100))
+        REQUIRE(
+            storage
+                .Set(std::format("k-{:03d}", i), MakeBytes(std::string(100, 'v')), 0, core::platform::SteadyTimePoint::max())
+                .has_value());
+    REQUIRE(storage.Snapshot().bytesUsed == 100U * 100U);
+
+    CHECK_FALSE(storage.ResizeTier(Pace::StorageTier::Disk, 1000).has_value());
+    CHECK(storage.Snapshot().evictions == 0U);
+
+    auto const resized = storage.ResizeTier(Pace::StorageTier::Memory, 1000);
+    REQUIRE(resized.has_value());
+    CHECK(Unwrap(resized) == 0U);
+    auto const after = storage.Snapshot();
+    CHECK(after.bytesLimit == 1000U);
+    CHECK(after.bytesUsed <= 1000U);
+    CHECK(after.evictions == 90U);
+    CHECK(storage.Get("k-099", clock.now())->found);
+    CHECK_FALSE(storage.Get("k-000", clock.now())->found);
+    CHECK(storage.EvictStep() == 0U);
+}
+
+TEST_CASE("memory grow takes effect without eviction", "[cache][resize]")
+{
+    Pace::InMemoryLruStorage storage { 1000 };
+    for (auto const i: std::views::iota(0, 10))
+        REQUIRE(
+            storage
+                .Set(std::format("k-{:03d}", i), MakeBytes(std::string(100, 'v')), 0, core::platform::SteadyTimePoint::max())
+                .has_value());
+    auto const grown = storage.ResizeTier(Pace::StorageTier::Memory, 4000);
+    REQUIRE(grown.has_value());
+    CHECK(Unwrap(grown) == 0U);
+    CHECK(storage.Snapshot().bytesLimit == 4000U);
+    CHECK(storage.Snapshot().evictions == 0U);
+    CHECK(storage.Snapshot().itemCount == 10U);
 }

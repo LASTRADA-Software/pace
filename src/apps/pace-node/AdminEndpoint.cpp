@@ -1006,7 +1006,8 @@ FleetSampler::FleetSampler(std::optional<Distributed::FleetSources> sources,
                            HistoryPaths paths,
                            ILogger& logger,
                            std::unique_ptr<IHostLoadSampler> load,
-                           std::size_t historyKeys):
+                           std::size_t historyKeys,
+                           std::function<void()> afterSample):
     _sources { sources },
     _metrics { metrics },
     _nodeFacts { std::move(node) },
@@ -1054,7 +1055,8 @@ FleetSampler::FleetSampler(std::optional<Distributed::FleetSources> sources,
                       .worthWriting = [this] { return _received.Count() > 0; } },
               KeyedStore(std::move(paths.requesters), Distributed::KeyedDimension::Requesters),
               KeyedStore(std::move(paths.toolchains), Distributed::KeyedDimension::ToolchainDemand) },
-    _logger { logger }
+    _logger { logger },
+    _afterSample { std::move(afterSample) }
 {
     // Every failure to read starts empty and says so once. History is a
     // convenience, and no state of any of these files may keep a node from starting.
@@ -1104,6 +1106,8 @@ FleetSampler::FleetSampler(std::optional<Distributed::FleetSources> sources,
         while (!stop.stop_requested())
         {
             SampleOnce();
+            if (_afterSample)
+                _afterSample();
             if (sinceSave >= SaveInterval)
             {
                 Persist();

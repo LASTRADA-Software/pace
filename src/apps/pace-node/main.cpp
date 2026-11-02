@@ -1253,9 +1253,13 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     // compile cannot have is what the tier actually HOLDS, which is what the
     // configuration asked for only sometimes. `NodeCapacityOf`'s contract carries the
     // three ways those differ; this is the ordering that lets it be honoured.
+    //
+    // Live since cache-budget overrides: `LiveNodeCapacity` makes those same three calls now and
+    // again whenever `CacheTier::ApplyTierBudget` moves a budget, so the reserve and the machine
+    // budget follow what the tier then holds. Declared right after the tier it listens to, and so
+    // destroyed before it; it unhooks itself under the tier's budget mutex.
     auto const host = MakeSystemHostFacts();
-    auto const capacity =
-        Node::NodeCapacityOf(cfg, *host, Node::CacheCapacityOf(cacheTier.get()), Node::IndexReserveBytesOf(cacheTier.get()));
+    Node::LiveNodeCapacity capacity { cfg, *host, cacheTier.get() };
 
     // The worker: survey, scratch root, lease check, slot cap, compile responder and
     // heartbeat, as one object (#1387). Built BELOW the cache tier, because the slots it
@@ -1863,7 +1867,12 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
                                  // Its OWN sampler: one holds the previous CPU counters, so sharing the presence
                                  // loop's would cut that loop's interval and this one's.
                                  MakeHostLoadSampler(MakeSystemCounterSource()),
-                                 Node::HistoryKeysOf(cfg) };
+                                 Node::HistoryKeysOf(cfg),
+                                 // The one loop every node runs, so it is what carries a live disk
+                                 // shrink the rest of the way when no write arrives to: one bounded
+                                 // slice a minute, nothing when the tier already fits. Declared after
+                                 // the tier, so the tier outlives the thread that calls it.
+                                 [tier = cacheTier.get()] { (void) Node::StepTierEviction(tier); } };
 
     // Wired here because this is the one scope holding both: the scheduler tier is
     // built before the sampler that receives for it, so the sink cannot be a

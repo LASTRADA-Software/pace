@@ -432,4 +432,17 @@ void LayeredStorage::Resize(std::size_t newL1MaxBytes)
     _l1->Resize(newL1MaxBytes);
 }
 
+std::optional<std::size_t> LayeredStorage::ResizeTier(StorageTier tier, std::size_t newMaxBytes)
+{
+    // Shrinking L1 drops mirror copies only: every entry it evicts is still in L2, which is
+    // canonical. Shrinking L2 can leave L1 holding a mirror of an entry L2 evicted, which is
+    // the state ordinary L2 eviction already leaves and `Get` already serves.
+    return CombineTierExcess(_l1->ResizeTier(tier, newMaxBytes), _l2->ResizeTier(tier, newMaxBytes));
+}
+
+std::size_t LayeredStorage::EvictStep()
+{
+    return _l1->EvictStep() + _l2->EvictStep();
+}
+
 } // namespace Pace

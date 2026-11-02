@@ -20,10 +20,12 @@
 
 #include <core/platform/Clock.hpp>
 #include <tests/ScratchPath.hpp>
+#include <tests/Unwrap.hpp>
 
 using namespace std::chrono_literals;
 using Pace::Testing::Decode;
 using Pace::Testing::MakeBytes;
+using Pace::Testing::Unwrap;
 
 namespace
 {
@@ -639,4 +641,61 @@ TEST_CASE("LayeredStorage::Update is atomic across L1+L2 and preserves expiry", 
     REQUIRE(l1->found);
     REQUIRE(l1->entry.cas == l2->entry.cas);
     REQUIRE(l1->entry.expiry == deadline);
+}
+
+TEST_CASE("layered resize of disk reaches L2 only", "[layered][cowtree][resize]")
+{
+    // `Resize` reads its one number as L1's, so a disk budget routed through it would land
+    // on the memory half. `ResizeTier` names the tier, and each half answers only for its own.
+    Pace::Testing::TempFile tmp;
+    auto l2 = Pace::CowTreeStorage::Open(Pace::CowTreeStorage::Options { .path = tmp.path });
+    REQUIRE(l2.has_value());
+    constexpr std::size_t L1Budget = 1024 * 1024;
+    constexpr std::size_t DiskBudget = 64ULL * 1024 * 1024;
+    Pace::LayeredStorage storage { std::make_unique<Pace::InMemoryLruStorage>(L1Budget), std::move(*l2) };
+
+    auto const disk = storage.ResizeTier(Pace::StorageTier::Disk, DiskBudget);
+    REQUIRE(disk.has_value());
+    CHECK(Unwrap(disk) == 0U);
+    auto tiers = storage.SnapshotTiers();
+    REQUIRE(tiers[static_cast<std::size_t>(Pace::StorageTier::Disk)].has_value());
+    REQUIRE(tiers[static_cast<std::size_t>(Pace::StorageTier::Memory)].has_value());
+    CHECK(Unwrap(tiers[static_cast<std::size_t>(Pace::StorageTier::Disk)]).bytesLimit == DiskBudget);
+    CHECK(Unwrap(tiers[static_cast<std::size_t>(Pace::StorageTier::Memory)]).bytesLimit == L1Budget);
+
+    // And the converse: a memory budget moves L1 and leaves the disk budget where it was.
+    constexpr std::size_t NewL1Budget = 512 * 1024;
+    auto const memory = storage.ResizeTier(Pace::StorageTier::Memory, NewL1Budget);
+    REQUIRE(memory.has_value());
+    CHECK(Unwrap(memory) == 0U);
+    tiers = storage.SnapshotTiers();
+    REQUIRE(tiers[static_cast<std::size_t>(Pace::StorageTier::Disk)].has_value());
+    REQUIRE(tiers[static_cast<std::size_t>(Pace::StorageTier::Memory)].has_value());
+    CHECK(Unwrap(tiers[static_cast<std::size_t>(Pace::StorageTier::Memory)]).bytesLimit == NewL1Budget);
+    CHECK(Unwrap(tiers[static_cast<std::size_t>(Pace::StorageTier::Disk)]).bytesLimit == DiskBudget);
+}
+
+TEST_CASE("A layered store of two memory tiers has no disk tier to resize", "[layered][resize]")
+{
+    auto storage = MakeLayered(1024);
+    CHECK_FALSE(storage->ResizeTier(Pace::StorageTier::Disk, 4096).has_value());
+    CHECK(storage->L1().Snapshot().bytesLimit == 1024U);
+}
+
+TEST_CASE("A sharded store splits a tier's budget across its shards as Resize does", "[sharded][resize]")
+{
+    std::vector<std::unique_ptr<Pace::IStorage>> shards;
+    shards.push_back(std::make_unique<Pace::InMemoryLruStorage>(0));
+    shards.push_back(std::make_unique<Pace::InMemoryLruStorage>(0));
+    Pace::ShardedStorage storage { std::move(shards) };
+
+    auto const resized = storage.ResizeTier(Pace::StorageTier::Memory, 2000);
+    REQUIRE(resized.has_value());
+    CHECK(Unwrap(resized) == 0U);
+    auto const tiers = storage.SnapshotTiers();
+    REQUIRE(tiers[static_cast<std::size_t>(Pace::StorageTier::Memory)].has_value());
+    CHECK(Unwrap(tiers[static_cast<std::size_t>(Pace::StorageTier::Memory)]).bytesLimit == 2000U);
+    // Absent in every shard is absent for the whole, never a zero.
+    CHECK_FALSE(storage.ResizeTier(Pace::StorageTier::Disk, 2000).has_value());
+    CHECK(storage.EvictStep() == 0U);
 }

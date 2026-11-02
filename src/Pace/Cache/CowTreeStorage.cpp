@@ -1608,10 +1608,10 @@ CacheEntry* CowTreeStorage::AcceptLiveRecord(std::string_view key,
     return nullptr;
 }
 
-bool CowTreeStorage::EvictColdSlice()
+bool CowTreeStorage::EvictColdSlice(std::size_t& budget)
 {
     CORE_ZONE_SCOPED_N("CowTreeStorage::EvictColdSlice");
-    if (_coldExhausted)
+    if (_coldExhausted || budget == 0)
         return false;
 
     // Gathered under a read snapshot and erased after it is gone. `ForEach` does not
@@ -1660,9 +1660,12 @@ bool CowTreeStorage::EvictColdSlice()
     std::size_t erased = 0;
     for (auto const& key: victims)
     {
-        if (FootprintBytes() <= _options.maxBytes)
+        // The slice's bound stops it exactly as fitting does: the cursor below follows what
+        // was CONSUMED, so the victims left standing are the first ones the next slice takes.
+        if (FootprintBytes() <= _options.maxBytes || budget == 0)
             break;
         ++consumed;
+        --budget;
         if (auto const r = EraseEntry(key); !r.has_value())
             continue;
         // Reported unconditionally, where the mirror path asks about the generation
@@ -1701,11 +1704,27 @@ std::uint64_t CowTreeStorage::FootprintBytes() const noexcept
     return static_cast<std::uint64_t>(_store->PagesInUse()) * static_cast<std::uint64_t>(_store->PageSize());
 }
 
-void CowTreeStorage::EvictToFit()
+std::size_t CowTreeStorage::SliceRecords() const noexcept
+{
+    return std::max<std::size_t>(_options.evictSliceRecords, 1);
+}
+
+std::size_t CowTreeStorage::ExcessBytes() const noexcept
+{
+    if (_options.maxBytes == 0)
+        return 0;
+    auto const footprint = FootprintBytes();
+    return footprint > _options.maxBytes ? static_cast<std::size_t>(footprint - _options.maxBytes) : 0;
+}
+
+void CowTreeStorage::EvictToFit(std::size_t maxRecords)
 {
     CORE_ZONE_SCOPED_N("CowTreeStorage::EvictToFit");
     if (_options.maxBytes == 0)
         return;
+    // Erase ATTEMPTS left in this call, failed ones included: what the bound limits is
+    // commits made under the caller's lock, and a failed erase is a commit attempted.
+    auto budget = maxRecords;
     // Track remaining attempts so a stuck disk (e.g. ENOSPC on every
     // commit) walks the LRU once and bails rather than spinning. Better
     // to leave the soft cap violated than to mutate the in-memory mirror
@@ -1720,10 +1739,11 @@ void CowTreeStorage::EvictToFit()
     // been used since startup, so it is genuinely the least recently used thing in the
     // store, and taking it first is what LRU means here. Draining it also converges,
     // because the slice erases whole entries rather than rotating a fixed set.
-    while (FootprintBytes() > _options.maxBytes && EvictColdSlice())
+    while (FootprintBytes() > _options.maxBytes && EvictColdSlice(budget))
         ;
-    while (FootprintBytes() > _options.maxBytes && !_lru.empty() && remainingAttempts != 0)
+    while (budget != 0 && FootprintBytes() > _options.maxBytes && !_lru.empty() && remainingAttempts != 0)
     {
+        --budget;
         auto victim = std::prev(_lru.end());
         auto const keyCopy = victim->key;
         if (auto const r = EraseEntry(keyCopy); !r.has_value())
@@ -1953,7 +1973,7 @@ std::expected<CasToken, StorageError> CowTreeStorage::Set(std::string_view key,
     if (auto const r = StoreEntry(key, e); !r.has_value())
         return std::unexpected(r.error());
     TouchOrInsert(key, e.ValueSize());
-    EvictToFit();
+    EvictToFit(SliceRecords());
     return e.cas;
 }
 
@@ -2019,7 +2039,7 @@ std::expected<CasToken, StorageError> CowTreeStorage::Append(std::string_view ke
     if (auto const r = StoreEntry(key, entry); !r.has_value())
         return std::unexpected(r.error());
     TouchOrInsert(key, entry.ValueSize());
-    EvictToFit();
+    EvictToFit(SliceRecords());
     return entry.cas;
 }
 
@@ -2052,7 +2072,7 @@ std::expected<CasToken, StorageError> CowTreeStorage::Prepend(std::string_view k
     if (auto const r = StoreEntry(key, entry); !r.has_value())
         return std::unexpected(r.error());
     TouchOrInsert(key, entry.ValueSize());
-    EvictToFit();
+    EvictToFit(SliceRecords());
     return entry.cas;
 }
 
@@ -2346,7 +2366,23 @@ void CowTreeStorage::Resize(std::size_t newMaxBytes)
 {
     _options.maxBytes = newMaxBytes;
     _stats.bytesLimit = newMaxBytes;
-    EvictToFit();
+    EvictToFit(UnboundedEviction);
+}
+
+std::optional<std::size_t> CowTreeStorage::ResizeTier(StorageTier tier, std::size_t newMaxBytes)
+{
+    if (tier != StorageTier::Disk)
+        return std::nullopt;
+    _options.maxBytes = newMaxBytes;
+    _stats.bytesLimit = newMaxBytes;
+    EvictToFit(SliceRecords());
+    return ExcessBytes();
+}
+
+std::size_t CowTreeStorage::EvictStep()
+{
+    EvictToFit(SliceRecords());
+    return ExcessBytes();
 }
 
 std::optional<CowTree::FilePageStore::LockState> CowTreeStorage::StoreLockState() const noexcept

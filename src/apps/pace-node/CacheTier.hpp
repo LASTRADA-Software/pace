@@ -20,6 +20,7 @@
 #include <Pace/Core/Logger.hpp>
 #include <Pace/Distributed/NodePolicy.hpp>
 #include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/HostInfo.hpp>
 #include <Pace/Platform/LocalAddresses.hpp>
 #include <Pace/Platform/ProcessExit.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
@@ -29,9 +30,11 @@
 #include <expected>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include <core/platform/Clock.hpp>
 
@@ -149,6 +152,28 @@ static_assert(RowsInEnumeratorOrder(UpstreamKindTable, &UpstreamKindRow::kind),
 /// @return The upstream; never null.
 [[nodiscard]] std::unique_ptr<ICacheUpstream> MakeCacheUpstream(UpstreamParts const& parts);
 
+/// Told after a tier's budget moved, so whatever was DERIVED from the tiers is derived again.
+///
+/// The cache tier cannot recompute those figures itself -- `NodeCapacityOf` needs the
+/// configuration and the machine, which the tier does not hold -- and must not leave them to
+/// whoever asked for the resize, who would then be one more caller able to forget.
+class ITierBudgetListener
+{
+  public:
+    virtual ~ITierBudgetListener() = default;
+
+    /// A tier's budget has just moved; re-read whatever is derived from what the tiers hold.
+    /// Called under the tier's budget lock, after the resize, from the resizing thread.
+    virtual void TierBudgetApplied() = 0;
+
+  protected:
+    ITierBudgetListener() = default;
+    ITierBudgetListener(ITierBudgetListener const&) = default;
+    ITierBudgetListener& operator=(ITierBudgetListener const&) = default;
+    ITierBudgetListener(ITierBudgetListener&&) = default;
+    ITierBudgetListener& operator=(ITierBudgetListener&&) = default;
+};
+
 /// The node's cache surface: storage, upstream, read-through logic, protocol and
 /// listener, owned as one thing.
 ///
@@ -247,6 +272,46 @@ class CacheTier final: public ITierStatsSource
         return _storage->SnapshotTiers();
     }
 
+    /// Give one tier of the running store a new budget.
+    ///
+    /// The API a cluster budget override is applied through. The memory tier evicts to the
+    /// new budget before this returns; the disk tier evicts at most one slice
+    /// (`CowTreeStorage::EvictSliceRecords`) and the rest goes on later writes and on
+    /// `EvictStep`, so the store serves throughout. What is still over is visible as
+    /// `IStorage::BytesOverBudget` of that tier's `SnapshotTiers()` entry, the one
+    /// derivation every surface reports it through. A grow evicts nothing.
+    ///
+    /// **Locking.** Applies are serialised by this tier's budget mutex, so a resize and the
+    /// recomputation it triggers are one step against other applies. The budget itself and
+    /// the eviction cursor live in the store, under the `ShardedStorage` shard mutex that
+    /// every cache verb, every `Snapshot` and `EvictStep` also take -- never across more
+    /// than one slice of commits, and never across a tree walk (a slice gathers its victims
+    /// under a read snapshot and erases after it). Lock order: budget mutex, then shard
+    /// mutex, then the listener's own; nothing takes them the other way round.
+    ///
+    /// After the resize the listener (`SetBudgetListener`) is told, which is what re-derives
+    /// the machine's capacity -- the reserve held back from compiles and the budget the
+    /// node reports -- from what the tiers now HOLD rather than from the number asked for.
+    /// @param tier Which tier.
+    /// @param bytes The new budget. Zero is refused (`TierOverrideCannotRemoveTier`), as is
+    ///        anything `CheckTierBudget` refuses.
+    /// @return Nothing, or why the budget was not applied -- a zero, or a tier this node
+    ///         does not have ("no disk tier on this node"), in which case nothing changed.
+    [[nodiscard]] std::expected<void, std::string> ApplyTierBudget(StorageTier tier, std::size_t bytes);
+
+    /// One more eviction slice toward the budgets; what a periodic driver calls.
+    ///
+    /// Cheap when nothing is over: one shard lock and a comparison per tier.
+    /// @return Bytes still over budget across the tiers; 0 once every tier fits.
+    std::size_t EvictStep();
+
+    /// Who is told when `ApplyTierBudget` moved a budget.
+    ///
+    /// Taken under the budget mutex, so clearing it (as `LiveNodeCapacity`'s destructor
+    /// does) cannot race an apply that is about to call it.
+    /// @param listener The listener, or nullptr for none; must outlive its registration.
+    void SetBudgetListener(ITierBudgetListener* listener) noexcept;
+
     /// Whether this tier reads through to a shared cache.
     ///
     /// Read off the upstream that was actually BUILT rather than off the
@@ -288,6 +353,107 @@ class CacheTier final: public ITierStatsSource
     LocalCache _cache;
     CacheProxy _proxy;
     CacheResponder _responder;
+
+    /// Serialises `ApplyTierBudget` and `SetBudgetListener`. Guards no figure: the budgets
+    /// live in the store, under its shard mutex.
+    std::mutex _budgetMutex;
+    /// Told after every applied budget; guarded by `_budgetMutex`.
+    ITierBudgetListener* _budgetListener { nullptr };
+};
+
+/// One eviction slice for the node's cache tier, if it has one.
+///
+/// What the node's periodic loop runs after every sample, so a disk tier shrunk live converges
+/// even when no write arrives to carry it there.
+/// @param tier The node's cache tier, or null when it has none.
+/// @return Bytes still over budget; 0 once every tier fits, and 0 with no tier.
+std::size_t StepTierEviction(CacheTier* tier);
+
+/// What this machine is, read when it is needed rather than captured at startup.
+///
+/// The capacity a node advertises is derived from what its cache tier HOLDS (#167), and a
+/// live budget override moves that, so every reader that outlives one round -- the presence
+/// loop's machine budget and NODE-ANNOUNCE, the worker's slot ceilings -- reads through this.
+class INodeCapacitySource
+{
+  public:
+    virtual ~INodeCapacitySource() = default;
+
+    /// @return What this machine is now. Safe from any thread.
+    [[nodiscard]] virtual Distributed::NodeCapacity Current() const = 0;
+
+  protected:
+    INodeCapacitySource() = default;
+    INodeCapacitySource(INodeCapacitySource const&) = default;
+    INodeCapacitySource& operator=(INodeCapacitySource const&) = default;
+    INodeCapacitySource(INodeCapacitySource&&) = default;
+    INodeCapacitySource& operator=(INodeCapacitySource&&) = default;
+};
+
+/// A capacity that never moves: a node with no tier to resize, and every test that is not
+/// about a resize.
+class FixedNodeCapacity final: public INodeCapacitySource
+{
+  public:
+    /// @param capacity What this machine is, for good.
+    explicit FixedNodeCapacity(Distributed::NodeCapacity capacity) noexcept:
+        _capacity { capacity }
+    {
+    }
+
+    /// @return The capacity this was built with.
+    [[nodiscard]] Distributed::NodeCapacity Current() const override
+    {
+        return _capacity;
+    }
+
+  private:
+    Distributed::NodeCapacity _capacity;
+};
+
+/// The machine's capacity, re-derived whenever the cache tier's budget moves.
+///
+/// Derived by `NodeCapacityOf` over `CacheCapacityOf` and `IndexReserveBytesOf` -- the same
+/// three calls `WorkerBody` makes at startup, so a recomputation and the start can never
+/// derive differently -- and from the tier that was BUILT, read again, never from the number
+/// an override asked for. Registers itself as the tier's budget listener and unregisters in
+/// its destructor.
+///
+/// **What does not follow** a live budget: the worker's own slot count and its thread pool,
+/// and the capacity record its REGISTER carries, are fixed at startup (`WorkerTier`). A shrink
+/// leaves them conservative; a grow is gated by the machine budget, which does follow.
+class LiveNodeCapacity final: public INodeCapacitySource, public ITierBudgetListener
+{
+  public:
+    /// Derive the capacity now and listen for budget changes.
+    /// @param cfg The parsed configuration; must outlive this.
+    /// @param host What the machine says about itself; must outlive this.
+    /// @param tier The node's cache tier, or null when it has none; must outlive this.
+    LiveNodeCapacity(NodeConfig const& cfg, IHostFactsSource const& host, CacheTier* tier);
+
+    /// Stops listening, under the tier's budget mutex.
+    ~LiveNodeCapacity() override;
+
+    LiveNodeCapacity(LiveNodeCapacity const&) = delete;
+    LiveNodeCapacity& operator=(LiveNodeCapacity const&) = delete;
+    LiveNodeCapacity(LiveNodeCapacity&&) = delete;
+    LiveNodeCapacity& operator=(LiveNodeCapacity&&) = delete;
+
+    /// @return The capacity as last derived.
+    [[nodiscard]] Distributed::NodeCapacity Current() const override;
+
+    /// Derive the capacity again from what the tiers hold now.
+    void TierBudgetApplied() override;
+
+  private:
+    /// @return `NodeCapacityOf` over the tier as it stands.
+    [[nodiscard]] Distributed::NodeCapacity Derive() const;
+
+    NodeConfig const& _cfg;
+    IHostFactsSource const& _host;
+    CacheTier* _tier;
+    mutable std::mutex _mutex;             ///< Guards `_current`.
+    Distributed::NodeCapacity _current {}; ///< As last derived.
 };
 
 /// What the on-disk half's B+tree is called inside `--cache-dir`.
@@ -386,7 +552,8 @@ struct DiskStoreSpec
 /// node that announced a budget it does not have would have the leader reporting
 /// a cache that is not there.
 ///
-/// A registration fact, because a budget does not move while the process runs.
+/// Read off the tier each time it is asked, so a budget moved by `ApplyTierBudget` is what
+/// the next caller sees -- `LiveNodeCapacity` is the caller that re-asks when one moves.
 /// @param tier The node's cache, or null when it has none.
 /// @return The per-tier budgets; every tier absent when @p tier is null.
 [[nodiscard]] Distributed::NodeCacheCapacity CacheCapacityOf(CacheTier const* tier);

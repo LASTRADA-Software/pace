@@ -41,7 +41,8 @@ struct NodePresenceParts
     /// Where the loop registers, re-read at every round (`AppliedSchedulers`): the process's one,
     /// shared with the worker's heartbeat and told every applied state by the consensus tier.
     ISchedulerEndpointSource const& schedulers;
-    Distributed::NodeCapacity const& capacity;      ///< What this machine is.
+    /// What this machine is, read per round: a live cache-budget override moves it.
+    INodeCapacitySource const& capacity;
     Cc::IAdvertisedEndpointSource const& announced; ///< Where it answers; the key its row is filed under.
     CacheTier const* cacheTier {};                  ///< Null on a node with no cache.
     IMetricsSink const& metrics;                    ///< Where the cache figures are read.
@@ -253,9 +254,10 @@ class NodePresence
     /// @return True when the loop should end.
     [[nodiscard]] bool WaitOutInterval(std::stop_token const& stop);
 
-    // The announcement keeps no `_cfg` and no `_capacity` of its own: the scheduler list is read
-    // once in `Start` and its capacity is converted once into `_capacityWire` below. The two kept
-    // here are for the machine's compile BUDGET (#1728), which is a different record, read per round.
+    // The announcement keeps no `_cfg` of its own: the scheduler list is read once in `Start`.
+    // `_cfg` is for the machine's compile BUDGET (#1728), and `_capacity` is read per round for
+    // both that budget and NODE-ANNOUNCE's capacity record, since a live cache-budget override
+    // moves the reserve both are derived from.
     Cc::IAdvertisedEndpointSource const& _announced;
     CacheTier const* _cacheTier;
     IMetricsSink const& _metrics;
@@ -265,15 +267,11 @@ class NodePresence
     NodeProofClient const* _prover;
     SchedulerReachability& _reachability;
     Cluster::IAskedJoinsSource const* _askedJoins;
-    IEndpointRefresh* _endpoints;               ///< Refreshed at the top of each round; null for none.
-    NodeConfig const& _cfg;                     ///< The configuration, for the machine budget's flags.
-    Distributed::NodeCapacity const& _capacity; ///< What this machine is, for the machine budget.
-    IHeldCharges const& _held;                  ///< What compiles on it hold; read per round.
-    MeasuredPeaks& _peaks;                      ///< Measured and unreported; drained per round.
-
-    /// This machine's capacity record, converted once: it is compiled-in and configured
-    /// state, and nothing about it changes between rounds.
-    CompileCacheWire::CapacityFields _capacityWire;
+    IEndpointRefresh* _endpoints;         ///< Refreshed at the top of each round; null for none.
+    NodeConfig const& _cfg;               ///< The configuration, for the machine budget's flags.
+    INodeCapacitySource const& _capacity; ///< What this machine is; read per round.
+    IHeldCharges const& _held;            ///< What compiles on it hold; read per round.
+    MeasuredPeaks& _peaks;                ///< Measured and unreported; drained per round.
 
     /// One sampler for the whole loop, never one per round: CPU utilization is a difference
     /// between two readings, so a sampler per round would report nothing, forever. Built with

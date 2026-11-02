@@ -3049,6 +3049,50 @@ std::size_t CompileRequestMaxOf(NodeConfig const& cfg) noexcept
                                                   : WorkerMaxRequestBytes;
 }
 
+namespace
+{
+    /// The startup flag that sizes one tier, and the grammar it parses its value with.
+    struct TierBudgetGrammar
+    {
+        StorageTier tier;                                                     ///< The tier this row sizes.
+        std::string_view flag;                                                ///< Its startup flag, for refusals.
+        std::expected<std::uint64_t, ConfigError> (*parse)(std::string_view); ///< That flag's own parser.
+    };
+
+    /// One row per tier: the flag an operator sizes it with at startup, and that flag's parser.
+    /// A tier added to `StorageTier` without a row fails the `static_assert` below, rather than
+    /// accepting overrides in a grammar its flag does not have.
+    constexpr EnumTable<StorageTier, TierBudgetGrammar> TierBudgetGrammars { {
+        { .tier = StorageTier::Memory, .flag = "--cache-memory", .parse = &ParseCacheBytes },
+        { .tier = StorageTier::Disk, .flag = "--cache-disk", .parse = &ParseCacheDiskBytes },
+    } };
+    static_assert(RowsInEnumeratorOrder(TierBudgetGrammars, &TierBudgetGrammar::tier),
+                  "TierBudgetGrammars must hold one row per StorageTier, in enumerator order");
+} // namespace
+
+std::expected<std::size_t, std::string> CheckTierBudget(std::uint64_t bytes)
+{
+    if (bytes == 0)
+        return std::unexpected(std::string { TierOverrideCannotRemoveTier });
+    if (!std::in_range<std::size_t>(bytes))
+        return std::unexpected(std::format("a budget of {} bytes is more than this process can address", bytes));
+    return static_cast<std::size_t>(bytes);
+}
+
+std::expected<std::uint64_t, ConfigError> ParseTierBudget(StorageTier tier, std::string_view text)
+{
+    auto const& grammar = TierBudgetGrammars[static_cast<std::size_t>(tier)];
+    auto parsed = grammar.parse(text).and_then([](std::uint64_t bytes) -> std::expected<std::uint64_t, ConfigError> {
+        auto const checked = CheckTierBudget(bytes);
+        if (!checked.has_value())
+            return std::unexpected(ArgvError(ConfigErrorCode::OutOfRange, checked.error()));
+        return bytes;
+    });
+    if (!parsed.has_value())
+        parsed.error().field = std::string { grammar.flag };
+    return parsed;
+}
+
 std::uint64_t CompileEstimateDefaultOf(NodeConfig const& cfg) noexcept
 {
     return cfg.compileEstimateDefaultBytes.value_or(DefaultCompileEstimateBytes);

@@ -693,6 +693,75 @@ class IStorage
     ///        forward this across their inner storages.
     virtual void Resize(std::size_t newMaxBytes) = 0;
 
+    /// Give ONE tier of a live store a new byte budget, leaving every other tier as it is.
+    ///
+    /// `Resize` cannot say which tier it means: `LayeredStorage` reads it as the in-memory
+    /// half's, so a disk budget reached through it would land on the wrong tier. This names
+    /// the tier, and a composite routes it to whichever of its stores reports that tier.
+    ///
+    /// **Bounded, not total.** A tier that sheds entries cheaply (in memory) evicts to fit
+    /// before returning; one whose eviction is a commit per record (`CowTreeStorage`)
+    /// evicts at most one slice and returns what is still over. The rest goes on later
+    /// write-path calls and on `EvictStep`, so the store serves throughout and a shrink
+    /// by most of the store never holds the caller's lock for the whole drain.
+    ///
+    /// A budget of zero keeps the tier's own meaning (unbounded for both tiers here);
+    /// whether a caller may ask for it is the caller's rule, not this interface's.
+    ///
+    /// The default describes a backend that is one tier: it resizes itself when @p tier is
+    /// one `SnapshotTiers` reports, and is not that tier otherwise. Every decorator and
+    /// composite in this tree overrides it, because the default reaching an inner
+    /// `LayeredStorage` through its `Resize` would resize the wrong half.
+    /// @param tier Which tier's budget to change.
+    /// @param newMaxBytes The tier's new budget.
+    /// @return Bytes the tier still holds above its new budget (0 once it fits), or
+    ///         nullopt when this store has no such tier -- absent, never zero.
+    virtual std::optional<std::size_t> ResizeTier(StorageTier tier, std::size_t newMaxBytes)
+    {
+        if (!SnapshotTiers()[static_cast<std::size_t>(tier)].has_value())
+            return std::nullopt;
+        Resize(newMaxBytes);
+        return BytesOverBudget(SnapshotTiers()[static_cast<std::size_t>(tier)]);
+    }
+
+    /// Evict one more bounded slice toward the budgets, where a tier is still over one.
+    ///
+    /// What carries a `ResizeTier` shrink the rest of the way when no write arrives to do
+    /// it: a periodic driver calls this until it answers zero. A tier that evicts to fit
+    /// whenever its budget moves is never over, which is the default's answer.
+    /// @return Bytes still above budget, summed over this store's tiers; 0 once all fit.
+    virtual std::size_t EvictStep()
+    {
+        return 0;
+    }
+
+    /// Two stores' `ResizeTier` answers as one composite's.
+    ///
+    /// Absent only when both are: a composite has a tier when any of its stores does, and
+    /// what it still holds over budget is what they hold over between them.
+    /// @param lhs One store's answer.
+    /// @param rhs The other's.
+    /// @return The sum of the present answers, or nullopt when neither is present.
+    [[nodiscard]] static constexpr std::optional<std::size_t> CombineTierExcess(std::optional<std::size_t> lhs,
+                                                                                std::optional<std::size_t> rhs) noexcept
+    {
+        if (!lhs.has_value())
+            return rhs;
+        if (!rhs.has_value())
+            return lhs;
+        return *lhs + *rhs;
+    }
+
+    /// How far @p stats sits above its own budget.
+    /// @param stats One tier's statistics, or nullopt for a tier that is not there.
+    /// @return `bytesUsed - bytesLimit` when over a non-zero limit; 0 otherwise.
+    [[nodiscard]] static constexpr std::size_t BytesOverBudget(std::optional<StorageStats> const& stats) noexcept
+    {
+        if (!stats.has_value() || stats->bytesLimit == 0 || stats->bytesUsed <= stats->bytesLimit)
+            return 0;
+        return stats->bytesUsed - stats->bytesLimit;
+    }
+
     /// @return Current storage statistics.
     [[nodiscard]] virtual StorageStats Snapshot() const noexcept = 0;
 

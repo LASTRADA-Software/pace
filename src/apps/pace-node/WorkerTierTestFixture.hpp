@@ -241,6 +241,9 @@ struct WorkerTierFixture
     /// `activatedNodeEndpoint` as they stand THEN, as `main` builds the process's one -- and kept for
     /// as long as the fixture, since a tier borrows it.
     std::vector<std::unique_ptr<AppliedSchedulers>> schedulers;
+    /// What each started tier reads `capacity` through, one per `Start` -- `capacity` as it stands
+    /// THEN -- and kept for as long as the fixture, since a tier borrows it.
+    std::vector<std::unique_ptr<FixedNodeCapacity>> capacities;
 
     /// Start a tier for `cfg` on a machine of sixteen cores.
     [[nodiscard]] std::expected<std::unique_ptr<WorkerTier>, NodeRefusal> Start()
@@ -264,9 +267,10 @@ struct WorkerTierFixture
                                    .scratchBase = scratchBase.empty() ? scratch.Path() : scratchBase };
         };
         schedulers.push_back(std::make_unique<AppliedSchedulers>(cfg, activatedNodeEndpoint));
+        capacities.push_back(std::make_unique<FixedNodeCapacity>(capacity));
         return WorkerTier::Start(WorkerTierParts { .cfg = cfg,
                                                    .reloader = nullptr,
-                                                   .capacity = capacity,
+                                                   .capacity = *capacities.back(),
                                                    .announced = announced,
                                                    .endpoints = endpoints,
                                                    .activatedNodeEndpoint = activatedNodeEndpoint,

@@ -207,10 +207,6 @@ NodePresence::NodePresence(NodePresenceParts const& parts, SchedulerLink link):
     _capacity { parts.capacity },
     _held { parts.held },
     _peaks { parts.peaks },
-    // `AnnouncedCapacity` rather than `Distributed::CapacityToWire` alone: the latter knows
-    // nothing of the version, so a node with no worker sent NODE-ANNOUNCE with none, and the
-    // leader recorded it exactly as absent as a build too old to know the field.
-    _capacityWire { AnnouncedCapacity(parts.capacity) },
     _loadSampler { MakeHostLoadSampler(MakeSystemCounterSource()) },
     _dialer { parts.dialer },
     _link { std::move(link) },
@@ -242,12 +238,19 @@ void NodePresence::Loop(std::stop_token const& stop)
         // True unless the presence dial ran and found nobody: an empty endpoint dials nothing, so there
         // is no failure to be told by, and the budget still goes (R6).
         auto reached = true;
+        // Read once per round, for both records below: a live cache-budget override moves the
+        // reserve each is derived from, and the two must describe the same moment.
+        auto const capacity = _capacity.Current();
+        // `AnnouncedCapacity` rather than `Distributed::CapacityToWire` alone: the latter knows
+        // nothing of the version, so a node with no worker sent NODE-ANNOUNCE with none, and the
+        // leader recorded it exactly as absent as a build too old to know the field.
+        auto const capacityWire = AnnouncedCapacity(capacity);
         if (auto const endpoint = _announced.Current(); !endpoint.empty())
             (void) AnnounceMachineOnce(PresenceRound { .loadSampler = *_loadSampler,
                                                        .cacheTier = _cacheTier,
                                                        .metrics = _metrics,
                                                        .sampler = _sampler,
-                                                       .capacity = _capacityWire,
+                                                       .capacity = capacityWire,
                                                        .endpoint = endpoint,
                                                        .logger = _logger,
                                                        .conditions = _conditions,
@@ -266,7 +269,7 @@ void NodePresence::Loop(std::stop_token const& stop)
         // never costs the other.
         if (reached)
             (void) SendMachineBudgetOnce(MachineBudgetRound { .cfg = _cfg,
-                                                              .capacity = _capacity,
+                                                              .capacity = capacity,
                                                               .held = _held,
                                                               .peaks = _peaks,
                                                               .logger = _logger,

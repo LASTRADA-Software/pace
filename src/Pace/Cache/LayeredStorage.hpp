@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <expected>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -203,6 +204,22 @@ class LayeredStorage final: public IStorage
     /// (typically unbounded for disk-backed tiers).
     /// @param newL1MaxBytes New L1 byte budget.
     void Resize(std::size_t newL1MaxBytes) override;
+
+    /// Route a tier's new budget to whichever store IS that tier.
+    ///
+    /// Both stores are asked and each answers only for a tier it reports, so a disk budget
+    /// reaches L2 alone and a memory budget L1 alone -- which is the whole difference from
+    /// `Resize`, whose one number this composite reads as L1's. Asked of both rather than
+    /// routed by a fixed slot: L2 is whatever the caller composed, and a test double
+    /// standing in for the disk tier says for itself which tier it is.
+    /// @param tier Which tier's budget to change.
+    /// @param newMaxBytes The new budget.
+    /// @return What the store holding @p tier still holds over it; nullopt when neither does.
+    std::optional<std::size_t> ResizeTier(StorageTier tier, std::size_t newMaxBytes) override;
+
+    /// One more eviction slice in each store.
+    /// @return Bytes still over budget across both.
+    std::size_t EvictStep() override;
 
     /// Test-only access to the inner cache (the L1 mirror).
     [[nodiscard]] InMemoryLruStorage& L1() noexcept

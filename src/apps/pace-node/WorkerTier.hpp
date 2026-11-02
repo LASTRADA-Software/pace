@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include "CacheTier.hpp"
 #include "CompileCapacity.hpp"
 #include "CompileResponder.hpp"
 #include "EndpointDialer.hpp"
@@ -117,9 +118,12 @@ using WorkerMachineFactory = std::function<WorkerMachine()>;
 /// What a worker tier borrows from the node that starts it, all of which outlive it.
 struct WorkerTierParts
 {
-    NodeConfig const& cfg;                     ///< The configuration the node started with.
-    NodeReloader const* reloader {};           ///< The live configuration; null with no file.
-    Distributed::NodeCapacity const& capacity; ///< What `NodeCapacityOf` made of this machine.
+    NodeConfig const& cfg;           ///< The configuration the node started with.
+    NodeReloader const* reloader {}; ///< The live configuration; null with no file.
+    /// What `NodeCapacityOf` made of this machine. Read ONCE at construction for the slot count, the
+    /// thread pool and REGISTER's capacity record, which are fixed for the worker's life; read per
+    /// heartbeat for the slot ceilings `node-status` names, which follow a live cache-budget override.
+    INodeCapacitySource const& capacity;
     /// Where this node tells clients to reach it, right now.
     ///
     /// **Owned by `main` rather than by this tier since
@@ -494,9 +498,9 @@ class WorkerTier
     CompileResponder _responder;
     NodeRuntimeState _runtime;
     CompileCacheWire::CapacityFields _advertisedWire;
-    /// What `NodeCapacityOf` made of this machine: the capacity the scheduler's `SlotCeilingsFor` weighs this
-    /// worker's load against, held so `node-status` weighs it the same way.
-    Distributed::NodeCapacity _machineCapacity;
+    /// What `NodeCapacityOf` makes of this machine: the capacity the scheduler's `SlotCeilingsFor` weighs this
+    /// worker's load against, read per round so `node-status` weighs it as it stands after a budget override.
+    INodeCapacitySource const& _machineCapacity;
     std::vector<Cc::WorkerRegistrar> _registrars;
     std::vector<Cc::WorkerRegistrar> _withdrawals;
     IEndpointDialer& _dialer;

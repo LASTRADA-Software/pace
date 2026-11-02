@@ -361,6 +361,11 @@ class FleetSampler final: public IFleetHistoryView
     /// @param load Where the node series reads this machine's CPU busy (`FleetMetric::CpuBusyPermille`): a
     ///             sampler of its OWN, since one holds the previous counters and a shared one would cut another
     ///             reader's interval. Null, or a reading the sampler cannot take, records the slot ABSENT.
+    /// @param historyKeys How many requesters and toolchains the keyed histories keep by name.
+    /// @param afterSample Run on the sampler's thread after every sample, or empty for nothing. The node's
+    ///             one periodic loop that runs on EVERY node, so it is where a cache tier left over its budget
+    ///             by a live shrink takes its next eviction slice (`CacheTier::EvictStep`) when no write
+    ///             arrives to take it.
     FleetSampler(std::optional<Distributed::FleetSources> sources,
                  IMetricsSink const& metrics,
                  AdminHttpServer::SnapshotProvider node,
@@ -368,7 +373,8 @@ class FleetSampler final: public IFleetHistoryView
                  HistoryPaths paths,
                  ILogger& logger,
                  std::unique_ptr<IHostLoadSampler> load = nullptr,
-                 std::size_t historyKeys = Distributed::DefaultHistoryKeys);
+                 std::size_t historyKeys = Distributed::DefaultHistoryKeys,
+                 std::function<void()> afterSample = {});
 
     /// Stops the thread and writes every store out one last time.
     ~FleetSampler() override;
@@ -564,6 +570,8 @@ class FleetSampler final: public IFleetHistoryView
     /// the series it indexes.
     std::atomic<std::int64_t> _handedThrough { -1 };
     ILogger& _logger;
+    /// Run after every sample, on the sampler's thread; empty for nothing.
+    std::function<void()> _afterSample;
     std::jthread _thread;
 };
 

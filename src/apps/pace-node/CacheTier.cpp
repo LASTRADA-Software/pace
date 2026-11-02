@@ -23,6 +23,7 @@
 #include <filesystem>
 #include <format>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -417,6 +418,75 @@ CacheTier::CacheTier(std::unique_ptr<IStorage> storage,
     _proxy { _cache, metrics },
     _responder { _proxy, locality, metrics }
 {
+}
+
+std::expected<void, std::string> CacheTier::ApplyTierBudget(StorageTier tier, std::size_t bytes)
+{
+    auto const checked = CheckTierBudget(bytes);
+    if (!checked.has_value())
+        return std::unexpected(checked.error());
+
+    std::scoped_lock const lock { _budgetMutex };
+    // One call that both asks and acts: every store answers nullopt for a tier it does not
+    // have BEFORE touching anything, so an absent tier is refused with nothing changed and
+    // there is no window between a presence check and the resize.
+    if (!_storage->ResizeTier(tier, *checked).has_value())
+        return std::unexpected(std::format("no {} tier on this node", TraitsFor(tier).name));
+    if (_budgetListener != nullptr)
+        _budgetListener->TierBudgetApplied();
+    return {};
+}
+
+std::size_t CacheTier::EvictStep()
+{
+    return _storage->EvictStep();
+}
+
+std::size_t StepTierEviction(CacheTier* tier)
+{
+    return tier != nullptr ? tier->EvictStep() : 0;
+}
+
+void CacheTier::SetBudgetListener(ITierBudgetListener* listener) noexcept
+{
+    std::scoped_lock const lock { _budgetMutex };
+    _budgetListener = listener;
+}
+
+LiveNodeCapacity::LiveNodeCapacity(NodeConfig const& cfg, IHostFactsSource const& host, CacheTier* tier):
+    _cfg { cfg },
+    _host { host },
+    _tier { tier },
+    _current { Derive() }
+{
+    if (_tier != nullptr)
+        _tier->SetBudgetListener(this);
+}
+
+LiveNodeCapacity::~LiveNodeCapacity()
+{
+    if (_tier != nullptr)
+        _tier->SetBudgetListener(nullptr);
+}
+
+Distributed::NodeCapacity LiveNodeCapacity::Current() const
+{
+    std::scoped_lock const lock { _mutex };
+    return _current;
+}
+
+void LiveNodeCapacity::TierBudgetApplied()
+{
+    // Derived OUTSIDE the lock: it takes the store's shard mutex, and a reader of `Current`
+    // must never wait on a cache verb.
+    auto const derived = Derive();
+    std::scoped_lock const lock { _mutex };
+    _current = derived;
+}
+
+Distributed::NodeCapacity LiveNodeCapacity::Derive() const
+{
+    return NodeCapacityOf(_cfg, _host, CacheCapacityOf(_tier), IndexReserveBytesOf(_tier));
 }
 
 std::expected<std::unique_ptr<CacheTier>, std::string> CacheTier::Start(NodeConfig const& cfg,

@@ -269,7 +269,7 @@ std::expected<std::unique_ptr<WorkerTier>, NodeRefusal> WorkerTier::Start(Worker
     // Through `WorkerSlotsOf`, never `OfferableSlots` directly -- its header says which
     // way the other spelling fails (#206). Absent is a node running no worker, and it
     // gets no tier at all.
-    auto const slots = WorkerSlotsOf(parts.cfg, parts.capacity);
+    auto const slots = WorkerSlotsOf(parts.cfg, parts.capacity.Current());
     if (!slots.has_value())
         return std::unique_ptr<WorkerTier> {};
 
@@ -415,7 +415,7 @@ WorkerTier::WorkerTier(WorkerTierParts const& parts,
     _runtime { ToolchainReading { .state = CompileCacheWire::ToolchainState::Surveying,
                                   .served = 0,
                                   .discovered = static_cast<std::uint32_t>(_discovered.entries.size()) } },
-    _advertisedWire { Distributed::CapacityToWire(parts.capacity) },
+    _advertisedWire { Distributed::CapacityToWire(parts.capacity.Current()) },
     _machineCapacity { parts.capacity },
     _dialer { parts.schedulerDialer },
     _link { std::move(link) },
@@ -617,7 +617,7 @@ void WorkerTier::Heartbeat(std::stop_token const& stop,
                                  // capacity this worker registered with and the load this round sent.
                                  .sampled = [this, &statusClock](Distributed::NodeLoad const& load) {
                                      _runtime.PublishSlotCeilings(SlotCeilingsReading {
-                                         .ceilings = Distributed::SlotCeilingsFor(_machineCapacity, _slots, load),
+                                         .ceilings = Distributed::SlotCeilingsFor(_machineCapacity.Current(), _slots, load),
                                          .sampledAt = statusClock.now() });
                                  } };
 

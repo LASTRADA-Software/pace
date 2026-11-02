@@ -1128,6 +1128,95 @@ TEST_CASE("Resize shrinks budget and triggers immediate eviction", "[cowstorage]
     CHECK(after.itemCount > 0U);
 }
 
+TEST_CASE("The eviction slice is 4096 records unless a store is told otherwise", "[cowstorage][eviction][resize]")
+{
+    // The constant the live-resize design names, pinned at its value and as the default:
+    // a slice a test shrank is a test's slice, never production's.
+    STATIC_REQUIRE(Pace::CowTreeStorage::EvictSliceRecords == 4096);
+    CHECK(Pace::CowTreeStorage::Options {}.evictSliceRecords == Pace::CowTreeStorage::EvictSliceRecords);
+}
+
+TEST_CASE("disk shrink evicts in slices and serves reads between slices", "[cowstorage][eviction][resize]")
+{
+    // A slice small enough to watch end: eight records, against a hundred one-page entries
+    // and a sixteen-page budget, so the shrink takes many slices and each must stop at eight.
+    constexpr std::size_t Slice = 8;
+    constexpr int Entries = 100;
+    TempFile tmp;
+    auto opts = FootprintOptions(tmp.path, 0);
+    opts.evictSliceRecords = Slice;
+    auto storage = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(storage.has_value());
+    core::platform::ManualClock clock;
+    for (auto const i: std::views::iota(0, Entries))
+        REQUIRE((*storage)
+                    ->Set(std::format("k-{:03d}", i),
+                          RandomBytes(OnePageValueLen, static_cast<std::uint64_t>(i)),
+                          0,
+                          core::platform::SteadyTimePoint::max())
+                    .has_value());
+
+    // Not this store's tier: answered absent, and nothing moves.
+    CHECK_FALSE((*storage)->ResizeTier(Pace::StorageTier::Memory, Pages(16)).has_value());
+    CHECK((*storage)->Snapshot().evictions == 0U);
+
+    auto const first = (*storage)->ResizeTier(Pace::StorageTier::Disk, Pages(16));
+    REQUIRE(first.has_value());
+    // One slice, exactly, and the store is still over: the excess is reported, not hidden.
+    CHECK((*storage)->Snapshot().evictions == Slice);
+    CHECK(Unwrap(first) > 0U);
+    CHECK(Unwrap(first) == (*storage)->Snapshot().bytesUsed - Pages(16));
+    CHECK((*storage)->Snapshot().bytesLimit == Pages(16));
+
+    // Serving between slices: the newest entry is the warmest, and still there.
+    auto const between = (*storage)->Get(std::format("k-{:03d}", Entries - 1), clock.now());
+    REQUIRE(between.has_value());
+    CHECK(between->found);
+
+    // Converges, one bounded slice per step, and never takes more than a slice at a time.
+    auto excess = Unwrap(first);
+    auto evictions = (*storage)->Snapshot().evictions;
+    std::size_t steps = 0;
+    while (excess != 0 && steps < static_cast<std::size_t>(Entries))
+    {
+        excess = (*storage)->EvictStep();
+        auto const now = (*storage)->Snapshot().evictions;
+        CHECK(now - evictions <= Slice);
+        evictions = now;
+        ++steps;
+    }
+    CHECK(excess == 0U);
+    CHECK((*storage)->Snapshot().bytesUsed <= Pages(16));
+    CHECK(steps > 1U);
+    // A store that fits has nothing for a step to do.
+    CHECK((*storage)->EvictStep() == 0U);
+    CHECK((*storage)->Snapshot().evictions == evictions);
+}
+
+TEST_CASE("disk grow takes effect without eviction", "[cowstorage][eviction][resize]")
+{
+    TempFile tmp;
+    auto storage = Pace::CowTreeStorage::Open(FootprintOptions(tmp.path, Pages(64)));
+    REQUIRE(storage.has_value());
+    for (auto const i: std::views::iota(0, 20))
+        REQUIRE((*storage)
+                    ->Set(std::format("k-{:03d}", i),
+                          RandomBytes(OnePageValueLen, static_cast<std::uint64_t>(i)),
+                          0,
+                          core::platform::SteadyTimePoint::max())
+                    .has_value());
+    auto const before = (*storage)->Snapshot();
+    REQUIRE(before.evictions == 0U);
+
+    auto const grown = (*storage)->ResizeTier(Pace::StorageTier::Disk, Pages(128));
+    REQUIRE(grown.has_value());
+    CHECK(Unwrap(grown) == 0U);
+    auto const after = (*storage)->Snapshot();
+    CHECK(after.bytesLimit == Pages(128));
+    CHECK(after.evictions == 0U);
+    CHECK(after.itemCount == before.itemCount);
+}
+
 TEST_CASE("Three Open/Close cycles preserve every entry", "[cowstorage][persist]")
 {
     constexpr int N = 100;

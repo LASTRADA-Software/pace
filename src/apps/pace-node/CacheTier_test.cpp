@@ -2,6 +2,7 @@
 #include "AdminEndpoint.hpp"
 #include "CacheTier.hpp"
 #include "LiveStatsSources.hpp"
+#include "MachineBudget.hpp"
 #include "MachineStandingTestUtils.hpp"
 #include "NodeIoLoop.hpp"
 #include "NodeProofClient.hpp"
@@ -37,10 +38,12 @@
 #include <fstream>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -497,6 +500,286 @@ TEST_CASE("A disk-only node keeps its disk tier", "[node][cache-tier]")
     auto const tiers = tier->SnapshotTiers();
     CHECK_FALSE(At(tiers, StorageTier::Memory).has_value());
     CHECK(At(tiers, StorageTier::Disk).has_value());
+}
+
+namespace
+{
+
+/// Bytes that no codec shrinks, so a disk tier's footprint grows by what the case wrote.
+///
+/// The leading byte is pinned outside `[1, MaxCompileValueGeneration]`, so the tier stores the
+/// value verbatim: a random leading byte inside that range reads as a compile value of some
+/// generation, and one this build does not implement is refused (#483).
+/// @param bytes How long; at least one.
+/// @param seed Varies the content between values.
+/// @return That many bytes of a linear congruential sequence after the pinned first.
+[[nodiscard]] std::vector<std::byte> Incompressible(std::size_t bytes, std::uint64_t seed)
+{
+    std::vector<std::byte> out(bytes);
+    auto state = (seed * 6364136223846793005ULL) + 1442695040888963407ULL;
+    for (auto& byte: out)
+    {
+        state = (state * 6364136223846793005ULL) + 1442695040888963407ULL;
+        byte = static_cast<std::byte>(state >> 56U);
+    }
+    out.front() = std::byte { 0x5A };
+    return out;
+}
+
+/// What the tier's STORE verb answers, over the loopback peer every cache verb admits.
+/// @param tier The tier.
+/// @param frame The request.
+/// @return The reply's status, or nullopt when the reply carried none.
+[[nodiscard]] std::optional<Wire::Status> Ask(CacheTier& tier, std::vector<std::byte> const& frame)
+{
+    return StatusOf(core::async::syncRun(tier.Responder().Answer(frame, PeerIdentity { .host = "127.0.0.1" })).bytes);
+}
+
+/// A STORE request for @p key carrying @p value.
+/// @param key The object key.
+/// @param value The object.
+/// @return The frame.
+[[nodiscard]] std::vector<std::byte> StoreFrame(std::string const& key, std::vector<std::byte> value)
+{
+    return Wire::EncodeStore(Wire::StoreRequest {
+        .key = key, .prefetchGroup = {}, .srcRoot = "/src", .buildTree = "/build", .value = std::move(value) });
+}
+
+} // namespace
+
+TEST_CASE("zero refused as a live tier budget", "[node][cache-tier][resize]")
+{
+    // Zero is how both tiers spell UNBOUNDED, and `--cache-memory 0` how a node builds no
+    // memory tier: a live store can do neither safely, so the override is refused by name.
+    Fixture fixture;
+    auto cfg = Fixture::BaseConfig();
+    cfg.cacheMemoryBytes = 8 * 1024 * 1024;
+    auto started = fixture.Start(cfg);
+    REQUIRE(started.has_value());
+    auto const tier = std::move(*started);
+    REQUIRE(tier != nullptr);
+
+    auto const applied = tier->ApplyTierBudget(StorageTier::Memory, 0);
+    REQUIRE_FALSE(applied.has_value());
+    CHECK(applied.error() == TierOverrideCannotRemoveTier);
+    // And nothing moved.
+    CHECK(Unwrap(At(tier->SnapshotTiers(), StorageTier::Memory)).bytesLimit == cfg.cacheMemoryBytes);
+}
+
+TEST_CASE("absent tier refused as a live tier budget", "[node][cache-tier][resize]")
+{
+    Fixture fixture;
+    auto cfg = Fixture::BaseConfig();
+    cfg.cacheMemoryBytes = 8 * 1024 * 1024;
+    auto started = fixture.Start(cfg);
+    REQUIRE(started.has_value());
+    auto const tier = std::move(*started);
+    REQUIRE(tier != nullptr);
+
+    auto const applied = tier->ApplyTierBudget(StorageTier::Disk, 64ULL * 1024 * 1024);
+    REQUIRE_FALSE(applied.has_value());
+    CHECK(applied.error() == "no disk tier on this node");
+    // Still no disk tier: refusing is not creating one.
+    CHECK_FALSE(At(tier->SnapshotTiers(), StorageTier::Disk).has_value());
+    CHECK(Unwrap(At(tier->SnapshotTiers(), StorageTier::Memory)).bytesLimit == cfg.cacheMemoryBytes);
+}
+
+TEST_CASE("A live tier budget is parsed by its startup flag's own grammar", "[node][cache-tier][resize]")
+{
+    // `N%` is `--cache-memory`'s and not `--cache-disk`'s, and zero is refused for both.
+    CHECK(Unwrap(ParseTierBudget(StorageTier::Memory, "64m")) == 64ULL * 1024 * 1024);
+    CHECK(Unwrap(ParseTierBudget(StorageTier::Disk, "2g")) == 2ULL * 1024 * 1024 * 1024);
+    CHECK(ParseTierBudget(StorageTier::Memory, "10%").has_value());
+    auto const percentDisk = ParseTierBudget(StorageTier::Disk, "10%");
+    REQUIRE_FALSE(percentDisk.has_value());
+    CHECK(percentDisk.error().field == "--cache-disk");
+    auto const zero = ParseTierBudget(StorageTier::Memory, "0");
+    REQUIRE_FALSE(zero.has_value());
+    CHECK(zero.error().context == TierOverrideCannotRemoveTier);
+    CHECK(zero.error().field == "--cache-memory");
+    CHECK_FALSE(ParseTierBudget(StorageTier::Disk, "lots").has_value());
+}
+
+TEST_CASE("capacity recomputed after shrink", "[node][cache-tier][resize][capacity]")
+{
+    // What a node holds back from compiles is what its tier HOLDS (#167), so a shrink must
+    // move the reserve, and through it the machine budget the presence loop reports next.
+    Fixture fixture;
+    auto cfg = Fixture::BaseConfig();
+    constexpr std::uint64_t Before = 64ULL * 1024 * 1024;
+    constexpr std::uint64_t After = 16ULL * 1024 * 1024;
+    cfg.cacheMemoryBytes = Before;
+    auto started = fixture.Start(cfg);
+    REQUIRE(started.has_value());
+    auto const tier = std::move(*started);
+    REQUIRE(tier != nullptr);
+    Testing::ScriptedHostFacts const host;
+    LiveNodeCapacity live { cfg, host, tier.get() };
+
+    auto const was = live.Current();
+    CHECK(Unwrap(At(was.cache.tierBytesLimit, StorageTier::Memory)) == Before);
+    auto const wasBudget = MachineBudgetOf(cfg, was, HeldCharges {});
+
+    REQUIRE(tier->ApplyTierBudget(StorageTier::Memory, After).has_value());
+
+    auto const now = live.Current();
+    CHECK(Unwrap(At(now.cache.tierBytesLimit, StorageTier::Memory)) == After);
+    // The same derivation the start makes, over the tier as it now stands -- not a patch of
+    // the old figure by the difference.
+    auto const rederived = NodeCapacityOf(cfg, host, CacheCapacityOf(tier.get()), IndexReserveBytesOf(tier.get()));
+    CHECK(now.reservedMemoryBytes == rederived.reservedMemoryBytes);
+    CHECK(now.cache.tierBytesLimit == rederived.cache.tierBytesLimit);
+    CHECK(was.reservedMemoryBytes - now.reservedMemoryBytes == Before - After);
+    auto const nowBudget = MachineBudgetOf(cfg, now, HeldCharges {});
+    auto const usable = [&host](Distributed::NodeCapacity const& c) {
+        return (host.TotalMemoryBytes() - c.reservedMemoryBytes) * MachineBudgetSharePercent / 100;
+    };
+    CHECK(wasBudget.memoryBudgetBytes == usable(was));
+    CHECK(nowBudget.memoryBudgetBytes == usable(now));
+    CHECK(nowBudget.memoryBudgetBytes > wasBudget.memoryBudgetBytes);
+
+    // A refused apply tells nobody: the capacity stays what the tier holds.
+    REQUIRE_FALSE(tier->ApplyTierBudget(StorageTier::Disk, After).has_value());
+    CHECK(live.Current().reservedMemoryBytes == now.reservedMemoryBytes);
+    CHECK(live.Current().cache.tierBytesLimit == now.cache.tierBytesLimit);
+}
+
+TEST_CASE("A disk tier shrunk live keeps serving and converges", "[node][cache-tier][resize]")
+{
+    Testing::ScratchDirectory const scratch { "node-cache-disk-shrink" };
+    Fixture fixture;
+    auto cfg = Fixture::BaseConfig();
+    cfg.cacheMemoryBytes = 0;
+    cfg.cacheDir = scratch.Path();
+    auto started = fixture.Start(cfg);
+    REQUIRE(started.has_value());
+    auto const tier = std::move(*started);
+    REQUIRE(tier != nullptr);
+
+    constexpr int Objects = 64;
+    for (auto const i: std::views::iota(0, Objects))
+        REQUIRE(Ask(*tier, StoreFrame(std::format("obj-{:03}", i), Incompressible(32 * 1024, static_cast<std::uint64_t>(i))))
+                == Wire::Status::Ok);
+    auto const held = Unwrap(At(tier->SnapshotTiers(), StorageTier::Disk)).bytesUsed;
+    auto const budget = held / 4;
+
+    REQUIRE(tier->ApplyTierBudget(StorageTier::Disk, budget).has_value());
+    auto const disk = Unwrap(At(tier->SnapshotTiers(), StorageTier::Disk));
+    CHECK(disk.bytesLimit == budget);
+    CHECK(disk.evictions > 0U);
+    // The newest object is the warmest, and still served.
+    CHECK(Ask(*tier, Wire::EncodeFetch(std::format("obj-{:03}", Objects - 1))) == Wire::Status::Ok);
+    CHECK(tier->EvictStep() == 0U);
+    CHECK(IStorage::BytesOverBudget(At(tier->SnapshotTiers(), StorageTier::Disk)) == 0U);
+}
+
+namespace
+{
+/// The concurrent-shrink case's shape: objects seeded before it, cache verbs on the traffic
+/// thread, readings on the reader thread, eviction steps on the shrinking thread, and the size
+/// of every object -- each larger than a disk page, so every eviction frees pages.
+constexpr int ShrinkSeeded = 96;
+constexpr int ShrinkTrafficOps = 192;
+constexpr int ShrinkReads = 192;
+constexpr int ShrinkSteps = 64;
+constexpr std::size_t ShrinkValueBytes = 24 * 1024;
+} // namespace
+
+TEST_CASE("concurrent cache traffic during disk shrink", "[node][cache-tier][resize][concurrency]")
+{
+    // The production threads, each on its own: cache verbs (the reactor), the override
+    // being applied and the store being stepped down (the admin surface, the sampler), and
+    // the readers of what the tiers hold (the heartbeat, the presence loop, node-status).
+    // Run under TSan by `scripts/tsan-gate.sh`, whose pace-node-tests row selects every case.
+    Testing::ScratchDirectory const scratch { "node-cache-concurrent-shrink" };
+    Fixture fixture;
+    auto cfg = Fixture::BaseConfig();
+    cfg.cacheMemoryBytes = 1024 * 1024;
+    cfg.cacheDir = scratch.Path();
+    auto started = fixture.Start(cfg);
+    REQUIRE(started.has_value());
+    auto const tier = std::move(*started);
+    REQUIRE(tier != nullptr);
+    Testing::ScriptedHostFacts const host;
+    LiveNodeCapacity live { cfg, host, tier.get() };
+
+    for (auto const i: std::views::iota(0, ShrinkSeeded))
+        REQUIRE(
+            Ask(*tier,
+                StoreFrame(std::format("seed-{:03}", i), Incompressible(ShrinkValueBytes, static_cast<std::uint64_t>(i))))
+            == Wire::Status::Ok);
+    auto const budget = Unwrap(At(tier->SnapshotTiers(), StorageTier::Disk)).bytesUsed / 3;
+
+    // Each thread RETURNS what it saw; every assertion runs on this thread after the joins.
+    struct Traffic
+    {
+        int stored = 0;
+        int failed = 0;
+    };
+    struct Shrink
+    {
+        bool applied = false;
+        std::size_t lastExcess = 0;
+    };
+    struct Readings
+    {
+        int taken = 0;
+        int inconsistent = 0;
+    };
+    Traffic traffic;
+    Shrink shrink;
+    Readings readings;
+    {
+        std::jthread const writer { [&tier, &traffic] {
+            for (auto const i: std::views::iota(0, ShrinkTrafficOps))
+            {
+                auto const status =
+                    i % 2 == 0 ? Ask(*tier,
+                                     StoreFrame(std::format("new-{:03}", i),
+                                                Incompressible(ShrinkValueBytes, 1000U + static_cast<std::uint64_t>(i))))
+                               : Ask(*tier, Wire::EncodeFetch(std::format("seed-{:03}", i % ShrinkSeeded)));
+                if (status == Wire::Status::Ok)
+                    ++traffic.stored;
+                else if (status != Wire::Status::Miss)
+                    ++traffic.failed;
+            }
+        } };
+        std::jthread const shrinker { [&tier, &shrink, budget] {
+            shrink.applied = tier->ApplyTierBudget(StorageTier::Disk, budget).has_value();
+            for ([[maybe_unused]] auto const step: std::views::iota(0, ShrinkSteps))
+                shrink.lastExcess = tier->EvictStep();
+        } };
+        std::jthread const reader { [&tier, &live, &readings] {
+            for ([[maybe_unused]] auto const read: std::views::iota(0, ShrinkReads))
+            {
+                auto const capacity = live.Current();
+                auto const tiers = tier->SnapshotTiers();
+                auto const budgets = CacheCapacityOf(tier.get());
+                (void) IndexReserveBytesOf(tier.get());
+                ++readings.taken;
+                // A budget is one of the two values it ever holds, never anything torn.
+                auto const limit = At(budgets.tierBytesLimit, StorageTier::Disk);
+                if (!limit.has_value() || !At(tiers, StorageTier::Disk).has_value()
+                    || !At(capacity.cache.tierBytesLimit, StorageTier::Disk).has_value())
+                    ++readings.inconsistent;
+            }
+        } };
+    }
+
+    CHECK(shrink.applied);
+    CHECK(traffic.failed == 0);
+    CHECK(traffic.stored > 0);
+    CHECK(readings.taken == ShrinkReads);
+    CHECK(readings.inconsistent == 0);
+    // Writes went on after the last step; the store converges once they stop.
+    std::size_t excess = shrink.lastExcess;
+    for ([[maybe_unused]] auto const settle: std::views::iota(0, ShrinkSteps))
+        excess = tier->EvictStep();
+    CHECK(excess == 0U);
+    auto const disk = Unwrap(At(tier->SnapshotTiers(), StorageTier::Disk));
+    CHECK(disk.bytesLimit == budget);
+    CHECK(disk.bytesUsed <= budget);
+    CHECK(Unwrap(At(live.Current().cache.tierBytesLimit, StorageTier::Disk)) == budget);
 }
 
 TEST_CASE("A cache directory that cannot be opened is fatal when it was named", "[node][cache-tier]")
@@ -1132,4 +1415,9 @@ TEST_CASE("The startup line names the upstream by its kind", "[node][cache-tier]
         REQUIRE(started.has_value());
         CHECK(Logged(fixture.logger, "upstream none)"));
     }
+}
+
+TEST_CASE("A node with no cache tier has nothing for the periodic eviction step to do", "[node][cache-tier][resize]")
+{
+    CHECK(StepTierEviction(nullptr) == 0U);
 }

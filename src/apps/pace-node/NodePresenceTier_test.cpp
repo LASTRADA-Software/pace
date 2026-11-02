@@ -160,6 +160,8 @@ struct PresenceFixture
     Cluster::IAskedJoinsSource const* askedJoins { nullptr }; ///< What the machine once asked; none by default.
     /// Where each loop built over this fixture registers, kept for as long as the fixture.
     std::vector<std::unique_ptr<AppliedSchedulers>> schedulers;
+    /// What each loop built over this fixture reads its capacity through, kept as long as the fixture.
+    std::vector<std::unique_ptr<FixedNodeCapacity>> capacities;
 
     PresenceFixture()
     {
@@ -608,7 +610,7 @@ class AnsweringDialer final: public IEndpointDialer
 /// @param events Where the host's events arrive.
 /// @return The parts.
 [[nodiscard]] NodePresenceParts PartsOver(PresenceFixture& fix,
-                                          Distributed::NodeCapacity const& capacity,
+                                          INodeCapacitySource const& capacity,
                                           AnnouncedEndpoint const& announced,
                                           IEndpointDialer& dialer,
                                           IHostEvents& events)
@@ -630,6 +632,51 @@ class AnsweringDialer final: public IEndpointDialer
                                .held = fix.held,
                                .peaks = fix.peaks };
 }
+
+/// The same, over a capacity that never moves.
+/// @param fix The fixture; keeps the capacity source for as long as it lives.
+/// @param capacity What this machine is.
+/// @param announced Where it answers.
+/// @param dialer How its rounds dial.
+/// @param events Where the host's events arrive.
+/// @return The parts.
+[[nodiscard]] NodePresenceParts PartsOver(PresenceFixture& fix,
+                                          Distributed::NodeCapacity const& capacity,
+                                          AnnouncedEndpoint const& announced,
+                                          IEndpointDialer& dialer,
+                                          IHostEvents& events)
+{
+    fix.capacities.push_back(std::make_unique<FixedNodeCapacity>(capacity));
+    return PartsOver(fix, *fix.capacities.back(), announced, dialer, events);
+}
+
+/// A capacity a case moves between rounds, as a live cache-budget override moves the node's.
+class MovableCapacity final: public INodeCapacitySource
+{
+  public:
+    /// @param capacity What this machine is until `Set`.
+    explicit MovableCapacity(Distributed::NodeCapacity capacity) noexcept:
+        _capacity { capacity }
+    {
+    }
+
+    [[nodiscard]] Distributed::NodeCapacity Current() const override
+    {
+        std::scoped_lock const lock { _mutex };
+        return _capacity;
+    }
+
+    /// @param capacity What this machine is from now on.
+    void Set(Distributed::NodeCapacity const& capacity)
+    {
+        std::scoped_lock const lock { _mutex };
+        _capacity = capacity;
+    }
+
+  private:
+    mutable std::mutex _mutex;
+    Distributed::NodeCapacity _capacity;
+};
 
 } // namespace
 
@@ -799,4 +846,43 @@ TEST_CASE("A presence the scheduler refuses does not keep the compile budget fro
     auto const second = FramesIn(dialer.SentOn(1));
     REQUIRE(second.size() == 1);
     CHECK(second.front().first == static_cast<std::uint8_t>(Wire::Op::MachineBudget));
+}
+
+TEST_CASE("The next machine budget carries a capacity moved since the last round", "[node][presence][machinebudget][resize]")
+{
+    // A live cache-budget override moves the reserve the machine budget is derived from, so the
+    // round after it must report the new figure -- read per round, never captured at the start.
+    PresenceFixture fix;
+    fix.cfg.slots = 0;
+    Testing::ScriptedHostEvents events;
+    AnsweringDialer dialer;
+    MovableCapacity capacity { Distributed::NodeCapacity { .logicalCores = 6, .totalMemoryBytes = 32ULL << 30 } };
+    AnnouncedEndpoint const announced { ThisMachine };
+    {
+        auto const presence = NodePresence::Start(PartsOver(fix, capacity, announced, dialer, events));
+        REQUIRE(presence != nullptr);
+        REQUIRE(Testing::WaitUntil(
+            "the first round's two dials",
+            [&dialer] { return dialer.Dials() >= 2; },
+            [&dialer] { return std::format("{} dial(s)", dialer.Dials()); }));
+
+        capacity.Set(Distributed::NodeCapacity {
+            .logicalCores = 6, .totalMemoryBytes = 32ULL << 30, .reservedMemoryBytes = 8ULL << 30 });
+        events.Fire(HostEvent::NetworkChanged);
+        static_assert(NodeAnnounceInterval > Testing::WaitHangGuard);
+        REQUIRE(Testing::WaitUntil(
+            "the round the network change asked for",
+            [&dialer] { return dialer.Dials() >= 4; },
+            [&dialer] { return std::format("{} dial(s)", dialer.Dials()); }));
+    }
+
+    auto const budgetOf = [&dialer](std::size_t dial) {
+        auto const frames = FramesIn(dialer.SentOn(dial));
+        REQUIRE(frames.size() == 1);
+        REQUIRE(frames.front().first == static_cast<std::uint8_t>(Wire::Op::MachineBudget));
+        return Unwrap(Wire::DecodeMachineBudgetPayload(frames.front().second)).memoryBudgetBytes;
+    };
+    // 75% of what is left after the reserve: all 32 GiB at first, 24 GiB once 8 are held back.
+    CHECK(budgetOf(1) == (24ULL << 30));
+    CHECK(budgetOf(3) == (18ULL << 30));
 }

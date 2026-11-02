@@ -992,8 +992,9 @@ struct NodeConfig
 /// Hence a **required** parameter rather than a defaulted convenience: a caller that
 /// could omit it is a caller that can quietly go back to guessing. It must also be
 /// obtained AFTER the tier has been started, which no signature can enforce --
-/// `CacheCapacityOf(nullptr)` and "not built yet" are the same record. `WorkerBody`
-/// is the one caller and derives both together, below the tier.
+/// `CacheCapacityOf(nullptr)` and "not built yet" are the same record. `LiveNodeCapacity`
+/// is the one caller, built by `WorkerBody` below the tier, and derives it again whenever
+/// a live cache-budget override moves what the tier holds.
 /// @param cfg The parsed configuration.
 /// @param host What the machine says about itself.
 /// @param cache What this node's cache tiers hold, from `CacheCapacityOf`; a
@@ -1027,6 +1028,38 @@ struct NodeConfig
 /// @param cfg The parsed configuration.
 /// @return The ceiling, in bytes.
 [[nodiscard]] std::size_t CompileRequestMaxOf(NodeConfig const& cfg) noexcept;
+
+/// What a live budget override of zero is told.
+///
+/// Zero is how both tiers spell UNBOUNDED at startup, and `--cache-memory 0` is how a node
+/// builds no memory tier at all -- so a zero arriving at a running tier would mean either
+/// "remove this tier", which a live store cannot do (the tier stack is built once), or
+/// "unbound it", which is the opposite of what an override sent to shrink a node meant. It
+/// is refused rather than given either reading.
+inline constexpr std::string_view TierOverrideCannotRemoveTier = "an override cannot remove a tier";
+
+/// The value-level rule a live tier budget is held to, however it arrived.
+///
+/// The ONE derivation a budget override shares with every surface that accepts one: a
+/// number off the wire (`CacheTier::ApplyTierBudget`) is held to this, and a number typed
+/// as text reaches it through `ParseTierBudget`, which first applies the tier's own flag
+/// grammar. Zero is refused (`TierOverrideCannotRemoveTier`), and so is a figure this
+/// process cannot address, which on a 64-bit build is none.
+/// @param bytes The budget asked for.
+/// @return The budget as this process's size type, or why it cannot be set.
+[[nodiscard]] std::expected<std::size_t, std::string> CheckTierBudget(std::uint64_t bytes);
+
+/// A tier budget typed as text, held to exactly what the tier's startup flag accepts.
+///
+/// `--cache-memory`'s grammar for the memory tier (`k`/`m`/`g` or `N%` of host RAM) and
+/// `--cache-disk`'s for the disk tier (no `N%`), through the very parsers those rows apply,
+/// then `CheckTierBudget`. A budget an operator could not have set at startup therefore
+/// cannot be set this way, and the one zero the flags accept -- "no tier" or "unbounded" --
+/// is the one this refuses.
+/// @param tier Which tier the budget is for.
+/// @param text The budget as typed.
+/// @return The budget in bytes, or why it is not one; `field` names the tier's flag.
+[[nodiscard]] std::expected<std::uint64_t, ConfigError> ParseTierBudget(StorageTier tier, std::string_view text);
 
 /// The in-flight compile budget this worker runs with: `--compile-inflight-max`, or
 /// `DefaultCompileByteBudget` over the RESOLVED slot count when it names none (#1667).
