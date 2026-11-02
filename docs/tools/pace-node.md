@@ -4172,7 +4172,7 @@ never guessed from an address, a worker id or a hostname. Each row names its mac
 stated as the slot series state it: `coverage` gives the minutes the leader counted in
 each bucket against `full_coverage`, and `observed_minutes` of `window_minutes` the
 window's -- a total is over the minutes counted, so an hour watched for one minute
-reads `1` of `60` and a demotion is a gap of zeros, never part of a whole. A bucket the
+reads `1` of `60` and a demotion is a gap whose counts are `null` (uncovered), never zero grants and never part of a whole. A bucket the
 leader was not counting in is `null`, never `0`. The most recently active
 `--history-requesters` keys (`keys_kept_max`; default 256, at most 1024, `0` refused;
 restart-only; it governs both sections) are kept by name, and the rest are summed into

@@ -757,6 +757,14 @@ inline constexpr std::size_t AdmissionEstimateCapacity = 65'536;
                                                                     std::string_view fingerprint,
                                                                     std::span<std::string const> excluded);
 
+/// A key as the registry stores a machine: the raw bytes, in a string.
+///
+/// The one derivation of a `MachineId` from an identity key -- the admission queue's charge, this node's own id and
+/// the demand history's requester all spell it, so none may restate it.
+/// @param key An identity public key.
+/// @return Its bytes.
+[[nodiscard]] std::string KeyAsMachineId(Ed25519PublicKey const& key);
+
 /// The fleet scheduler: who may compile where, and on whose behalf.
 ///
 /// ## Why this is not in the cache daemon any more

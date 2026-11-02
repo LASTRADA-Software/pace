@@ -1266,7 +1266,7 @@ void SchedulerService::ReportLeaseDemand(CallerContext const& caller, std::strin
     // identified no machine here, so it is counted UNATTRIBUTED: never guessed from an address.
     auto requester = MachineId {};
     if (caller.provenKey.has_value())
-        requester = MachineId { AsStringView(std::span<std::byte const> { *caller.provenKey }) };
+        requester = KeyAsMachineId(*caller.provenKey);
     else if (IsLoopbackHost(caller.peerId))
         requester = OwnMachineId();
     auto const guard = std::scoped_lock { _admissionMutex };

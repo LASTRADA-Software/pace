@@ -663,15 +663,6 @@ namespace
         return fields;
     }
 
-    /// @param millis An instant, in milliseconds since the epoch.
-    /// @return It as RFC 3339 UTC, to the second.
-    [[nodiscard]] std::string Rfc3339(std::int64_t millis)
-    {
-        auto const instant = std::chrono::floor<std::chrono::seconds>(
-            std::chrono::sys_time<std::chrono::milliseconds> { std::chrono::milliseconds { millis } });
-        return std::format("{:%FT%TZ}", instant);
-    }
-
     /// @param text A cell.
     /// @return Its integer, or nothing when it is not one.
     [[nodiscard]] std::optional<std::int64_t> IntegerCell(std::string_view text)
@@ -893,11 +884,24 @@ namespace
                 : std::string {};
         // Over the minutes the leader COUNTED, never "since" an instant alone: a demotion's gap, or a bucket watched
         // for one minute of sixty, is a part of the window nobody counted, and the total is that part's.
+        // The headline is the SELECTED rows' own totals when `key` narrowed the list -- "N compile(s) granted" beside
+        // "the row for X" must be X's N, with the whole window's total still in the section for a reader who wants it.
+        auto granted = numberAt("total");
+        if (key.has_value())
+        {
+            granted = 0;
+            for (auto const& row: *section.Find("keys")->AsArray())
+            {
+                auto const* const rowTotal = row.Find("total");
+                granted += rowTotal != nullptr ? rowTotal->AsUint().value_or(0) : std::uint64_t { 0 };
+            }
+            selected += std::format("; the window's whole total is {}", numberAt("total"));
+        }
         auto text = std::format("{} over {}: {} compile(s) granted, {} {} named{}{}{}; counted for {} of the window's {} "
                                 "minute(s), first at {}; {}",
                                 dimension.series,
                                 range.key,
-                                numberAt("total"),
+                                granted,
                                 named,
                                 dimension.noun,
                                 otherText,

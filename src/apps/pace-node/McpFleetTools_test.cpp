@@ -1003,6 +1003,34 @@ TEST_CASE("history's key selects one row of a keyed series, by key, node id or d
     CHECK(none.text.contains("in other"));
 }
 
+TEST_CASE("history's headline gives the selected row's own total, with the window's beside it",
+          "[node][mcp][fleet-tools][fleet-keyed-history]")
+{
+    KeyedFleet const fleet;
+    auto upstream = LeaderUpstream();
+    upstream.AnswerOk(fleet.body);
+    // n1 asked three of the window's five.
+    auto const row = Call(upstream, "history", R"({"series":"requesters","range":"24h","key":"n1"})");
+    REQUIRE_FALSE(row.isError);
+    INFO(row.text);
+    CHECK(row.text.contains("3 compile(s) granted"));
+    CHECK_FALSE(row.text.contains("5 compile(s) granted"));
+    CHECK(row.text.contains("the window's whole total is 5"));
+
+    // No row selected: the whole window's figure, and no second one beside it.
+    auto whole = LeaderUpstream();
+    whole.AnswerOk(fleet.body);
+    auto const all = Call(whole, "history", R"({"series":"requesters","range":"24h"})");
+    CHECK(all.text.contains("5 compile(s) granted"));
+    CHECK_FALSE(all.text.contains("whole total"));
+
+    // A key naming no row granted nothing in the rows shown; its counts, if folded, are in other.
+    auto none = LeaderUpstream();
+    none.AnswerOk(fleet.body);
+    auto const nobody = Call(none, "history", R"({"series":"requesters","range":"24h","key":"nobody"})");
+    CHECK(nobody.text.contains("0 compile(s) granted"));
+}
+
 TEST_CASE("history refuses node on a keyed series and key on a slot series, asking nothing",
           "[node][mcp][fleet-tools][fleet-keyed-history]")
 {

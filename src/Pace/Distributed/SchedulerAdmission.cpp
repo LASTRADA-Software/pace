@@ -25,18 +25,6 @@ namespace
 {
     namespace Wire = CompileCacheWire;
 
-    /// A key as the registry stores one: the raw bytes, in a string.
-    /// @param key An identity public key.
-    /// @return Its bytes.
-    [[nodiscard]] std::string KeyAsMachineId(Ed25519PublicKey const& key)
-    {
-        std::string out;
-        out.reserve(key.size());
-        for (auto const byte: key)
-            out.push_back(static_cast<char>(std::to_integer<unsigned char>(byte)));
-        return out;
-    }
-
     /// The name an admission's worker lease is filed under in the lease table (Ruling 17).
     ///
     /// One per TICKET, so two admissions never contend for one entry: deduplication is the queue's
@@ -110,6 +98,15 @@ Wire::LocalGrantReason LocalGrantReasonOf(std::span<WorkerInfo const> live,
     if (std::ranges::none_of(live, reachable))
         return Wire::LocalGrantReason::AllExcluded;
     return Wire::LocalGrantReason::NoRoom;
+}
+
+std::string KeyAsMachineId(Ed25519PublicKey const& key)
+{
+    std::string out;
+    out.reserve(key.size());
+    for (auto const byte: key)
+        out.push_back(static_cast<char>(std::to_integer<unsigned char>(byte)));
+    return out;
 }
 
 MachineId SchedulerService::OwnMachineId() const

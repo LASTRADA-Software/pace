@@ -26,18 +26,6 @@ namespace
 {
     namespace Wire = CompileCacheWire;
 
-    /// A key as the registry stores one: the raw bytes, in a string.
-    /// @param key An identity public key.
-    /// @return Its bytes.
-    [[nodiscard]] std::string MachineIdOf(Ed25519PublicKey const& key)
-    {
-        std::string out;
-        out.reserve(key.size());
-        for (auto const byte: key)
-            out.push_back(static_cast<char>(std::to_integer<unsigned char>(byte)));
-        return out;
-    }
-
     /// Encode what the service decided: an `Ok` carrying its payload, or its refusal.
     /// @param reply The service reply.
     /// @return The frame to write.
@@ -600,7 +588,7 @@ bool AdmissionResponder::DecidesHere(PeerIdentity const& peer) const
     if (service == nullptr || service->Role() == Distributed::SchedulerRole::Leader)
         return true;
     auto const caller = Distributed::CallerContextOf(*_core->membership, peer);
-    return caller.provenKey.has_value() && MachineIdOf(*caller.provenKey) == service->OwnMachineId();
+    return caller.provenKey.has_value() && Distributed::KeyAsMachineId(*caller.provenKey) == service->OwnMachineId();
 }
 
 core::async::Task<FrameReply> AdmissionResponder::Answer(std::span<std::byte const> frame, PeerIdentity peer)
@@ -623,7 +611,7 @@ core::async::Task<FrameReply> AdmissionResponder::Answer(std::span<std::byte con
     // caller that reached here any other way identified no machine and is refused below.
     auto const machine = [&]() -> std::optional<Distributed::MachineId> {
         if (caller.provenKey.has_value())
-            return MachineIdOf(*caller.provenKey);
+            return Distributed::KeyAsMachineId(*caller.provenKey);
         if (loopback)
             return service->OwnMachineId();
         return std::nullopt;
