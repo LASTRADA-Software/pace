@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <optional>
 #include <span>
@@ -531,4 +532,60 @@ TEST_CASE("lacks_recommended names a machine on another build of the recommended
     CHECK(gcc.nodesAhead.empty());
     CHECK(gcc.nodesSameVersionOtherFingerprint == Endpoints { "b:1" });
     CHECK(gcc.nodesLackingRecommended == Endpoints { "b:1" });
+}
+
+TEST_CASE("Counts near the ceiling saturate instead of wrapping, and a saturated figure decides nothing",
+          "[distributed][toolchains]")
+{
+    constexpr auto Max = std::numeric_limits<std::uint64_t>::max();
+    auto const workers = std::vector<WorkerReport> {
+        Entry("fp-12", "a:1", "gcc", "gcc 12.3.0"),
+        Entry("fp-13", "b:1", "gcc", "gcc 13.2.0"),
+    };
+    auto const weighed = DemandContext { .unattributable = 0, .weighed = true, .notWeighedBecause = {} };
+
+    // The family's total is Max - 1 + 5: it saturates and reads as the ceiling, never as 3.
+    auto const big = std::vector<DemandRow> { DemandRow { .fingerprint = "fp-12", .compiles = Max - 1 },
+                                              DemandRow { .fingerprint = "fp-13", .compiles = 5 } };
+    auto const family = FamilyOf(AdviseUpgrades(workers, big, weighed), "gcc");
+    CHECK(family.recommendedVersion == std::optional<std::string> { "12.3.0" });
+    CHECK(family.basis.contains("of 18446744073709551615 compiles named"));
+
+    // Two rows for one fingerprint add up past the ceiling: a saturated count decides nothing.
+    auto const wrapping = std::vector<DemandRow> { DemandRow { .fingerprint = "fp-12", .compiles = Max - 1 },
+                                                   DemandRow { .fingerprint = "fp-12", .compiles = 5 },
+                                                   DemandRow { .fingerprint = "fp-13", .compiles = 1 } };
+    auto const saturated = FamilyOf(AdviseUpgrades(workers, wrapping, weighed), "gcc");
+    CHECK(saturated.recommendedVersion == std::optional<std::string> { "13.2.0" });
+    CHECK(saturated.basis.starts_with("demand does not decide this family"));
+
+    // An unattributable total at the ceiling could outweigh any lead.
+    auto const lead = std::vector<DemandRow> { DemandRow { .fingerprint = "fp-12", .compiles = 10 },
+                                               DemandRow { .fingerprint = "fp-13", .compiles = 1 } };
+    auto const unknown = FamilyOf(
+        AdviseUpgrades(workers, lead, DemandContext { .unattributable = Max, .weighed = true, .notWeighedBecause = {} }),
+        "gcc");
+    CHECK(unknown.recommendedVersion == std::optional<std::string> { "13.2.0" });
+    CHECK(unknown.basis.contains("could change the order"));
+
+    // Two fingerprints of ONE version add up past the ceiling too.
+    auto const sameVersion = std::vector<WorkerReport> {
+        Entry("fp-12a", "a:1", "gcc", "gcc 12.3.0"),
+        Entry("fp-12b", "c:1", "gcc", "gcc 12.3.0"),
+        Entry("fp-13", "b:1", "gcc", "gcc 13.2.0"),
+    };
+    auto const split = std::vector<DemandRow> { DemandRow { .fingerprint = "fp-12a", .compiles = Max - 1 },
+                                                DemandRow { .fingerprint = "fp-12b", .compiles = 5 },
+                                                DemandRow { .fingerprint = "fp-13", .compiles = 1 } };
+    CHECK(FamilyOf(AdviseUpgrades(sameVersion, split, weighed), "gcc").recommendedVersion
+          == std::optional<std::string> { "13.2.0" });
+
+    // A lead plus the unattributable compiles can pass the ceiling without either being at it.
+    auto const near = std::vector<DemandRow> { DemandRow { .fingerprint = "fp-12", .compiles = Max - 2 },
+                                               DemandRow { .fingerprint = "fp-13", .compiles = Max - 5 } };
+    CHECK(FamilyOf(AdviseUpgrades(
+                       workers, near, DemandContext { .unattributable = 10, .weighed = true, .notWeighedBecause = {} }),
+                   "gcc")
+              .recommendedVersion
+          == std::optional<std::string> { "13.2.0" });
 }

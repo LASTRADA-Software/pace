@@ -54,10 +54,19 @@ namespace Pace::Node::McpSupport
     return Int(static_cast<std::int64_t>(number));
 }
 
-/// @param millis An instant, in milliseconds since the epoch.
-/// @return It as RFC 3339 UTC, to the second.
-[[nodiscard]] inline std::string Rfc3339(std::int64_t millis)
+/// The earliest instant `Rfc3339` renders: 1970-01-01T00:00:00Z, the epoch itself.
+inline constexpr std::int64_t Rfc3339FirstMillis = 0;
+
+/// The latest instant `Rfc3339` renders: 9999-12-31T23:59:59.999Z, the last millisecond a four-digit year holds.
+inline constexpr std::int64_t Rfc3339LastMillis = 253'402'300'799'999;
+
+/// @param millis An instant, in milliseconds since the epoch, as a foreign document stated it.
+/// @return It as RFC 3339 UTC, to the second, or nothing when it lies outside years 1970 to 9999 -- a figure that
+///         cannot be a real instant is absent, never wrapped text and never a throw.
+[[nodiscard]] inline std::optional<std::string> Rfc3339(std::int64_t millis)
 {
+    if (millis < Rfc3339FirstMillis || millis > Rfc3339LastMillis)
+        return std::nullopt;
     auto const instant = std::chrono::floor<std::chrono::seconds>(
         std::chrono::sys_time<std::chrono::milliseconds> { std::chrono::milliseconds { millis } });
     return std::format("{:%FT%TZ}", instant);

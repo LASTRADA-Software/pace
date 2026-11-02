@@ -5,6 +5,7 @@
 
 #include <Pace/CompileCache/ToolchainFingerprint.hpp>
 #include <Pace/CompileCache/VersionName.hpp>
+#include <Pace/Core/SaturatingAdd.hpp>
 #include <Pace/Distributed/CompilerVersion.hpp>
 #include <Pace/Distributed/FingerprintDiff.hpp>
 #include <Pace/Distributed/FleetHistory.hpp>
@@ -325,7 +326,7 @@ namespace
             auto const compiles = UintAt(row, "total");
             if (!fingerprint.has_value() || !compiles.has_value())
                 return unavailable("a row of the section is not one this build reads");
-            named += *compiles;
+            named = SaturatingAdd(named, *compiles);
             // A key that was folded away and came back shows only what it did since: its count is a floor.
             auto const earlier = StringAt(row, "earlier_counts");
             auto const atLeast = earlier.value_or("unknown") != "none";
@@ -344,7 +345,7 @@ namespace
 
         reading.available = true;
         reading.weighed = sufficient && otherOk && unattributedOk;
-        reading.unattributable = folded.value_or(0) + unnamed.value_or(0);
+        reading.unattributable = SaturatingAdd(folded.value_or(0), unnamed.value_or(0));
         if (!sufficient)
             reading.notWeighedBecause = std::format("coverage is insufficient ({} minute(s) observed, {} required); the "
                                                     "figures are shown but do not decide",
@@ -354,31 +355,31 @@ namespace
             reading.notWeighedBecause = std::format("the section's `{}` member is missing or malformed, so the compiles it "
                                                     "holds are unknown, not zero",
                                                     !otherOk ? "other" : "unattributed");
-        reading.basis =
-            std::format("demand over {}: counted for {} of the window's {} minute(s), since {}{}; {} compile(s) "
-                        "named a toolchain of {} counted{}",
-                        range,
-                        *observed,
-                        *window,
-                        since.has_value() ? Rfc3339(*since) : std::string { "an unknown instant" },
-                        *observed < *window ? " -- PARTIAL coverage, these counts are of that part only" : std::string {},
-                        named,
-                        *total,
-                        folded.has_value() && foldedKeys.has_value()
-                            ? std::format("; {} more are in `other ({} toolchain{})` and are attributed to no "
-                                          "toolchain, so named counts are \"at least\" figures and demand decides a "
-                                          "family only where its lead exceeds them",
-                                          *folded,
-                                          *foldedKeys,
-                                          *foldedKeys == 1 ? "" : "s")
-                            : std::string {});
+        reading.basis = std::format(
+            "demand over {}: counted for {} of the window's {} minute(s), since {}{}; {} compile(s) "
+            "named a toolchain of {} counted{}",
+            range,
+            *observed,
+            *window,
+            since.has_value() ? Rfc3339(*since).value_or("an out-of-range instant") : std::string { "an unknown instant" },
+            *observed < *window ? " -- PARTIAL coverage, these counts are of that part only" : std::string {},
+            named,
+            *total,
+            folded.has_value() && foldedKeys.has_value()
+                ? std::format("; {} more are in `other ({} toolchain{})` and are attributed to no "
+                              "toolchain, so named counts are \"at least\" figures and demand decides a "
+                              "family only where its lead exceeds them",
+                              *folded,
+                              *foldedKeys,
+                              *foldedKeys == 1 ? "" : "s")
+                : std::string {});
         if (auto const carryNone = unnamed.value_or(0); carryNone > 0)
             reading.basis += std::format("; {} more carry no fingerprint (`unattributed`)", carryNone);
         auto figures =
             Json::Object { { "range", Str(std::string { range }) },
                            { "observed_minutes", Int(static_cast<std::int64_t>(*observed)) },
                            { "window_minutes", Int(static_cast<std::int64_t>(*window)) },
-                           { "coverage_since", since.has_value() ? Str(Rfc3339(*since)) : Null() },
+                           { "coverage_since", since.has_value() ? StrOrNull(Rfc3339(*since)) : Null() },
                            { "partial_coverage", Bool(*observed < *window) },
                            { "total", Int(static_cast<std::int64_t>(*total)) },
                            { "toolchains", Arr(std::move(rows)) },

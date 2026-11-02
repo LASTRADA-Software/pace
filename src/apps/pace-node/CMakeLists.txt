@@ -159,6 +159,7 @@ if(PACE_BUILD_TESTS)
         McpNodeTools_test.cpp
         McpToolchainTools.cpp
         McpToolchainTools_test.cpp
+        McpToolSupport_test.cpp
         NodeNameResolver.cpp
         NodeNameResolver_test.cpp
         McpUpstream.cpp

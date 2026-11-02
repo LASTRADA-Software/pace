@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <format>
 #include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -619,6 +620,61 @@ TEST_CASE("toolchains lets no demand decide when the other or unattributed membe
                   .value_or(std::string {})
                   .starts_with("demand was read but does not decide (the section's `"));
         CHECK(TextAt(gcc, "basis").value_or(std::string {}).contains("missing or malformed"));
+    }
+}
+
+TEST_CASE("toolchains sums foreign counts without wrapping and renders an impossible instant as absent",
+          "[pace-node][mcp][toolchains][toolchain-demand]")
+{
+    Testing::PlacedWallClock wall;
+    Dist::CompileDemandHistory demand { 8, wall };
+    CountFor(wall, demand, 1500);
+    CountNineAndTwo(demand);
+    auto const body = DocumentWithDemand(TwoGccs(), demand);
+    constexpr auto Max = std::numeric_limits<std::uint64_t>::max();
+
+    // other.total + unattributed.total is Max - 1 + 5: wrapped it would read 3 and let a lead of 7 decide.
+    auto wrapped =
+        WithDemandMember(body,
+                         "other",
+                         Json::Value { .v = Json::Object { { "keys_folded", Json::Value { .v = std::int64_t { 1 } } },
+                                                           { "total", Json::Value { .v = Max - 1 } } } });
+    wrapped = WithDemandMember(
+        wrapped, "unattributed", Json::Value { .v = Json::Object { { "total", Json::Value { .v = std::int64_t { 5 } } } } });
+    {
+        auto upstream = LeaderUpstream();
+        upstream.AnswerOk(wrapped);
+        auto const gcc = GccAdvice(CallToolchains(upstream).structured);
+        CHECK(TextAt(gcc, "recommended_version") == std::optional<std::string> { "13.2.0" });
+        CHECK(TextAt(gcc, "basis").value_or(std::string {}).starts_with("demand does not decide this family"));
+    }
+    // Named rows summing past the ceiling say the ceiling, never a small wrapped figure.
+    {
+        auto rows = Json::Array {};
+        for (auto const& [fingerprint, total]:
+             { std::pair { "fp-12", Max - 1 }, std::pair { "fp-13", std::uint64_t { 5 } } })
+            rows.push_back(
+                Json::Value { .v = Json::Object { { "fingerprint", Json::Value { .v = std::string { fingerprint } } },
+                                                  { "total", Json::Value { .v = total } },
+                                                  { "earlier_counts", Json::Value { .v = std::string { "none" } } } } });
+        auto upstream = LeaderUpstream();
+        upstream.AnswerOk(WithDemandMember(body, "keys", Json::Value { .v = std::move(rows) }));
+        auto const result = CallToolchains(upstream);
+        REQUIRE_FALSE(result.isError);
+        CHECK(TextAt(GccAdvice(result.structured), "basis")
+                  .value_or(std::string {})
+                  .contains("18446744073709551615 compile(s) named a toolchain"));
+    }
+    // A coverage start no calendar holds is absent, and says so; the answer is otherwise whole.
+    {
+        auto upstream = LeaderUpstream();
+        upstream.AnswerOk(
+            WithDemandMember(body, "coverage_since_ms", Json::Value { .v = std::numeric_limits<std::int64_t>::max() }));
+        auto const result = CallToolchains(upstream);
+        REQUIRE_FALSE(result.isError);
+        CHECK(At(At(result.structured, "demand"), "coverage_since").IsNull());
+        CHECK(TextAt(GccAdvice(result.structured), "basis").value_or(std::string {}).contains("an out-of-range instant"));
+        CHECK(TextAt(GccAdvice(result.structured), "recommended_version") == std::optional<std::string> { "12.3.0" });
     }
 }
 

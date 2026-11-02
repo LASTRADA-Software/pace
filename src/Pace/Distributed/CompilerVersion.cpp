@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <Pace/CompileCache/VersionName.hpp>
+#include <Pace/Core/SaturatingAdd.hpp>
 #include <Pace/Distributed/CompilerVersion.hpp>
 
 #include <algorithm>
@@ -253,7 +254,9 @@ namespace
             if (&entry != demandTarget)
                 runnerUp = std::max(runnerUp, entry.second.second);
         auto const leads = demandTarget->second.second > runnerUp;
-        auto const decides = leads && demandTarget->second.second > runnerUp + folded;
+        auto const decides = leads && !IsSaturated(folded) && !IsSaturated(runnerUp)
+                             && !IsSaturated(demandTarget->second.second)
+                             && demandTarget->second.second > SaturatingAdd(runnerUp, folded);
         return TargetChoice { .target = decides ? demandTarget : &*byVersion.rbegin(),
                               .demandDecides = decides,
                               .undecidedByFolded = leads && !decides && folded > 0 };
@@ -284,7 +287,7 @@ namespace
                 continue;
             auto& [fingerprints, compiles] = byVersion[member.parsed->parts];
             fingerprints.push_back(fingerprint);
-            compiles += demandFor(fingerprint);
+            compiles = SaturatingAdd(compiles, demandFor(fingerprint));
         }
         if (byVersion.empty())
             return UpgradeAdvice { .family = std::move(family),
@@ -299,7 +302,7 @@ namespace
 
         auto familyDemand = std::uint64_t { 0 };
         for (auto const& row: byVersion | std::views::values)
-            familyDemand += row.second;
+            familyDemand = SaturatingAdd(familyDemand, row.second);
 
         auto const inexact = [&](std::vector<std::string> const& fingerprints) {
             return IsFloor(fingerprints, atLeastOf, folded);
@@ -360,7 +363,7 @@ namespace
                                              fingerprint,
                                              folded > 0 || atLeastOf.contains(fingerprint) ? "at least " : "",
                                              CompilesWords(demandFor(fingerprint))));
-            if (demandFor(ranked[0]) > demandFor(ranked[1]) + folded)
+            if (!IsSaturated(folded) && demandFor(ranked[0]) > SaturatingAdd(demandFor(ranked[1]), folded))
             {
                 advice.recommendedFingerprints.emplace(driver, ranked[0]);
                 advice.basis += std::format("; {} under `{}` is served by {} fingerprints and demand favours {}: {}",
@@ -479,7 +482,7 @@ std::vector<UpgradeAdvice> AdviseUpgrades(std::span<WorkerReport const> workers,
     // Read but not weighed: the rows are ignored whoever handed them, so nothing can decide on them by accident.
     for (auto const& row: context.notWeighedBecause.empty() ? demand : std::span<DemandRow const> {})
     {
-        demandOf[row.fingerprint] += row.compiles;
+        demandOf[row.fingerprint] = SaturatingAdd(demandOf[row.fingerprint], row.compiles);
         if (row.atLeast)
             atLeastOf.insert(row.fingerprint);
     }

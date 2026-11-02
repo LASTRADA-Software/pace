@@ -7,6 +7,7 @@
 #include <Pace/Cluster/Roster.hpp>
 #include <Pace/Core/Ed25519.hpp>
 #include <Pace/Core/NumericText.hpp>
+#include <Pace/Core/SaturatingAdd.hpp>
 #include <Pace/Distributed/FleetChart.hpp>
 #include <Pace/Distributed/FleetHistory.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
@@ -706,7 +707,7 @@ namespace
             value = Real(number);
         }
 
-        return Obj({ { "start", Str(Rfc3339(*start)) },
+        return Obj({ { "start", StrOrNull(Rfc3339(*start)) },
                      { "value", std::move(value) },
                      { "coverage", std::move(coverage) },
                      { "backfilled", Bool(fields[backfilledAt] == "true") } });
@@ -868,8 +869,9 @@ namespace
                                                               : std::uint64_t { 0 })
                 : std::string {};
         auto const* const since = section.Find("coverage_since_ms");
-        auto const sinceText =
-            since != nullptr && since->AsInt().has_value() ? Rfc3339(*since->AsInt()) : std::string { "never" };
+        auto const sinceText = since != nullptr && since->AsInt().has_value()
+                                   ? Rfc3339(*since->AsInt()).value_or("an out-of-range instant")
+                                   : std::string { "never" };
         auto selected = std::string {};
         if (key.has_value() && named == 0)
             selected = std::format("; no row is \"{}\" in this window -- if it was folded, its counts are in other", *key);
@@ -894,7 +896,7 @@ namespace
             for (auto const& row: *section.Find("keys")->AsArray())
             {
                 auto const* const rowTotal = row.Find("total");
-                granted += rowTotal != nullptr ? rowTotal->AsUint().value_or(0) : std::uint64_t { 0 };
+                granted = SaturatingAdd(granted, rowTotal != nullptr ? rowTotal->AsUint().value_or(0) : std::uint64_t { 0 });
                 // A key folded away and seen again shows only what it did since: its count is a floor.
                 auto const* const earlier = row.Find("earlier_counts");
                 floor = floor || earlier == nullptr || earlier->AsString() == nullptr || *earlier->AsString() != "none";
