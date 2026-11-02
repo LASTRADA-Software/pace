@@ -416,7 +416,12 @@ Beside them, what that worker is offering and whether anyone knows about it:
 - **`compile-slots`** and **`compiles-in-flight`** — how many concurrent compiles this
   node offers and how many are running. Both or neither: a slot count with no in-flight
   figure invites the reading that the node is idle. A node running no worker tier
-  reports neither, which is **not** the same as reporting none free.
+  reports neither, which is **not** the same as reporting none free. The slot count is
+  the **startup** figure: it sizes the worker's thread pool once, and a live cluster
+  cache-budget override does not change it -- not even when `--slots` is unset and the
+  count was derived from the cache reserve at startup. What such an override does move
+  is the capacity the worker registers (its reserved memory and tier budgets) and the
+  machine budget compiles are admitted against.
 - **`compile-inflight-max`** and **`compile-request-max`** — the worker's other two
   ceilings, in bytes, as resolved (`--compile-inflight-max`, `--compile-request-max`):
   what every running compile may hold together, and what one request may cost. A
@@ -493,7 +498,9 @@ Beside them, what that worker is offering and whether anyone knows about it:
   `slot-ceilings-sampled-seconds-ago`** — every ceiling on the worker's slots as of its
   last heartbeat, and which one binds: `registered`, `external-cpu`, `memory`, `scratch`,
   `compile-budget`, `cordoned`. The worker computes them with the scheduler's own
-  arithmetic over the load that heartbeat sent, so the two name the same limit. A limit
+  arithmetic over the load that heartbeat sent and the capacity its registrations carry,
+  so the two name the same limit — after a live cache-budget override too, since the
+  worker re-registers with the new capacity on its next heartbeat. A limit
   that did not apply — a CPU figure the host could not read, a cordon nobody set — is an
   absent cell, never a zero, which would be a limit that takes everything. A node with no
   worker, or one whose first heartbeat has not sampled the host, reports none of them.

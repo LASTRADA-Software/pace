@@ -697,5 +697,5 @@ TEST_CASE("A sharded store splits a tier's budget across its shards as Resize do
     CHECK(Unwrap(tiers[static_cast<std::size_t>(Pace::StorageTier::Memory)]).bytesLimit == 2000U);
     // Absent in every shard is absent for the whole, never a zero.
     CHECK_FALSE(storage.ResizeTier(Pace::StorageTier::Disk, 2000).has_value());
-    CHECK(storage.EvictStep() == 0U);
+    CHECK(storage.EvictStep() == Pace::IStorage::EvictStepOutcome {});
 }

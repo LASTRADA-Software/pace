@@ -1128,69 +1128,104 @@ TEST_CASE("Resize shrinks budget and triggers immediate eviction", "[cowstorage]
     CHECK(after.itemCount > 0U);
 }
 
-TEST_CASE("The eviction slice is 4096 records unless a store is told otherwise", "[cowstorage][eviction][resize]")
+TEST_CASE("The eviction slice is one batched flush unless a store is told otherwise", "[cowstorage][eviction][resize]")
 {
     // The constant the live-resize design names, pinned at its value and as the default:
     // a slice a test shrank is a test's slice, never production's.
-    STATIC_REQUIRE(Pace::CowTreeStorage::EvictSliceRecords == 4096);
+    STATIC_REQUIRE(Pace::CowTreeStorage::EvictSliceRecords == 64);
     CHECK(Pace::CowTreeStorage::Options {}.evictSliceRecords == Pace::CowTreeStorage::EvictSliceRecords);
 }
 
-TEST_CASE("disk shrink evicts in slices and serves reads between slices", "[cowstorage][eviction][resize]")
+namespace
 {
-    // A slice small enough to watch end: eight records, against a hundred one-page entries
-    // and a sixteen-page budget, so the shrink takes many slices and each must stop at eight.
-    constexpr std::size_t Slice = 8;
-    constexpr int Entries = 100;
-    TempFile tmp;
-    auto opts = FootprintOptions(tmp.path, 0);
-    opts.evictSliceRecords = Slice;
+/// One hundred one-page entries in a store with no budget and an eight-record slice: a
+/// sixteen-page budget then takes many slices to reach.
+constexpr std::size_t ShrinkSlice = 8;
+constexpr int ShrinkEntries = 100;
+
+/// @param path Where the store lives.
+/// @return The store, seeded.
+[[nodiscard]] std::unique_ptr<Pace::CowTreeStorage> SeededForShrink(std::filesystem::path const& path)
+{
+    auto opts = FootprintOptions(path, 0);
+    opts.evictSliceRecords = ShrinkSlice;
     auto storage = Pace::CowTreeStorage::Open(opts);
     REQUIRE(storage.has_value());
-    core::platform::ManualClock clock;
-    for (auto const i: std::views::iota(0, Entries))
+    for (auto const i: std::views::iota(0, ShrinkEntries))
         REQUIRE((*storage)
                     ->Set(std::format("k-{:03d}", i),
                           RandomBytes(OnePageValueLen, static_cast<std::uint64_t>(i)),
                           0,
                           core::platform::SteadyTimePoint::max())
                     .has_value());
+    return std::move(*storage);
+}
+} // namespace
+
+TEST_CASE("disk shrink evicts in slices and serves reads between slices", "[cowstorage][eviction][resize]")
+{
+    TempFile tmp;
+    auto const storage = SeededForShrink(tmp.path);
+    core::platform::ManualClock clock;
 
     // Not this store's tier: answered absent, and nothing moves.
-    CHECK_FALSE((*storage)->ResizeTier(Pace::StorageTier::Memory, Pages(16)).has_value());
-    CHECK((*storage)->Snapshot().evictions == 0U);
+    CHECK_FALSE(storage->ResizeTier(Pace::StorageTier::Memory, Pages(16)).has_value());
+    CHECK(storage->Snapshot().evictions == 0U);
 
-    auto const first = (*storage)->ResizeTier(Pace::StorageTier::Disk, Pages(16));
+    // The resize adopts the budget and evicts NOTHING: whoever holds the store's lock to call it
+    // holds it for an assignment. The excess is reported, not hidden.
+    auto const first = storage->ResizeTier(Pace::StorageTier::Disk, Pages(16));
     REQUIRE(first.has_value());
-    // One slice, exactly, and the store is still over: the excess is reported, not hidden.
-    CHECK((*storage)->Snapshot().evictions == Slice);
+    CHECK(storage->Snapshot().evictions == 0U);
     CHECK(Unwrap(first) > 0U);
-    CHECK(Unwrap(first) == (*storage)->Snapshot().bytesUsed - Pages(16));
-    CHECK((*storage)->Snapshot().bytesLimit == Pages(16));
+    CHECK(Unwrap(first) == storage->Snapshot().bytesUsed - Pages(16));
+    CHECK(storage->Snapshot().bytesLimit == Pages(16));
 
-    // Serving between slices: the newest entry is the warmest, and still there.
-    auto const between = (*storage)->Get(std::format("k-{:03d}", Entries - 1), clock.now());
-    REQUIRE(between.has_value());
-    CHECK(between->found);
-
-    // Converges, one bounded slice per step, and never takes more than a slice at a time.
+    // Converges one bounded slice per step, says how many it took, and serves between steps.
     auto excess = Unwrap(first);
-    auto evictions = (*storage)->Snapshot().evictions;
+    auto evictions = storage->Snapshot().evictions;
     std::size_t steps = 0;
-    while (excess != 0 && steps < static_cast<std::size_t>(Entries))
+    while (excess != 0 && steps < static_cast<std::size_t>(ShrinkEntries))
     {
-        excess = (*storage)->EvictStep();
-        auto const now = (*storage)->Snapshot().evictions;
-        CHECK(now - evictions <= Slice);
+        auto const step = storage->EvictStep();
+        auto const now = storage->Snapshot().evictions;
+        CHECK(step.evicted <= ShrinkSlice);
+        CHECK(step.evicted == now - evictions);
+        CHECK(step.evicted > 0U);
+        excess = step.bytesOverBudget;
         evictions = now;
         ++steps;
+        auto const between = storage->Get(std::format("k-{:03d}", ShrinkEntries - 1), clock.now());
+        REQUIRE(between.has_value());
+        CHECK(between->found);
     }
     CHECK(excess == 0U);
-    CHECK((*storage)->Snapshot().bytesUsed <= Pages(16));
+    CHECK(storage->Snapshot().bytesUsed <= Pages(16));
     CHECK(steps > 1U);
     // A store that fits has nothing for a step to do.
-    CHECK((*storage)->EvictStep() == 0U);
-    CHECK((*storage)->Snapshot().evictions == evictions);
+    CHECK(storage->EvictStep() == Pace::IStorage::EvictStepOutcome {});
+    CHECK(storage->Snapshot().evictions == evictions);
+}
+
+TEST_CASE("A write into a store shrunk live takes back what it added and at most one slice more",
+          "[cowstorage][eviction][resize]")
+{
+    // The write path runs on whatever serves the store -- a node's reactor -- so the bulk of a
+    // live shrink is not its to drain. It must still never GROW the excess, or a store with no
+    // background driver (the daemon's) would leave its budget behind.
+    TempFile tmp;
+    auto const storage = SeededForShrink(tmp.path);
+    REQUIRE(storage->ResizeTier(Pace::StorageTier::Disk, Pages(16)).has_value());
+    auto const before = storage->Snapshot();
+    REQUIRE(before.bytesUsed > Pages(16));
+
+    REQUIRE(storage->Set("new", RandomBytes(OnePageValueLen, 1000), 0, core::platform::SteadyTimePoint::max()).has_value());
+    auto const after = storage->Snapshot();
+    // One page added, so at most one record to take it back, then one slice of the old excess.
+    CHECK(after.evictions - before.evictions <= ShrinkSlice + 1);
+    CHECK(after.evictions - before.evictions > 0U);
+    CHECK(after.bytesUsed < before.bytesUsed);
+    CHECK(after.bytesUsed > Pages(16));
 }
 
 TEST_CASE("disk grow takes effect without eviction", "[cowstorage][eviction][resize]")

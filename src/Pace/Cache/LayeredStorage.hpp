@@ -218,8 +218,8 @@ class LayeredStorage final: public IStorage
     std::optional<std::size_t> ResizeTier(StorageTier tier, std::size_t newMaxBytes) override;
 
     /// One more eviction slice in each store.
-    /// @return Bytes still over budget across both.
-    std::size_t EvictStep() override;
+    /// @return Both stores' answers, summed.
+    EvictStepOutcome EvictStep() override;
 
     /// Test-only access to the inner cache (the L1 mirror).
     [[nodiscard]] InMemoryLruStorage& L1() noexcept

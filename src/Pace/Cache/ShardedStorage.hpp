@@ -175,17 +175,18 @@ class ShardedStorage final: public IStorage
 
     /// Forward a tier's new budget to every shard, split as `Resize` splits it.
     ///
-    /// Each shard is resized under its OWN mutex, one shard at a time, so a shard's
-    /// eviction slice holds only that shard's traffic -- and that slice is bounded by the
-    /// tier (`CowTreeStorage::EvictSliceRecords`), never by the size of the shrink.
+    /// Each shard is resized under its OWN mutex, one shard at a time. The split floors as
+    /// `Resize`'s does, so over N shards the tiers report `floor(total / N) * N`; a node runs
+    /// one shard, where that is the total exactly.
     /// @param tier Which tier's budget to change.
     /// @param newTotalBytes The tier's new total budget, across every shard.
     /// @return Bytes over budget summed across shards; nullopt when no shard has the tier.
     std::optional<std::size_t> ResizeTier(StorageTier tier, std::size_t newTotalBytes) override;
 
-    /// One more eviction slice in every shard, each under its own mutex.
-    /// @return Bytes still over budget across every shard.
-    std::size_t EvictStep() override;
+    /// One more eviction slice in every shard, each under its own mutex, taken and released
+    /// per shard: a caller looping this hands every shard's traffic the lock between slices.
+    /// @return Every shard's answer, summed.
+    EvictStepOutcome EvictStep() override;
 
     /// @return Index of the shard responsible for `key`. Useful for tests
     ///         that need to verify hash partitioning.

@@ -485,15 +485,15 @@ std::optional<std::size_t> ShardedStorage::ResizeTier(StorageTier tier, std::siz
     return excess;
 }
 
-std::size_t ShardedStorage::EvictStep()
+IStorage::EvictStepOutcome ShardedStorage::EvictStep()
 {
-    std::size_t excess = 0;
+    EvictStepOutcome total;
     for (auto& shard: _shards)
     {
         std::unique_lock const lock { shard->mu };
-        excess += shard->storage->EvictStep();
+        total = CombineEvictSteps(total, shard->storage->EvictStep());
     }
-    return excess;
+    return total;
 }
 
 } // namespace Pace

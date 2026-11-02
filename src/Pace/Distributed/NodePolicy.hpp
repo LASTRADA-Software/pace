@@ -107,7 +107,8 @@ static_assert(RowsInEnumeratorOrder(NodeClassTable, &NodeClassTraits::nodeClass)
 /// budget it is, not whether it has a disk tier.
 ///
 /// Split from `NodeCacheLoad` exactly as `NodeCapacity` is split from `NodeLoad`,
-/// and the boundary is the same one: a budget is fixed for the process's life, so
+/// and the boundary is the same one: a budget moves only when an operator moves it --
+/// at a start, or by a live cluster override, after which the node re-registers -- so
 /// re-reading it on every heartbeat would be a number nobody chose to resend.
 ///
 /// **Not scheduling input.** `AvailableSlots` does not consult any of this and
@@ -122,6 +123,9 @@ struct NodeCacheCapacity
     /// ceiling. A dashboard renders the second as "unbounded" and would render a
     /// flattened first as the same thing.
     EnumTable<StorageTier, std::optional<std::uint64_t>> tierBytesLimit {};
+
+    /// Field by field: whether a re-registration has anything new to say.
+    [[nodiscard]] bool operator==(NodeCacheCapacity const&) const = default;
 };
 
 /// What one of a node's cache tiers holds.
@@ -210,10 +214,14 @@ struct NodeCapacity
 
     /// What this node's cache tiers actually hold -- not what was asked for.
     ///
-    /// Here rather than in `NodeLoad` because a budget does not move, and here
+    /// Here rather than in `NodeLoad` because a budget moves only by an operator's act
+    /// (and the node re-registers when it does), and here
     /// rather than nowhere because the leader is the one node with a view of
     /// every member and had no view of any member's cache at all.
     NodeCacheCapacity cache {};
+
+    /// Field by field: whether this machine's capacity moved since it was last registered.
+    [[nodiscard]] bool operator==(NodeCapacity const&) const = default;
 };
 
 /// Memory a single translation unit is budgeted at, for slot derivation.

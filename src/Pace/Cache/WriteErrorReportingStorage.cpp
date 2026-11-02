@@ -270,7 +270,7 @@ std::optional<std::size_t> WriteErrorReportingStorage::ResizeTier(StorageTier ti
     return _inner.ResizeTier(tier, newMaxBytes);
 }
 
-std::size_t WriteErrorReportingStorage::EvictStep()
+IStorage::EvictStepOutcome WriteErrorReportingStorage::EvictStep()
 {
     return _inner.EvictStep();
 }

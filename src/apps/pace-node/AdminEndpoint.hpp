@@ -363,9 +363,8 @@ class FleetSampler final: public IFleetHistoryView
     ///             reader's interval. Null, or a reading the sampler cannot take, records the slot ABSENT.
     /// @param historyKeys How many requesters and toolchains the keyed histories keep by name.
     /// @param afterSample Run on the sampler's thread after every sample, or empty for nothing. The node's
-    ///             one periodic loop that runs on EVERY node, so it is where a cache tier left over its budget
-    ///             by a live shrink takes its next eviction slice (`CacheTier::EvictStep`) when no write
-    ///             arrives to take it.
+    ///             one periodic loop that runs on EVERY node, so it is where the cache tier's eviction driver
+    ///             gets its fallback kick (`KickTierEviction`); the eviction itself runs on that driver's thread.
     FleetSampler(std::optional<Distributed::FleetSources> sources,
                  IMetricsSink const& metrics,
                  AdminHttpServer::SnapshotProvider node,

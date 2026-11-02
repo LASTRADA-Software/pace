@@ -384,7 +384,7 @@ std::optional<std::size_t> TracingStorage::ResizeTier(StorageTier tier, std::siz
     return _inner.ResizeTier(tier, newMaxBytes);
 }
 
-std::size_t TracingStorage::EvictStep()
+IStorage::EvictStepOutcome TracingStorage::EvictStep()
 {
     return _inner.EvictStep();
 }

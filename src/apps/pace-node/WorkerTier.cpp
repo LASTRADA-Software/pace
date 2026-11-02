@@ -415,8 +415,9 @@ WorkerTier::WorkerTier(WorkerTierParts const& parts,
     _runtime { ToolchainReading { .state = CompileCacheWire::ToolchainState::Surveying,
                                   .served = 0,
                                   .discovered = static_cast<std::uint32_t>(_discovered.entries.size()) } },
-    _advertisedWire { Distributed::CapacityToWire(parts.capacity.Current()) },
+    _advertisedWire {},
     _machineCapacity { parts.capacity },
+    _registeredCapacity { parts.capacity.Current() },
     _dialer { parts.schedulerDialer },
     _link { std::move(link) },
     _hostInbox { [this] { _capacity.WakeHeartbeat(); }, parts.suspendWait },
@@ -457,8 +458,37 @@ WorkerTier::WorkerTier(WorkerTierParts const& parts,
     // is held here, at the most the host query can return at all.
     static_assert(MaxHostNameBytes <= CompileCacheWire::MaxDisplayNameBytes,
                   "a scheduler must record any host name this node can send");
+    // Rebuilt from `_registeredCapacity` rather than kept from a second `Current()` in the initializer
+    // list: the two must describe one moment, or the first registration and node-status disagree.
+    _advertisedWire = Distributed::CapacityToWire(_registeredCapacity);
     _advertisedWire.version = AdvertisedVersion();
     _advertisedWire.displayName = parts.host.Facts().hostName;
+}
+
+bool WorkerTier::FollowCapacity(core::platform::IClock const& statusClock)
+{
+    auto now = _machineCapacity.Current();
+    if (now == _registeredCapacity)
+        return false;
+
+    // Rebuilt from the wire form, with the fields this record carries beside the capacity -- the
+    // version, the host name -- kept, since neither moved.
+    auto rebuilt = Distributed::CapacityToWire(now);
+    rebuilt.version = _advertisedWire.version;
+    rebuilt.displayName = _advertisedWire.displayName;
+    _advertisedWire = std::move(rebuilt);
+    _registeredCapacity = now;
+
+    // The same `(fingerprint, endpoint)` keys under the endpoint in force, so `AdoptRegistrars` withdraws
+    // nothing and the next round's REGISTER updates each registry entry in place. Republished for
+    // node-status, as an endpoint move is: until that round the rebuilt registrars hold no id.
+    AdoptRegistrars(RegistrarsAt(_toolchains, _registeredAs->Current()), _registrars, _withdrawals);
+    PublishRegistration(_runtime, statusClock, _registrars, 0);
+    _logger.Logf(LogLevel::Info,
+                 "this machine's capacity moved (reserved memory {}); re-registering {} toolchain(s) with it",
+                 FormatByteSize(static_cast<std::size_t>(now.reservedMemoryBytes)),
+                 _registrars.size());
+    return true;
 }
 
 std::string RegisteredToolchainLabel(ServedToolchain const& toolchain, ILogger& logger)
@@ -614,10 +644,11 @@ void WorkerTier::Heartbeat(std::stop_token const& stop,
                                  .logger = _logger,
                                  .reachability = reachability,
                                  // The ceilings `node-status` names: the scheduler's own arithmetic over the
-                                 // capacity this worker registered with and the load this round sent.
+                                 // capacity this worker's registrations carry (`FollowCapacity` moves it, once
+                                 // a beat, before the round) and the load this round sent.
                                  .sampled = [this, &statusClock](Distributed::NodeLoad const& load) {
                                      _runtime.PublishSlotCeilings(SlotCeilingsReading {
-                                         .ceilings = Distributed::SlotCeilingsFor(_machineCapacity.Current(), _slots, load),
+                                         .ceilings = Distributed::SlotCeilingsFor(_registeredCapacity, _slots, load),
                                          .sampledAt = statusClock.now() });
                                  } };
 
@@ -718,6 +749,9 @@ void WorkerTier::Heartbeat(std::stop_token const& stop,
         // a change this beat was woken for is published before it is compared.
         _endpoints.Refresh();
         FollowAnnouncedEndpoint(statusClock);
+        // And the capacity: a live cache-budget override re-derived it, and the registry and node-status must
+        // both move to the new figure, through the one registration.
+        (void) FollowCapacity(statusClock);
         // The capture walk, once it has finished: asked, never waited for. A served compiler it filed under another
         // fingerprint makes THIS beat's recheck unconditional, from the configuration in force.
         auto carry = std::optional<std::map<std::string, ServedToolchain>> {};

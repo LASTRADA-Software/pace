@@ -318,7 +318,7 @@ std::optional<std::size_t> NotifyingStorage::ResizeTier(StorageTier tier, std::s
     return _inner.ResizeTier(tier, newMaxBytes);
 }
 
-std::size_t NotifyingStorage::EvictStep()
+IStorage::EvictStepOutcome NotifyingStorage::EvictStep()
 {
     ReclaimDrain const drain { *this };
     return _inner.EvictStep();

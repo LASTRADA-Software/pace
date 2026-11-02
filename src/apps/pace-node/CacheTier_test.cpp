@@ -28,8 +28,10 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <charconv>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -37,9 +39,11 @@
 #include <format>
 #include <fstream>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <ranges>
 #include <span>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -52,6 +56,7 @@
 #include <core/net/BlockingSocket.hpp>
 #include <core/net/testing/InMemorySocket.hpp>
 #include <core/platform/Clock.hpp>
+#include <tests/BoundedWait.hpp>
 #include <tests/HalfClose.hpp>
 #include <tests/RaftPeerKeyFakes.hpp>
 #include <tests/ScratchPath.hpp>
@@ -644,7 +649,54 @@ TEST_CASE("capacity recomputed after shrink", "[node][cache-tier][resize][capaci
     CHECK(live.Current().cache.tierBytesLimit == now.cache.tierBytesLimit);
 }
 
-TEST_CASE("A disk tier shrunk live keeps serving and converges", "[node][cache-tier][resize]")
+namespace
+{
+/// The concurrent-shrink cases' shape: objects seeded before the shrink, cache verbs on the
+/// traffic thread, readings on the reader thread, applies on the shrinking thread, and the size
+/// of every object -- each larger than a disk page, so every eviction frees pages.
+constexpr int ShrinkSeeded = 96;
+constexpr int ShrinkTrafficOps = 192;
+constexpr int ShrinkReads = 192;
+constexpr int ShrinkApplies = 32;
+constexpr std::size_t ShrinkValueBytes = 24 * 1024;
+
+/// @param tier The tier.
+/// @param tierKind Which of its tiers.
+/// @return How far that tier sits above its budget, through the one derivation every surface uses.
+[[nodiscard]] std::size_t OverBudget(CacheTier const& tier, StorageTier tierKind)
+{
+    return IStorage::BytesOverBudget(At(tier.SnapshotTiers(), tierKind));
+}
+
+/// A store a driver test steps directly: the production composition (`OpenDiskStore` under
+/// `ShareStorage`), seeded with objects each larger than a page, so every eviction frees pages.
+/// @param directory Where the store lives.
+/// @param logger Where the store reports.
+/// @param objects How many objects to seed.
+/// @return The store.
+[[nodiscard]] std::unique_ptr<IStorage> SeededDiskStore(std::filesystem::path const& directory, ILogger& logger, int objects)
+{
+    auto disk = OpenDiskStore(DiskStoreSpec { .path = directory / DiskStoreFileName,
+                                              .maxBytes = 0,
+                                              .codec = CompressionCodec::Identity,
+                                              .level = 0,
+                                              .minBytes = 0,
+                                              .inUse = "a test store is held already" },
+                              logger);
+    REQUIRE(disk.has_value());
+    auto storage = ShareStorage(std::move(*disk), logger);
+    for (auto const i: std::views::iota(0, objects))
+        REQUIRE(storage
+                    ->Set(std::format("k-{:04}", i),
+                          Incompressible(ShrinkValueBytes, static_cast<std::uint64_t>(i)),
+                          0,
+                          core::platform::SteadyTimePoint::max())
+                    .has_value());
+    return storage;
+}
+} // namespace
+
+TEST_CASE("A disk tier shrunk live keeps serving and converges in the background", "[node][cache-tier][resize]")
 {
     Testing::ScratchDirectory const scratch { "node-cache-disk-shrink" };
     Fixture fixture;
@@ -664,33 +716,135 @@ TEST_CASE("A disk tier shrunk live keeps serving and converges", "[node][cache-t
     auto const budget = held / 4;
 
     REQUIRE(tier->ApplyTierBudget(StorageTier::Disk, budget).has_value());
-    auto const disk = Unwrap(At(tier->SnapshotTiers(), StorageTier::Disk));
-    CHECK(disk.bytesLimit == budget);
-    CHECK(disk.evictions > 0U);
+    CHECK(Unwrap(At(tier->SnapshotTiers(), StorageTier::Disk)).bytesLimit == budget);
+    // The tier's own driver carries it down, on its own thread; nothing here steps it.
+    REQUIRE(Testing::WaitUntil(
+        "the eviction driver brings the disk tier to its budget",
+        [&tier] { return OverBudget(*tier, StorageTier::Disk) == 0 && tier->Eviction().Convergences() >= 1; },
+        [&tier] {
+            return std::format(
+                "{} byte(s) over, {} slice(s)", OverBudget(*tier, StorageTier::Disk), tier->Eviction().Slices());
+        }));
+    CHECK(Unwrap(At(tier->SnapshotTiers(), StorageTier::Disk)).evictions > 0U);
     // The newest object is the warmest, and still served.
     CHECK(Ask(*tier, Wire::EncodeFetch(std::format("obj-{:03}", Objects - 1))) == Wire::Status::Ok);
-    CHECK(tier->EvictStep() == 0U);
-    CHECK(IStorage::BytesOverBudget(At(tier->SnapshotTiers(), StorageTier::Disk)) == 0U);
 }
 
-namespace
+TEST_CASE("The eviction driver releases the store between slices, so traffic completes during a shrink",
+          "[node][cache-tier][resize][concurrency]")
 {
-/// The concurrent-shrink case's shape: objects seeded before it, cache verbs on the traffic
-/// thread, readings on the reader thread, eviction steps on the shrinking thread, and the size
-/// of every object -- each larger than a disk page, so every eviction frees pages.
-constexpr int ShrinkSeeded = 96;
-constexpr int ShrinkTrafficOps = 192;
-constexpr int ShrinkReads = 192;
-constexpr int ShrinkSteps = 64;
-constexpr std::size_t ShrinkValueBytes = 24 * 1024;
-} // namespace
+    // The property the driver exists for: a shrink by most of the store never holds the store's
+    // lock for the drain. Proved by construction rather than by timing -- between every two
+    // slices the driver waits until a cache op on THIS thread has completed, which it can only
+    // do with the lock released. A driver that held it across slices would never reach a second
+    // slice boundary, or would wait out the bound with no op ever completing.
+    Testing::ScratchDirectory const scratch { "node-eviction-interleave" };
+    NullLogger logger;
+    constexpr int Objects = 400;
+    auto const storage = SeededDiskStore(scratch.Path(), logger, Objects);
+    auto const budget = Unwrap(At(storage->SnapshotTiers(), StorageTier::Disk)).bytesUsed / 4;
+    auto const resized = storage->ResizeTier(StorageTier::Disk, budget);
+    REQUIRE(resized.has_value());
+    REQUIRE(Unwrap(resized) > 0U);
+    // The resize evicted nothing: the bulk is the driver's.
+    CHECK(Unwrap(At(storage->SnapshotTiers(), StorageTier::Disk)).evictions == 0U);
+
+    core::platform::ManualClock clock;
+    std::atomic<std::uint64_t> trafficOps { 0 };
+    std::atomic<std::uint64_t> boundaries { 0 };
+    std::atomic<bool> converged { false };
+    Testing::OffThreadWaits waits;
+    auto pacing = DefaultEvictionPacing();
+    pacing.betweenSlices = [&trafficOps, &boundaries, &waits](std::stop_token const& /*stop*/) {
+        auto const seen = trafficOps.load(std::memory_order_acquire);
+        boundaries.fetch_add(1, std::memory_order_acq_rel);
+        (void) waits.Wait(
+            "a cache op completing between two eviction slices",
+            [&trafficOps, seen] { return trafficOps.load(std::memory_order_acquire) > seen; },
+            [&trafficOps] { return std::format("{} op(s)", trafficOps.load(std::memory_order_acquire)); });
+    };
+    {
+        TierEvictionDriver driver { *storage, clock, [&converged] { converged.store(true); }, std::move(pacing) };
+        driver.Kick();
+        std::uint64_t next = 0;
+        Testing::WaitOptions traffic;
+        traffic.step = [&storage, &clock, &trafficOps, &next] {
+            auto const key = std::format("k-{:04}", next % Objects);
+            ++next;
+            if (storage->Get(key, clock.now()).has_value())
+                trafficOps.fetch_add(1, std::memory_order_acq_rel);
+        };
+        REQUIRE(Testing::WaitUntil(
+            "the driver brings the store to its budget",
+            [&converged] { return converged.load(); },
+            [&driver, &trafficOps] { return std::format("{} slice(s), {} op(s)", driver.Slices(), trafficOps.load()); },
+            traffic));
+    }
+    CHECK(waits.AllReached());
+    // Several slices, and an op completed at every boundary between them.
+    CHECK(boundaries.load() >= 2U);
+    CHECK(trafficOps.load() >= boundaries.load());
+    CHECK(IStorage::BytesOverBudget(At(storage->SnapshotTiers(), StorageTier::Disk)) == 0U);
+}
+
+TEST_CASE("An eviction driver stopped mid-shrink stops at the slice boundary and leaves a usable store",
+          "[node][cache-tier][resize][concurrency]")
+{
+    // Parked between two slices of a run that has not converged -- deterministic, since the
+    // hook waits for nothing but the stop -- and then destroyed: the stop must end the wait and
+    // the join must return, with the store still serving and still able to converge.
+    Testing::ScratchDirectory const scratch { "node-eviction-stop" };
+    NullLogger logger;
+    constexpr int Objects = 400;
+    auto const storage = SeededDiskStore(scratch.Path(), logger, Objects);
+    auto const budget = Unwrap(At(storage->SnapshotTiers(), StorageTier::Disk)).bytesUsed / 4;
+    REQUIRE(storage->ResizeTier(StorageTier::Disk, budget).has_value());
+
+    core::platform::ManualClock clock;
+    std::atomic<bool> parked { false };
+    auto pacing = DefaultEvictionPacing();
+    pacing.betweenSlices = [&parked](std::stop_token const& stop) {
+        parked.store(true, std::memory_order_release);
+        std::mutex mutex;
+        std::condition_variable_any stopped;
+        std::unique_lock lock { mutex };
+        (void) stopped.wait(lock, stop, [] { return false; });
+    };
+    std::uint64_t slices = 0;
+    std::uint64_t convergences = 0;
+    {
+        TierEvictionDriver driver { *storage, clock, {}, std::move(pacing) };
+        driver.Kick();
+        REQUIRE(Testing::WaitUntil(
+            "the driver parked between two slices",
+            [&parked] { return parked.load(std::memory_order_acquire); },
+            [] { return std::string { "not yet" }; }));
+        slices = driver.Slices();
+        convergences = driver.Convergences();
+    }
+    CHECK(slices == 1U);
+    CHECK(convergences == 0U);
+    // Still over, and still a working store: the rest goes slice by slice on this thread.
+    CHECK(IStorage::BytesOverBudget(At(storage->SnapshotTiers(), StorageTier::Disk)) > 0U);
+    auto step = storage->EvictStep();
+    for ([[maybe_unused]] auto const more: std::views::iota(0, Objects))
+    {
+        if (step.bytesOverBudget == 0 || step.evicted == 0)
+            break;
+        step = storage->EvictStep();
+    }
+    CHECK(step.bytesOverBudget == 0U);
+    auto const newest = storage->Get(std::format("k-{:04}", Objects - 1), clock.now());
+    REQUIRE(newest.has_value());
+    CHECK(newest->found);
+}
 
 TEST_CASE("concurrent cache traffic during disk shrink", "[node][cache-tier][resize][concurrency]")
 {
-    // The production threads, each on its own: cache verbs (the reactor), the override
-    // being applied and the store being stepped down (the admin surface, the sampler), and
-    // the readers of what the tiers hold (the heartbeat, the presence loop, node-status).
-    // Run under TSan by `scripts/tsan-gate.sh`, whose pace-node-tests row selects every case.
+    // The production threads, each on its own: cache verbs (the reactor), the override being
+    // applied (the admin surface), the tier's own eviction driver, and the readers of what the
+    // tiers hold (the heartbeat, the presence loop, node-status). Both tiers are shrunk. Run under
+    // TSan by `scripts/tsan-gate.sh`, whose pace-node-tests row selects every case.
     Testing::ScratchDirectory const scratch { "node-cache-concurrent-shrink" };
     Fixture fixture;
     auto cfg = Fixture::BaseConfig();
@@ -709,17 +863,18 @@ TEST_CASE("concurrent cache traffic during disk shrink", "[node][cache-tier][res
                 StoreFrame(std::format("seed-{:03}", i), Incompressible(ShrinkValueBytes, static_cast<std::uint64_t>(i))))
             == Wire::Status::Ok);
     auto const budget = Unwrap(At(tier->SnapshotTiers(), StorageTier::Disk)).bytesUsed / 3;
+    constexpr std::size_t MemoryBudget = 256 * 1024;
 
     // Each thread RETURNS what it saw; every assertion runs on this thread after the joins.
     struct Traffic
     {
-        int stored = 0;
+        int answered = 0;
         int failed = 0;
     };
     struct Shrink
     {
-        bool applied = false;
-        std::size_t lastExcess = 0;
+        bool diskApplied = false;
+        bool memoryApplied = false;
     };
     struct Readings
     {
@@ -738,16 +893,15 @@ TEST_CASE("concurrent cache traffic during disk shrink", "[node][cache-tier][res
                                      StoreFrame(std::format("new-{:03}", i),
                                                 Incompressible(ShrinkValueBytes, 1000U + static_cast<std::uint64_t>(i))))
                                : Ask(*tier, Wire::EncodeFetch(std::format("seed-{:03}", i % ShrinkSeeded)));
-                if (status == Wire::Status::Ok)
-                    ++traffic.stored;
-                else if (status != Wire::Status::Miss)
+                if (status == Wire::Status::Ok || status == Wire::Status::Miss)
+                    ++traffic.answered;
+                else
                     ++traffic.failed;
             }
         } };
         std::jthread const shrinker { [&tier, &shrink, budget] {
-            shrink.applied = tier->ApplyTierBudget(StorageTier::Disk, budget).has_value();
-            for ([[maybe_unused]] auto const step: std::views::iota(0, ShrinkSteps))
-                shrink.lastExcess = tier->EvictStep();
+            shrink.diskApplied = tier->ApplyTierBudget(StorageTier::Disk, budget).has_value();
+            shrink.memoryApplied = tier->ApplyTierBudget(StorageTier::Memory, MemoryBudget).has_value();
         } };
         std::jthread const reader { [&tier, &live, &readings] {
             for ([[maybe_unused]] auto const read: std::views::iota(0, ShrinkReads))
@@ -757,29 +911,117 @@ TEST_CASE("concurrent cache traffic during disk shrink", "[node][cache-tier][res
                 auto const budgets = CacheCapacityOf(tier.get());
                 (void) IndexReserveBytesOf(tier.get());
                 ++readings.taken;
-                // A budget is one of the two values it ever holds, never anything torn.
-                auto const limit = At(budgets.tierBytesLimit, StorageTier::Disk);
-                if (!limit.has_value() || !At(tiers, StorageTier::Disk).has_value()
+                if (!At(budgets.tierBytesLimit, StorageTier::Disk).has_value() || !At(tiers, StorageTier::Disk).has_value()
                     || !At(capacity.cache.tierBytesLimit, StorageTier::Disk).has_value())
                     ++readings.inconsistent;
             }
         } };
     }
 
-    CHECK(shrink.applied);
+    CHECK(shrink.diskApplied);
+    CHECK(shrink.memoryApplied);
     CHECK(traffic.failed == 0);
-    CHECK(traffic.stored > 0);
+    CHECK(traffic.answered == ShrinkTrafficOps);
     CHECK(readings.taken == ShrinkReads);
     CHECK(readings.inconsistent == 0);
-    // Writes went on after the last step; the store converges once they stop.
-    std::size_t excess = shrink.lastExcess;
-    for ([[maybe_unused]] auto const settle: std::views::iota(0, ShrinkSteps))
-        excess = tier->EvictStep();
-    CHECK(excess == 0U);
+    // The driver converges once the writes stop; a kick per poll covers a run that ended early.
+    Testing::WaitOptions kicking;
+    kicking.step = [&tier] {
+        tier->KickEviction();
+    };
+    REQUIRE(Testing::WaitUntil(
+        "the disk tier back at its budget",
+        [&tier] { return OverBudget(*tier, StorageTier::Disk) == 0; },
+        [&tier] { return std::format("{} byte(s) over", OverBudget(*tier, StorageTier::Disk)); },
+        kicking));
     auto const disk = Unwrap(At(tier->SnapshotTiers(), StorageTier::Disk));
     CHECK(disk.bytesLimit == budget);
-    CHECK(disk.bytesUsed <= budget);
+    auto const memory = Unwrap(At(tier->SnapshotTiers(), StorageTier::Memory));
+    CHECK(memory.bytesLimit == MemoryBudget);
+    CHECK(memory.bytesUsed <= MemoryBudget);
     CHECK(Unwrap(At(live.Current().cache.tierBytesLimit, StorageTier::Disk)) == budget);
+    CHECK(Unwrap(At(live.Current().cache.tierBytesLimit, StorageTier::Memory)) == MemoryBudget);
+}
+
+TEST_CASE("concurrent cache traffic during memory shrink", "[node][cache-tier][resize][concurrency]")
+{
+    // The memory tier's own path -- `InMemoryLruStorage::ResizeTier`, evict-to-fit under the
+    // shard lock -- against cache verbs and readers on their own threads, the budget moved down
+    // and up repeatedly so every apply evicts or grows while traffic runs.
+    Fixture fixture;
+    auto cfg = Fixture::BaseConfig();
+    constexpr std::size_t Large = 2 * 1024 * 1024;
+    constexpr std::size_t Small = 128 * 1024;
+    cfg.cacheMemoryBytes = Large;
+    auto started = fixture.Start(cfg);
+    REQUIRE(started.has_value());
+    auto const tier = std::move(*started);
+    REQUIRE(tier != nullptr);
+    Testing::ScriptedHostFacts const host;
+    LiveNodeCapacity live { cfg, host, tier.get() };
+
+    struct Traffic
+    {
+        int answered = 0;
+        int failed = 0;
+    };
+    struct Shrink
+    {
+        int applied = 0;
+    };
+    struct Readings
+    {
+        int taken = 0;
+        int overBudget = 0;
+    };
+    Traffic traffic;
+    Shrink shrink;
+    Readings readings;
+    {
+        std::jthread const writer { [&tier, &traffic] {
+            for (auto const i: std::views::iota(0, ShrinkTrafficOps))
+            {
+                auto const status = i % 2 == 0 ? Ask(*tier,
+                                                     StoreFrame(std::format("mem-{:03}", i),
+                                                                Incompressible(16 * 1024, static_cast<std::uint64_t>(i))))
+                                               : Ask(*tier, Wire::EncodeFetch(std::format("mem-{:03}", i - 1)));
+                if (status == Wire::Status::Ok || status == Wire::Status::Miss)
+                    ++traffic.answered;
+                else
+                    ++traffic.failed;
+            }
+        } };
+        std::jthread const shrinker { [&tier, &shrink] {
+            for (auto const apply: std::views::iota(0, ShrinkApplies))
+                if (tier->ApplyTierBudget(StorageTier::Memory, apply % 2 == 0 ? Small : Large).has_value())
+                    ++shrink.applied;
+            // Last word: the small budget.
+            if (tier->ApplyTierBudget(StorageTier::Memory, Small).has_value())
+                ++shrink.applied;
+        } };
+        std::jthread const reader { [&tier, &live, &readings] {
+            for ([[maybe_unused]] auto const read: std::views::iota(0, ShrinkReads))
+            {
+                (void) live.Current();
+                (void) CacheCapacityOf(tier.get());
+                // The memory tier fits whenever its lock is free: an in-memory resize evicts to fit
+                // before it releases it, so no reader can catch it over.
+                if (OverBudget(*tier, StorageTier::Memory) != 0)
+                    ++readings.overBudget;
+                ++readings.taken;
+            }
+        } };
+    }
+
+    CHECK(shrink.applied == ShrinkApplies + 1);
+    CHECK(traffic.failed == 0);
+    CHECK(traffic.answered == ShrinkTrafficOps);
+    CHECK(readings.taken == ShrinkReads);
+    CHECK(readings.overBudget == 0);
+    auto const memory = Unwrap(At(tier->SnapshotTiers(), StorageTier::Memory));
+    CHECK(memory.bytesLimit == Small);
+    CHECK(memory.bytesUsed <= Small);
+    CHECK(Unwrap(At(live.Current().cache.tierBytesLimit, StorageTier::Memory)) == Small);
 }
 
 TEST_CASE("A cache directory that cannot be opened is fatal when it was named", "[node][cache-tier]")
@@ -1415,9 +1657,4 @@ TEST_CASE("The startup line names the upstream by its kind", "[node][cache-tier]
         REQUIRE(started.has_value());
         CHECK(Logged(fixture.logger, "upstream none)"));
     }
-}
-
-TEST_CASE("A node with no cache tier has nothing for the periodic eviction step to do", "[node][cache-tier][resize]")
-{
-    CHECK(StepTierEviction(nullptr) == 0U);
 }

@@ -171,7 +171,7 @@ class WriteErrorReportingStorage final: public IStorage
     std::optional<std::size_t> ResizeTier(StorageTier tier, std::size_t newMaxBytes) override;
     /// Forwarded, for the same reason.
     /// @return The inner store's answer.
-    std::size_t EvictStep() override;
+    EvictStepOutcome EvictStep() override;
 
     /// Forward to the inner storage: this decorator counts write errors, it
     /// never reclaims.

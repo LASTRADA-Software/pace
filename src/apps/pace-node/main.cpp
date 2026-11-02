@@ -1868,11 +1868,11 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
                                  // loop's would cut that loop's interval and this one's.
                                  MakeHostLoadSampler(MakeSystemCounterSource()),
                                  Node::HistoryKeysOf(cfg),
-                                 // The one loop every node runs, so it is what carries a live disk
-                                 // shrink the rest of the way when no write arrives to: one bounded
-                                 // slice a minute, nothing when the tier already fits. Declared after
-                                 // the tier, so the tier outlives the thread that calls it.
-                                 [tier = cacheTier.get()] { (void) Node::StepTierEviction(tier); } };
+                                 // The fallback look at a store left over its budget: the tier's own
+                                 // eviction driver does the work on its thread, kicked by every applied
+                                 // budget; this kicks it once a minute in case nothing else did.
+                                 // Declared after the tier, so the tier outlives the thread that calls it.
+                                 [tier = cacheTier.get()] { Node::KickTierEviction(tier); } };
 
     // Wired here because this is the one scope holding both: the scheduler tier is
     // built before the sampler that receives for it, so the sink cannot be a

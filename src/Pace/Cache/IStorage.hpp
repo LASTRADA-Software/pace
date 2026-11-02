@@ -693,17 +693,28 @@ class IStorage
     ///        forward this across their inner storages.
     virtual void Resize(std::size_t newMaxBytes) = 0;
 
+    /// What one `EvictStep` did, and what is left.
+    struct EvictStepOutcome
+    {
+        std::size_t bytesOverBudget { 0 }; ///< Bytes still above budget, summed over the tiers; 0 once all fit.
+        std::size_t evicted { 0 };         ///< Entries this step erased. Zero while still over means no progress.
+
+        /// Field by field.
+        [[nodiscard]] bool operator==(EvictStepOutcome const&) const = default;
+    };
+
     /// Give ONE tier of a live store a new byte budget, leaving every other tier as it is.
     ///
     /// `Resize` cannot say which tier it means: `LayeredStorage` reads it as the in-memory
     /// half's, so a disk budget reached through it would land on the wrong tier. This names
-    /// the tier, and a composite routes it to whichever of its stores reports that tier.
+    /// the tier, and a composite routes it to EVERY one of its stores that reports that tier.
     ///
     /// **Bounded, not total.** A tier that sheds entries cheaply (in memory) evicts to fit
     /// before returning; one whose eviction is a commit per record (`CowTreeStorage`)
-    /// evicts at most one slice and returns what is still over. The rest goes on later
-    /// write-path calls and on `EvictStep`, so the store serves throughout and a shrink
-    /// by most of the store never holds the caller's lock for the whole drain.
+    /// evicts NOTHING here and returns what is over. Its excess goes on `EvictStep`, which a
+    /// background driver calls one small slice at a time with the caller's lock released
+    /// between slices, so the store serves throughout and no caller -- a reactor least of
+    /// all -- ever holds the lock for the drain.
     ///
     /// A budget of zero keeps the tier's own meaning (unbounded for both tiers here);
     /// whether a caller may ask for it is the caller's rule, not this interface's.
@@ -724,15 +735,25 @@ class IStorage
         return BytesOverBudget(SnapshotTiers()[static_cast<std::size_t>(tier)]);
     }
 
-    /// Evict one more bounded slice toward the budgets, where a tier is still over one.
+    /// Evict one more small, bounded slice toward the budgets, where a tier is still over one.
     ///
-    /// What carries a `ResizeTier` shrink the rest of the way when no write arrives to do
-    /// it: a periodic driver calls this until it answers zero. A tier that evicts to fit
-    /// whenever its budget moves is never over, which is the default's answer.
-    /// @return Bytes still above budget, summed over this store's tiers; 0 once all fit.
-    virtual std::size_t EvictStep()
+    /// What carries a `ResizeTier` shrink to its budget: a background driver calls this back
+    /// to back, re-taking the store's lock for each call, until it answers zero over budget or
+    /// zero evicted. A tier that evicts to fit whenever its budget moves is never over, which
+    /// is the default's answer.
+    /// @return What the step erased and what is still over.
+    virtual EvictStepOutcome EvictStep()
     {
-        return 0;
+        return {};
+    }
+
+    /// Two stores' `EvictStep` answers as one composite's.
+    /// @param lhs One store's answer.
+    /// @param rhs The other's.
+    /// @return Both fields summed.
+    [[nodiscard]] static constexpr EvictStepOutcome CombineEvictSteps(EvictStepOutcome lhs, EvictStepOutcome rhs) noexcept
+    {
+        return { .bytesOverBudget = lhs.bytesOverBudget + rhs.bytesOverBudget, .evicted = lhs.evicted + rhs.evicted };
     }
 
     /// Two stores' `ResizeTier` answers as one composite's.

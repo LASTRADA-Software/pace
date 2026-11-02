@@ -25,15 +25,21 @@
 #include <Pace/Platform/ProcessExit.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
 
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 
 #include <core/platform/Clock.hpp>
@@ -174,6 +180,109 @@ class ITierBudgetListener
     ITierBudgetListener& operator=(ITierBudgetListener&&) = default;
 };
 
+/// How the eviction driver paces itself.
+struct EvictionPacing
+{
+    /// How long one run of back-to-back slices may last before the driver pauses. Measured on
+    /// the injected clock, so a manual clock that never moves runs until the store fits.
+    std::chrono::milliseconds runBudget;
+    /// How long the driver pauses between runs, so traffic on the store's lock is never shut
+    /// out by a run that has used its budget; ended early only by a stop.
+    std::chrono::milliseconds pause;
+    /// What the driver does between two slices of one run, with the store's lock RELEASED:
+    /// a yield in production, so a thread parked on that lock gets it before the next slice.
+    /// A test that must prove the interleaving waits here for traffic to complete. Handed the
+    /// driver's stop token, so anything that waits here ends when the driver is stopped.
+    std::function<void(std::stop_token const&)> betweenSlices;
+};
+
+/// The pacing a node runs with: runs of at most 200 ms, each followed by a 50 ms pause.
+///
+/// A slice is `CowTreeStorage::EvictSliceRecords` records, one batched flush, so a run is many
+/// short holds of the shard lock with a yield between each; the pause bounds the driver to
+/// four fifths of wall time even against a disk that makes every slice slow. At a few
+/// milliseconds per slice that drains hundreds of thousands of records a minute, so halving a
+/// store of millions converges in minutes where a once-a-minute slice took hours.
+[[nodiscard]] EvictionPacing DefaultEvictionPacing();
+
+/// Carries a store over its budget down to it, slice by slice, on a thread of its own.
+///
+/// **Its own thread, never a reactor's, and never the sampler's.** A reactor serves every
+/// `0xFC` surface on the node, and a slice is commits; the sampler's minute is a history
+/// cadence, and a driver that waits a minute between slices is the hours-long convergence
+/// this replaces. So a stoppable thread, idle on a condition variable until `Kick`ed: by an
+/// applied budget, at startup (a store reopened over its budget), and by the sampler's minute
+/// as a fallback.
+///
+/// **The store's lock is released between slices.** Each `IStorage::EvictStep` takes and
+/// releases the shard mutex itself; between two calls the driver runs
+/// `EvictionPacing::betweenSlices`, and after `runBudget` it pauses. A run ends when the store
+/// fits, or when a step evicted nothing while still over -- a budget below what the store can
+/// shrink to, or a disk refusing every erase -- so a driver that cannot make progress waits
+/// for the next kick instead of spinning.
+///
+/// **Stopped and joined by its destructor**, which the owner runs before the store goes: a
+/// stop lands at the next slice boundary, so it waits at most one slice.
+class TierEvictionDriver
+{
+  public:
+    /// Start the thread, idle until kicked.
+    /// @param storage The store to step; must outlive this.
+    /// @param clock What a run's budget is measured on; must outlive this.
+    /// @param converged Called on the driver's thread when a run that found the store over its
+    ///        budget brought it to fit; empty for nothing.
+    /// @param pacing How the driver paces itself.
+    TierEvictionDriver(IStorage& storage,
+                       core::platform::IClock& clock,
+                       std::function<void()> converged,
+                       EvictionPacing pacing);
+
+    /// Stops the thread and joins it.
+    ~TierEvictionDriver();
+
+    TierEvictionDriver(TierEvictionDriver const&) = delete;
+    TierEvictionDriver& operator=(TierEvictionDriver const&) = delete;
+    TierEvictionDriver(TierEvictionDriver&&) = delete;
+    TierEvictionDriver& operator=(TierEvictionDriver&&) = delete;
+
+    /// Ask for a run. Cheap and safe from any thread; kicks while a run is going are folded
+    /// into one more look once it ends.
+    void Kick();
+
+    /// @return How many slices the driver has run, ever. Any thread.
+    [[nodiscard]] std::uint64_t Slices() const noexcept
+    {
+        return _slices.load(std::memory_order_acquire);
+    }
+
+    /// @return How many runs have brought an over-budget store to fit. Any thread.
+    [[nodiscard]] std::uint64_t Convergences() const noexcept
+    {
+        return _convergences.load(std::memory_order_acquire);
+    }
+
+  private:
+    /// The thread's body: wait for a kick, run, repeat until stopped.
+    /// @param stop Requested by the destructor.
+    void Loop(std::stop_token const& stop);
+
+    /// One run: slices back to back until the store fits, stops progressing, or is stopped.
+    /// @param stop Requested by the destructor.
+    void Run(std::stop_token const& stop);
+
+    IStorage& _storage;
+    core::platform::IClock& _clock;
+    std::function<void()> _converged;
+    EvictionPacing _pacing;
+    std::mutex _mutex;                 ///< Guards `_kicked`.
+    std::condition_variable_any _wake; ///< Kicks and stops.
+    bool _kicked { false };
+    std::atomic<std::uint64_t> _slices { 0 };
+    std::atomic<std::uint64_t> _convergences { 0 };
+    /// Last, so it stops and joins before anything above it goes.
+    std::jthread _thread;
+};
+
 /// The node's cache surface: storage, upstream, read-through logic, protocol and
 /// listener, owned as one thing.
 ///
@@ -275,23 +384,28 @@ class CacheTier final: public ITierStatsSource
     /// Give one tier of the running store a new budget.
     ///
     /// The API a cluster budget override is applied through. The memory tier evicts to the
-    /// new budget before this returns; the disk tier evicts at most one slice
-    /// (`CowTreeStorage::EvictSliceRecords`) and the rest goes on later writes and on
-    /// `EvictStep`, so the store serves throughout. What is still over is visible as
-    /// `IStorage::BytesOverBudget` of that tier's `SnapshotTiers()` entry, the one
-    /// derivation every surface reports it through. A grow evicts nothing.
+    /// new budget before this returns (in memory, no I/O); the disk tier adopts the budget and
+    /// evicts NOTHING here, and this tier's eviction driver is kicked to carry it down slice
+    /// by slice on its own thread, so neither this call nor any reactor holds the store's
+    /// lock for a drain. What is still over is visible as `IStorage::BytesOverBudget` of that
+    /// tier's `SnapshotTiers()` entry, the one derivation every surface reports it through. A
+    /// grow evicts nothing.
     ///
     /// **Locking.** Applies are serialised by this tier's budget mutex, so a resize and the
     /// recomputation it triggers are one step against other applies. The budget itself and
     /// the eviction cursor live in the store, under the `ShardedStorage` shard mutex that
-    /// every cache verb, every `Snapshot` and `EvictStep` also take -- never across more
-    /// than one slice of commits, and never across a tree walk (a slice gathers its victims
-    /// under a read snapshot and erases after it). Lock order: budget mutex, then shard
-    /// mutex, then the listener's own; nothing takes them the other way round.
+    /// every cache verb, every `Snapshot` and the driver's `EvictStep` also take -- never
+    /// across more than one slice of commits, and never across a tree walk (a slice gathers
+    /// its victims under a read snapshot and erases after it). Lock order: budget mutex, then
+    /// shard mutex, then the listener's own, then the driver's; nothing takes them the other
+    /// way round, and the driver takes the budget mutex (to tell the listener it converged)
+    /// holding nothing else.
     ///
     /// After the resize the listener (`SetBudgetListener`) is told, which is what re-derives
     /// the machine's capacity -- the reserve held back from compiles and the budget the
     /// node reports -- from what the tiers now HOLD rather than from the number asked for.
+    /// It is told again when the driver brings the store to fit, since the key index the
+    /// reserve counts shrinks with it.
     /// @param tier Which tier.
     /// @param bytes The new budget. Zero is refused (`TierOverrideCannotRemoveTier`), as is
     ///        anything `CheckTierBudget` refuses.
@@ -299,18 +413,23 @@ class CacheTier final: public ITierStatsSource
     ///         does not have ("no disk tier on this node"), in which case nothing changed.
     [[nodiscard]] std::expected<void, std::string> ApplyTierBudget(StorageTier tier, std::size_t bytes);
 
-    /// One more eviction slice toward the budgets; what a periodic driver calls.
-    ///
-    /// Cheap when nothing is over: one shard lock and a comparison per tier.
-    /// @return Bytes still over budget across the tiers; 0 once every tier fits.
-    std::size_t EvictStep();
+    /// Ask the eviction driver for a run: the sampler's minute calls this as a fallback, so a
+    /// store left over its budget by anything (a reopen, a run that could not progress) is
+    /// looked at again. Cheap when nothing is over.
+    void KickEviction();
+
+    /// @return The tier's eviction driver, for what it has done. Any thread.
+    [[nodiscard]] TierEvictionDriver const& Eviction() const noexcept
+    {
+        return _eviction;
+    }
 
     /// Who is told when `ApplyTierBudget` moved a budget.
     ///
     /// Taken under the budget mutex, so clearing it (as `LiveNodeCapacity`'s destructor
     /// does) cannot race an apply that is about to call it.
     /// @param listener The listener, or nullptr for none; must outlive its registration.
-    void SetBudgetListener(ITierBudgetListener* listener) noexcept;
+    void SetBudgetListener(ITierBudgetListener* listener);
 
     /// Whether this tier reads through to a shared cache.
     ///
@@ -345,6 +464,9 @@ class CacheTier final: public ITierStatsSource
               core::platform::IClock& clock,
               IMetricsSink& metrics);
 
+    /// Tell the listener the tiers moved, under the budget mutex. The driver's convergence.
+    void NotifyBudgetListener();
+
     // Declaration order IS construction order, and every one of these is referenced
     // by the one below it. Reordering them is a dangling reference, which is why
     // they live here rather than as locals somebody has to keep in the right order.
@@ -359,15 +481,17 @@ class CacheTier final: public ITierStatsSource
     std::mutex _budgetMutex;
     /// Told after every applied budget; guarded by `_budgetMutex`.
     ITierBudgetListener* _budgetListener { nullptr };
+    /// Carries an over-budget store down to its budget. LAST, so its thread is stopped and
+    /// joined before the storage, the cache and the budget mutex it reaches go.
+    TierEvictionDriver _eviction;
 };
 
-/// One eviction slice for the node's cache tier, if it has one.
+/// Kick the node's cache tier's eviction driver, if it has a tier.
 ///
-/// What the node's periodic loop runs after every sample, so a disk tier shrunk live converges
-/// even when no write arrives to carry it there.
+/// What the node's sampler runs after every sample: the fallback look at a store left over its
+/// budget when nothing else kicked the driver.
 /// @param tier The node's cache tier, or null when it has none.
-/// @return Bytes still over budget; 0 once every tier fits, and 0 with no tier.
-std::size_t StepTierEviction(CacheTier* tier);
+void KickTierEviction(CacheTier* tier);
 
 /// What this machine is, read when it is needed rather than captured at startup.
 ///

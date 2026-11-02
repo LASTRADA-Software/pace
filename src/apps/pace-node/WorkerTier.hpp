@@ -385,6 +385,35 @@ class WorkerTier
     /// @return One registrar per entry of @p served.
     [[nodiscard]] std::vector<Cc::WorkerRegistrar> RegistrarsFor(std::map<std::string, ServedToolchain> const& served);
 
+    /// Re-register under this machine's capacity as it stands now, when it is not the capacity
+    /// the registrations in force carry.
+    ///
+    /// A live cache-budget override moves the reserve the capacity is derived from
+    /// (`LiveNodeCapacity`). The registry sizes this worker by the capacity its REGISTER carried,
+    /// and `node-status` must weigh the worker the same way, so both read `RegisteredCapacity()`
+    /// and this is the one place it moves: the capacity record is rebuilt, the registrars with it
+    /// (the same `(fingerprint, endpoint)` keys, so nothing is withdrawn and the registry updates
+    /// the entry in place), and the round that follows re-registers. Run by the heartbeat once a
+    /// beat, before its round; public, as `RegistrarsFor` is, because it dials nothing.
+    ///
+    /// The slot COUNT and the thread pool do not follow: they are sized once, at startup, and the
+    /// registration keeps sending that count, which the registry takes as given. When `--slots` is
+    /// unset that count was derived from the STARTUP capacity, and it stays the startup figure.
+    /// What follows live is the capacity record itself -- the reserved memory and the tier budgets
+    /// the fleet page's worker rows show -- and the machine budget the presence loop reports, which
+    /// is what admission charges compiles against. The memory ceiling `SlotCeilingsFor` folds is
+    /// the host's free memory each heartbeat, which no budget figure enters.
+    /// @param statusClock What `node-status` stamps against, for the registrations this replaces.
+    /// @return Whether the capacity had moved, and the registrars were rebuilt.
+    bool FollowCapacity(core::platform::IClock const& statusClock);
+
+    /// @return The capacity the registrations in force carry, and that `node-status` weighs this
+    ///         worker by. The heartbeat thread, or before it runs.
+    [[nodiscard]] Distributed::NodeCapacity const& RegisteredCapacity() const noexcept
+    {
+        return _registeredCapacity;
+    }
+
     /// Stop admitting compiles, and wait for the ones admitted to finish.
     void StopAndDrain();
 
@@ -498,9 +527,11 @@ class WorkerTier
     CompileResponder _responder;
     NodeRuntimeState _runtime;
     CompileCacheWire::CapacityFields _advertisedWire;
-    /// What `NodeCapacityOf` makes of this machine: the capacity the scheduler's `SlotCeilingsFor` weighs this
-    /// worker's load against, read per round so `node-status` weighs it as it stands after a budget override.
+    /// What `NodeCapacityOf` makes of this machine now, read once a beat by `FollowCapacity`.
     INodeCapacitySource const& _machineCapacity;
+    /// The capacity `_advertisedWire` and the registrars in force were built from: what the scheduler's
+    /// `SlotCeilingsFor` weighs this worker by, and so what `node-status` weighs it by. Heartbeat thread only.
+    Distributed::NodeCapacity _registeredCapacity;
     std::vector<Cc::WorkerRegistrar> _registrars;
     std::vector<Cc::WorkerRegistrar> _withdrawals;
     IEndpointDialer& _dialer;

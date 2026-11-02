@@ -440,9 +440,9 @@ std::optional<std::size_t> LayeredStorage::ResizeTier(StorageTier tier, std::siz
     return CombineTierExcess(_l1->ResizeTier(tier, newMaxBytes), _l2->ResizeTier(tier, newMaxBytes));
 }
 
-std::size_t LayeredStorage::EvictStep()
+IStorage::EvictStepOutcome LayeredStorage::EvictStep()
 {
-    return _l1->EvictStep() + _l2->EvictStep();
+    return CombineEvictSteps(_l1->EvictStep(), _l2->EvictStep());
 }
 
 } // namespace Pace

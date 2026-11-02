@@ -169,7 +169,7 @@ class NotifyingStorage final: public IStorage
     std::optional<std::size_t> ResizeTier(StorageTier tier, std::size_t newMaxBytes) override;
     /// Forwarded, for the same reason.
     /// @return The inner store's answer.
-    std::size_t EvictStep() override;
+    EvictStepOutcome EvictStep() override;
     [[nodiscard]] StorageStats Snapshot() const noexcept override;
     [[nodiscard]] TieredStorageStats SnapshotTiers() const noexcept override;
     [[nodiscard]] bool SupportsSharedRead() const noexcept override;

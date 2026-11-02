@@ -834,7 +834,7 @@ TEST_CASE("memory shrink evicts to budget", "[cache][resize]")
     CHECK(after.evictions == 90U);
     CHECK(storage.Get("k-099", clock.now())->found);
     CHECK_FALSE(storage.Get("k-000", clock.now())->found);
-    CHECK(storage.EvictStep() == 0U);
+    CHECK(storage.EvictStep() == Pace::IStorage::EvictStepOutcome {});
 }
 
 TEST_CASE("memory grow takes effect without eviction", "[cache][resize]")

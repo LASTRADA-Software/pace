@@ -113,17 +113,18 @@ class CowTreeStorage final: public IStorage
                                                         'h',  'e',  'd', '.', 'm', 'i', 'g', '\0' };
     static constexpr std::string_view MigrationMarkerKey { MigrationMarkerKeyBytes, sizeof(MigrationMarkerKeyBytes) };
 
-    /// The most records one eviction call erases: a `ResizeTier`, an `EvictStep`, or the
-    /// eviction a write runs after it lands.
+    /// The most records one `EvictStep` erases, and the most a write erases beyond what it
+    /// itself added.
     ///
     /// Each eviction is its own commit, taken under whatever lock serialises this store
-    /// (`ShardedStorage`'s per-shard mutex on both binaries), so an unbounded drain after
-    /// an operator halves a large disk tier would hold every request on that shard for the
-    /// whole of it. A slice bounds that hold; what is left over goes on the next write or
-    /// the next `EvictStep`, and the store serves reads between slices. In steady state a
-    /// write overshoots by a few records at most, so the ceiling only ever binds after a
-    /// shrink (or on a store reopened over its budget).
-    static constexpr std::size_t EvictSliceRecords = 4096;
+    /// (`ShardedStorage`'s per-shard mutex on both binaries -- on a node, the ONE mutex every
+    /// cache verb on the reactor takes). So the slice is what bounds how long an eviction
+    /// holds that lock. 64 is one batched flush (`FilePageStore`'s `BatchedFlushInterval`):
+    /// a slice costs at most one data/list/meta sync beside its page writes, milliseconds on
+    /// any disk, where the 4096 this started at was some sixty flushes and could hold the
+    /// node's reactor for seconds. The background driver re-takes the lock per slice, so a
+    /// large shrink converges at slices-per-second rather than by holding it.
+    static constexpr std::size_t EvictSliceRecords = 64;
 
     struct Options
     {
@@ -136,9 +137,10 @@ class CowTreeStorage final: public IStorage
         /// disables eviction. Not a cap on the file's length; see `FootprintBytes`.
         std::size_t maxBytes { 0 };
 
-        /// The most records one bounded eviction call erases; `EvictSliceRecords` unless a
-        /// test needs a slice it can watch end. Zero is read as one, since a slice that may
-        /// erase nothing would leave a shrunk store over its budget for good.
+        /// The most records one `EvictStep` erases, and a write beyond what it added;
+        /// `EvictSliceRecords` unless a test needs a slice it can watch end. Zero is read as
+        /// one, since a slice that may erase nothing would leave a shrunk store over its
+        /// budget for good.
         std::size_t evictSliceRecords { EvictSliceRecords };
 
         /// Durability mode for the page store.
@@ -383,22 +385,23 @@ class CowTreeStorage final: public IStorage
     /// that must not hold the store's lock for a whole drain is `ResizeTier`.
     void Resize(std::size_t newMaxBytes) override;
 
-    /// Adopt a new page-footprint budget for the disk tier, evicting at most one slice.
+    /// Adopt a new page-footprint budget for the disk tier, evicting nothing.
     ///
     /// The budget is the in-memory `Options::maxBytes` and nothing on disk: the meta records
     /// no budget, so changing it is no format change and a restart reads `--cache-disk`
-    /// again. A grow evicts nothing. A shrink evicts cold entries first, then the mirror's
-    /// tail (the same order as every eviction here), at most `evictSliceRecords` of them,
-    /// each walk gathered before any erase so no walk overlaps a commit.
+    /// again. Nothing is evicted here, so the caller holds the store's lock for an
+    /// assignment: the excess goes on `EvictStep`, slice by slice, cold entries first and
+    /// then the mirror's tail (the order of every eviction here), each walk gathered before
+    /// any erase so no walk overlaps a commit. Until then the store serves over its budget,
+    /// which is the state `Open` already leaves a store reopened over its budget in.
     /// @param tier Which tier's budget to change; only `StorageTier::Disk` is this store.
     /// @param newMaxBytes The new footprint budget; zero disables eviction, as at `Open`.
-    /// @return Footprint bytes still above the budget after this slice, or nullopt for any
-    ///         tier but the disk tier.
+    /// @return Footprint bytes above the new budget, or nullopt for any tier but the disk tier.
     std::optional<std::size_t> ResizeTier(StorageTier tier, std::size_t newMaxBytes) override;
 
-    /// Evict one more slice toward the budget, if the store is over it.
-    /// @return Footprint bytes still above the budget; 0 once the store fits.
-    std::size_t EvictStep() override;
+    /// Evict one slice (`evictSliceRecords`) toward the budget, if the store is over it.
+    /// @return What the slice erased and the footprint bytes still above the budget.
+    EvictStepOutcome EvictStep() override;
 
     /// Whether the backing file is held under an exclusive inter-process claim.
     ///
@@ -755,10 +758,23 @@ class CowTreeStorage final: public IStorage
     /// drain that may be most of the store.
     ///
     /// Bounded by @p maxRecords erase ATTEMPTS, failed ones included, because what the
-    /// bound limits is commits held under the caller's lock. A write passes one slice, so
-    /// a store far over its budget converges across writes rather than inside one.
+    /// bound limits is commits held under the caller's lock.
     /// @param maxRecords The most entries to try to erase; `UnboundedEviction` for `Resize`.
-    void EvictToFit(std::size_t maxRecords);
+    /// @param ceiling The footprint to come down to: the budget, or for a write the larger
+    ///        of the budget and the footprint before the write (see `EvictAfterWrite`).
+    /// @return Entries erased.
+    std::size_t EvictToFit(std::size_t maxRecords, std::uint64_t ceiling);
+
+    /// The eviction a write runs after it lands.
+    ///
+    /// Two parts, and only the first is unbounded. What THIS write added is taken back in
+    /// full, down to the larger of the budget and the footprint the store had before it --
+    /// so a write never grows an excess, which is what keeps a store with no background
+    /// driver (the daemon's) at its budget, exactly as before live resizing existed. Then at
+    /// most one slice of any excess that was already there: a store shrunk live, or reopened
+    /// over its budget, is drained by the background driver, never by a client's write.
+    /// @param footprintBefore `FootprintBytes()` before the write.
+    void EvictAfterWrite(std::uint64_t footprintBefore);
 
     /// `EvictToFit`'s bound for the one caller that drains to the end: `Resize`.
     static constexpr std::size_t UnboundedEviction = std::numeric_limits<std::size_t>::max();
@@ -789,8 +805,10 @@ class CowTreeStorage final: public IStorage
     /// past and left standing is never walked again.
     ///
     /// @param budget Erase attempts this call may still make; decremented by every attempt.
+    /// @param ceiling The footprint to come down to.
+    /// @param erased Incremented by every entry erased.
     /// @return true when at least one entry was erased.
-    bool EvictColdSlice(std::size_t& budget);
+    bool EvictColdSlice(std::size_t& budget, std::uint64_t ceiling, std::size_t& erased);
 
     /// How many keys one refill walk collects before it stops.
     ///
