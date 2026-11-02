@@ -549,6 +549,13 @@ class FleetSampler final: public IFleetHistoryView
     /// @return The row.
     [[nodiscard]] Store KeyedStore(std::filesystem::path path, Distributed::KeyedDimension dimension);
 
+    /// Run `_afterSample`, catching anything it throws: never ends the sampler's thread.
+    void RunAfterSample() noexcept;
+
+    /// Say, once per failure, that the after-sample step threw. Never throws.
+    /// @param why What the exception said.
+    void ReportAfterSampleFailure(std::string_view why) noexcept;
+
     /// What the fleet series reads, or nullopt on a node with no scheduler.
     std::optional<Distributed::FleetSources> _sources;
     IMetricsSink const& _metrics;
@@ -571,6 +578,8 @@ class FleetSampler final: public IFleetHistoryView
     ILogger& _logger;
     /// Run after every sample, on the sampler's thread; empty for nothing.
     std::function<void()> _afterSample;
+    /// After-sample failures whose Warn could not be written either.
+    std::atomic<std::uint64_t> _afterSampleUnreported { 0 };
     std::jthread _thread;
 };
 

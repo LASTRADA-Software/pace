@@ -1228,6 +1228,36 @@ TEST_CASE("A write into a store shrunk live takes back what it added and at most
     CHECK(after.bytesUsed > Pages(16));
 }
 
+TEST_CASE("A write bigger than one slice is still taken back in full", "[cowstorage][eviction][resize]")
+{
+    // The take-back half of the write path on its own: a one-record slice cannot cover a value of
+    // several pages, so only the take-back keeps the write from growing the excess -- the half that
+    // holds a store with no background driver (the daemon's) at its budget.
+    TempFile tmp;
+    auto opts = FootprintOptions(tmp.path, 0);
+    opts.evictSliceRecords = 1;
+    auto opened = Pace::CowTreeStorage::Open(opts);
+    REQUIRE(opened.has_value());
+    auto const& storage = *opened;
+    for (auto const i: std::views::iota(0, ShrinkEntries))
+        REQUIRE(storage
+                    ->Set(std::format("k-{:03d}", i),
+                          RandomBytes(OnePageValueLen, static_cast<std::uint64_t>(i)),
+                          0,
+                          core::platform::SteadyTimePoint::max())
+                    .has_value());
+    REQUIRE(storage->ResizeTier(Pace::StorageTier::Disk, Pages(16)).has_value());
+    auto const before = storage->Snapshot();
+
+    constexpr std::size_t PagesWritten = 4;
+    REQUIRE(
+        storage->Set("wide", RandomBytes(PagesWritten * OnePageValueLen, 2000), 0, core::platform::SteadyTimePoint::max())
+            .has_value());
+    auto const after = storage->Snapshot();
+    CHECK(after.bytesUsed <= before.bytesUsed);
+    CHECK(after.evictions - before.evictions >= PagesWritten);
+}
+
 TEST_CASE("disk grow takes effect without eviction", "[cowstorage][eviction][resize]")
 {
     TempFile tmp;

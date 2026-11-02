@@ -1106,8 +1106,7 @@ FleetSampler::FleetSampler(std::optional<Distributed::FleetSources> sources,
         while (!stop.stop_requested())
         {
             SampleOnce();
-            if (_afterSample)
-                _afterSample();
+            RunAfterSample();
             if (sinceSave >= SaveInterval)
             {
                 Persist();
@@ -1122,6 +1121,39 @@ FleetSampler::FleetSampler(std::optional<Distributed::FleetSources> sources,
             sinceSave += Distributed::FleetHistory::SampleInterval;
         }
     } };
+}
+
+void FleetSampler::RunAfterSample() noexcept
+{
+    if (!_afterSample)
+        return;
+    // Caught here, at the one call this loop makes into code it does not own: an exception escaping
+    // the sampler's thread ends the process, and a missed kick costs one minute of a fallback.
+    try
+    {
+        _afterSample();
+    }
+    catch (std::exception const& failure)
+    {
+        ReportAfterSampleFailure(failure.what());
+    }
+    catch (...)
+    {
+        ReportAfterSampleFailure("an exception that is not a std::exception");
+    }
+}
+
+void FleetSampler::ReportAfterSampleFailure(std::string_view why) noexcept
+{
+    try
+    {
+        _logger.Logf(LogLevel::Warn, "fleet sampler: the after-sample step failed ({}); skipped until the next sample", why);
+    }
+    catch (...)
+    {
+        // The report itself failed; counted rather than rethrown, for the reason above.
+        _afterSampleUnreported.fetch_add(1, std::memory_order_relaxed);
+    }
 }
 
 FleetSampler::Store FleetSampler::KeyedStore(std::filesystem::path path, Distributed::KeyedDimension dimension)

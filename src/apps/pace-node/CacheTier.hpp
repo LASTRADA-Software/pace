@@ -223,17 +223,23 @@ struct EvictionPacing
 ///
 /// **Stopped and joined by its destructor**, which the owner runs before the store goes: a
 /// stop lands at the next slice boundary, so it waits at most one slice.
+///
+/// **Never ends the process.** A run that throws -- an allocation failure, a storage fault
+/// surfaced as an exception -- is caught at the thread's loop, said once at Warn with how far it
+/// got, counted (`FailedRuns`), and the driver waits for the next kick.
 class TierEvictionDriver
 {
   public:
     /// Start the thread, idle until kicked.
     /// @param storage The store to step; must outlive this.
     /// @param clock What a run's budget is measured on; must outlive this.
+    /// @param logger Where a run that failed is reported; must outlive this.
     /// @param converged Called on the driver's thread when a run that found the store over its
     ///        budget brought it to fit; empty for nothing.
     /// @param pacing How the driver paces itself.
     TierEvictionDriver(IStorage& storage,
                        core::platform::IClock& clock,
+                       ILogger& logger,
                        std::function<void()> converged,
                        EvictionPacing pacing);
 
@@ -261,6 +267,12 @@ class TierEvictionDriver
         return _convergences.load(std::memory_order_acquire);
     }
 
+    /// @return How many runs ended in an exception, caught at the thread's loop. Any thread.
+    [[nodiscard]] std::uint64_t FailedRuns() const noexcept
+    {
+        return _failedRuns.load(std::memory_order_acquire);
+    }
+
   private:
     /// The thread's body: wait for a kick, run, repeat until stopped.
     /// @param stop Requested by the destructor.
@@ -270,8 +282,15 @@ class TierEvictionDriver
     /// @param stop Requested by the destructor.
     void Run(std::stop_token const& stop);
 
+    /// Say, once, that a run ended in an exception, and count it. Never throws: it runs where an
+    /// exception would end the process.
+    /// @param why What the exception said.
+    /// @param slices How many slices the run had taken before it failed.
+    void ReportFailedRun(std::string_view why, std::uint64_t slices) noexcept;
+
     IStorage& _storage;
     core::platform::IClock& _clock;
+    ILogger& _logger;
     std::function<void()> _converged;
     EvictionPacing _pacing;
     std::mutex _mutex;                 ///< Guards `_kicked`.
@@ -279,6 +298,8 @@ class TierEvictionDriver
     bool _kicked { false };
     std::atomic<std::uint64_t> _slices { 0 };
     std::atomic<std::uint64_t> _convergences { 0 };
+    std::atomic<std::uint64_t> _failedRuns { 0 };
+    std::atomic<std::uint64_t> _unreportedFailures { 0 }; ///< Failed runs whose report itself failed.
     /// Last, so it stops and joins before anything above it goes.
     std::jthread _thread;
 };
@@ -427,7 +448,8 @@ class CacheTier final: public ITierStatsSource
     /// Who is told when `ApplyTierBudget` moved a budget.
     ///
     /// Taken under the budget mutex, so clearing it (as `LiveNodeCapacity`'s destructor
-    /// does) cannot race an apply that is about to call it.
+    /// does) cannot race an apply that is about to call it. A listener being SET is told once
+    /// at once, under that lock, so a change it was not yet registered for is not lost.
     /// @param listener The listener, or nullptr for none; must outlive its registration.
     void SetBudgetListener(ITierBudgetListener* listener);
 
@@ -462,7 +484,8 @@ class CacheTier final: public ITierStatsSource
               std::unique_ptr<ICacheUpstream> upstream,
               ILocalityOracle const& locality,
               core::platform::IClock& clock,
-              IMetricsSink& metrics);
+              IMetricsSink& metrics,
+              ILogger& logger);
 
     /// Tell the listener the tiers moved, under the budget mutex. The driver's convergence.
     void NotifyBudgetListener();

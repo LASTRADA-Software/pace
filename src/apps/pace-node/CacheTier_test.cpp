@@ -43,6 +43,7 @@
 #include <optional>
 #include <ranges>
 #include <span>
+#include <stdexcept>
 #include <stop_token>
 #include <string>
 #include <string_view>
@@ -764,7 +765,7 @@ TEST_CASE("The eviction driver releases the store between slices, so traffic com
             [&trafficOps] { return std::format("{} op(s)", trafficOps.load(std::memory_order_acquire)); });
     };
     {
-        TierEvictionDriver driver { *storage, clock, [&converged] { converged.store(true); }, std::move(pacing) };
+        TierEvictionDriver driver { *storage, clock, logger, [&converged] { converged.store(true); }, std::move(pacing) };
         driver.Kick();
         std::uint64_t next = 0;
         Testing::WaitOptions traffic;
@@ -813,7 +814,7 @@ TEST_CASE("An eviction driver stopped mid-shrink stops at the slice boundary and
     std::uint64_t slices = 0;
     std::uint64_t convergences = 0;
     {
-        TierEvictionDriver driver { *storage, clock, {}, std::move(pacing) };
+        TierEvictionDriver driver { *storage, clock, logger, {}, std::move(pacing) };
         driver.Kick();
         REQUIRE(Testing::WaitUntil(
             "the driver parked between two slices",
@@ -837,6 +838,73 @@ TEST_CASE("An eviction driver stopped mid-shrink stops at the slice boundary and
     auto const newest = storage->Get(std::format("k-{:04}", Objects - 1), clock.now());
     REQUIRE(newest.has_value());
     CHECK(newest->found);
+}
+
+TEST_CASE("An eviction step that throws is reported and the driver keeps working", "[node][cache-tier][resize]")
+{
+    // An exception escaping the driver's thread would end the node. A run that throws is caught at
+    // the loop, said once at Warn, counted -- and the next kick does the work.
+    Testing::ScratchDirectory const scratch { "node-eviction-throw" };
+    NullLogger storeLogger;
+    constexpr int Objects = 64;
+    std::function<void()> hook = [] {
+        throw std::runtime_error { "injected eviction fault" };
+    };
+    Testing::HookedStorage storage { SeededDiskStore(scratch.Path(), storeLogger, Objects), hook };
+    auto const budget = Unwrap(At(storage.SnapshotTiers(), StorageTier::Disk)).bytesUsed / 4;
+    REQUIRE(storage.ResizeTier(StorageTier::Disk, budget).has_value());
+
+    core::platform::ManualClock clock;
+    CapturingLogger logger;
+    TierEvictionDriver driver { storage, clock, logger, {}, DefaultEvictionPacing() };
+    driver.Kick();
+    REQUIRE(Testing::WaitUntil(
+        "the failed run reported",
+        [&driver] { return driver.FailedRuns() >= 1; },
+        [&driver] { return std::format("{} failed run(s), {} slice(s)", driver.FailedRuns(), driver.Slices()); }));
+    CHECK(Logged(logger, "injected eviction fault"));
+    CHECK(Logged(logger, "the next kick retries"));
+    CHECK(IStorage::BytesOverBudget(At(storage.SnapshotTiers(), StorageTier::Disk)) > 0U);
+
+    // The hook is spent; the next kick converges.
+    driver.Kick();
+    REQUIRE(Testing::WaitUntil(
+        "the next kick brings the store to its budget",
+        [&driver] { return driver.Convergences() >= 1; },
+        [&driver] { return std::format("{} convergence(s), {} slice(s)", driver.Convergences(), driver.Slices()); }));
+    CHECK(driver.FailedRuns() == 1U);
+    CHECK(IStorage::BytesOverBudget(At(storage.SnapshotTiers(), StorageTier::Disk)) == 0U);
+}
+
+TEST_CASE("A budget listener is told once as it registers", "[node][cache-tier][resize][capacity]")
+{
+    // So a drain the tier's startup kick finished before anybody listened is not lost: registering
+    // derives, under the same lock as every later notification.
+    class CountingListener final: public ITierBudgetListener
+    {
+      public:
+        void TierBudgetApplied() override
+        {
+            ++told;
+        }
+        int told = 0;
+    };
+    Fixture fixture;
+    auto cfg = Fixture::BaseConfig();
+    cfg.cacheMemoryBytes = 8 * 1024 * 1024;
+    auto started = fixture.Start(cfg);
+    REQUIRE(started.has_value());
+    auto const tier = std::move(*started);
+    REQUIRE(tier != nullptr);
+
+    CountingListener listener;
+    tier->SetBudgetListener(&listener);
+    CHECK(listener.told == 1);
+    REQUIRE(tier->ApplyTierBudget(StorageTier::Memory, 4 * 1024 * 1024).has_value());
+    CHECK(listener.told == 2);
+    tier->SetBudgetListener(nullptr);
+    REQUIRE(tier->ApplyTierBudget(StorageTier::Memory, 2 * 1024 * 1024).has_value());
+    CHECK(listener.told == 2);
 }
 
 TEST_CASE("concurrent cache traffic during disk shrink", "[node][cache-tier][resize][concurrency]")
