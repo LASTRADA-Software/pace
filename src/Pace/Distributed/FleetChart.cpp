@@ -85,7 +85,10 @@ namespace
     /// @return True when the number in that slot means something.
     [[nodiscard]] bool Answers(FleetBucket const& bucket, FleetMetric metric) noexcept
     {
-        return !bucket.backfilled || FleetMetricTable[static_cast<std::size_t>(metric)].scope == FleetMetricScope::Node;
+        // And a slot the bucket records absent -- the CPU a machine could not read, or one no fleet view
+        // carries -- answers nothing, whatever number sits in it.
+        return !IsAbsent(bucket, metric)
+               && (!bucket.backfilled || FleetMetricTable[static_cast<std::size_t>(metric)].scope == FleetMetricScope::Node);
     }
 
     /// Whether a bucket can answer for every slot a series reads.

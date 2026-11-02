@@ -68,13 +68,16 @@ class ScriptedFleet final: public ILiveStatsSources
     }
 
     /// @copydoc ILiveStatsSources::FleetText
-    [[nodiscard]] std::expected<FleetTextDocument, FleetTextDeclined> FleetText(
-        std::string_view section, std::string_view range, CompileCacheWire::FleetTextFormat format) const override
+    [[nodiscard]] std::expected<FleetTextDocument, FleetTextDeclined> FleetText(std::string_view section,
+                                                                                std::string_view range,
+                                                                                CompileCacheWire::FleetTextFormat format,
+                                                                                std::string_view node) const override
     {
         ++reads;
         askedSection = section;
         askedRange = range;
         askedFormat = format;
+        askedNode = node;
         return answer;
     }
 
@@ -90,6 +93,7 @@ class ScriptedFleet final: public ILiveStatsSources
     mutable std::string askedRange {};   ///< The range the last read named.
     /// The format the last read named.
     mutable Wire::FleetTextFormat askedFormat { Wire::FleetTextFormat::Text };
+    mutable std::string askedNode {}; ///< The node the last read named.
 };
 
 /// A FLEET-TEXT frame.
@@ -173,6 +177,19 @@ TEST_CASE("The format a fleet read names reaches the sources, and a json read is
     // And a stranger gets nothing, whatever the format.
     auto const stranger = rig.Ask(rig.responder, FleetTextFrame({}, {}, {}, Wire::FleetTextFormat::Json), "192.0.2.1");
     CHECK(Testing::ErrorOf(stranger) == Wire::ErrorCode::NotAMember);
+}
+
+TEST_CASE("A fleet read's node selector reaches the sources as typed, and none reads the fleet", "[node][fleettext]")
+{
+    Rig rig;
+    auto const named = rig.AskLocally(Wire::EncodeFleetTextRequest(
+        Wire::FleetTextRequest { .section = "series", .range = "1h", .dashboardToken = {}, .format = {}, .node = "n2" }));
+    REQUIRE(Testing::StatusOf(named) == Wire::Status::Ok);
+    CHECK(rig.sources.askedNode == "n2");
+
+    auto const fleet = rig.AskLocally(FleetTextFrame("series", "1h"));
+    REQUIRE(Testing::StatusOf(fleet) == Wire::Status::Ok);
+    CHECK(rig.sources.askedNode.empty());
 }
 
 TEST_CASE("A version 16 FLEET-TEXT is refused UnsupportedVersion, not as a malformed frame", "[node][fleettext]")
@@ -381,15 +398,16 @@ TEST_CASE("A fleet read through the slot is the attached sources' and a detached
     LiveStatsSourceSlot slot;
     {
         auto const attached = slot.Attach(sources);
-        auto const read = slot.FleetText("series", "7d", Wire::FleetTextFormat::Json);
+        auto const read = slot.FleetText("series", "7d", Wire::FleetTextFormat::Json, "n2");
         REQUIRE(read.has_value());
         CHECK(read->body == "# kpi\nkey\tvalue\n");
         CHECK(sources.askedSection == "series");
         CHECK(sources.askedRange == "7d");
         CHECK(sources.askedFormat == Wire::FleetTextFormat::Json);
+        CHECK(sources.askedNode == "n2");
     }
 
-    auto const detached = slot.FleetText("series", "7d", Wire::FleetTextFormat::Json);
+    auto const detached = slot.FleetText("series", "7d", Wire::FleetTextFormat::Json, {});
     REQUIRE_FALSE(detached.has_value());
     CHECK(detached.error().refusal == FleetTextRefusal::NoFleet);
     CHECK(sources.reads == 1);

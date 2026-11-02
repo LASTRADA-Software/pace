@@ -4139,6 +4139,21 @@ It is the one section the every-section document leaves out. Its size is the ran
 rather than the fleet's (a day is 288 rows, whatever the fleet is), so it is asked for
 by name.
 
+**`cpu-busy` is one machine's, never the fleet's.** It is the host CPU busy in permille
+(0..1000, this node's own compiles included), sampled with every other figure once a
+minute. A load ratio summed or averaged over machines is nobody's load, so the fleet's
+`series` table carries the column as `-` in every row. A machine's own series carries it:
+a `fleet-text` request naming a member id in its node field draws the `series` table
+from what **that** machine handed the leader, found by the identity key its member record
+holds -- never by an endpoint -- and still answerable after the machine left, for as long
+as the rings hold its readings. In a machine's series the dispatch columns are `-`, since
+only the scheduler produces those, and a minute whose CPU could not be read (the first
+sample after a start has no earlier counters to difference against, and a platform may
+not say) is `-` as well, never `0`. The node field is refused on every other selection,
+on an id no member holds (listing the members), and for a member nobody handed history
+over for. The MCP `history` tool's `node` argument is its client: `cpu-busy` requires it,
+and the dispatch series refuse it.
+
 Three of the seven are derived from the **history** rather than the snapshot, so both
 surfaces take `range` exactly as the page does, and refuse an unknown one for the same
 reason. A figure the range cannot answer is `null` / `-` and **never `0`**: a fleet

@@ -80,9 +80,12 @@ namespace McpFleet
 /// Each asks the leader through @p upstream on the MCP thread that calls it, and answers a tool EXECUTION error
 /// (`isError`) carrying the upstream's sentence when the leader could not be asked, or refused.
 /// @param upstream How the leader is reached; must outlive every row returned.
-/// @param cluster The applied state every machine row is named in (`McpSupport::AppendNaming`); must outlive every
-///        row returned.
+/// @param cluster The applied state every machine row is named in (`McpSupport::AppendNaming`), and where `history`'s
+///        `node` resolves; must outlive every row returned.
+/// @param selfId This node's id: the one name `node` resolves on a node that has applied no cluster state.
 /// @return The rows, in the order `tools/list` presents them.
-[[nodiscard]] std::vector<Mcp::ToolRow> FleetReadTools(IMcpUpstream& upstream, IAppliedClusterView const& cluster);
+[[nodiscard]] std::vector<Mcp::ToolRow> FleetReadTools(IMcpUpstream& upstream,
+                                                       IAppliedClusterView const& cluster,
+                                                       std::string selfId);
 
 } // namespace Pace::Node

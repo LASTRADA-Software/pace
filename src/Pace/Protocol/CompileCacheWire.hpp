@@ -2708,7 +2708,7 @@ inline constexpr std::array OpTable {
     // fleet map.
     OpDescriptor { .code = Op::FleetText,
                    .name = "fleet-text",
-                   .fieldCount = 4, // section key, range key, dashboard token, format
+                   .fieldCount = 5, // section key, range key, dashboard token, format, node id
                    .legalStatuses = static_cast<std::uint8_t>(StatusBit(Status::Ok) | StatusBit(Status::Error)),
                    .preAuth = RequiresAuth,
                    .maxPayload = BoundedTo(MaxControlPayload),
@@ -5291,7 +5291,7 @@ struct RegisterReplyFields
 /// come across as zero. Sending just the node-scoped ones would make the arity
 /// depend on a table the two peers might disagree about, and a misaligned reading is
 /// worse than five wasted words.
-inline constexpr std::size_t HistorySlotCount = 10;
+inline constexpr std::size_t HistorySlotCount = 11;
 
 /// One closed bucket of a node's own history.
 ///
@@ -5302,12 +5302,24 @@ inline constexpr std::size_t HistorySlotCount = 10;
 /// and the one a decoder trusted would be the one nothing kept correct. Nor would a
 /// fold help: the leader merges these into a FLEET-wide series whose peak is the
 /// peak of the sums, which is not the sum of the peaks. The nested record is
-/// variable-arity, so a build that finds a use can add a field without a version.
+/// variable-arity, so a build that finds a use can add a field without a version --
+/// which is how the absence mask arrived, as an optional fourth field.
 struct HistoryBucketFields
 {
     std::uint64_t startMillis { 0 };                       ///< Wall-clock start of the bucket.
     std::uint64_t sampleMillis { 0 };                      ///< When the reading in `values` was taken.
     std::array<std::uint64_t, HistorySlotCount> values {}; ///< The readings, positionally.
+    /// The slots that carry no reading, one bit per position (bit `n` is `values[n]`). The record's fourth
+    /// field, OPTIONAL: a peer that sends none had no slot that could be absent, so zero.
+    ///
+    /// Travels because nothing can recompute it: a CPU reading the machine could not take is not a zero.
+    std::uint64_t absent { 0 };
+    /// How many positions the sender's record actually carried, at most `HistorySlotCount`.
+    ///
+    /// Decoded, never encoded: a receiver reads the slots a narrower peer never sent by the policy of the
+    /// SLOT, which this dependency-free header cannot see -- so it reports the width and the side that can
+    /// see `FleetMetricTable` decides (`Distributed::HistoryFromWire`).
+    std::size_t carried { HistorySlotCount };
 };
 
 /// The most closed buckets one heartbeat may carry.
@@ -5321,12 +5333,12 @@ inline constexpr std::size_t MaxHistoryBucketsPerHeartbeat = 128;
 
 /// What one encoded bucket costs at most, framing included.
 ///
-/// Three fields, each a length-prefixed word or array, plus the prefix on the record
+/// Four fields, each a length-prefixed word or array, plus the prefix on the record
 /// itself. Written out rather than measured so the ceiling below is a compile-time
 /// fact, and in terms of `FieldPrefixSize` rather than a literal 4, which would
 /// restate the framing contract beside the one place it is defined.
 inline constexpr std::size_t MaxHistoryBucketBytes =
-    (2 * (sizeof(std::uint64_t) + WireFields::FieldPrefixSize))
+    (3 * (sizeof(std::uint64_t) + WireFields::FieldPrefixSize))
     + ((HistorySlotCount * sizeof(std::uint64_t)) + WireFields::FieldPrefixSize) + WireFields::FieldPrefixSize;
 
 /// The batch fits, with the rest of a heartbeat still to fit beside it.
@@ -5365,7 +5377,8 @@ static_assert(MaxHistoryBucketsPerHeartbeat * MaxHistoryBucketBytes <= HistoryPa
         owned.push_back(
             WireFields::Encode({ std::span<std::byte const> { WireFields::ToBigEndian<std::uint64_t>(bucket.startMillis) },
                                  std::span<std::byte const> { WireFields::ToBigEndian<std::uint64_t>(bucket.sampleMillis) },
-                                 std::span<std::byte const> { packed } }));
+                                 std::span<std::byte const> { packed },
+                                 std::span<std::byte const> { WireFields::ToBigEndian<std::uint64_t>(bucket.absent) } }));
         fields.emplace_back(owned.back());
     }
     return WireFields::Encode(WireFields::FieldList { fields });
@@ -5375,8 +5388,10 @@ static_assert(MaxHistoryBucketsPerHeartbeat * MaxHistoryBucketBytes <= HistoryPa
 ///
 /// Tolerant of a peer carrying more slots than this build knows and of one carrying
 /// fewer, exactly as `DecodeLoad` is: the extra are ignored and the missing stay
-/// zero. Strict about WIDTH, because a slot at the wrong width is a number nobody
-/// can interpret rather than one somebody can ignore.
+/// zero, with `carried` saying how many there were so the side that knows each slot's
+/// meaning can read the hole. The absence mask is optional for the same reason; a
+/// field past it is a newer peer's and ignored. Strict about WIDTH, because a slot at
+/// the wrong width is a number nobody can interpret rather than one somebody can ignore.
 ///
 /// @param field The nested record's bytes.
 /// @return The buckets, or nullopt when a field is present at the wrong width.
@@ -5414,13 +5429,21 @@ static_assert(MaxHistoryBucketsPerHeartbeat * MaxHistoryBucketBytes <= HistoryPa
         if (packed.size() % sizeof(std::uint64_t) != 0)
             return std::nullopt;
         auto const carried = packed.size() / sizeof(std::uint64_t);
-        for (auto const slot: std::views::iota(std::size_t { 0 }, std::min(carried, HistorySlotCount)))
+        bucket.carried = std::min(carried, HistorySlotCount);
+        for (auto const slot: std::views::iota(std::size_t { 0 }, bucket.carried))
         {
             auto const read = WireFields::FromBigEndian<std::uint64_t>(
                 packed.subspan(slot * sizeof(std::uint64_t), sizeof(std::uint64_t)));
             if (!read.has_value())
                 return std::nullopt;
             bucket.values[slot] = *read;
+        }
+        if (parts->size() > 3)
+        {
+            auto const absent = WireFields::FromBigEndian<std::uint64_t>((*parts)[3]);
+            if (!absent.has_value())
+                return std::nullopt;
+            bucket.absent = *absent;
         }
         out.push_back(bucket);
     }
@@ -10371,8 +10394,13 @@ struct FleetTextRequest
     std::string range {};   ///< A `FleetRangeTable` key, or empty for the default day.
     /// The dashboard credential, or empty; a secret, so the request is the only place it travels.
     std::string dashboardToken {};
-    /// Which document is wanted; the request's fourth and last field.
+    /// Which document is wanted; the request's fourth field.
     FleetTextFormat format { FleetTextFormat::Text };
+    /// A member id whose OWN history the `series` section draws, or empty for the fleet's; the request's fifth
+    /// and last field. Empty is the absence: a reader that names no machine reads the fleet, as before the field.
+    /// The leader resolves it to the key the member record holds and refuses it on any other selection
+    /// (`UnknownFleetSelector`) rather than dropping it.
+    std::string node {};
 };
 
 /// Frame a FLEET-TEXT request.
@@ -10388,7 +10416,8 @@ struct FleetTextRequest
                                  { AsBytes(request.section),
                                    AsBytes(request.range),
                                    AsBytes(request.dashboardToken),
-                                   std::span<std::byte const> { &formatByte, 1 } });
+                                   std::span<std::byte const> { &formatByte, 1 },
+                                   AsBytes(request.node) });
 }
 
 /// Decode a FLEET-TEXT request's payload.
@@ -10406,7 +10435,8 @@ struct FleetTextRequest
     return FleetTextRequest { .section = std::string { AsStringView((*fields)[0]) },
                               .range = std::string { AsStringView((*fields)[1]) },
                               .dashboardToken = std::string { AsStringView((*fields)[2]) },
-                              .format = static_cast<FleetTextFormat>(std::to_integer<std::uint8_t>((*fields)[3][0])) };
+                              .format = static_cast<FleetTextFormat>(std::to_integer<std::uint8_t>((*fields)[3][0])),
+                              .node = std::string { AsStringView((*fields)[4]) } };
 }
 
 /// The cadence a server grants for @p subject when asked for @p asked.

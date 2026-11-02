@@ -632,36 +632,6 @@ namespace
 
     // ------------------------------------------------------------ history
 
-    /// What one series kind's values are measured in.
-    struct SeriesUnitRow
-    {
-        Distributed::FleetSeriesKind kind; ///< The kind.
-        std::string_view unit;             ///< Its unit, as the tool names it.
-    };
-
-    /// One row per `FleetSeriesKind`; what `ValuesFor` derives for each.
-    constexpr std::array SeriesUnits {
-        SeriesUnitRow { .kind = Distributed::FleetSeriesKind::Rate, .unit = "per-minute" },
-        SeriesUnitRow { .kind = Distributed::FleetSeriesKind::Level, .unit = "count" },
-        SeriesUnitRow { .kind = Distributed::FleetSeriesKind::Share, .unit = "percent" },
-    };
-
-    static_assert(std::ranges::all_of(Distributed::FleetSeriesTable,
-                                      [](Distributed::FleetSeriesRow const& series) {
-                                          return std::ranges::count(SeriesUnits, series.kind, &SeriesUnitRow::kind) == 1;
-                                      }),
-                  "every series kind a series uses names its unit exactly once");
-
-    /// @param kind A series kind.
-    /// @return Its unit.
-    [[nodiscard]] std::string_view UnitOf(Distributed::FleetSeriesKind kind) noexcept
-    {
-        for (auto const& row: SeriesUnits)
-            if (row.kind == kind)
-                return row.unit;
-        return {};
-    }
-
     /// @param keys Some keys.
     /// @return Them, comma-separated, for a refusal that lists what it would accept.
     template <typename Rows, typename Key>
@@ -794,7 +764,10 @@ namespace
         return buckets;
     }
 
-    [[nodiscard]] Mcp::ToolResult History(IMcpUpstream& upstream, Mcp::ToolCall const& call)
+    [[nodiscard]] Mcp::ToolResult History(IMcpUpstream& upstream,
+                                          IAppliedClusterView const& cluster,
+                                          std::string const& selfId,
+                                          Mcp::ToolCall const& call)
     {
         auto const seriesKey = StringAt(call.arguments, "series").value_or(std::string {});
         auto const rangeKey = StringAt(call.arguments, "range").value_or(std::string {});
@@ -814,12 +787,42 @@ namespace
                                      rangeKey,
                                      KeysOf(Distributed::FleetRangeTable, &Distributed::FleetRangeRow::key)));
 
+        // Whose series: the fleet's, or one machine's. Which a series HAS is read off the slot table's columns,
+        // never restated: a load ratio has no fleet figure (`FleetTotal::None`), a dispatch outcome no machine
+        // figure (`FleetMetricScope::Fleet`). Asked the wrong way, each is refused naming the argument -- never a
+        // fleet aggregate silently standing in for a machine, nor a machine's absences standing in for a count.
+        auto const* const nodeArgument = call.arguments.Find("node");
+        auto const forMachine = nodeArgument != nullptr && !nodeArgument->IsNull();
+        if (!forMachine && !Distributed::HasFleetValue(*series))
+            return Error(std::format("series \"{}\" is one machine's own reading and has no fleet-wide value; name the "
+                                     "machine with `node` (its member id or display name)",
+                                     series->key));
+        if (forMachine && !Distributed::HasMachineValue(*series))
+            return Error(std::format("series \"{}\" is the fleet scheduler's own count, which no single machine answers "
+                                     "for; omit `node` to read the fleet's",
+                                     series->key));
+
+        auto naming = MachineNaming {};
+        auto memberId = std::string {};
+        if (forMachine)
+        {
+            auto target = NodeTargetFrom(nodeArgument, cluster, selfId);
+            if (!target.has_value())
+                return std::move(target.error());
+            // Empty means this node, named by the id it runs under.
+            memberId = target->nodeId.empty() ? selfId : target->nodeId;
+            if (memberId.empty())
+                return Error("this node runs with no id, so `node` can name no machine here");
+            naming = std::move(target->naming);
+        }
+
         auto const section = Distributed::FleetSectionTable[static_cast<std::size_t>(Distributed::FleetSection::Series)].key;
-        auto reply =
-            AskLeader(upstream,
-                      Wire::EncodeFleetTextRequest(Wire::FleetTextRequest {
-                          .section = std::string { section }, .range = rangeKey, .format = Wire::FleetTextFormat::Text }),
-                      "fleet-text");
+        auto reply = AskLeader(upstream,
+                               Wire::EncodeFleetTextRequest(Wire::FleetTextRequest { .section = std::string { section },
+                                                                                     .range = rangeKey,
+                                                                                     .format = Wire::FleetTextFormat::Text,
+                                                                                     .node = memberId }),
+                               "fleet-text");
         if (!reply.has_value())
             return std::move(reply.error());
 
@@ -832,11 +835,16 @@ namespace
             auto const* const value = bucket.Find("value");
             return value != nullptr && !value->IsNull();
         });
-        auto const unit = UnitOf(series->kind);
+        auto const unit = series->unit;
         auto const bucketSeconds = std::chrono::duration_cast<std::chrono::seconds>(range->bucket).count();
-        auto text = std::format("{} over {}: {} bucket(s) of {} s, {} with a value ({}); {}",
+        auto const whose = forMachine ? std::format(" for node {} ({})",
+                                                    naming.nodeId.value_or(memberId),
+                                                    naming.displayName.value_or(std::string { "no display name" }))
+                                      : std::string { " for the fleet" };
+        auto text = std::format("{} over {}{}: {} bucket(s) of {} s, {} with a value ({}); {}",
                                 series->key,
                                 range->key,
+                                whose,
                                 buckets->size(),
                                 bucketSeconds,
                                 known,
@@ -844,6 +852,9 @@ namespace
                                 Provenance(*reply));
 
         auto result = Envelope(*reply);
+        result.emplace_back("scope", Str(std::string { forMachine ? "node" : "fleet" }));
+        // Named as every answer names a machine: id AND display name; both null for the fleet's series.
+        AppendNaming(result, naming);
         result.emplace_back("series", Str(std::string { series->key }));
         result.emplace_back("range", Str(std::string { range->key }));
         result.emplace_back("unit", Str(std::string { unit }));
@@ -959,8 +970,9 @@ namespace
             };
             return std::format(
                 R"({{"type":"object","required":["series","range"],"properties":{{)"
-                R"("series":{{"type":"string","enum":[{}],"description":"A fleet series, as /fleet/series.json keys it."}},)"
-                R"("range":{{"type":"string","enum":[{}],"description":"How far back, as the dashboard's range buttons name it."}}}},"additionalProperties":false}})",
+                R"("series":{{"type":"string","enum":[{}],"description":"A series, as /fleet/series.json keys it. cpu-busy (permille) is one machine's own reading and needs `node`; the dispatch series (dispatched and the refusal reasons) are the scheduler's and refuse it."}},)"
+                R"("range":{{"type":"string","enum":[{}],"description":"How far back, as the dashboard's range buttons name it."}},)"
+                R"("node":{{"type":"string","description":"One machine's own series instead of the fleet's: a member id or display name, matched exactly."}}}},"additionalProperties":false}})",
                 quoted(Distributed::FleetSeriesTable, &Distributed::FleetSeriesRow::key),
                 quoted(Distributed::FleetRangeTable, &Distributed::FleetRangeRow::key));
         }();
@@ -968,8 +980,9 @@ namespace
     }
 
     constexpr std::string_view HistoryOutput =
-        R"({"type":"object","required":["answered_by","term","term_scope","series","range","unit","bucket_seconds","full_coverage","buckets"],"properties":{)"
+        R"({"type":"object","required":["answered_by","term","term_scope","scope","node_id","display_name","series","range","unit","bucket_seconds","full_coverage","buckets"],"properties":{)"
         R"("answered_by":{"type":"string"},"term":{"type":["integer","null"]},"term_scope":{"const":"this-node"},)"
+        R"("scope":{"enum":["fleet","node"]},"node_id":{"type":["string","null"],"description":"The machine whose series this is; null for the fleet's."},"display_name":{"type":["string","null"]},)"
         R"("series":{"type":"string"},"range":{"type":"string"},"unit":{"type":"string"},)"
         R"("bucket_seconds":{"type":"integer"},"full_coverage":{"type":"integer"},)"
         R"("buckets":{"type":"array","description":"Oldest first: start (RFC 3339 UTC), value (null for a gap), coverage (samples, null when unsampled), backfilled."}}})";
@@ -983,7 +996,7 @@ namespace
 
 } // namespace
 
-std::vector<Mcp::ToolRow> FleetReadTools(IMcpUpstream& upstream, IAppliedClusterView const& cluster)
+std::vector<Mcp::ToolRow> FleetReadTools(IMcpUpstream& upstream, IAppliedClusterView const& cluster, std::string selfId)
 {
     auto* const to = &upstream;
     auto const* const in = &cluster;
@@ -1028,14 +1041,18 @@ std::vector<Mcp::ToolRow> FleetReadTools(IMcpUpstream& upstream, IAppliedCluster
         Mcp::ToolRow {
             .name = "history",
             .title = "Fleet history",
-            .description = "One fleet series over a range, as bucket values with explicit gaps (null), from the same "
-                           "history /fleet/series.json serves. Rates are per minute, shares percent, levels counts; "
-                           "bucket_seconds is in SECONDS and each start is RFC 3339 UTC. An unknown series or range is "
-                           "refused with the valid ones listed. `term` is the term THIS node holds.",
+            .description = "One series over a range, as bucket values with explicit gaps (null), from the same "
+                           "history /fleet/series.json serves: the fleet's, or with `node` one machine's own, kept by "
+                           "the leader from what that machine handed over. `unit` names each series' unit: rates per "
+                           "minute, shares percent, slot levels counts, cpu-busy permille. bucket_seconds is in SECONDS "
+                           "and each start is RFC 3339 UTC. cpu-busy needs `node`; the dispatch series refuse it. An "
+                           "unknown series, range or node is refused with the valid ones listed. `term` is the term "
+                           "THIS node holds.",
             .inputSchema = HistoryInput(),
             .outputSchema = HistoryOutput,
             .effect = Mcp::ToolEffect::ReadOnly,
-            .handler = [to](Mcp::ToolCall const& call) { return History(*to, call); },
+            .handler =
+                [to, in, self = std::move(selfId)](Mcp::ToolCall const& call) { return History(*to, *in, self, call); },
         },
         Mcp::ToolRow {
             .name = "enrollment_status",

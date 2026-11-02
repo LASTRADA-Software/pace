@@ -814,7 +814,7 @@ class McpForwarding
 /// @return The table.
 [[nodiscard]] std::vector<Mcp::ToolRow> McpToolTable(NodeConfig const& cfg, McpForwarding& forwarding, ILogger& logger)
 {
-    auto tools = Node::FleetReadTools(forwarding.Upstream(), forwarding.Directory());
+    auto tools = Node::FleetReadTools(forwarding.Upstream(), forwarding.Directory(), cfg.nodeId);
     std::ranges::move(
         Node::ToolchainTools(forwarding.Upstream(), forwarding.Directory(), cfg.nodeId, std::string { VersionString }),
         std::back_inserter(tools));
@@ -1859,7 +1859,10 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
                                  snapshotProvider,
                                  wall,
                                  Node::SetAsideForeignHistory(Node::HistoryPaths::For(cfg), historyGuard, logger),
-                                 logger };
+                                 logger,
+                                 // Its OWN sampler: one holds the previous CPU counters, so sharing the presence
+                                 // loop's would cut that loop's interval and this one's.
+                                 MakeHostLoadSampler(MakeSystemCounterSource()) };
 
     // Wired here because this is the one scope holding both: the scheduler tier is
     // built before the sampler that receives for it, so the sink cannot be a

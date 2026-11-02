@@ -232,7 +232,7 @@ std::vector<std::byte> FleetTextResponder::Read(Wire::FleetTextRequest const& re
 
 std::vector<std::byte> FleetTextResponder::Render(Wire::FleetTextRequest const& request) const
 {
-    auto document = _sources.FleetText(request.section, request.range, request.format);
+    auto document = _sources.FleetText(request.section, request.range, request.format, request.node);
     if (!document.has_value())
     {
         if (document.error().refusal == FleetTextRefusal::UnknownSelector)

@@ -67,12 +67,16 @@ class RecordingHistorySink final: public Distributed::IFleetHistorySink
     struct Call
     {
         std::string endpoint;                          ///< Who it was filed under.
+        std::string provenKey;                         ///< The key the delivering connection proved, raw.
         std::vector<Distributed::FleetBucket> buckets; ///< What arrived.
     };
 
-    std::size_t AcceptHistory(std::string_view endpoint, std::span<Distributed::FleetBucket const> buckets) override
+    std::size_t AcceptHistory(std::string_view endpoint,
+                              std::string_view provenKey,
+                              std::span<Distributed::FleetBucket const> buckets) override
     {
         calls.push_back(Call { .endpoint = std::string { endpoint },
+                               .provenKey = std::string { provenKey },
                                .buckets = std::vector<Distributed::FleetBucket> { buckets.begin(), buckets.end() } });
         return buckets.size();
     }

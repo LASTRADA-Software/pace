@@ -357,6 +357,83 @@ namespace
         return view;
     }
 
+    /// The member ids a refusal lists as the ones a node selector could name.
+    /// @param snapshot The fleet, with the applied state it read.
+    /// @return The ids, comma-separated; `(none)` when the state names nobody or there is none.
+    [[nodiscard]] std::string KnownMemberIds(Distributed::FleetSnapshot const& snapshot)
+    {
+        auto out = std::string {};
+        if (snapshot.cluster.has_value())
+            for (auto const& member: snapshot.cluster->members)
+                out += std::format("{}{}", out.empty() ? "" : ", ", member.id);
+        return out.empty() ? std::string { "(none)" } : out;
+    }
+
+    /// One machine's own `series` table: `AnswerFleetText` with a node selector.
+    ///
+    /// The member is found by its id, exactly, and its series by the key its record holds -- never by an
+    /// endpoint, which is a machine's own claim. Refused rather than answered for anything but the series
+    /// section of the tables: a selector accepted and silently dropped on another section would answer about the
+    /// fleet while the reader believed it was about a machine.
+    /// @param snapshot The fleet, and the applied state it read.
+    /// @param history The record, or null.
+    /// @param section The section asked for.
+    /// @param format The document asked for.
+    /// @param nodeId The member id named.
+    /// @param range The window.
+    /// @return The document, or `UnknownSelector` saying what was wrong.
+    [[nodiscard]] std::expected<FleetTextDocument, FleetTextDeclined> AnswerMachineSeries(
+        Distributed::FleetSnapshot const& snapshot,
+        IFleetHistoryView const* history,
+        std::optional<Distributed::FleetSection> section,
+        CompileCacheWire::FleetTextFormat format,
+        std::string_view nodeId,
+        Distributed::FleetRange range)
+    {
+        auto const seriesKey =
+            Distributed::FleetSectionTable[static_cast<std::size_t>(Distributed::FleetSection::Series)].key;
+        if (format != CompileCacheWire::FleetTextFormat::Text || section != Distributed::FleetSection::Series)
+            return std::unexpected(FleetTextDeclined {
+                .refusal = FleetTextRefusal::UnknownSelector,
+                .detail = std::format("a node selects a machine's own history, served by the {} section of the tables "
+                                      "alone\n",
+                                      seriesKey) });
+
+        auto const* const member =
+            snapshot.cluster.has_value()
+                ? core::findIfOrNull(snapshot.cluster->members,
+                                     [nodeId](Cluster::ClusterMember const& each) { return each.id == nodeId; })
+                : nullptr;
+        if (member == nullptr)
+            return std::unexpected(FleetTextDeclined {
+                .refusal = FleetTextRefusal::UnknownSelector,
+                .detail = std::format("no member is named {}; the members are: {}\n", nodeId, KnownMemberIds(snapshot)) });
+
+        // A follower answers as it answers for the fleet -- comment lines naming the leader, no table -- since
+        // what it was handed is a fraction of the fleet's handover, rendered by the same renderer below.
+        auto const leads = Distributed::LeadsTheFleet(snapshot);
+        Distributed::FleetHistoryView view { .range = range,
+                                             .buckets = {},
+                                             .durable = history != nullptr && history->Durable() };
+        if (leads)
+        {
+            auto buckets =
+                history != nullptr
+                    ? history->MachineBuckets(AsStringView(std::span<std::byte const> { member->publicKey }), range)
+                    : std::nullopt;
+            if (!buckets.has_value())
+                return std::unexpected(FleetTextDeclined {
+                    .refusal = FleetTextRefusal::UnknownSelector,
+                    .detail = std::format("this leader holds no history for {}: none was handed over under the key "
+                                          "its record holds\n",
+                                          nodeId) });
+            view.buckets = std::move(*buckets);
+        }
+        return FleetTextDocument { .leads = leads,
+                                   .leaderEndpoint = snapshot.leaderEndpoint,
+                                   .body = Distributed::RenderFleetText(snapshot, view, section) };
+    }
+
     /// A chart tail that names nothing in the table.
     [[nodiscard]] AdminResponse NoSuchChart()
     {
@@ -422,7 +499,8 @@ std::expected<FleetTextDocument, FleetTextDeclined> AnswerFleetText(Distributed:
                                                                     IFleetHistoryView const* history,
                                                                     std::string_view sectionKey,
                                                                     std::string_view rangeKey,
-                                                                    CompileCacheWire::FleetTextFormat format)
+                                                                    CompileCacheWire::FleetTextFormat format,
+                                                                    std::string_view nodeId)
 {
     if (format == CompileCacheWire::FleetTextFormat::Json && !sectionKey.empty())
         return std::unexpected(FleetTextDeclined { .refusal = FleetTextRefusal::UnknownSelector,
@@ -442,6 +520,9 @@ std::expected<FleetTextDocument, FleetTextDeclined> AnswerFleetText(Distributed:
         return std::unexpected(
             FleetTextDeclined { .refusal = FleetTextRefusal::UnknownSelector,
                                 .detail = std::format("unknown range; this build serves: {}\n", KnownRangeKeys()) });
+
+    if (!nodeId.empty())
+        return AnswerMachineSeries(snapshot, history, section, format, nodeId, *range);
 
     auto const view = HistoryViewFor(history, *range);
     return FleetTextDocument { .leads = Distributed::LeadsTheFleet(snapshot),
@@ -824,6 +905,15 @@ EnumTable<Distributed::FleetMetric, std::uint64_t> NodeSampleFrom(IMetricsSink c
     return values;
 }
 
+Distributed::FleetSlotMask ApplyCpuReading(EnumTable<Distributed::FleetMetric, std::uint64_t>& values, HostLoad const& load)
+{
+    auto const slot = Distributed::FleetMetric::CpuBusyPermille;
+    if (!load.cpuBusyPermille.has_value())
+        return Distributed::SlotBit(slot);
+    values[static_cast<std::size_t>(slot)] = *load.cpuBusyPermille;
+    return 0;
+}
+
 std::string_view HistoryFileNameOf(HistoryFile which) noexcept
 {
     // One row per file, in enumerator order, so a fourth file is a row rather than a
@@ -879,10 +969,12 @@ FleetSampler::FleetSampler(std::optional<Distributed::FleetSources> sources,
                            AdminHttpServer::SnapshotProvider node,
                            core::platform::WallClockRef wall,
                            HistoryPaths paths,
-                           ILogger& logger):
+                           ILogger& logger,
+                           std::unique_ptr<IHostLoadSampler> load):
     _sources { sources },
     _metrics { metrics },
     _nodeFacts { std::move(node) },
+    _load { std::move(load) },
     _fleet { wall },
     _node { wall },
     _received { wall },
@@ -1002,7 +1094,12 @@ bool FleetSampler::SampleOnce()
     // whichever peer happened to be leading at the time. This is the half that
     // survives an election, and in Phase 5 it is the half that rebuilds the leader's.
     if (_nodeFacts)
-        _node.Record(NodeSampleFrom(_metrics, _nodeFacts()));
+    {
+        auto values = NodeSampleFrom(_metrics, _nodeFacts());
+        // This machine's CPU, from its own sampler: absent when there is none or it cannot say, never zero.
+        auto const absent = ApplyCpuReading(values, _load != nullptr ? _load->Sample() : HostLoad {});
+        _node.Record(values, absent);
+    }
 
     // A node with no scheduler has no fleet to answer for, and says so by recording
     // nothing rather than by recording zeroes. It still keeps the series above,
@@ -1019,7 +1116,8 @@ bool FleetSampler::SampleOnce()
     // happened. What changed is that this no longer stops the node recording itself.
     if (!Distributed::LeadsTheFleet(snapshot))
         return false;
-    _fleet.Record(SampleFrom(snapshot));
+    // A slot with no fleet total -- a load ratio -- is no fleet's reading, so the fleet series carries it absent.
+    _fleet.Record(SampleFrom(snapshot), Distributed::SlotsWithoutFleetTotal());
     return true;
 }
 

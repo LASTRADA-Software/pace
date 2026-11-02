@@ -254,6 +254,16 @@ class IFleetHistoryView
 
     /// Whether this record is written to disk and so survives a restart.
     [[nodiscard]] virtual bool Durable() const = 0;
+
+    /// One machine's own series, by the identity key it PROVED -- the second thing a route may read, and through
+    /// this same door, so a per-machine answer and the fleet's come from one record.
+    ///
+    /// A machine's view: its FLEET-scoped slots are absent, and a slot it could not read is absent, never zero.
+    /// @param identityKey The raw key, as the cluster records it; empty names nobody.
+    /// @param range Which window.
+    /// @return The buckets, oldest first, gaps included; nullopt when no series is filed under that key.
+    [[nodiscard]] virtual std::optional<std::vector<Distributed::FleetBucket>> MachineBuckets(
+        std::string_view identityKey, Distributed::FleetRange range) const = 0;
 };
 
 /// The fleet document for one selection: the ONE renderer `/fleet.txt` and the `fleet-text` verb
@@ -273,12 +283,17 @@ class IFleetHistoryView
 /// @param format `Text` for the tables; `Json` for the body `/fleet.json` serves, rendered by the
 ///        same `RenderFleetJson` over the same history view. `Json` takes no section: it is one
 ///        document, and a section accepted and silently dropped is the answer this refuses.
+/// @param nodeId A member id whose OWN series the `series` section draws, or empty for the fleet's. Honoured by
+///        the `series` section of the tables alone -- every other selection refuses it rather than dropping it --
+///        and resolved to the key the member record holds, never to an endpoint, so the series is the one the
+///        machine holding that key handed over (`IFleetHistoryView::MachineBuckets`).
 /// @return The document, or `UnknownSelector` with every key this build serves.
 [[nodiscard]] std::expected<FleetTextDocument, FleetTextDeclined> AnswerFleetText(Distributed::FleetSnapshot const& snapshot,
                                                                                   IFleetHistoryView const* history,
                                                                                   std::string_view sectionKey,
                                                                                   std::string_view rangeKey,
-                                                                                  CompileCacheWire::FleetTextFormat format);
+                                                                                  CompileCacheWire::FleetTextFormat format,
+                                                                                  std::string_view nodeId = {});
 
 [[nodiscard]] std::vector<AdminRoute> MakeFleetRoutes(Distributed::FleetSources sources,
                                                       AdminCredential const& credential,
@@ -323,12 +338,16 @@ class FleetSampler final: public IFleetHistoryView
     /// @param wall Where a bucket's timestamp comes from.
     /// @param paths Where each store is kept; any of them empty is memory-only.
     /// @param logger Shared logger.
+    /// @param load Where the node series reads this machine's CPU busy (`FleetMetric::CpuBusyPermille`): a
+    ///             sampler of its OWN, since one holds the previous counters and a shared one would cut another
+    ///             reader's interval. Null, or a reading the sampler cannot take, records the slot ABSENT.
     FleetSampler(std::optional<Distributed::FleetSources> sources,
                  IMetricsSink const& metrics,
                  AdminHttpServer::SnapshotProvider node,
                  core::platform::WallClockRef wall,
                  HistoryPaths paths,
-                 ILogger& logger);
+                 ILogger& logger,
+                 std::unique_ptr<IHostLoadSampler> load = nullptr);
 
     /// Stops the thread and writes every store out one last time.
     ~FleetSampler() override;
@@ -403,6 +422,16 @@ class FleetSampler final: public IFleetHistoryView
     /// @return The buckets, backfilled where this leader has no reading.
     [[nodiscard]] std::vector<Distributed::FleetBucket> Buckets(Distributed::FleetRange range) const override;
 
+    /// `IFleetHistoryView`: one machine's series, from what the machines handed over.
+    /// @param identityKey The raw key it proved.
+    /// @param range Which view.
+    /// @return Its buckets, or nullopt when none are filed under that key.
+    [[nodiscard]] std::optional<std::vector<Distributed::FleetBucket>> MachineBuckets(
+        std::string_view identityKey, Distributed::FleetRange range) const override
+    {
+        return _received.MachineBuckets(identityKey, range);
+    }
+
     /// `IFleetHistoryView`: the fleet series' generation.
     [[nodiscard]] std::uint64_t Generation() const override
     {
@@ -474,6 +503,8 @@ class FleetSampler final: public IFleetHistoryView
     IMetricsSink const& _metrics;
     /// This machine's own facts, read the same way `/metrics` reads them.
     AdminHttpServer::SnapshotProvider _nodeFacts;
+    /// This machine's CPU, for the node series; null records the slot absent.
+    std::unique_ptr<IHostLoadSampler> _load;
     Distributed::FleetHistory _fleet;
     Distributed::FleetHistory _node;
     Distributed::FleetNodeHistories _received;
@@ -511,6 +542,17 @@ class FleetSampler final: public IFleetHistoryView
 /// @return The readings, node-scoped slots filled.
 [[nodiscard]] EnumTable<Distributed::FleetMetric, std::uint64_t> NodeSampleFrom(IMetricsSink const& metrics,
                                                                                 MetricsSnapshot const& snapshot);
+
+/// The node series' CPU slot from one load reading.
+///
+/// Pure, so the rule it carries is a unit assertion rather than a property of a running sampler: a reading the
+/// sampler could not take -- its first after construction, a counter that went backwards, a platform that will not
+/// say -- leaves the slot ABSENT, never zero.
+/// @param values The node reading, filled in place.
+/// @param load What the sampler answered.
+/// @return The slots the reading could not answer for: `SlotBit(CpuBusyPermille)` when it had no CPU, else none.
+[[nodiscard]] Distributed::FleetSlotMask ApplyCpuReading(EnumTable<Distributed::FleetMetric, std::uint64_t>& values,
+                                                         HostLoad const& load);
 
 /// Where a node keeps its fleet history.
 ///

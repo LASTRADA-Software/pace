@@ -808,7 +808,7 @@ TEST_CASE("A heartbeat's history reaches the sink across the wire", "[distribute
     REQUIRE(StatusOf(fixture.protocol.Answer(beat, Insider)) == Wire::Status::Ok);
 
     REQUIRE(sink.calls.size() == 1);
-    auto const& [endpoint, arrived] = sink.calls.front();
+    auto const& [endpoint, provenKey, arrived] = sink.calls.front();
     CHECK(endpoint == "10.0.0.2:7100");
     REQUIRE(arrived.size() == 1);
     CHECK(arrived[0].startMillis == bucket.startMillis);

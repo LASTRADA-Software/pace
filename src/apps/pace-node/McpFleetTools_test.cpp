@@ -46,6 +46,9 @@ namespace
 /// Where the leader answers, as the scripted upstream reports it.
 constexpr std::string_view LeaderAt = "10.0.0.1:6674";
 
+/// This node's id, as the tools are built with it.
+constexpr std::string_view SelfId = "self-node";
+
 /// The term this node holds, as the scripted upstream reports it.
 constexpr std::uint64_t TermHere = 7;
 
@@ -78,7 +81,7 @@ constexpr std::uint64_t TermHere = 7;
                                    std::optional<Cluster::ClusterState> state = std::nullopt)
 {
     McpFakes::FixedCluster const cluster { std::move(state) };
-    auto const tools = FleetReadTools(upstream, cluster);
+    auto const tools = FleetReadTools(upstream, cluster, std::string { SelfId });
     auto const args = Json::Parse(arguments);
     REQUIRE(args.has_value());
     return RowNamed(tools, name).handler(Mcp::ToolCall { .arguments = Unwrap(args), .clientName = "test" });
@@ -581,7 +584,7 @@ TEST_CASE("An unreachable leader is a tool error naming the endpoint, and nothin
                                                   UpstreamFailureRowOf(UpstreamFailure::Unreachable).sentence) } };
 
     McpFakes::FixedCluster const noState { std::nullopt };
-    for (auto const& row: FleetReadTools(upstream, noState))
+    for (auto const& row: FleetReadTools(upstream, noState, std::string { SelfId }))
     {
         INFO(row.name);
         auto const arguments =
@@ -734,4 +737,143 @@ TEST_CASE("enrollment_status reports the leader's window as --enroll-list reads 
         CHECK(Text(At(again.structured, "enrollment")) == R"("manual")");
         CHECK(At(again.structured, "auto_approve_left_s").IsNull());
     }
+}
+
+namespace
+{
+
+/// Five one-minute buckets on the hour range for one machine: a gap, then four sampled, the third of which could not
+/// read the CPU -- rendered exactly as the leader renders a machine's `series` table.
+[[nodiscard]] std::string MachineSeriesText()
+{
+    auto const range = Dist::FleetRange::OneHour;
+    auto buckets = std::vector<Dist::FleetBucket>(5);
+    auto const cpu = std::array<std::uint64_t, 5> { 0, 300, 450, 0, 800 };
+    for (auto const index: std::views::iota(std::size_t { 0 }, buckets.size()))
+    {
+        auto& bucket = buckets[index];
+        bucket.startMillis = 1'790'000'000'000 + (static_cast<std::int64_t>(index) * 60'000);
+        bucket.sampleMillis = bucket.startMillis;
+        bucket.present = index != 0;
+        bucket.coverage = index != 0 ? 1 : 0;
+        bucket.values[static_cast<std::size_t>(Dist::FleetMetric::CpuBusyPermille)] = cpu[index];
+        bucket.absent = Dist::FleetScopedSlots() | (index == 3 ? Dist::SlotBit(Dist::FleetMetric::CpuBusyPermille) : 0);
+    }
+    auto text = std::string {};
+    Dist::AppendSeriesText(text, buckets, range);
+    return text;
+}
+
+/// A state naming two members, `n1` called `office-pc` and `n2`.
+[[nodiscard]] Cluster::ClusterState TwoMembers()
+{
+    auto state = Cluster::ClusterState {};
+    auto office = Member("n1", "10.0.0.1:6680", "10.0.0.1:6674");
+    office.displayName = "office-pc";
+    state.members = { office, Member("n2", "10.0.0.2:6680", "10.0.0.2:6674") };
+    return state;
+}
+
+} // namespace
+
+TEST_CASE("history asks for one machine's series by its member id, named by id and display name, gaps kept",
+          "[node][mcp][fleet-tools]")
+{
+    auto upstream = LeaderUpstream();
+    upstream.AnswerOk(MachineSeriesText());
+    // Named by its DISPLAY name; the leader is asked by the member id it resolves to.
+    auto const result = Call(upstream, "history", R"({"series":"cpu-busy","range":"1h","node":"office-pc"})", TwoMembers());
+    INFO(result.text);
+    REQUIRE_FALSE(result.isError);
+    CheckEnvelope(result.structured);
+
+    auto const asked = FleetTextAsked(upstream);
+    CHECK(asked.section == "series");
+    CHECK(asked.range == "1h");
+    CHECK(asked.node == "n1");
+    CHECK(asked.format == Wire::FleetTextFormat::Text);
+
+    CHECK(Text(At(result.structured, "scope")) == R"("node")");
+    CHECK(Text(At(result.structured, "node_id")) == R"("n1")");
+    CHECK(Text(At(result.structured, "display_name")) == R"("office-pc")");
+    CHECK(Text(At(result.structured, "unit")) == R"("permille")");
+    CHECK(result.text.contains("n1"));
+    CHECK(result.text.contains("office-pc"));
+
+    auto const& buckets = Elements(At(result.structured, "buckets"));
+    REQUIRE(buckets.size() == 5);
+    // A gauge, NOT rate-converted: the bucket's own reading.
+    CHECK(NumberOf(At(buckets[1], "value")) == 300.0);
+    CHECK(NumberOf(At(buckets[2], "value")) == 450.0);
+    CHECK(NumberOf(At(buckets[4], "value")) == 800.0);
+    // The unsampled minute and the minute whose CPU could not be read are both gaps, never 0.
+    CHECK(At(buckets[0], "value").IsNull());
+    CHECK(At(buckets[3], "value").IsNull());
+    // And the unreadable minute WAS sampled: a gap in this slot, not an unwatched window.
+    CHECK(Text(At(buckets[3], "coverage")) == "1");
+}
+
+TEST_CASE("history's fleet answer names no machine", "[node][mcp][fleet-tools]")
+{
+    auto upstream = LeaderUpstream();
+    upstream.AnswerOk(MachineSeriesText());
+    auto const result = Call(upstream, "history", R"({"series":"in-flight","range":"1h"})", TwoMembers());
+    REQUIRE_FALSE(result.isError);
+    CHECK(FleetTextAsked(upstream).node.empty());
+    CHECK(Text(At(result.structured, "scope")) == R"("fleet")");
+    CHECK(At(result.structured, "node_id").IsNull());
+    CHECK(At(result.structured, "display_name").IsNull());
+}
+
+TEST_CASE("history refuses a machine-only series without node and a scheduler series with one, asking nothing",
+          "[node][mcp][fleet-tools]")
+{
+    auto upstream = LeaderUpstream();
+
+    // cpu-busy has no fleet figure: refused naming the argument, never answered with a fleet aggregate.
+    auto const cpu = Call(upstream, "history", R"({"series":"cpu-busy","range":"1h"})", TwoMembers());
+    CHECK(cpu.isError);
+    CHECK(cpu.text.contains("`node`"));
+    CHECK(cpu.text.contains("cpu-busy"));
+
+    // A dispatch outcome is the scheduler's; no machine answers for it.
+    auto const dispatched = Call(upstream, "history", R"({"series":"dispatched","range":"1h","node":"n1"})", TwoMembers());
+    CHECK(dispatched.isError);
+    CHECK(dispatched.text.contains("omit `node`"));
+
+    CHECK(upstream.calls.empty());
+
+    // A node-scoped series with a fleet total answers both ways: per machine here.
+    upstream.AnswerOk(MachineSeriesText());
+    auto const hitRate = Call(upstream, "history", R"({"series":"hit-rate","range":"1h","node":"n2"})", TwoMembers());
+    CHECK_FALSE(hitRate.isError);
+    CHECK(FleetTextAsked(upstream).node == "n2");
+}
+
+TEST_CASE("history refuses a node it cannot name, listing who it could", "[node][mcp][fleet-tools]")
+{
+    auto upstream = LeaderUpstream();
+    auto const result = Call(upstream, "history", R"({"series":"cpu-busy","range":"1h","node":"nobody"})", TwoMembers());
+    CHECK(result.isError);
+    CHECK(result.text.contains("nobody"));
+    CHECK(result.text.contains("n1"));
+    CHECK(result.text.contains("n2"));
+    CHECK(upstream.calls.empty());
+
+    // And on a node with no applied state, only its own id names anything -- asked for as that id.
+    auto own = LeaderUpstream();
+    own.AnswerOk(MachineSeriesText());
+    auto const self = Call(own, "history", std::format(R"({{"series":"cpu-busy","range":"1h","node":"{}"}})", SelfId));
+    CHECK_FALSE(self.isError);
+    CHECK(FleetTextAsked(own).node == SelfId);
+}
+
+TEST_CASE("history passes the leader's refusal of a node selector through as a tool error", "[node][mcp][fleet-tools]")
+{
+    auto upstream = LeaderUpstream();
+    upstream.answer = std::unexpected { std::pair {
+        UpstreamFailure::Refused, std::string { "this leader holds no history for n2: none was handed over" } } };
+    auto const result = Call(upstream, "history", R"({"series":"cpu-busy","range":"1h","node":"n2"})", TwoMembers());
+    CHECK(result.isError);
+    CHECK(result.text.contains("no history for n2"));
 }

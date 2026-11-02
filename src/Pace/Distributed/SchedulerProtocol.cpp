@@ -554,6 +554,7 @@ std::vector<CompileCacheWire::HistoryBucketFields> HistoryToWire(std::span<Fleet
         // One assignment: `EnumTable` IS `std::array`, and the static_assert in the
         // header ties the two extents, so these are the same type.
         record.values = bucket.values;
+        record.absent = bucket.absent;
     }
     return out;
 }
@@ -568,6 +569,9 @@ std::vector<FleetBucket> HistoryFromWire(std::span<CompileCacheWire::HistoryBuck
         bucket.startMillis = static_cast<std::int64_t>(record.startMillis);
         bucket.sampleMillis = static_cast<std::int64_t>(record.sampleMillis);
         bucket.values = record.values;
+        // What the sender said it lacked, plus what a narrower sender never carried, read by each slot's own
+        // policy -- an exclusion count it never sent is zero, a CPU reading it never sent is a gap.
+        bucket.absent = (record.absent | UncarriedAbsentSlots(record.carried)) & EveryFleetSlot;
         bucket.present = true;
     }
     return out;

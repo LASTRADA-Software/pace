@@ -115,10 +115,10 @@ class NumberedSources final: public ILiveStatsSources
         return "cache.test:6380";
     }
 
-    [[nodiscard]] std::expected<FleetTextDocument, FleetTextDeclined> FleetText(
-        std::string_view /*section*/,
-        std::string_view /*range*/,
-        CompileCacheWire::FleetTextFormat /*format*/) const override
+    [[nodiscard]] std::expected<FleetTextDocument, FleetTextDeclined> FleetText(std::string_view /*section*/,
+                                                                                std::string_view /*range*/,
+                                                                                CompileCacheWire::FleetTextFormat /*format*/,
+                                                                                std::string_view /*node*/) const override
     {
         return std::unexpected(FleetTextDeclined { .refusal = FleetTextRefusal::NoFleet, .detail = {} });
     }

@@ -250,8 +250,10 @@ class FleetHistory
     ///
     /// Idempotent within a bucket: sampling twice inside the same minute overwrites
     /// rather than appends, so a jittery timer cannot double-count.
-    /// @param values The ten readings, counters cumulative.
-    void Record(EnumTable<FleetMetric, std::uint64_t> const& values);
+    /// @param values One reading per slot, counters cumulative.
+    /// @param absent The slots this reading could not answer for (`SlotBit`); their values are ignored, and a
+    ///        bucket in which every reading lacked a slot carries that slot ABSENT rather than zero.
+    void Record(EnumTable<FleetMetric, std::uint64_t> const& values, FleetSlotMask absent = 0);
 
     /// Replay a bucket another machine recorded, at ITS instant rather than now.
     ///
@@ -375,7 +377,8 @@ class FleetHistory
     /// One reading at a stated instant; `Record` and `Adopt` differ only in that.
     /// @param now When the reading was taken.
     /// @param values The reading.
-    void RecordAt(std::int64_t now, EnumTable<FleetMetric, std::uint64_t> const& values);
+    /// @param absent The slots it could not answer for.
+    void RecordAt(std::int64_t now, EnumTable<FleetMetric, std::uint64_t> const& values, FleetSlotMask absent);
 
     [[nodiscard]] std::int64_t NowMillis() const noexcept;
 
@@ -400,6 +403,9 @@ class FleetHistory
     /// bucket's peak rate would silently omit its opening step, which in a one-sample
     /// spike is the entire spike.
     EnumTable<FleetMetric, std::uint64_t> _last {};
+
+    /// The slots `_last` could not answer for, so no peak is taken from a reading that did not exist.
+    FleetSlotMask _lastAbsent { 0 };
 
     /// When `_last` was taken, so a delta across a GAP is not read as a peak.
     ///
@@ -445,10 +451,40 @@ class FleetNodeHistories final: public IFleetHistorySink
     /// no acknowledgement at all: the node advances its own watermark on a successful
     /// heartbeat and the leader is safe against the replay that follows a lost one.
     ///
+    /// The key is what the machine's own series is later found BY (`MachineBuckets`). Recorded per endpoint as
+    /// the first non-empty key delivered under it; a DIFFERENT non-empty key later is two machines' readings in
+    /// one series, which then answers for neither -- the rule a fleet machine row follows when its registrations
+    /// proved different keys.
+    ///
+    /// @param endpoint Which machine reported.
+    /// @param provenKey The identity key the reporting connection proved, raw; empty when it proved none.
+    /// @param buckets Its closed buckets, oldest first.
+    /// @return How many were new.
+    std::size_t AcceptHistory(std::string_view endpoint,
+                              std::string_view provenKey,
+                              std::span<FleetBucket const> buckets) override;
+
+    /// Take what a node handed over on a connection that proved no key.
     /// @param endpoint Which machine reported.
     /// @param buckets Its closed buckets, oldest first.
     /// @return How many were new.
-    std::size_t AcceptHistory(std::string_view endpoint, std::span<FleetBucket const> buckets) override;
+    std::size_t AcceptHistory(std::string_view endpoint, std::span<FleetBucket const> buckets)
+    {
+        return AcceptHistory(endpoint, {}, buckets);
+    }
+
+    /// One machine's own series, found by the identity key it proved -- never by the endpoint it claimed.
+    ///
+    /// A machine's view, so every FLEET-scoped slot is absent in it: a machine answers for no dispatch outcome,
+    /// and its zero there would read as a measurement. Answers for a machine that has since left, for as long
+    /// as the rings hold its readings: history is filed under the machine, not under its presence.
+    ///
+    /// Two endpoints holding the same key is one machine that moved; the one it reported under most recently
+    /// answers, and its readings under the earlier endpoint are not merged in.
+    /// @param provenKey The raw identity key; empty matches nothing.
+    /// @param range Which view.
+    /// @return The buckets, oldest first, gaps included; nullopt when no series is filed under that key alone.
+    [[nodiscard]] std::optional<std::vector<FleetBucket>> MachineBuckets(std::string_view provenKey, FleetRange range) const;
 
     /// Fill a rendered fleet view's gaps by summing what the nodes reported.
     ///
@@ -502,6 +538,10 @@ class FleetNodeHistories final: public IFleetHistorySink
     {
         std::unique_ptr<FleetHistory> history; ///< What that machine recorded.
         std::int64_t highWater { -1 };         ///< Newest `startMillis` accepted from it.
+        /// The identity key its batches were proven under, raw; empty while none was, or once two differed.
+        std::string provenKey {};
+        /// Set when two different keys delivered under this endpoint: the series is then nobody's.
+        bool keyDisputed { false };
     };
     std::map<std::string, Entry, std::less<>> _nodes;
 

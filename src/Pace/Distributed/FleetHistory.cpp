@@ -47,7 +47,10 @@ namespace
     };
 
     /// A node's own series: three rings in one file.
-    constexpr FileEnvelope RingFile { .magic = { 'F', 'C', 'F', 'H' }, .newest = 3 };
+    ///
+    /// Version 4 added each bucket's absence mask and the CPU slot, together: the slot is the first that can be
+    /// absent inside a present bucket, so the two are one change to the shape.
+    constexpr FileEnvelope RingFile { .magic = { 'F', 'C', 'F', 'H' }, .newest = 4 };
 
     /// The received-histories store: one nested `FleetHistory` body per machine.
     ///
@@ -59,19 +62,21 @@ namespace
     /// reader can learn whether it was written at `ReadVersion2`'s width or
     /// `ReadVersion3`'s. Version 1 wrote the former, version 2 the latter -- moved
     /// here because `DispatchAllExcluded` widened `FleetMetric`, the same reason
-    /// `RingFile` moved to 3.
-    constexpr FileEnvelope NodeStoreFile { .magic = { 'F', 'C', 'N', 'H' }, .newest = 2 };
+    /// `RingFile` moved to 3. Version 3 writes `ReadVersion4`'s shape -- the CPU slot and
+    /// the absence mask -- and, per machine, the identity key its batches were proven under,
+    /// which is what a machine's own series is looked up BY.
+    constexpr FileEnvelope NodeStoreFile { .magic = { 'F', 'C', 'N', 'H' }, .newest = 3 };
 
     /// Magic, version byte, body length, body checksum.
     constexpr std::size_t EnvelopeSize = 4 + 1 + (sizeof(std::uint64_t) * 2);
 
-    /// What one bucket costs in a body: four scalars, the readings, and the fold.
+    /// What one bucket costs in a body: five scalars, the readings, and the fold.
     ///
     /// Derived from the metric table rather than written down, so a tenth metric
     /// moves it. Only a reservation hint -- being wrong costs a reallocation, not a
     /// wrong file -- but a hint nothing keeps current is a hint that stops helping.
     constexpr std::size_t BucketBytes =
-        (4 + EnumeratorCount<FleetMetric> + (EnumeratorCount<FleetMetric> * 3)) * sizeof(std::uint64_t);
+        (5 + EnumeratorCount<FleetMetric> + (EnumeratorCount<FleetMetric> * 3)) * sizeof(std::uint64_t);
 
     /// The largest ring this build keeps, as a ceiling on a declared bucket count.
     ///
@@ -108,44 +113,59 @@ namespace
     /// @param widthMillis Width of one of its buckets.
     /// @param nowMillis When this reading was taken.
     /// @param values The reading.
+    /// @param absent The slots this reading could not answer for; their values are ignored.
     /// @param previous The reading before this one, or null when there is none or
     ///                 when it is too old to subtract from.
+    /// @param previousAbsent The slots that earlier reading could not answer for.
     /// @return True when this opened a bucket that was not already there.
     bool AccumulateInto(std::vector<FleetBucket>& ring,
                         std::int64_t widthMillis,
                         std::int64_t nowMillis,
                         EnumTable<FleetMetric, std::uint64_t> const& values,
-                        EnumTable<FleetMetric, std::uint64_t> const* previous)
+                        FleetSlotMask absent,
+                        EnumTable<FleetMetric, std::uint64_t> const* previous,
+                        FleetSlotMask previousAbsent)
     {
         auto const number = nowMillis / widthMillis;
         auto const start = number * widthMillis;
         auto& slot = ring[static_cast<std::size_t>(number) % ring.size()];
         auto const opened = !slot.present || slot.startMillis != start;
 
+        // What the bucket held before this reading: on opening, nothing at all -- every slot absent -- so the
+        // first reading of each slot is its first wherever in the bucket it lands.
+        auto const heldBefore = opened ? EveryFleetSlot : slot.absent;
         if (opened)
-            slot = FleetBucket { .startMillis = start, .sampleMillis = nowMillis, .values = values, .present = true };
-        else
-        {
-            // `nowMillis` for the sample instant, NOT the aligned `start`. Stamping
-            // the alignment throws the reading's real time away at the moment it is
-            // recorded, and no later fold can recover it -- which made the divisor a
-            // no-op for a view whose bucket IS its sub-bucket, since those are always
-            // exactly one nominal width apart.
-            slot.sampleMillis = nowMillis;
-            slot.values = values;
-        }
+            slot = FleetBucket { .startMillis = start, .sampleMillis = nowMillis, .values = {}, .present = true };
+        // `nowMillis` for the sample instant, NOT the aligned `start`. Stamping
+        // the alignment throws the reading's real time away at the moment it is
+        // recorded, and no later fold can recover it -- which made the divisor a
+        // no-op for a view whose bucket IS its sub-bucket, since those are always
+        // exactly one nominal width apart.
+        slot.sampleMillis = nowMillis;
+        // A slot stays absent only while EVERY reading in the bucket lacked it.
+        slot.absent = heldBefore & absent;
 
         for (auto const& row: FleetMetricTable)
         {
             auto const index = static_cast<std::size_t>(row.metric);
-            auto const reading = values[index];
+            auto const bit = SlotBit(row.metric);
             auto& fold = slot.fold[index];
+            if (opened)
+                fold = FleetFold {};
+            // A slot this reading could not answer for keeps what the bucket already had: the newest reading
+            // that existed, and a fold over readings alone -- an absence is neither a floor nor a peak.
+            if ((absent & bit) != 0)
+                continue;
+
+            auto const reading = values[index];
+            auto const first = (heldBefore & bit) != 0;
+            slot.values[index] = reading;
 
             if (row.kind == FleetMetricKind::Gauge)
             {
-                fold.low = opened ? reading : std::min(fold.low, reading);
-                fold.high = opened ? reading : std::max(fold.high, reading);
-                fold.total = (opened ? 0 : fold.total) + reading;
+                fold.low = first ? reading : std::min(fold.low, reading);
+                fold.high = first ? reading : std::max(fold.high, reading);
+                fold.total = (first ? 0 : fold.total) + reading;
                 continue;
             }
 
@@ -153,10 +173,9 @@ namespace
             // which for a bucket's first sample sits in the bucket before it. A
             // counter has no meaningful floor or sum: its mean over a window is the
             // delta across it, and its minimum is not a fact anybody acts on.
-            if (opened)
-                fold = FleetFold {};
-            // Backwards is a restart, whose step is unknowable rather than enormous.
-            if (previous != nullptr && reading >= (*previous)[index])
+            // Backwards is a restart, whose step is unknowable rather than enormous;
+            // and a reading the previous sample lacked has no step at all.
+            if (previous != nullptr && (previousAbsent & bit) == 0 && reading >= (*previous)[index])
                 fold.high = std::max(fold.high, reading - (*previous)[index]);
         }
 
@@ -206,18 +225,32 @@ namespace
                 continue;
             }
 
-            if (slot.startMillis > out->startMillis)
+            // Walked oldest first, so every later sub-bucket is the newer one: its instant wins, and so does each
+            // reading it HAS -- a slot it lacks keeps the newest reading an earlier sub-bucket held.
+            auto const newer = slot.startMillis > out->startMillis;
+            if (newer)
             {
                 out->startMillis = slot.startMillis;
                 out->sampleMillis = slot.sampleMillis;
-                out->values = slot.values;
             }
 
             for (auto const& row: FleetMetricTable)
             {
                 auto const index = static_cast<std::size_t>(row.metric);
+                auto const bit = SlotBit(row.metric);
+                if ((slot.absent & bit) != 0)
+                    continue;
                 auto& into = out->fold[index];
                 auto const& from = slot.fold[index];
+                if ((out->absent & bit) != 0)
+                {
+                    // The first sub-bucket with a reading for this slot: its value and fold are the window's so far.
+                    out->values[index] = slot.values[index];
+                    into = from;
+                    continue;
+                }
+                if (newer)
+                    out->values[index] = slot.values[index];
                 // A counter's `low` and `total` are unused and stay zero, so the same
                 // three lines serve both kinds rather than branching on one to do
                 // nothing.
@@ -225,6 +258,7 @@ namespace
                 into.high = std::max(into.high, from.high);
                 into.total += from.total;
             }
+            out->absent &= slot.absent;
             out->coverage += slot.coverage;
         }
         return out;
@@ -521,6 +555,11 @@ namespace
     /// that slot at zero is correct, not a gap.
     constexpr std::size_t LegacyValueWidth = 9;
 
+    /// The value and fold width version 3 wrote: ten, for as long as `DispatchAllExcluded` was the newest slot.
+    ///
+    /// Frozen for `LegacyValueWidth`'s reason. `CpuBusyPermille` lands past index 9, and a v3 bucket never
+    /// wrote it -- which, unlike an exclusion count, reads ABSENT (`FleetUncarried`), not zero.
+    constexpr std::size_t VersionThreeValueWidth = 10;
     /// Version 1: a generation, then two rings -- minute and hour -- of
     /// `[start][present][9 values]`, with no fold and no coverage.
     ///
@@ -554,6 +593,7 @@ namespace
                 if (!from.Take(bucket.values[index]))
                     return false;
             bucket.coverage = bucket.present ? 1 : 0;
+            bucket.absent = UncarriedAbsentSlots(LegacyValueWidth);
             for (auto const& row: FleetMetricTable)
             {
                 if (row.kind != FleetMetricKind::Gauge)
@@ -601,20 +641,20 @@ namespace
                 if (!from.Take(bucket.fold[index].low) || !from.Take(bucket.fold[index].high)
                     || !from.Take(bucket.fold[index].total))
                     return false;
+            bucket.absent = UncarriedAbsentSlots(LegacyValueWidth);
             return true;
         });
     }
 
-    /// Version 3: the same shape version 2 wrote, over THIS build's full value and fold
-    /// width -- `[start][sample][present][coverage][N values][N x low,high,total]`,
-    /// where `N` is `EnumeratorCount<FleetMetric>`.
+    /// Version 3: the same shape version 2 wrote, at ten values and ten folds --
+    /// `[start][sample][present][coverage][10 values][10 x low,high,total]`.
     ///
-    /// Minted because `DispatchAllExcluded` widened that count past what versions 1 and
+    /// Minted because `DispatchAllExcluded` widened `FleetMetric` past what versions 1 and
     /// 2 ever wrote (#308's ordinals are a persisted contract, so it landed at the END
     /// rather than reordering either), and reading a v2 body against a wider layout
-    /// would misalign every field after the first missing one. `ReadVersion2` stays
-    /// pinned at nine for that reason; this reader is what moves forward with the live
-    /// table, until it grows again and earns a version 4 of its own.
+    /// would misalign every field after the first missing one. Frozen at
+    /// `VersionThreeValueWidth` since version 4 moved forward with the live table; the CPU
+    /// slot it never carried reads absent.
     /// @param reader The cursor.
     /// @param out Where the rings land.
     /// @return False on a truncated or implausible body.
@@ -629,6 +669,42 @@ namespace
             bucket.startMillis = static_cast<std::int64_t>(start);
             bucket.sampleMillis = static_cast<std::int64_t>(sample);
             bucket.present = present != 0;
+            for (auto const index: std::views::iota(std::size_t { 0 }, VersionThreeValueWidth))
+                if (!from.Take(bucket.values[index]))
+                    return false;
+            for (auto const index: std::views::iota(std::size_t { 0 }, VersionThreeValueWidth))
+                if (!from.Take(bucket.fold[index].low) || !from.Take(bucket.fold[index].high)
+                    || !from.Take(bucket.fold[index].total))
+                    return false;
+            bucket.absent = UncarriedAbsentSlots(VersionThreeValueWidth);
+            return true;
+        });
+    }
+
+    /// Version 4: version 3's shape with each bucket's absence mask after its coverage, over THIS build's full
+    /// value and fold width -- `[start][sample][present][coverage][absent][N values][N x low,high,total]`, where
+    /// `N` is `EnumeratorCount<FleetMetric>`.
+    ///
+    /// Minted by `CpuBusyPermille`, the first slot that can be absent inside a present bucket: without the mask
+    /// a restart would read every CPU gap back as an idle zero. This reader moves forward with the live table
+    /// until it grows again and earns a version 5 of its own.
+    /// @param reader The cursor.
+    /// @param out Where the rings land.
+    /// @return False on a truncated or implausible body.
+    bool ReadVersion4(BodyReader& reader, LoadedHistory& out)
+    {
+        return ReadBody(reader, out, Version2Rings, [](BodyReader& from, FleetBucket& bucket) {
+            std::uint64_t start = 0;
+            std::uint64_t sample = 0;
+            std::uint64_t present = 0;
+            std::uint64_t absent = 0;
+            if (!from.Take(start) || !from.Take(sample) || !from.Take(present) || !from.Take(bucket.coverage)
+                || !from.Take(absent))
+                return false;
+            bucket.startMillis = static_cast<std::int64_t>(start);
+            bucket.sampleMillis = static_cast<std::int64_t>(sample);
+            bucket.present = present != 0;
+            bucket.absent = absent & EveryFleetSlot;
             for (auto& value: bucket.values)
                 if (!from.Take(value))
                     return false;
@@ -654,11 +730,15 @@ namespace
     /// the upgrade. Bumping `FileVersion` without adding a row here remains the
     /// decision to discard every history -- and is then a visible one, made by
     /// deleting a row rather than by not noticing a constant.
-    constexpr std::array<HistoryFormat, 3> HistoryFormats {
+    constexpr std::array<HistoryFormat, 4> HistoryFormats {
         HistoryFormat { .version = 1, .read = &ReadVersion1 },
         HistoryFormat { .version = 2, .read = &ReadVersion2 },
         HistoryFormat { .version = 3, .read = &ReadVersion3 },
+        HistoryFormat { .version = 4, .read = &ReadVersion4 },
     };
+
+    static_assert(HistoryFormats.back().version == RingFile.newest,
+                  "the newest ring format this build writes must be one it can read back");
 
     /// The reader for a version, if this build has one.
     /// @param version What the header said.
@@ -679,11 +759,20 @@ namespace
     /// standalone ring file and a nested body can move on different schedules even
     /// though today they happen to share readers. Version 1 wrote a nested body in
     /// `ReadVersion2`'s shape (frozen at nine values); version 2 moved to
-    /// `ReadVersion3`'s, the same day `FleetMetric` grew `DispatchAllExcluded`.
-    constexpr std::array<HistoryFormat, 2> NestedBodyFormats {
+    /// `ReadVersion3`'s, the same day `FleetMetric` grew `DispatchAllExcluded`; version 3
+    /// to `ReadVersion4`'s, the day it grew `CpuBusyPermille` and buckets their absence mask.
+    constexpr std::array<HistoryFormat, 3> NestedBodyFormats {
         HistoryFormat { .version = 1, .read = &ReadVersion2 },
         HistoryFormat { .version = 2, .read = &ReadVersion3 },
+        HistoryFormat { .version = 3, .read = &ReadVersion4 },
     };
+
+    static_assert(NestedBodyFormats.back().version == NodeStoreFile.newest,
+                  "the newest received-store format this build writes must be one it can read back");
+
+    /// The first `NodeStoreFile` version that records, per machine, the identity key its batches were proven
+    /// under. Older stores carry none, so their machines answer no per-machine lookup until they report again.
+    constexpr std::uint8_t NodeStoreKeyedSince = 3;
 
     /// The nested-body reader for one `NodeStoreFile` version, if this build has one.
     /// @param version What `NodeStoreFile`'s envelope said.
@@ -719,9 +808,9 @@ std::int64_t FleetHistory::NowMillis() const noexcept
     return std::chrono::duration_cast<std::chrono::milliseconds>(_wall.now().time_since_epoch()).count();
 }
 
-void FleetHistory::Record(EnumTable<FleetMetric, std::uint64_t> const& values)
+void FleetHistory::Record(EnumTable<FleetMetric, std::uint64_t> const& values, FleetSlotMask absent)
 {
-    RecordAt(NowMillis(), values);
+    RecordAt(NowMillis(), values, absent);
 }
 
 void FleetHistory::Adopt(FleetBucket const& bucket)
@@ -730,10 +819,10 @@ void FleetHistory::Adopt(FleetBucket const& bucket)
         return;
     // Its own sample instant, not this leader's clock. See the header: stamping a
     // catch-up with the moment it arrived would pile a day into one window.
-    RecordAt(bucket.sampleMillis, bucket.values);
+    RecordAt(bucket.sampleMillis, bucket.values, bucket.absent);
 }
 
-void FleetHistory::RecordAt(std::int64_t now, EnumTable<FleetMetric, std::uint64_t> const& values)
+void FleetHistory::RecordAt(std::int64_t now, EnumTable<FleetMetric, std::uint64_t> const& values, FleetSlotMask absent)
 {
     auto const guard = std::scoped_lock { _mutex };
 
@@ -756,7 +845,8 @@ void FleetHistory::RecordAt(std::int64_t now, EnumTable<FleetMetric, std::uint64
     for (auto const& row: FleetRingTable)
     {
         auto const index = static_cast<std::size_t>(row.ring);
-        auto const openedHere = AccumulateInto(_rings[index], RingWidthMillis(row.ring), now, values, previous);
+        auto const openedHere = AccumulateInto(
+            _rings[index], RingWidthMillis(row.ring), now, values, absent & EveryFleetSlot, previous, _lastAbsent);
         // The generation follows the BASE ring, which is the one whose buckets close
         // fastest: an ETag that only moved when the day ring rolled would hold a
         // stale chart for a day.
@@ -765,6 +855,7 @@ void FleetHistory::RecordAt(std::int64_t now, EnumTable<FleetMetric, std::uint64
     }
 
     _last = values;
+    _lastAbsent = absent & EveryFleetSlot;
     _lastMillis = now;
     _hasLast = true;
     if (opened)
@@ -912,6 +1003,7 @@ void FleetHistory::AppendBody(std::string& out) const
             AppendU64(out, static_cast<std::uint64_t>(bucket.sampleMillis));
             AppendU64(out, bucket.present ? 1U : 0U);
             AppendU64(out, bucket.coverage);
+            AppendU64(out, bucket.absent);
             for (auto const value: bucket.values)
                 AppendU64(out, value);
             for (auto const& fold: bucket.fold)
@@ -996,7 +1088,9 @@ FleetNodeHistories::FleetNodeHistories(core::platform::WallClockRef wall):
 {
 }
 
-std::size_t FleetNodeHistories::AcceptHistory(std::string_view endpoint, std::span<FleetBucket const> buckets)
+std::size_t FleetNodeHistories::AcceptHistory(std::string_view endpoint,
+                                              std::string_view provenKey,
+                                              std::span<FleetBucket const> buckets)
 {
     // The map's lock covers finding the entry and moving its mark, and nothing else.
     // Adopting a batch walks three rings up to a hundred and twenty-eight times, and
@@ -1013,6 +1107,20 @@ std::size_t FleetNodeHistories::AcceptHistory(std::string_view endpoint, std::sp
                                  Entry { .history = std::make_unique<FleetHistory>(_wall), .highWater = -1 })
                         .first;
         entry = &found->second;
+
+        // Whose readings these are, by the key the connection PROVED. A second, different key under one endpoint
+        // means the series now mixes two machines, so it answers for neither -- for good, since the readings
+        // already folded in cannot be told apart again.
+        if (!provenKey.empty() && !entry->keyDisputed)
+        {
+            if (entry->provenKey.empty())
+                entry->provenKey = std::string { provenKey };
+            else if (entry->provenKey != provenKey)
+            {
+                entry->provenKey.clear();
+                entry->keyDisputed = true;
+            }
+        }
     }
 
     std::size_t taken = 0;
@@ -1070,6 +1178,9 @@ void FleetNodeHistories::BackfillInto(std::vector<FleetBucket>& into, FleetRange
             continue;
 
         FleetBucket filled = into[index];
+        // Every slot starts absent and becomes present only where some machine read it; a slot with no fleet
+        // total, or one only a scheduler answers for, never does.
+        filled.absent = EveryFleetSlot;
         auto contributors = std::size_t { 0 };
         for (auto const& node: perNode)
         {
@@ -1082,10 +1193,15 @@ void FleetNodeHistories::BackfillInto(std::vector<FleetBucket>& into, FleetRange
             {
                 // NODE-scoped only. A machine cannot answer for a dispatch outcome,
                 // so summing one would be summing zeroes into a number a reader would
-                // take for a measurement.
-                if (row.scope != FleetMetricScope::Node)
+                // take for a measurement. And only a slot whose sum MEANS something:
+                // a load ratio summed over machines is nobody's load.
+                if (row.scope != FleetMetricScope::Node || row.fleetTotal != FleetTotal::Summed)
+                    continue;
+                // A machine that could not read a slot contributes nothing to it, rather than a zero.
+                if (IsAbsent(node[index], row.metric))
                     continue;
                 auto const slot = static_cast<std::size_t>(row.metric);
+                filled.absent &= ~SlotBit(row.metric);
                 filled.values[slot] += node[index].values[slot];
                 filled.fold[slot].low += node[index].fold[slot].low;
                 filled.fold[slot].high += node[index].fold[slot].high;
@@ -1126,6 +1242,12 @@ bool FleetNodeHistories::Save(std::filesystem::path const& path, StateFile which
         AppendU64(file, endpoint.size());
         file += endpoint;
         AppendU64(file, static_cast<std::uint64_t>(entry->highWater));
+        // Whose readings they are, by the key they were proven under (empty: nobody's, or not yet anybody's) --
+        // and whether two keys disputed it, which must survive a restart or the next key to arrive would
+        // claim a series that mixes two machines.
+        AppendU64(file, entry->provenKey.size());
+        file += entry->provenKey;
+        AppendU64(file, entry->keyDisputed ? 1U : 0U);
         // The nested body, written by the very code that reads it back. A second copy
         // of the ring encoding here would drift from that one the first time a bucket
         // grew a field -- and would drift silently, because both halves would still
@@ -1169,17 +1291,30 @@ bool FleetNodeHistories::Load(std::filesystem::path const& path)
         std::uint64_t length = 0;
         std::string_view endpoint;
         std::uint64_t highWater = 0;
+        if (!reader.Take(length) || !reader.Take(length, endpoint) || !reader.Take(highWater))
+            return false;
+
+        // Keyed stores only: an older one recorded no key, so its machines are nobody's until they report again.
+        std::uint64_t keyLength = 0;
+        std::string_view provenKey;
+        std::uint64_t disputed = 0;
+        if (opened.version >= NodeStoreKeyedSince
+            && (!reader.Take(keyLength) || !reader.Take(keyLength, provenKey) || !reader.Take(disputed)))
+            return false;
+
         std::uint64_t nestedSize = 0;
         std::string_view nested;
-        if (!reader.Take(length) || !reader.Take(length, endpoint) || !reader.Take(highWater) || !reader.Take(nestedSize)
-            || !reader.Take(nestedSize, nested))
+        if (!reader.Take(nestedSize) || !reader.Take(nestedSize, nested))
             return false;
 
         auto history = std::make_unique<FleetHistory>(_wall);
         if (!history->ReadBody(nested, opened.version))
             return false;
         restored.emplace(std::string { endpoint },
-                         Entry { .history = std::move(history), .highWater = static_cast<std::int64_t>(highWater) });
+                         Entry { .history = std::move(history),
+                                 .highWater = static_cast<std::int64_t>(highWater),
+                                 .provenKey = std::string { provenKey },
+                                 .keyDisputed = disputed != 0 });
     }
 
     auto const guard = std::scoped_lock { _mutex };
@@ -1197,6 +1332,36 @@ std::size_t FleetNodeHistories::Count() const
 {
     auto const guard = std::scoped_lock { _mutex };
     return _nodes.size();
+}
+
+std::optional<std::vector<FleetBucket>> FleetNodeHistories::MachineBuckets(std::string_view provenKey,
+                                                                           FleetRange range) const
+{
+    if (provenKey.empty())
+        return std::nullopt;
+
+    FleetHistory const* chosen = nullptr;
+    {
+        auto const guard = std::scoped_lock { _mutex };
+        auto newest = std::int64_t { -1 };
+        for (auto const& [endpoint, entry]: _nodes)
+        {
+            // A disputed entry has an empty key, so it can never match.
+            if (entry.provenKey != provenKey || (chosen != nullptr && entry.highWater <= newest))
+                continue;
+            chosen = entry.history.get();
+            newest = entry.highWater;
+        }
+    }
+    if (chosen == nullptr)
+        return std::nullopt;
+
+    // Rendered with the map's lock released, as `BackfillInto` renders: the history guards itself and nothing
+    // erases an entry once made.
+    auto buckets = chosen->Buckets(range);
+    for (auto& bucket: buckets)
+        bucket.absent |= FleetScopedSlots();
+    return buckets;
 }
 
 std::int64_t FleetNodeHistories::HighWaterFor(std::string_view endpoint) const

@@ -63,13 +63,15 @@ std::optional<LiveCapture> NodeLiveStatsSources::Capture(Wire::LiveSubject subje
     return std::nullopt;
 }
 
-std::expected<FleetTextDocument, FleetTextDeclined> NodeLiveStatsSources::FleetText(
-    std::string_view section, std::string_view range, CompileCacheWire::FleetTextFormat format) const
+std::expected<FleetTextDocument, FleetTextDeclined> NodeLiveStatsSources::FleetText(std::string_view section,
+                                                                                    std::string_view range,
+                                                                                    CompileCacheWire::FleetTextFormat format,
+                                                                                    std::string_view node) const
 {
     if (!_parts.fleet.has_value())
         return std::unexpected(FleetTextDeclined { .refusal = FleetTextRefusal::NoFleet,
                                                    .detail = "this node runs no scheduler, so it has no fleet" });
-    return AnswerFleetText(Distributed::CollectFleet(*_parts.fleet), _parts.history, section, range, format);
+    return AnswerFleetText(Distributed::CollectFleet(*_parts.fleet), _parts.history, section, range, format, node);
 }
 
 std::optional<LiveLeadership> NodeLiveStatsSources::Leadership() const

@@ -1525,17 +1525,80 @@ TEST_CASE("A history bucket tolerates a peer with fewer or more slots than this 
         REQUIRE(decoded.has_value());
         REQUIRE(Unwrap(decoded).size() == 1);
         CHECK(Unwrap(decoded).front().values[8] == 9);
-        // The slot this peer never sent stays at its default, not garbage.
+        // The slot this peer never sent stays at its default, not garbage -- and the width it DID send is
+        // reported, so the side that knows each slot's meaning can read the hole (zero, or absent).
         CHECK(Unwrap(decoded).front().values[9] == 0);
+        CHECK(Unwrap(decoded).front().carried == 9);
+        // No mask field: nothing it sent was absent.
+        CHECK(Unwrap(decoded).front().absent == 0);
     }
 
-    SECTION("eleven words: a peer built after this one's HistorySlotCount")
+    SECTION("ten words: a peer built before CpuBusyPermille")
     {
-        auto const decoded = DecodeHistoryBuckets(oneBucket(packWords({ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 999 })));
+        auto const decoded = DecodeHistoryBuckets(oneBucket(packWords({ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 })));
         REQUIRE(decoded.has_value());
         REQUIRE(Unwrap(decoded).size() == 1);
         CHECK(Unwrap(decoded).front().values[9] == 10);
-        // The eleventh word is this build's future; it decodes, rather than refuses.
+        CHECK(Unwrap(decoded).front().carried == 10);
+    }
+
+    SECTION("twelve words: a peer built after this one's HistorySlotCount")
+    {
+        auto const decoded = DecodeHistoryBuckets(oneBucket(packWords({ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 999 })));
+        REQUIRE(decoded.has_value());
+        REQUIRE(Unwrap(decoded).size() == 1);
+        CHECK(Unwrap(decoded).front().values[10] == 11);
+        CHECK(Unwrap(decoded).front().carried == HistorySlotCount);
+        // The twelfth word is this build's future; it decodes, rather than refuses.
+    }
+}
+
+TEST_CASE("A history bucket's absence mask is its optional fourth field, a big-endian word",
+          "[wire][compile-cache][history]")
+{
+    using namespace Pace::CompileCacheWire;
+
+    // The width, by value: the slot count is `FleetMetric`'s, eleven since the CPU slot.
+    CHECK(HistorySlotCount == 11);
+
+    HistoryBucketFields bucket {};
+    bucket.startMillis = 60'000;
+    bucket.sampleMillis = 60'000;
+    bucket.values[10] = 0;
+    bucket.absent = std::uint64_t { 1 } << 10; // the CPU slot's bit
+    auto const encoded = EncodeHistoryBuckets(std::span { &bucket, 1 });
+    // The record ends with the mask field: a four-byte length of eight, then the word, big-endian.
+    REQUIRE(encoded.size() > 12);
+    CHECK(std::equal(encoded.end() - 12,
+                     encoded.end(),
+                     std::array { std::byte { 0 },
+                                  std::byte { 0 },
+                                  std::byte { 0 },
+                                  std::byte { 8 },
+                                  std::byte { 0 },
+                                  std::byte { 0 },
+                                  std::byte { 0 },
+                                  std::byte { 0 },
+                                  std::byte { 0 },
+                                  std::byte { 0 },
+                                  std::byte { 0x04 },
+                                  std::byte { 0x00 } }
+                         .begin()));
+    auto const decoded = DecodeHistoryBuckets(encoded);
+    REQUIRE(decoded.has_value());
+    REQUIRE(Unwrap(decoded).size() == 1);
+    CHECK(Unwrap(decoded).front().absent == bucket.absent);
+    CHECK(Unwrap(decoded).front().carried == HistorySlotCount);
+
+    SECTION("a mask of the wrong width is refused, not guessed at")
+    {
+        auto const record =
+            WireFields::Encode({ std::span<std::byte const> { WireFields::ToBigEndian<std::uint64_t>(60'000) },
+                                 std::span<std::byte const> { WireFields::ToBigEndian<std::uint64_t>(60'000) },
+                                 std::span<std::byte const> {},
+                                 std::span<std::byte const> { std::array { std::byte { 1 } } } });
+        std::vector<std::span<std::byte const>> fields { record };
+        CHECK_FALSE(DecodeHistoryBuckets(WireFields::Encode(WireFields::FieldList { fields })).has_value());
     }
 }
 
@@ -3905,7 +3968,7 @@ TEST_CASE("A FLEET-TEXT request carries its keys and its token as the words type
         CHECK(Unwrap(read).range.empty());
     }
 
-    SECTION("a payload that is not exactly four fields is refused")
+    SECTION("a payload that is not exactly five fields is refused")
     {
         auto const twoFields = WireFields::Encode({ AsBytes("kpi"), AsBytes("1h") });
         CHECK_FALSE(DecodeFleetTextRequest(twoFields).has_value());
@@ -3914,6 +3977,12 @@ TEST_CASE("A FLEET-TEXT request carries its keys and its token as the words type
         // version-16 peer never gets this far, because its header is refused by number.
         auto const threeFields = WireFields::Encode({ AsBytes("kpi"), AsBytes("1h"), AsBytes("") });
         CHECK_FALSE(DecodeFleetTextRequest(threeFields).has_value());
+
+        // Four fields, no node selector: refused -- the arity is exact, and an empty fifth field is how
+        // a reader says "the fleet".
+        auto const fourFields = WireFields::Encode(
+            { AsBytes(""), AsBytes(""), AsBytes(""), std::span<std::byte const> { std::array { std::byte { 0x00 } } } });
+        CHECK_FALSE(DecodeFleetTextRequest(fourFields).has_value());
 
         auto trailing = std::vector<std::byte> { payload.begin(), payload.end() };
         trailing.push_back(std::byte { 0x00 });
@@ -3928,16 +3997,20 @@ TEST_CASE("FleetText format byte is pinned", "[wire][fleettext]")
     CHECK(static_cast<std::uint8_t>(FleetTextFormat::Text) == 0);
     CHECK(static_cast<std::uint8_t>(FleetTextFormat::Json) == 1);
     CHECK(static_cast<std::uint8_t>(FleetTextFormat::Last) == 2);
-    CHECK(OpFieldCount(Op::FleetText) == 4);
+    CHECK(OpFieldCount(Op::FleetText) == 5);
 
-    // And the byte on the wire: the request's LAST field, one byte long. Fields are length-prefixed
-    // (see WireFields), so the format byte is the final byte of the payload.
+    // And the byte on the wire: the request's FOURTH field, one byte long, followed by the fifth --
+    // the node selector, empty here, so a four-byte zero length prefix. Fields are length-prefixed
+    // (see WireFields), so the format byte sits five bytes from the end.
     auto const json = EncodeFleetTextRequest(FleetTextRequest { .format = FleetTextFormat::Json });
     auto const text = EncodeFleetTextRequest(FleetTextRequest { .format = FleetTextFormat::Text });
     REQUIRE(json.size() == text.size());
-    CHECK(json.back() == std::byte { 0x01 });
-    CHECK(text.back() == std::byte { 0x00 });
-    CHECK(std::equal(json.begin(), json.end() - 1, text.begin()));
+    constexpr auto EmptyNodeField = std::array { std::byte { 0 }, std::byte { 0 }, std::byte { 0 }, std::byte { 0 } };
+    REQUIRE(json.size() > EmptyNodeField.size());
+    CHECK(std::equal(EmptyNodeField.begin(), EmptyNodeField.end(), json.end() - 4));
+    CHECK(*(json.end() - 5) == std::byte { 0x01 });
+    CHECK(*(text.end() - 5) == std::byte { 0x00 });
+    CHECK(std::equal(json.begin(), json.end() - 5, text.begin()));
 
     auto const read = DecodeFleetTextRequest(std::span { json }.subspan(RequestHeaderSize));
     REQUIRE(read.has_value());
@@ -3946,16 +4019,40 @@ TEST_CASE("FleetText format byte is pinned", "[wire][fleettext]")
     SECTION("a format byte this build does not name is refused, and so is one of the wrong width")
     {
         auto bad = std::vector<std::byte> { json.begin(), json.end() };
-        bad.back() = static_cast<std::byte>(FleetTextFormat::Last);
+        *(bad.end() - 5) = static_cast<std::byte>(FleetTextFormat::Last);
         CHECK_FALSE(DecodeFleetTextRequest(std::span { bad }.subspan(RequestHeaderSize)).has_value());
 
         auto const wide =
             WireFields::Encode({ AsBytes(""),
                                  AsBytes(""),
                                  AsBytes(""),
-                                 std::span<std::byte const> { std::array { std::byte { 0x01 }, std::byte { 0x00 } } } });
+                                 std::span<std::byte const> { std::array { std::byte { 0x01 }, std::byte { 0x00 } } },
+                                 AsBytes("") });
         CHECK_FALSE(DecodeFleetTextRequest(wide).has_value());
     }
+}
+
+TEST_CASE("A FLEET-TEXT node selector is the request's fifth field, its bytes the id typed", "[wire][fleettext]")
+{
+    auto const frame = EncodeFleetTextRequest(FleetTextRequest { .section = "series", .node = "n2" });
+    // The last field: a four-byte big-endian length, then the id's bytes.
+    REQUIRE(frame.size() > 6);
+    CHECK(std::equal(
+        frame.end() - 6,
+        frame.end(),
+        std::array {
+            std::byte { 0 }, std::byte { 0 }, std::byte { 0 }, std::byte { 2 }, std::byte { 'n' }, std::byte { '2' } }
+            .begin()));
+    auto const read = DecodeFleetTextRequest(std::span { frame }.subspan(RequestHeaderSize));
+    REQUIRE(read.has_value());
+    CHECK(Unwrap(read).node == "n2");
+    CHECK(Unwrap(read).section == "series");
+
+    // Absent is empty: a request naming no machine decodes with no node.
+    auto const empty = EncodeFleetTextRequest(FleetTextRequest {});
+    auto const fleet = DecodeFleetTextRequest(std::span { empty }.subspan(RequestHeaderSize));
+    REQUIRE(fleet.has_value());
+    CHECK(Unwrap(fleet).node.empty());
 }
 
 TEST_CASE("WireSurface::Mcp is byte 4 and survives a NODE-STATUS round trip", "[wire][node-status]")

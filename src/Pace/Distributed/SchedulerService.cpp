@@ -30,6 +30,15 @@ namespace
 {
     namespace Wire = CompileCacheWire;
 
+    /// @param caller A connection.
+    /// @return The identity key it PROVED, raw, as text; empty when it proved none. What a handed-over history is
+    ///         attributed BY, since the endpoint it is filed under is the machine's own claim.
+    [[nodiscard]] std::string_view ProvenKeyText(CallerContext const& caller) noexcept
+    {
+        return caller.provenKey.has_value() ? AsStringView(std::span<std::byte const> { *caller.provenKey })
+                                            : std::string_view {};
+    }
+
     /// One row per refusal that moves a counter: the wire code, and which one.
     ///
     /// A table rather than a `Count(...)` call beside each `Refuse(...)`, for the
@@ -1276,7 +1285,7 @@ SchedulerReply SchedulerService::AnnounceNode(CallerContext const& caller,
     // Filed under the ENDPOINT, exactly as a worker's batch is. The node's cursor advances only
     // because this verb was accepted, which is the rule `Heartbeat` already follows.
     if (_history != nullptr && !history.empty())
-        _history->AcceptHistory(std::string { presence.endpoint }, history);
+        _history->AcceptHistory(std::string { presence.endpoint }, ProvenKeyText(caller), history);
 
     // The fleets it once asked, filed apart from the history above and under the id the caller
     // PROVED rather than the endpoint it names: they are the evidence a split of THIS fleet is told
@@ -1362,7 +1371,7 @@ SchedulerReply SchedulerService::Heartbeat(CallerContext const& caller,
     // `WorkerRegistry::NodeCaches()` already exists to enforce on the neighbouring
     // number.
     if (_history != nullptr && !history.empty())
-        _history->AcceptHistory(*endpoint, history);
+        _history->AcceptHistory(*endpoint, ProvenKeyText(caller), history);
 
     // A heartbeat restates what the worker is running, which is how a slot the queue was waiting on
     // comes free: the queued requests are due a pump (#1728).
