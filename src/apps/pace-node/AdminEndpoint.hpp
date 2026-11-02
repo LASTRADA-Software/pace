@@ -261,9 +261,9 @@ class IFleetHistoryView
     /// A machine's view: its FLEET-scoped slots are absent, and a slot it could not read is absent, never zero.
     /// @param identityKey The raw key, as the cluster records it; empty names nobody.
     /// @param range Which window.
-    /// @return The buckets, oldest first, gaps included; or why none are filed under that key.
-    [[nodiscard]] virtual std::expected<std::vector<Distributed::FleetBucket>, Distributed::MachineHistoryMiss>
-    MachineBuckets(std::string_view identityKey, Distributed::FleetRange range) const = 0;
+    /// @return The buckets, oldest first, gaps included; nullopt when no series is filed under that key.
+    [[nodiscard]] virtual std::optional<std::vector<Distributed::FleetBucket>> MachineBuckets(
+        std::string_view identityKey, Distributed::FleetRange range) const = 0;
 };
 
 /// The fleet document for one selection: the ONE renderer `/fleet.txt` and the `fleet-text` verb
@@ -425,8 +425,8 @@ class FleetSampler final: public IFleetHistoryView
     /// `IFleetHistoryView`: one machine's series, from what the machines handed over.
     /// @param identityKey The raw key it proved.
     /// @param range Which view.
-    /// @return Its buckets, or why none are filed under that key.
-    [[nodiscard]] std::expected<std::vector<Distributed::FleetBucket>, Distributed::MachineHistoryMiss> MachineBuckets(
+    /// @return Its buckets, or nullopt when none are filed under that key.
+    [[nodiscard]] std::optional<std::vector<Distributed::FleetBucket>> MachineBuckets(
         std::string_view identityKey, Distributed::FleetRange range) const override
     {
         return _received.MachineBuckets(identityKey, range);

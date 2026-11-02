@@ -910,8 +910,8 @@ TEST_CASE("A leader fills the windows it missed from what the nodes kept", "[dis
     }
 
     FleetNodeHistories received { clock };
-    CHECK(received.AcceptHistory("a:1", nodeA.ClosedBucketsAfter(-1, 100)) == 4);
-    CHECK(received.AcceptHistory("b:1", nodeB.ClosedBucketsAfter(-1, 100)) == 4);
+    CHECK(received.AcceptHistory("a:1", "key-a", nodeA.ClosedBucketsAfter(-1, 100)) == 4);
+    CHECK(received.AcceptHistory("b:1", "key-b", nodeB.ClosedBucketsAfter(-1, 100)) == 4);
     CHECK(received.Count() == 2);
 
     // A leader whose own series is empty: it was not leading for any of that.
@@ -951,7 +951,7 @@ TEST_CASE("A window the leader sampled itself is never replaced by a sum", "[dis
     leader.Record(Reading(0, 999));
 
     FleetNodeHistories received { clock };
-    received.AcceptHistory("a:1", node.ClosedBucketsAfter(-1, 100));
+    received.AcceptHistory("a:1", "key-a", node.ClosedBucketsAfter(-1, 100));
 
     auto view = leader.Buckets(FleetRange::OneHour);
     received.BackfillInto(view, FleetRange::OneHour);
@@ -980,9 +980,9 @@ TEST_CASE("A redelivered heartbeat does not count twice", "[distributed][fleethi
     REQUIRE(batch.size() == 3);
 
     FleetNodeHistories received { clock };
-    CHECK(received.AcceptHistory("a:1", batch) == 3);
+    CHECK(received.AcceptHistory("a:1", "key-a", batch) == 3);
     // The very same batch again, as a lost reply would produce.
-    CHECK(received.AcceptHistory("a:1", batch) == 0);
+    CHECK(received.AcceptHistory("a:1", "key-a", batch) == 0);
     CHECK(received.HighWaterFor("a:1") == batch.back().startMillis);
 
     FleetHistory leader { clock };
@@ -1036,7 +1036,7 @@ TEST_CASE("A handover carries no fold, and the leader rebuilds one", "[distribut
         CHECK(bucket.fold[Hits].high == 0);
 
     FleetNodeHistories received { clock };
-    REQUIRE(received.AcceptHistory("a:1", handed) == 3);
+    REQUIRE(received.AcceptHistory("a:1", "key-a", handed) == 3);
 
     FleetHistory leader { clock };
     auto view = leader.Buckets(FleetRange::OneHour);
@@ -1073,8 +1073,8 @@ TEST_CASE("A leader's record of the other machines survives a restart", "[distri
     auto const batchA = nodeA.ClosedBucketsAfter(-1, 100);
     {
         FleetNodeHistories received { clock };
-        REQUIRE(received.AcceptHistory("a:1", batchA) == 4);
-        REQUIRE(received.AcceptHistory("b:1", nodeB.ClosedBucketsAfter(-1, 100)) == 4);
+        REQUIRE(received.AcceptHistory("a:1", "key-a", batchA) == 4);
+        REQUIRE(received.AcceptHistory("b:1", "key-b", nodeB.ClosedBucketsAfter(-1, 100)) == 4);
         highA = received.HighWaterFor("a:1");
         REQUIRE(received.Save(file, StateFile::ReceivedHistory));
     }
@@ -1085,7 +1085,7 @@ TEST_CASE("A leader's record of the other machines survives a restart", "[distri
     // The mark as well as the readings: without it a restarted leader would take the
     // batch a node resends after a reply it never saw and count every window twice.
     CHECK(restored.HighWaterFor("a:1") == highA);
-    CHECK(restored.AcceptHistory("a:1", batchA) == 0);
+    CHECK(restored.AcceptHistory("a:1", "key-a", batchA) == 0);
 
     FleetHistory leader { clock };
     auto view = leader.Buckets(FleetRange::OneHour);
@@ -1141,7 +1141,7 @@ TEST_CASE("A received-history file that cannot be trusted starts empty", "[distr
             node.Record(Reading(0, 7));
             clock.Advance(std::chrono::minutes { 1 });
             FleetNodeHistories received { clock };
-            REQUIRE(received.AcceptHistory("a:1", node.ClosedBucketsAfter(-1, 100)) == 1);
+            REQUIRE(received.AcceptHistory("a:1", "key-a", node.ClosedBucketsAfter(-1, 100)) == 1);
             REQUIRE(received.Save(file, StateFile::ReceivedHistory));
         }
         {
@@ -1155,13 +1155,12 @@ TEST_CASE("A received-history file that cannot be trusted starts empty", "[distr
     }
 }
 
-TEST_CASE("A v1 received-history file still reads, with its slots in place", "[distributed][fleethistory]")
+TEST_CASE("A v1 received-history file loads with its keyless series dropped and the drop reported",
+          "[distributed][fleethistory]")
 {
-    // The regression this exists to prevent: `NodeStoreFile`'s nested bodies grew a
-    // slot right along with `FleetMetric`, but the OUTER envelope's version is what
-    // has to say so -- a nested body carries none of its own. Without this, a real
-    // v1 file would be decoded through `ReadVersion3`'s wider shape and every field
-    // past the first missing one would land in the wrong place.
+    // A store written before keys were recorded holds every series under no key. Kept, a series would be counted a
+    // second time beside the one its machine files under its key once it reports again -- so it is dropped, counted
+    // for the start to say, and the file still loads rather than keeping the node from starting.
     Testing::ScratchDirectory const scratch { "fleet-received-v1" };
     auto const file = scratch.Path() / "v1.bin";
 
@@ -1170,23 +1169,50 @@ TEST_CASE("A v1 received-history file still reads, with its slots in place", "[d
     // Comfortably closed, not the instant a fresh reader would call its open bucket.
     auto const minuteStart = ((nowMillis / 60'000) - 5) * 60'000;
 
+    // Its body is still read through the v1 nested reader before it is dropped: a damaged one refuses the file whole.
     WriteFile(file, VersionOneNodeStoreFile("a:1", 5, 42, minuteStart, 17, 4));
 
     FleetNodeHistories received { clock };
-    REQUIRE(received.Load(file));
-    CHECK(received.Count() == 1);
-    CHECK(received.HighWaterFor("a:1") == 5);
+    CHECK_FALSE(received.Load(file));     // nothing was restored ...
+    CHECK(received.DroppedOnLoad() == 1); // ... because the one series it held was dropped, and said so
+    CHECK(received.Count() == 0);
+    CHECK_FALSE(received.ReadOnly());
+    CHECK(received.HighWaterFor("a:1") == -1);
+
+    // And it saves forward as an empty v3 store.
+    REQUIRE(received.Save(file, StateFile::ReceivedHistory));
+    CHECK(ReadFile(file)[4] == static_cast<char>(3));
+}
+
+TEST_CASE("A fleet window spanning a legacy store and the machine's keyed series counts the machine once",
+          "[distributed][fleethistory]")
+{
+    // The upgrade: a v1 store holds machine A's minute M under its endpoint, no key. After the upgrade A announces its
+    // minute M+1 under its key. The 5-minute Day window holding both must read A's in-flight once -- 4 -- never 8.
+    Testing::ScratchDirectory const scratch { "fleet-received-span" };
+    auto const file = scratch.Path() / "v1.bin";
+
+    PlacedWallClock clock;
+    auto const nowMillis = std::chrono::duration_cast<std::chrono::milliseconds>(clock.now().time_since_epoch()).count();
+    // Two minutes inside one closed 5-minute window: its first and second minute.
+    auto const window = ((nowMillis / 300'000) - 1) * 300'000;
+    WriteFile(file, VersionOneNodeStoreFile("a:1", static_cast<std::uint64_t>(window), 1, window, 0, 4));
+
+    FleetNodeHistories received { clock };
+    (void) received.Load(file);
+    REQUIRE(received.DroppedOnLoad() == 1);
+
+    auto next = Testing::ClosedBucket(window + 60'000);
+    next.values[static_cast<std::size_t>(FleetMetric::JobsInFlight)] = 4;
+    REQUIRE(received.AcceptHistory("a:1", "key-a", std::span { &next, 1 }) == 1);
 
     FleetHistory leader { clock };
-    auto view = leader.Buckets(FleetRange::OneHour);
-    received.BackfillInto(view, FleetRange::OneHour);
-
-    // `JobsInFlight`, not `DispatchGranted`: `BackfillInto` sums NODE-scoped slots
-    // only, and it is also the LAST of the nine legacy slots -- the one a width bug
-    // misreads first, since everything before it would have to already be wrong for
-    // the read to still be in bounds.
-    auto const found = std::ranges::find_if(view, [](FleetBucket const& b) { return b.present; });
+    auto view = leader.Buckets(FleetRange::Day);
+    received.BackfillInto(view, FleetRange::Day);
+    auto const found =
+        std::ranges::find_if(view, [window](FleetBucket const& bucket) { return bucket.startMillis == window; });
     REQUIRE(found != view.end());
+    REQUIRE(found->present);
     CHECK(found->values[static_cast<std::size_t>(FleetMetric::JobsInFlight)] == 4);
 }
 
@@ -1204,7 +1230,7 @@ TEST_CASE("A received-history file newer than this build is kept, and never writ
         node.Record(Reading(0, 7));
         clock.Advance(std::chrono::minutes { 1 });
         FleetNodeHistories writer { clock };
-        REQUIRE(writer.AcceptHistory("a:1", node.ClosedBucketsAfter(-1, 100)) == 1);
+        REQUIRE(writer.AcceptHistory("a:1", "key-a", node.ClosedBucketsAfter(-1, 100)) == 1);
         REQUIRE(writer.Save(file, StateFile::ReceivedHistory));
     }
     auto bytes = ReadFile(file);
@@ -1475,10 +1501,8 @@ TEST_CASE("A received-history store keeps each slot's absence and the key a mach
     // A machine answers for no dispatch outcome: those slots are absent in its own view, never zero.
     CHECK(IsAbsent(older, FleetMetric::DispatchGranted));
 
-    // A key nobody delivered under names no machine, and the store has nothing unattributed to mention.
-    auto const nobody = received.MachineBuckets("key-b", FleetRange::OneHour);
-    REQUIRE_FALSE(nobody.has_value());
-    CHECK(nobody.error().unattributed == 0);
+    // A key nobody delivered under names no machine.
+    CHECK_FALSE(received.MachineBuckets("key-b", FleetRange::OneHour).has_value());
 }
 
 namespace
@@ -1563,31 +1587,21 @@ TEST_CASE("A second key at one endpoint is a second machine and takes nothing fr
     CHECK_FALSE(received.MachineBuckets("", FleetRange::OneHour).has_value());
 }
 
-TEST_CASE("A series nobody proved is answered for no machine, and a lookup says how many there are",
-          "[distributed][fleethistory]")
+TEST_CASE("A connection that proved no key files nothing", "[distributed][fleethistory]")
 {
+    // Its series could answer for no machine, and it may be a machine a proven connection also reports: filed, it would
+    // be summed twice into every fleet window it filled.
     PlacedWallClock clock;
     auto const batch = CpuMinutes(clock, 3);
-    REQUIRE(batch.size() == 3);
-
     FleetNodeHistories received { clock };
-    REQUIRE(received.AcceptHistory("10.0.0.7:6674", std::span { batch }.first(2)) == 2);
-    auto const miss = received.MachineBuckets("key-a", FleetRange::OneHour);
-    REQUIRE_FALSE(miss.has_value());
-    CHECK(miss.error().unattributed == 1);
+    CHECK(received.AcceptHistory("10.0.0.7:6674", batch) == 0);
+    CHECK(received.AcceptHistory("10.0.0.7:6674", "", batch) == 0);
+    CHECK(received.Count() == 0);
 
-    // A proven key that then reports from that endpoint is NOT given the unattributed minutes -- that would be a guess
-    // on the endpoint -- and its own series starts past them, so a replay of the ring is not filed twice.
-    REQUIRE(received.AcceptHistory("10.0.0.7:6674", "key-a", batch) == 1);
-    CHECK(received.Count() == 2);
-    CHECK(CpuReadings(Testing::Unwrap(received.MachineBuckets("key-a", FleetRange::OneHour)))
-          == std::vector<std::uint64_t> { 300 });
-
-    // A fleet window is filled once, from whichever series holds it.
     FleetHistory leader { clock };
     auto view = leader.Buckets(FleetRange::OneHour);
     received.BackfillInto(view, FleetRange::OneHour);
-    CHECK(std::ranges::count_if(view, [](FleetBucket const& bucket) { return bucket.present; }) == 3);
+    CHECK(std::ranges::none_of(view, [](FleetBucket const& bucket) { return bucket.present; }));
 }
 
 TEST_CASE("A received-history store holds at most its ceiling, dropping the series heard from longest ago",

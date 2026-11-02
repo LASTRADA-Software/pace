@@ -374,35 +374,24 @@ namespace
     /// A node selector as a refusal may quote it: only text, and only so much of it.
     ///
     /// The selector arrives over raw `0xFC` as any bytes up to the control payload, and a refusal is read by a person
-    /// and relayed to an MCP client verbatim -- so bytes that are not UTF-8, or more than a name's worth, are described
-    /// rather than echoed.
+    /// and relayed to an MCP client verbatim -- so bytes that are not UTF-8, a control character, or more than a name's
+    /// worth, are described rather than echoed.
     /// @param nodeId The selector as received.
     /// @return It quoted, or a description of it.
     [[nodiscard]] std::string QuotedSelector(std::string_view nodeId)
     {
         if (!IsValidUtf8(nodeId))
             return std::format("a selector of {} bytes that are not UTF-8 text", nodeId.size());
+        // Valid UTF-8 can still carry a C0 control or DEL -- a newline would forge a second line of the refusal a
+        // person reads.
+        if (std::ranges::any_of(nodeId, [](char const each) {
+                auto const byte = static_cast<unsigned char>(each);
+                return byte < 0x20 || byte == 0x7F;
+            }))
+            return std::format("a selector of {} bytes holding a control character", nodeId.size());
         if (nodeId.size() > MaxQuotedNameBytes)
             return std::format("a selector of {} bytes", nodeId.size());
         return std::format("\"{}\"", nodeId);
-    }
-
-    /// Why one machine's series could not be drawn, as a sentence that is true: no series under its key, and how much
-    /// this leader holds that it could not attribute to ANY machine.
-    /// @param nodeId The member asked for, already known to be a member id.
-    /// @param miss What the store said.
-    /// @return The refusal's detail.
-    [[nodiscard]] std::string NoMachineHistory(std::string_view nodeId, Distributed::MachineHistoryMiss miss)
-    {
-        auto const unattributed =
-            miss.unattributed == 0
-                ? std::string {}
-                : std::format("; it also holds {} series received from connections that proved no key, or before keys "
-                              "were recorded, which are answered for no machine",
-                              miss.unattributed);
-        return std::format("this leader holds no history filed under the key member {}'s record holds{}\n",
-                           QuotedSelector(nodeId),
-                           unattributed);
     }
 
     /// One machine's own `series` table: `AnswerFleetText` with a node selector.
@@ -459,8 +448,10 @@ namespace
                                                            .detail = "this leader keeps no history at all\n" });
             auto buckets = history->MachineBuckets(AsStringView(std::span<std::byte const> { member->publicKey }), range);
             if (!buckets.has_value())
-                return std::unexpected(FleetTextDeclined { .refusal = FleetTextRefusal::UnknownSelector,
-                                                           .detail = NoMachineHistory(nodeId, buckets.error()) });
+                return std::unexpected(FleetTextDeclined {
+                    .refusal = FleetTextRefusal::UnknownSelector,
+                    .detail = std::format("this leader holds no history filed under the key member {}'s record holds\n",
+                                          QuotedSelector(nodeId)) });
             view.buckets = std::move(*buckets);
         }
         return FleetTextDocument { .leads = leads,
@@ -1031,7 +1022,21 @@ FleetSampler::FleetSampler(std::optional<Distributed::FleetSources> sources,
                       .worthWriting = [this] { return !_node.Empty(); } },
               Store { .path = std::move(paths.received),
                       .what = "received",
-                      .load = [this](auto const& at) { return _received.Load(at); },
+                      .load =
+                          [this](auto const& at) {
+                              auto const restored = _received.Load(at);
+                              // Said once, at the start: what a store written before keys were recorded held under
+                              // no key is dropped, since keeping it would sum those machines twice into fleet windows.
+                              if (auto const dropped = _received.DroppedOnLoad(); dropped > 0)
+                                  _logger.Logf(LogLevel::Warn,
+                                               "received history at {} held {} series filed under no identity key (a "
+                                               "store written before keys were recorded); dropped, since each would be "
+                                               "counted twice beside the series its machine now files under its key. "
+                                               "This leader's own fleet history is unaffected",
+                                               at.string(),
+                                               dropped);
+                              return restored;
+                          },
                       .save = [this](auto const& at) { return _received.Save(at, StateFile::ReceivedHistory); },
                       .readOnly = [this] { return _received.ReadOnly(); },
                       .worthWriting = [this] { return _received.Count() > 0; } } },

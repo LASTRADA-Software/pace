@@ -1210,7 +1210,7 @@ TEST_CASE("What the other machines handed over survives a leader restart", "[nod
 
     {
         FleetSampler sampler { sources, metrics, NodeFacts(), wall, paths, logger };
-        CHECK(sampler.Received().AcceptHistory("10.0.0.4:6676", std::span { &bucket, 1 }) == 1);
+        CHECK(sampler.Received().AcceptHistory("10.0.0.4:6676", "key-of-10.0.0.4:6676", std::span { &bucket, 1 }) == 1);
     }
     REQUIRE(std::filesystem::exists(receivedFile));
 
@@ -1219,7 +1219,7 @@ TEST_CASE("What the other machines handed over survives a leader restart", "[nod
     // The mark as well as the readings: without it the batch a node resends after a
     // reply it never saw would be counted a second time.
     CHECK(restored.Received().HighWaterFor("10.0.0.4:6676") == minute);
-    CHECK(restored.Received().AcceptHistory("10.0.0.4:6676", std::span { &bucket, 1 }) == 0);
+    CHECK(restored.Received().AcceptHistory("10.0.0.4:6676", "key-of-10.0.0.4:6676", std::span { &bucket, 1 }) == 0);
 
     // And it reaches the view the page draws, which is the only reason it is kept.
     auto const merged = restored.Buckets(Distributed::FleetRange::OneHour);
@@ -1562,7 +1562,8 @@ TEST_CASE("The page draws what the other machines handed over", "[node][admin][c
     auto const missed = Testing::MinuteBucketStart(fixture.wall.now()) - (3 * 60'000);
     auto bucket = Testing::ClosedBucket(missed);
     bucket.values[static_cast<std::size_t>(Distributed::FleetMetric::JobsInFlight)] = 4242;
-    REQUIRE(fixture.sampler->Received().AcceptHistory("10.0.0.7:6676", std::span { &bucket, 1 }) == 1);
+    REQUIRE(fixture.sampler->Received().AcceptHistory("10.0.0.7:6676", "key-of-10.0.0.7:6676", std::span { &bucket, 1 })
+            == 1);
 
     auto const response = fixture.Get("/fleet/series.json", "range=1h");
     CHECK(response.status == "200 OK");
@@ -2385,20 +2386,28 @@ TEST_CASE("A node selector draws one machine's series, found by the key its memb
         auto const answer = ask("series", CompileCacheWire::FleetTextFormat::Text, "machine-b");
         REQUIRE_FALSE(answer.has_value());
         CHECK(answer.error().refusal == FleetTextRefusal::UnknownSelector);
-        // The true reason: nothing filed under that member's key -- and nothing unattributed held, so no more said.
+        // The true reason: nothing filed under that member's key.
         CHECK(answer.error().detail
               == "this leader holds no history filed under the key member \"machine-b\"'s record holds\n");
     }
 
-    SECTION("a refusal says how much history this leader holds that it could attribute to no machine")
+    SECTION("a selector holding a control character is described, so a newline cannot forge a line")
     {
-        auto keyless = Testing::ClosedBucket(Testing::MinuteBucketStart(fixture.wall.now()) - (4 * 60'000));
-        REQUIRE(fixture.sampler->Received().AcceptHistory("10.0.0.9:6676", std::span { &keyless, 1 }) == 1);
-        auto const answer = ask("series", CompileCacheWire::FleetTextFormat::Text, "machine-b");
-        REQUIRE_FALSE(answer.has_value());
-        CHECK(answer.error().refusal == FleetTextRefusal::UnknownSelector);
-        CHECK(answer.error().detail.contains("no history filed under the key member \"machine-b\"'s record holds"));
-        CHECK(answer.error().detail.contains("it also holds 1 series received from connections that proved no key"));
+        auto const forged = ask("series", CompileCacheWire::FleetTextFormat::Text, "x\nthe members are: machine-z");
+        REQUIRE_FALSE(forged.has_value());
+        CHECK(forged.error().refusal == FleetTextRefusal::UnknownSelector);
+        CHECK(forged.error().detail.starts_with("no member is named a selector of 28 bytes holding a control character;"));
+        // One line, and the forged text appears nowhere.
+        CHECK(std::ranges::count(forged.error().detail, '\n') == 1);
+        CHECK_FALSE(forged.error().detail.contains("machine-z"));
+
+        auto const deleted = ask("series",
+                                 CompileCacheWire::FleetTextFormat::Text,
+                                 std::string_view { "a\x7f"
+                                                    "b",
+                                                    3 });
+        REQUIRE_FALSE(deleted.has_value());
+        CHECK(deleted.error().detail.starts_with("no member is named a selector of 3 bytes holding a control character;"));
     }
 
     SECTION("a selector that is not text, or too long, is described rather than echoed")

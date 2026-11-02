@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
-#include <expected>
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -428,15 +427,7 @@ class FleetHistory
     bool _readOnly { false };
 };
 
-/// Why a machine's own series could not be answered, said rather than inferred (`FleetNodeHistories::MachineBuckets`).
-struct MachineHistoryMiss
-{
-    /// How many series this store holds that are attributed to NO machine: received from a connection that proved no
-    /// key, or restored from a store written before keys were recorded. They fill fleet windows, never a machine's.
-    std::size_t unattributed { 0 };
-};
-
-/// The most series a received-history store holds, attributed and unattributed together.
+/// The most series a received-history store holds.
 ///
 /// Every series is a whole `FleetHistory` (`FleetHistoryBytes()`, about a megabyte), and a series is opened by any
 /// machine that proves a key it has not proven before -- so without a ceiling a stream of fresh keys grows the leader
@@ -453,10 +444,10 @@ inline constexpr std::size_t MaxReceivedHistories = 256;
 /// its own: neither can erase, block or poison the other's. Never per registry entry either: a worker with two
 /// `--toolchain` flags registers twice against one machine and both entries heartbeat the same figures.
 ///
-/// A connection that proved no key, and a store written before keys were recorded, file their series under the
-/// ENDPOINT as **unattributed**. Those are never answered for a machine: attaching one to the first key that reports
-/// from the same address would be a guess on exactly the claim this store refuses to trust. They still fill a fleet
-/// view's gaps, where they always did.
+/// **Nothing is filed under no key.** A connection that proved none is not filed, and a series a store written before
+/// keys were recorded holds is dropped on load (`DroppedOnLoad`): such a series answers for no machine, and the machine
+/// it came from files the same minutes under its key once it reports -- two series of one machine, summed twice into
+/// every fleet window either fills. The leader's own fleet series is untouched; only handed-over copies are lost.
 ///
 /// This is what makes a fleet's record survive an election. The leader's own fleet
 /// series only covers windows it was leading for; these cover the rest, because each
@@ -473,22 +464,21 @@ class FleetNodeHistories final: public IFleetHistorySink
     /// redelivered after a reply the node never saw cannot count twice. That high-water mark is what lets the wire
     /// carry no acknowledgement at all.
     ///
-    /// A series a proven key OPENS at an endpoint that already holds an unattributed one starts at that series' mark:
-    /// the node replays its ring from the start after a restart, and the same minutes filed twice would be summed
-    /// twice into a fleet window. What it skips is held unattributed already, so nothing is lost to the fleet.
+    /// Claiming the new buckets and adding them happen under the series' own lock, so a `Save` never persists a mark
+    /// past buckets the series does not hold, and two announcements under one key add in the order they claimed.
     ///
-    /// @param endpoint Where the machine reports from: a label on its series, and the file of a keyless one.
-    /// @param provenKey The identity key the reporting connection proved, raw; empty when it proved none.
+    /// @param endpoint Where the machine reports from: a label on its series.
+    /// @param provenKey The identity key the reporting connection proved, raw; empty files nothing.
     /// @param buckets Its closed buckets, oldest first.
     /// @return How many were new.
     std::size_t AcceptHistory(std::string_view endpoint,
                               std::string_view provenKey,
                               std::span<FleetBucket const> buckets) override;
 
-    /// Take what a node handed over on a connection that proved no key.
+    /// Take what a node handed over on a connection that proved no key: nothing is filed (see the class).
     /// @param endpoint Which machine reported.
     /// @param buckets Its closed buckets, oldest first.
-    /// @return How many were new.
+    /// @return Zero, always.
     std::size_t AcceptHistory(std::string_view endpoint, std::span<FleetBucket const> buckets)
     {
         return AcceptHistory(endpoint, {}, buckets);
@@ -501,9 +491,8 @@ class FleetNodeHistories final: public IFleetHistorySink
     /// as the rings hold its readings: history is filed under the machine, not under its presence or its address.
     /// @param provenKey The raw identity key; empty matches nothing.
     /// @param range Which view.
-    /// @return The buckets, oldest first, gaps included; or why there are none.
-    [[nodiscard]] std::expected<std::vector<FleetBucket>, MachineHistoryMiss> MachineBuckets(std::string_view provenKey,
-                                                                                             FleetRange range) const;
+    /// @return The buckets, oldest first, gaps included; nullopt when no series is filed under that key.
+    [[nodiscard]] std::optional<std::vector<FleetBucket>> MachineBuckets(std::string_view provenKey, FleetRange range) const;
 
     /// Fill a rendered fleet view's gaps by summing what the nodes reported.
     ///
@@ -516,7 +505,7 @@ class FleetNodeHistories final: public IFleetHistorySink
     /// @param range Which view, so the same windows are summed.
     void BackfillInto(std::vector<FleetBucket>& into, FleetRange range) const;
 
-    /// How many series this store holds, attributed and unattributed.
+    /// How many series this store holds: one per machine that proved a key.
     [[nodiscard]] std::size_t Count() const;
 
     /// The newest bucket start any series last reported from this endpoint has been handed, or -1.
@@ -532,6 +521,11 @@ class FleetNodeHistories final: public IFleetHistorySink
     /// @param path Where `Save` wrote.
     /// @return True when anything was restored.
     bool Load(std::filesystem::path const& path);
+
+    /// How many series the last `Load` dropped for being filed under no key (a store written before keys were
+    /// recorded); for the start to report, once.
+    /// @return The count.
+    [[nodiscard]] std::size_t DroppedOnLoad() const;
 
     /// Whether `Load` found a file a LATER build wrote, which is never written over.
     /// @return True when this store will refuse to save.
@@ -549,34 +543,33 @@ class FleetNodeHistories final: public IFleetHistorySink
     [[nodiscard]] bool Save(std::filesystem::path const& path, StateFile which) const;
 
   private:
-    /// One series: what a machine recorded, how far it has been handed over, and where it last reported from.
+    /// One machine's series: what it recorded, how far it has been handed over, and where it last reported from.
     ///
-    /// The history is SHARED so a reader rendering it with the map's lock released keeps it alive across an
-    /// eviction that drops the entry.
-    struct Entry
+    /// SHARED so a reader rendering it with the map's lock released keeps it alive across an eviction, and with a lock
+    /// of its own held across claiming and adding a batch. The map's lock is always taken first.
+    struct Series
     {
-        std::shared_ptr<FleetHistory> history; ///< What that machine recorded.
-        std::int64_t highWater { -1 };         ///< Newest `startMillis` accepted into it.
-        std::string endpoint {};               ///< Where it last reported from: a label, never its identity.
-    };
+        /// @param wall Where its buckets' timestamps come from.
+        /// @param at Where it reports from.
+        Series(core::platform::WallClockRef wall, std::string at);
 
-    /// Which map an entry sits in, and under what.
-    using EntryMap = std::map<std::string, Entry, std::less<>>;
+        mutable std::mutex mutex;      ///< Guards `highWater`, `endpoint`, and adding to `history` with the mark.
+        FleetHistory history;          ///< What that machine recorded; guards its own rings.
+        std::int64_t highWater { -1 }; ///< Newest `startMillis` accepted into it.
+        std::string endpoint;          ///< Where it last reported from: a label, never its identity.
+    };
 
     /// Make room for one more series, dropping the one whose newest reading is oldest. Called with `_mutex` held.
     void EvictForOneMoreLocked();
 
-    /// Drop the series whose newest reading is oldest, whichever map holds it. Called with `_mutex` held.
-    void EraseOldestLocked();
-
     core::platform::WallClockRef _wall;
     mutable std::mutex _mutex;
 
-    /// Series a connection PROVED, keyed by the raw key: each a machine.
-    EntryMap _byKey;
+    /// Every machine's series, keyed by the raw key it proved.
+    std::map<std::string, std::shared_ptr<Series>, std::less<>> _byKey;
 
-    /// Series nobody proved, keyed by the endpoint they arrived from: answered for no machine.
-    EntryMap _unattributed;
+    /// How many keyless series the last `Load` dropped.
+    std::size_t _droppedOnLoad { 0 };
 
     /// Set when `Load` read a file a LATER build wrote; see `FleetHistory::_readOnly`.
     ///
