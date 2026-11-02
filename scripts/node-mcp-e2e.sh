@@ -46,10 +46,6 @@
 #                                         recommended where the ordering is unknown, a
 #                                         fingerprint per DRIVER otherwise, nobody behind
 #                                         or ahead on a one-machine fleet, a basis on each.
-#   2h. history answers for a machine   — that same scheduler's own cpu-busy series, asked by its id: named by
-#                                         id and display name, sixty one-minute buckets, every unsampled one a
-#                                         gap and the first sampled one a gap too (no CPU interval yet), never 0;
-#                                         asked of the fleet, refused naming `node`.
 #   2g. toolchain_diff explains         — on that same scheduler, whose capture walk is HELD
 #       a fingerprint                     until released: the worker has registered while it
 #                                         is held (asserted -- registration does not wait on
@@ -58,6 +54,11 @@
 #                                         PASSED -- the inputs the survey kept reproduce the
 #                                         fingerprint it registered -- and a fingerprint it
 #                                         does not serve is a clean tool error.
+#   2h. history answers for a machine   — that same scheduler's own cpu-busy series, asked by its id: named by
+#                                         id and display name, sixty one-minute buckets, every unsampled one a
+#                                         gap and the first sampled one a gap too (no CPU interval yet), never 0;
+#                                         asked of the fleet, refused naming `node`. Last, so
+#                                         2f/2g pay for the node uptime it waits on.
 #   3. A legacy client is answered      — `initialize` answers `2025-11-25`.
 #   4. It is not a scrape endpoint      — `GET /metrics` on the MCP port is a 404.
 #   5. A network address refuses        — `--mcp-listen=0.0.0.0:<port>` ends the
@@ -417,27 +418,6 @@ if grep -qF -- "mcp action explain_admission" "${workdir}/node.log"; then
 fi
 e2e_note "each action left its audit line naming ${ACTION_CLIENT}; the read left none"
 
-# ------------------------------------------------- 2h. history answers for one machine
-# This node's own cpu-busy series, asked BY ITS ID: the leader (itself) answers from what its presence loop handed
-# over, filed under the key the announcement proved. A closed minute bucket travels only once its minute has ended,
-# and the sampler's first CPU reading has no earlier counters to difference against -- so the wait is on the STATE
-# "two sampled buckets", and the first of them must read a GAP (null), never 0.
-cpu_history_sampled() {
-    local body
-    body="$(call_action history "{\"series\":\"cpu-busy\",\"range\":\"1h\",\"node\":\"${self_id}\"}")"
-    python3 -I -c "import json,sys; d=json.loads(sys.stdin.read()); sys.exit(0 if d['result']['isError'] is False and sum(1 for b in d['result']['structuredContent']['buckets'] if b['coverage'] is not None) >= 2 else 1)" <<< "$body"
-}
-wait_until cpu_history_sampled "the leader to hold two sampled minutes of this node's cpu-busy history" "$action_pid" "${workdir}/node.log" 300
-cpu_body="$(call_action history "{\"series\":\"cpu-busy\",\"range\":\"1h\",\"node\":\"${self_id}\"}")"
-# The shape: one machine, named by id and display name, a level in permille, sixty one-minute buckets. Every
-# unsampled bucket is a gap; the first sampled one is a gap too (no interval yet); a value is a permille.
-json_check "history cpu-busy for this node" "$cpu_body" \
-    "${OK} and ${SC}['scope'] == 'node' and ${SC}['node_id'] == '${self_id}' and ${SC}['display_name'] == 'e2e-box' and ${SC}['series'] == 'cpu-busy' and ${SC}['unit'] == 'permille' and ${SC}['bucket_seconds'] == 60 and len(${SC}['buckets']) == 60 and all(b['value'] is None for b in ${SC}['buckets'] if b['coverage'] is None) and any(b['coverage'] is None for b in ${SC}['buckets']) and [b for b in ${SC}['buckets'] if b['coverage'] is not None][0]['value'] is None and all(0 <= b['value'] <= 1000 for b in ${SC}['buckets'] if b['value'] is not None)"
-# Asked of the fleet, cpu-busy is refused naming the argument -- never a fleet aggregate.
-json_check "history cpu-busy without node" "$(call_action history '{"series":"cpu-busy","range":"1h"}')" \
-    "d['result']['isError'] is True and '\`node\`' in d['result']['content'][0]['text']"
-e2e_note "history answered cpu-busy for ${self_id} (e2e-box): $(python3 -I -c "import json,sys; b=json.loads(sys.stdin.read())['result']['structuredContent']['buckets']; print(sum(1 for x in b if x['coverage'] is not None), 'sampled,', sum(1 for x in b if x['value'] is not None), 'with a reading')" <<< "$cpu_body"), gaps kept; refused without node"
-
 # ------------------------------------------------------------- 2f. toolchains answers
 # The worker registers the toolchains it identified only once each fingerprint is real (the survey walks
 # include trees on the heartbeat thread), so wait on that STATE. A host with no compiler on PATH registers
@@ -512,6 +492,42 @@ if command -v cc >/dev/null 2>&1 || command -v c++ >/dev/null 2>&1 || command -v
 else
     e2e_note "no compiler on PATH, so the worker registers no toolchain: the toolchains and toolchain_diff checks were NOT run"
 fi
+
+# ------------------------------------------------- 2h. history answers for one machine
+# This node's own cpu-busy series, asked BY ITS ID: the leader (itself) answers from what its presence loop handed
+# over, filed under the key the announcement proved. LAST, after 2f and 2g, because what it waits for is the node's
+# UPTIME, not anything this section does: a minute bucket travels only once its minute has closed, and the sampler's
+# first CPU reading has no earlier counters to difference against -- so "two sampled minutes, the second with a
+# reading" needs about three sample intervals (`FleetSampleInterval`, 60 s: the open minute at start, the absent
+# first, the read second) and one announce cadence (`NodeAnnounceInterval`, 20 s) from the node's start. Whatever
+# 2f and 2g already spent pays for that.
+#
+# The bound is DERIVED from the node's own `uptime_s` (a steady clock, not this shell's wall clock): what is left of
+# those 200 s, plus one announce cadence of slack, and never less than that slack. Counted from the node's start, the
+# whole case then stays inside the ctest TIMEOUT, so a stall is reported by `wait_until` -- what it waited for and the
+# measured elapsed -- rather than by ctest killing the run.
+readonly HISTORY_NEEDS_S=$((3 * 60 + 20))
+readonly HISTORY_SLACK_S=20
+uptime_s="$(python3 -I -c "import json,sys; print(json.loads(sys.stdin.read())['result']['structuredContent']['uptime_s'])" \
+    <<< "$(call_action node_status '{}')")" || fail "node_status reported no uptime_s"
+history_bound=$((HISTORY_NEEDS_S - uptime_s + HISTORY_SLACK_S))
+[ "$history_bound" -ge "$HISTORY_SLACK_S" ] || history_bound="$HISTORY_SLACK_S"
+cpu_history_sampled() {
+    local body
+    body="$(call_action history "{\"series\":\"cpu-busy\",\"range\":\"1h\",\"node\":\"${self_id}\"}")"
+    python3 -I -c "import json,sys; d=json.loads(sys.stdin.read()); sys.exit(0 if d['result']['isError'] is False and sum(1 for b in d['result']['structuredContent']['buckets'] if b['coverage'] is not None) >= 2 else 1)" <<< "$body"
+}
+wait_until cpu_history_sampled "the leader to hold two sampled minutes of this node's cpu-busy history (node up ${uptime_s} s, bound ${history_bound} s)" "$action_pid" "${workdir}/node.log" "$history_bound"
+cpu_body="$(call_action history "{\"series\":\"cpu-busy\",\"range\":\"1h\",\"node\":\"${self_id}\"}")"
+# The shape: one machine, named by id and display name, a level in permille, sixty one-minute buckets. Every
+# unsampled bucket is a gap; the first sampled one is a gap too (no interval yet); a value is a permille.
+json_check "history cpu-busy for this node" "$cpu_body" \
+    "${OK} and ${SC}['scope'] == 'node' and ${SC}['node_id'] == '${self_id}' and ${SC}['display_name'] == 'e2e-box' and ${SC}['series'] == 'cpu-busy' and ${SC}['unit'] == 'permille' and ${SC}['bucket_seconds'] == 60 and len(${SC}['buckets']) == 60 and all(b['value'] is None for b in ${SC}['buckets'] if b['coverage'] is None) and any(b['coverage'] is None for b in ${SC}['buckets']) and [b for b in ${SC}['buckets'] if b['coverage'] is not None][0]['value'] is None and all(0 <= b['value'] <= 1000 for b in ${SC}['buckets'] if b['value'] is not None)"
+# Asked of the fleet, cpu-busy is refused naming the argument -- never a fleet aggregate.
+json_check "history cpu-busy without node" "$(call_action history '{"series":"cpu-busy","range":"1h"}')" \
+    "d['result']['isError'] is True and '\`node\`' in d['result']['content'][0]['text']"
+e2e_note "history answered cpu-busy for ${self_id} (e2e-box): $(python3 -I -c "import json,sys; b=json.loads(sys.stdin.read())['result']['structuredContent']['buckets']; print(sum(1 for x in b if x['coverage'] is not None), 'sampled,', sum(1 for x in b if x['value'] is not None), 'with a reading')" <<< "$cpu_body"), gaps kept; refused without node"
+
 stop_and_require_clean_exit "$action_pid" "the acting scheduler" 30 "${workdir}/node.log"
 node_pid=""
 

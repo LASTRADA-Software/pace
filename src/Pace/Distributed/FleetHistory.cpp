@@ -63,8 +63,9 @@ namespace
     /// `ReadVersion3`'s. Version 1 wrote the former, version 2 the latter -- moved
     /// here because `DispatchAllExcluded` widened `FleetMetric`, the same reason
     /// `RingFile` moved to 3. Version 3 writes `ReadVersion4`'s shape -- the CPU slot and
-    /// the absence mask -- and, per machine, the identity key its batches were proven under,
-    /// which is what a machine's own series is looked up BY.
+    /// the absence mask -- and files each series under the identity key it was proven under
+    /// (`[endpoint][high-water][key][body]`, an empty key for an unattributed series), which is
+    /// what a machine's own series is looked up BY.
     constexpr FileEnvelope NodeStoreFile { .magic = { 'F', 'C', 'N', 'H' }, .newest = 3 };
 
     /// Magic, version byte, body length, body checksum.
@@ -770,8 +771,8 @@ namespace
     static_assert(NestedBodyFormats.back().version == NodeStoreFile.newest,
                   "the newest received-store format this build writes must be one it can read back");
 
-    /// The first `NodeStoreFile` version that records, per machine, the identity key its batches were proven
-    /// under. Older stores carry none, so their machines answer no per-machine lookup until they report again.
+    /// The first `NodeStoreFile` version that files each series under the identity key it was proven under. Older
+    /// stores carry none, so every series they hold reads back unattributed and answers for no machine.
     constexpr std::uint8_t NodeStoreKeyedSince = 3;
 
     /// The nested-body reader for one `NodeStoreFile` version, if this build has one.
@@ -1088,56 +1089,75 @@ FleetNodeHistories::FleetNodeHistories(core::platform::WallClockRef wall):
 {
 }
 
+void FleetNodeHistories::EvictForOneMoreLocked()
+{
+    if (_byKey.size() + _unattributed.size() >= MaxReceivedHistories)
+        EraseOldestLocked();
+}
+
+void FleetNodeHistories::EraseOldestLocked()
+{
+    // The series whose newest reading is OLDEST, whichever map holds it: a machine still reporting is never the one
+    // dropped while a silent one is kept.
+    auto const oldestIn = [](EntryMap& map) {
+        return std::ranges::min_element(map, {}, [](auto const& each) { return each.second.highWater; });
+    };
+    auto keyed = oldestIn(_byKey);
+    auto loose = oldestIn(_unattributed);
+    if (keyed == _byKey.end() && loose == _unattributed.end())
+        return;
+    if (loose == _unattributed.end() || (keyed != _byKey.end() && keyed->second.highWater <= loose->second.highWater))
+        _byKey.erase(keyed);
+    else
+        _unattributed.erase(loose);
+}
+
 std::size_t FleetNodeHistories::AcceptHistory(std::string_view endpoint,
                                               std::string_view provenKey,
                                               std::span<FleetBucket const> buckets)
 {
-    // The map's lock covers finding the entry and moving its mark, and nothing else.
-    // Adopting a batch walks three rings up to a hundred and twenty-eight times, and
-    // doing that here would put every other machine's heartbeat behind this one's.
-    // The entry itself outlives the lock: nothing ever erases one, and the history is
-    // held by pointer so a rehash cannot move it.
-    Entry* entry = nullptr;
+    // The map's lock covers finding (or opening) the series and claiming which buckets are news, and nothing else.
+    // Adopting a batch walks three rings up to a hundred and twenty-eight times, and doing that here would put every
+    // other machine's heartbeat behind this one's. The history is shared, so an eviction meanwhile cannot free it.
+    std::shared_ptr<FleetHistory> history;
+    std::vector<FleetBucket const*> news;
     {
         auto const guard = std::scoped_lock { _mutex };
-        auto found = _nodes.find(endpoint);
-        if (found == _nodes.end())
-            found = _nodes
-                        .emplace(std::string { endpoint },
-                                 Entry { .history = std::make_unique<FleetHistory>(_wall), .highWater = -1 })
-                        .first;
-        entry = &found->second;
-
-        // Whose readings these are, by the key the connection PROVED. A second, different key under one endpoint
-        // means the series now mixes two machines, so it answers for neither -- for good, since the readings
-        // already folded in cannot be told apart again.
-        if (!provenKey.empty() && !entry->keyDisputed)
+        auto& map = provenKey.empty() ? _unattributed : _byKey;
+        auto const file = provenKey.empty() ? endpoint : provenKey;
+        auto found = map.find(file);
+        if (found == map.end())
         {
-            if (entry->provenKey.empty())
-                entry->provenKey = std::string { provenKey };
-            else if (entry->provenKey != provenKey)
-            {
-                entry->provenKey.clear();
-                entry->keyDisputed = true;
-            }
+            EvictForOneMoreLocked();
+            // A proven series opened where an unattributed one already holds minutes starts at its mark: those minutes
+            // are the fleet's already, and a node replaying its ring after a restart would otherwise file them twice.
+            auto const loose = provenKey.empty() ? _unattributed.end() : _unattributed.find(endpoint);
+            auto const mark = loose != _unattributed.end() ? loose->second.highWater : std::int64_t { -1 };
+            found = map.emplace(std::string { file },
+                                Entry { .history = std::make_shared<FleetHistory>(_wall),
+                                        .highWater = mark,
+                                        .endpoint = std::string { endpoint } })
+                        .first;
+        }
+        auto& entry = found->second;
+        // Where it reports from NOW: a machine that moved keeps its series and changes its label.
+        entry.endpoint = std::string { endpoint };
+        history = entry.history;
+        for (auto const& bucket: buckets)
+        {
+            // At or below the mark is a replay, not news. Ignored rather than refused:
+            // the node is behaving correctly when it resends after a reply it never saw,
+            // and the only wrong answer here is to add the reading twice.
+            if (!bucket.present || bucket.startMillis <= entry.highWater)
+                continue;
+            news.push_back(&bucket);
+            entry.highWater = bucket.startMillis;
         }
     }
 
-    std::size_t taken = 0;
-    for (auto const& bucket: buckets)
-    {
-        // At or below the mark is a replay, not news. Ignored rather than refused:
-        // the node is behaving correctly when it resends after a reply it never saw,
-        // and the only wrong answer here is to add the reading twice.
-        if (!bucket.present || bucket.startMillis <= entry->highWater)
-            continue;
-        entry->history->Adopt(bucket);
-        // Plain assignment: the guard above already established that this bucket is
-        // strictly newer, so a `max` could only ever pick it.
-        entry->highWater = bucket.startMillis;
-        ++taken;
-    }
-    return taken;
+    for (auto const* bucket: news)
+        history->Adopt(*bucket);
+    return news.size();
 }
 
 void FleetNodeHistories::BackfillInto(std::vector<FleetBucket>& into, FleetRange range) const
@@ -1149,12 +1169,15 @@ void FleetNodeHistories::BackfillInto(std::vector<FleetBucket>& into, FleetRange
     if (std::ranges::none_of(into, [](FleetBucket const& each) { return !each.present; }))
         return;
 
-    std::vector<FleetHistory const*> histories;
+    // Attributed and unattributed alike: a fleet window is every machine's, whoever could be named. Shared, so an
+    // eviction while this renders cannot free one.
+    std::vector<std::shared_ptr<FleetHistory const>> histories;
     {
         auto const guard = std::scoped_lock { _mutex };
-        histories.reserve(_nodes.size());
-        for (auto const& [endpoint, entry]: _nodes)
-            histories.push_back(entry.history.get());
+        histories.reserve(_byKey.size() + _unattributed.size());
+        for (auto const* map: { &_byKey, &_unattributed })
+            for (auto const& [file, entry]: *map)
+                histories.push_back(entry.history);
     }
     if (histories.empty())
         return;
@@ -1165,7 +1188,7 @@ void FleetNodeHistories::BackfillInto(std::vector<FleetBucket>& into, FleetRange
     // a heartbeat must not wait behind it.
     std::vector<std::vector<FleetBucket>> perNode;
     perNode.reserve(histories.size());
-    for (auto const* history: histories)
+    for (auto const& history: histories)
         perNode.push_back(history->Buckets(range));
 
     for (auto const index: std::views::iota(std::size_t { 0 }, into.size()))
@@ -1221,33 +1244,43 @@ bool FleetNodeHistories::Save(std::filesystem::path const& path, StateFile which
 {
     // The same refusal `FleetHistory::Save` makes, and for the same reason: a build
     // that cannot read this file must not replace it with one it can.
-    std::vector<std::pair<std::string, Entry const*>> listed;
+    /// One series as it is written: copied out under the lock, its history shared so an eviction cannot free it.
+    struct Listed
+    {
+        std::string provenKey;                       ///< Empty for an unattributed series.
+        std::string endpoint;                        ///< Where it last reported from.
+        std::int64_t highWater { -1 };               ///< How far it has been handed over.
+        std::shared_ptr<FleetHistory const> history; ///< What it holds.
+    };
+    std::vector<Listed> listed;
     {
         auto const guard = std::scoped_lock { _mutex };
         if (_readOnly)
             return false;
-        listed.reserve(_nodes.size());
-        for (auto const& [endpoint, entry]: _nodes)
-            listed.emplace_back(endpoint, &entry);
+        listed.reserve(_byKey.size() + _unattributed.size());
+        for (auto const& [key, entry]: _byKey)
+            listed.push_back(Listed {
+                .provenKey = key, .endpoint = entry.endpoint, .highWater = entry.highWater, .history = entry.history });
+        for (auto const& [endpoint, entry]: _unattributed)
+            listed.push_back(
+                Listed { .provenKey = {}, .endpoint = endpoint, .highWater = entry.highWater, .history = entry.history });
     }
 
     // Composed with the map's lock RELEASED. One machine's series is most of a
     // megabyte, so serializing a fleet of them under the lock every heartbeat has to
     // take would put each inbound `Accept` behind all of it. Each `FleetHistory`
-    // guards itself, and nothing erases an entry once made.
+    // guards itself.
     auto file = FramedBuffer();
     AppendU64(file, listed.size());
-    for (auto const& [endpoint, entry]: listed)
+    for (auto const& entry: listed)
     {
-        AppendU64(file, endpoint.size());
-        file += endpoint;
-        AppendU64(file, static_cast<std::uint64_t>(entry->highWater));
-        // Whose readings they are, by the key they were proven under (empty: nobody's, or not yet anybody's) --
-        // and whether two keys disputed it, which must survive a restart or the next key to arrive would
-        // claim a series that mixes two machines.
-        AppendU64(file, entry->provenKey.size());
-        file += entry->provenKey;
-        AppendU64(file, entry->keyDisputed ? 1U : 0U);
+        // `[endpoint][high-water][key]`: the endpoint first, where versions 1 and 2 had it, then the key the series
+        // is filed under -- empty for one nobody proved, which reads back unattributed.
+        AppendU64(file, entry.endpoint.size());
+        file += entry.endpoint;
+        AppendU64(file, static_cast<std::uint64_t>(entry.highWater));
+        AppendU64(file, entry.provenKey.size());
+        file += entry.provenKey;
         // The nested body, written by the very code that reads it back. A second copy
         // of the ring encoding here would drift from that one the first time a bucket
         // grew a field -- and would drift silently, because both halves would still
@@ -1258,7 +1291,7 @@ bool FleetNodeHistories::Save(std::filesystem::path const& path, StateFile which
         auto const lengthAt = file.size();
         AppendU64(file, 0);
         auto const bodyAt = file.size();
-        entry->history->AppendBody(file);
+        entry.history->AppendBody(file);
         WriteU64(file, lengthAt, file.size() - bodyAt);
     }
     return WriteFramed(path, NodeStoreFile, file, which);
@@ -1285,7 +1318,8 @@ bool FleetNodeHistories::Load(std::filesystem::path const& path)
     if (count > opened.body.size())
         return false;
 
-    std::map<std::string, Entry, std::less<>> restored;
+    EntryMap byKey;
+    EntryMap unattributed;
     for ([[maybe_unused]] auto const index: std::views::iota(std::uint64_t { 0 }, count))
     {
         std::uint64_t length = 0;
@@ -1294,12 +1328,10 @@ bool FleetNodeHistories::Load(std::filesystem::path const& path)
         if (!reader.Take(length) || !reader.Take(length, endpoint) || !reader.Take(highWater))
             return false;
 
-        // Keyed stores only: an older one recorded no key, so its machines are nobody's until they report again.
+        // Keyed stores only: an older one recorded no key, so every series it holds reads back unattributed.
         std::uint64_t keyLength = 0;
         std::string_view provenKey;
-        std::uint64_t disputed = 0;
-        if (opened.version >= NodeStoreKeyedSince
-            && (!reader.Take(keyLength) || !reader.Take(keyLength, provenKey) || !reader.Take(disputed)))
+        if (opened.version >= NodeStoreKeyedSince && (!reader.Take(keyLength) || !reader.Take(keyLength, provenKey)))
             return false;
 
         std::uint64_t nestedSize = 0;
@@ -1307,18 +1339,26 @@ bool FleetNodeHistories::Load(std::filesystem::path const& path)
         if (!reader.Take(nestedSize) || !reader.Take(nestedSize, nested))
             return false;
 
-        auto history = std::make_unique<FleetHistory>(_wall);
+        auto history = std::make_shared<FleetHistory>(_wall);
         if (!history->ReadBody(nested, opened.version))
             return false;
-        restored.emplace(std::string { endpoint },
-                         Entry { .history = std::move(history),
-                                 .highWater = static_cast<std::int64_t>(highWater),
-                                 .provenKey = std::string { provenKey },
-                                 .keyDisputed = disputed != 0 });
+        // A file naming one series twice is not one this build wrote: refused whole, like any other damage.
+        auto& map = provenKey.empty() ? unattributed : byKey;
+        auto const inserted = map.emplace(provenKey.empty() ? endpoint : provenKey,
+                                          Entry { .history = std::move(history),
+                                                  .highWater = static_cast<std::int64_t>(highWater),
+                                                  .endpoint = std::string { endpoint } })
+                                  .second;
+        if (!inserted)
+            return false;
     }
 
     auto const guard = std::scoped_lock { _mutex };
-    _nodes = std::move(restored);
+    _byKey = std::move(byKey);
+    _unattributed = std::move(unattributed);
+    // A store written under a larger ceiling keeps the series that reported most recently.
+    while (_byKey.size() + _unattributed.size() > MaxReceivedHistories)
+        EraseOldestLocked();
     return true;
 }
 
@@ -1328,47 +1368,40 @@ bool FleetNodeHistories::ReadOnly() const
     return _readOnly;
 }
 
-std::size_t FleetNodeHistories::Count() const
+std::expected<std::vector<FleetBucket>, MachineHistoryMiss> FleetNodeHistories::MachineBuckets(std::string_view provenKey,
+                                                                                               FleetRange range) const
 {
-    auto const guard = std::scoped_lock { _mutex };
-    return _nodes.size();
-}
-
-std::optional<std::vector<FleetBucket>> FleetNodeHistories::MachineBuckets(std::string_view provenKey,
-                                                                           FleetRange range) const
-{
-    if (provenKey.empty())
-        return std::nullopt;
-
-    FleetHistory const* chosen = nullptr;
+    std::shared_ptr<FleetHistory const> history;
     {
         auto const guard = std::scoped_lock { _mutex };
-        auto newest = std::int64_t { -1 };
-        for (auto const& [endpoint, entry]: _nodes)
-        {
-            // A disputed entry has an empty key, so it can never match.
-            if (entry.provenKey != provenKey || (chosen != nullptr && entry.highWater <= newest))
-                continue;
-            chosen = entry.history.get();
-            newest = entry.highWater;
-        }
+        auto const found = provenKey.empty() ? _byKey.end() : _byKey.find(provenKey);
+        if (found == _byKey.end())
+            return std::unexpected { MachineHistoryMiss { .unattributed = _unattributed.size() } };
+        history = found->second.history;
     }
-    if (chosen == nullptr)
-        return std::nullopt;
 
-    // Rendered with the map's lock released, as `BackfillInto` renders: the history guards itself and nothing
-    // erases an entry once made.
-    auto buckets = chosen->Buckets(range);
+    // Rendered with the map's lock released, as `BackfillInto` renders.
+    auto buckets = history->Buckets(range);
     for (auto& bucket: buckets)
         bucket.absent |= FleetScopedSlots();
     return buckets;
 }
 
+std::size_t FleetNodeHistories::Count() const
+{
+    auto const guard = std::scoped_lock { _mutex };
+    return _byKey.size() + _unattributed.size();
+}
+
 std::int64_t FleetNodeHistories::HighWaterFor(std::string_view endpoint) const
 {
     auto const guard = std::scoped_lock { _mutex };
-    auto const found = _nodes.find(endpoint);
-    return found == _nodes.end() ? -1 : found->second.highWater;
+    auto newest = std::int64_t { -1 };
+    for (auto const* map: { &_byKey, &_unattributed })
+        for (auto const& [file, entry]: *map)
+            if (entry.endpoint == endpoint)
+                newest = std::max(newest, entry.highWater);
+    return newest;
 }
 
 } // namespace Pace::Distributed

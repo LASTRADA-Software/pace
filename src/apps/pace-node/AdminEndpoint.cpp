@@ -2,11 +2,13 @@
 #include "AdminEndpoint.hpp"
 #include "CacheTier.hpp"
 #include "NodeIdentity.hpp"
+#include "NodeNameResolver.hpp"
 
 #include <Pace/Core/HostPort.hpp>
 #include <Pace/Core/Json.hpp>
 #include <Pace/Core/StateFiles.hpp>
 #include <Pace/Core/StopAwareWait.hpp>
+#include <Pace/Core/Utf8.hpp>
 
 #include <core/Ranges.hpp>
 #include <core/async/SyncRun.hpp>
@@ -369,6 +371,40 @@ namespace
         return out.empty() ? std::string { "(none)" } : out;
     }
 
+    /// A node selector as a refusal may quote it: only text, and only so much of it.
+    ///
+    /// The selector arrives over raw `0xFC` as any bytes up to the control payload, and a refusal is read by a person
+    /// and relayed to an MCP client verbatim -- so bytes that are not UTF-8, or more than a name's worth, are described
+    /// rather than echoed.
+    /// @param nodeId The selector as received.
+    /// @return It quoted, or a description of it.
+    [[nodiscard]] std::string QuotedSelector(std::string_view nodeId)
+    {
+        if (!IsValidUtf8(nodeId))
+            return std::format("a selector of {} bytes that are not UTF-8 text", nodeId.size());
+        if (nodeId.size() > MaxQuotedNameBytes)
+            return std::format("a selector of {} bytes", nodeId.size());
+        return std::format("\"{}\"", nodeId);
+    }
+
+    /// Why one machine's series could not be drawn, as a sentence that is true: no series under its key, and how much
+    /// this leader holds that it could not attribute to ANY machine.
+    /// @param nodeId The member asked for, already known to be a member id.
+    /// @param miss What the store said.
+    /// @return The refusal's detail.
+    [[nodiscard]] std::string NoMachineHistory(std::string_view nodeId, Distributed::MachineHistoryMiss miss)
+    {
+        auto const unattributed =
+            miss.unattributed == 0
+                ? std::string {}
+                : std::format("; it also holds {} series received from connections that proved no key, or before keys "
+                              "were recorded, which are answered for no machine",
+                              miss.unattributed);
+        return std::format("this leader holds no history filed under the key member {}'s record holds{}\n",
+                           QuotedSelector(nodeId),
+                           unattributed);
+    }
+
     /// One machine's own `series` table: `AnswerFleetText` with a node selector.
     ///
     /// The member is found by its id, exactly, and its series by the key its record holds -- never by an
@@ -405,9 +441,10 @@ namespace
                                      [nodeId](Cluster::ClusterMember const& each) { return each.id == nodeId; })
                 : nullptr;
         if (member == nullptr)
-            return std::unexpected(FleetTextDeclined {
-                .refusal = FleetTextRefusal::UnknownSelector,
-                .detail = std::format("no member is named {}; the members are: {}\n", nodeId, KnownMemberIds(snapshot)) });
+            return std::unexpected(FleetTextDeclined { .refusal = FleetTextRefusal::UnknownSelector,
+                                                       .detail = std::format("no member is named {}; the members are: {}\n",
+                                                                             QuotedSelector(nodeId),
+                                                                             KnownMemberIds(snapshot)) });
 
         // A follower answers as it answers for the fleet -- comment lines naming the leader, no table -- since
         // what it was handed is a fraction of the fleet's handover, rendered by the same renderer below.
@@ -417,16 +454,13 @@ namespace
                                              .durable = history != nullptr && history->Durable() };
         if (leads)
         {
-            auto buckets =
-                history != nullptr
-                    ? history->MachineBuckets(AsStringView(std::span<std::byte const> { member->publicKey }), range)
-                    : std::nullopt;
+            if (history == nullptr)
+                return std::unexpected(FleetTextDeclined { .refusal = FleetTextRefusal::UnknownSelector,
+                                                           .detail = "this leader keeps no history at all\n" });
+            auto buckets = history->MachineBuckets(AsStringView(std::span<std::byte const> { member->publicKey }), range);
             if (!buckets.has_value())
-                return std::unexpected(FleetTextDeclined {
-                    .refusal = FleetTextRefusal::UnknownSelector,
-                    .detail = std::format("this leader holds no history for {}: none was handed over under the key "
-                                          "its record holds\n",
-                                          nodeId) });
+                return std::unexpected(FleetTextDeclined { .refusal = FleetTextRefusal::UnknownSelector,
+                                                           .detail = NoMachineHistory(nodeId, buckets.error()) });
             view.buckets = std::move(*buckets);
         }
         return FleetTextDocument { .leads = leads,

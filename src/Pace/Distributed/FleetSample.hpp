@@ -21,10 +21,11 @@ namespace Pace::Distributed
 /// vocabularies for one fact.
 /// **ORDINALS ARE A PERSISTED CONTRACT. Append only; never insert or reorder.** (#308)
 ///
-/// A history file's body is `[start][sample][present][coverage][N values][N folds]`, where `N`
-/// is the width the format VERSION that wrote it used -- see `FleetHistory.cpp`'s
-/// `LegacyValueWidth`, frozen at nine for versions 1 and 2 forever, and this build's
-/// count from version 3 onward. The readings are stored POSITIONALLY, indexed by
+/// A history file's bucket is `[start][sample][present][coverage][N values][N folds]` through
+/// version 3 and `[start][sample][present][coverage][absent][N values][N folds]` from version 4,
+/// where `N` is the width the format VERSION that wrote it used -- see `FleetHistory.cpp`'s
+/// `LegacyValueWidth` (nine, versions 1 and 2) and `VersionThreeValueWidth` (ten, version 3),
+/// each frozen forever, and this build's count from version 4 onward. The readings are stored POSITIONALLY, indexed by
 /// `static_cast<std::size_t>(metric)`, and read back the same way. Inserting an
 /// enumerator mid-enum therefore does not fail to load: every bucket already on disk
 /// comes back with each reading attributed to the NEXT series, silently, for as long

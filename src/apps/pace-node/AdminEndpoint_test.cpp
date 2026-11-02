@@ -2,6 +2,7 @@
 #include "AdminEndpoint.hpp"
 #include "NodeConditions.hpp"
 #include "NodeIdentity.hpp"
+#include "NodeNameResolver.hpp"
 
 #include <Pace/Core/Json.hpp>
 #include <Pace/Core/Logger.hpp>
@@ -27,6 +28,7 @@
 #include <fstream>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -2210,6 +2212,10 @@ namespace
 {
 
 /// A load sampler answering a script, one reading per call, then the last one again.
+///
+/// Locked: `FleetSampler` samples on its own thread from construction while a case calls `SampleOnce` on its own, so
+/// two threads advance the script -- which order they take the readings in is the case's business, a race on the
+/// cursor is not.
 class ScriptedLoadSampler final: public IHostLoadSampler
 {
   public:
@@ -2221,12 +2227,14 @@ class ScriptedLoadSampler final: public IHostLoadSampler
 
     [[nodiscard]] HostLoad Sample() override
     {
+        auto const guard = std::scoped_lock { _mutex };
         auto const index = std::min(_next, _readings.size() - 1);
         ++_next;
         return HostLoad { .cpuBusyPermille = _readings[index], .availableMemoryBytes = {}, .freeScratchBytes = {} };
     }
 
   private:
+    std::mutex _mutex;
     std::vector<std::optional<std::uint32_t>> _readings;
     std::size_t _next { 0 };
 };
@@ -2377,7 +2385,35 @@ TEST_CASE("A node selector draws one machine's series, found by the key its memb
         auto const answer = ask("series", CompileCacheWire::FleetTextFormat::Text, "machine-b");
         REQUIRE_FALSE(answer.has_value());
         CHECK(answer.error().refusal == FleetTextRefusal::UnknownSelector);
-        CHECK(answer.error().detail.contains("no history for machine-b"));
+        // The true reason: nothing filed under that member's key -- and nothing unattributed held, so no more said.
+        CHECK(answer.error().detail
+              == "this leader holds no history filed under the key member \"machine-b\"'s record holds\n");
+    }
+
+    SECTION("a refusal says how much history this leader holds that it could attribute to no machine")
+    {
+        auto keyless = Testing::ClosedBucket(Testing::MinuteBucketStart(fixture.wall.now()) - (4 * 60'000));
+        REQUIRE(fixture.sampler->Received().AcceptHistory("10.0.0.9:6676", std::span { &keyless, 1 }) == 1);
+        auto const answer = ask("series", CompileCacheWire::FleetTextFormat::Text, "machine-b");
+        REQUIRE_FALSE(answer.has_value());
+        CHECK(answer.error().refusal == FleetTextRefusal::UnknownSelector);
+        CHECK(answer.error().detail.contains("no history filed under the key member \"machine-b\"'s record holds"));
+        CHECK(answer.error().detail.contains("it also holds 1 series received from connections that proved no key"));
+    }
+
+    SECTION("a selector that is not text, or too long, is described rather than echoed")
+    {
+        auto const binary = ask("series", CompileCacheWire::FleetTextFormat::Text, std::string_view { "\xff\xfe", 2 });
+        REQUIRE_FALSE(binary.has_value());
+        CHECK(binary.error().refusal == FleetTextRefusal::UnknownSelector);
+        CHECK(binary.error().detail.starts_with("no member is named a selector of 2 bytes that are not UTF-8 text;"));
+
+        auto const longName = std::string(MaxQuotedNameBytes + 1, 'x');
+        auto const tooLong = ask("series", CompileCacheWire::FleetTextFormat::Text, longName);
+        REQUIRE_FALSE(tooLong.has_value());
+        CHECK(
+            tooLong.error().detail.starts_with(std::format("no member is named a selector of {} bytes;", longName.size())));
+        CHECK_FALSE(tooLong.error().detail.contains(longName));
     }
 
     SECTION("an id no member holds is refused, listing the members")
@@ -2385,15 +2421,26 @@ TEST_CASE("A node selector draws one machine's series, found by the key its memb
         auto const answer = ask("series", CompileCacheWire::FleetTextFormat::Text, "machine-c");
         REQUIRE_FALSE(answer.has_value());
         CHECK(answer.error().refusal == FleetTextRefusal::UnknownSelector);
+        CHECK(answer.error().detail.starts_with("no member is named \"machine-c\"; the members are: "));
         CHECK(answer.error().detail.contains("machine-a"));
         CHECK(answer.error().detail.contains("machine-b"));
     }
 
     SECTION("any selection but the series table refuses a node rather than dropping it")
     {
-        CHECK_FALSE(ask("members", CompileCacheWire::FleetTextFormat::Text, "machine-a").has_value());
-        CHECK_FALSE(ask({}, CompileCacheWire::FleetTextFormat::Text, "machine-a").has_value());
-        CHECK_FALSE(ask({}, CompileCacheWire::FleetTextFormat::Json, "machine-a").has_value());
+        for (auto const& [section, format]:
+             std::array { std::pair { std::string_view { "members" }, CompileCacheWire::FleetTextFormat::Text },
+                          std::pair { std::string_view {}, CompileCacheWire::FleetTextFormat::Text },
+                          std::pair { std::string_view {}, CompileCacheWire::FleetTextFormat::Json } })
+        {
+            INFO("section '" << section << "', format " << static_cast<int>(format));
+            auto const answer = ask(section, format, "machine-a");
+            REQUIRE_FALSE(answer.has_value());
+            // WHICH refusal: the selector's own, not an unknown section or range.
+            CHECK(answer.error().refusal == FleetTextRefusal::UnknownSelector);
+            CHECK(answer.error().detail
+                  == "a node selects a machine's own history, served by the series section of the tables alone\n");
+        }
     }
 
     SECTION("a follower answers a node read as it answers the fleet's: no table, naming the leader")
@@ -2404,6 +2451,19 @@ TEST_CASE("A node selector draws one machine's series, found by the key its memb
         REQUIRE(answer.has_value());
         CHECK_FALSE(answer->leads);
         CHECK(answer->body.starts_with("# this node does not lead the fleet"));
+    }
+
+    SECTION("a machine that moved endpoint answers with every minute it handed over, from both addresses")
+    {
+        auto later = Testing::ClosedBucket(Testing::MinuteBucketStart(fixture.wall.now()) - 60'000);
+        later.values[static_cast<std::size_t>(Distributed::FleetMetric::CpuBusyPermille)] = 710;
+        REQUIRE(fixture.sampler->Received().AcceptHistory("192.168.4.7:6676", RawKeyText(keyA), std::span { &later, 1 })
+                == 1);
+        auto const answer = ask("series", CompileCacheWire::FleetTextFormat::Text, "machine-a");
+        REQUIRE(answer.has_value());
+        // Both the 640 reported from the old address and the 710 from the new one.
+        CHECK(answer->body.contains("\t640\n"));
+        CHECK(answer->body.contains("\t710\n"));
     }
 
     SECTION("a machine that has left is still answered from what it handed over")

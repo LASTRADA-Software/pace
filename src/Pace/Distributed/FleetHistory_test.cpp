@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <ranges>
 #include <span>
@@ -1474,31 +1475,142 @@ TEST_CASE("A received-history store keeps each slot's absence and the key a mach
     // A machine answers for no dispatch outcome: those slots are absent in its own view, never zero.
     CHECK(IsAbsent(older, FleetMetric::DispatchGranted));
 
-    // A key nobody delivered under names no machine.
-    CHECK_FALSE(received.MachineBuckets("key-b", FleetRange::OneHour).has_value());
+    // A key nobody delivered under names no machine, and the store has nothing unattributed to mention.
+    auto const nobody = received.MachineBuckets("key-b", FleetRange::OneHour);
+    REQUIRE_FALSE(nobody.has_value());
+    CHECK(nobody.error().unattributed == 0);
 }
 
-TEST_CASE("A received history two keys delivered under is nobody's", "[distributed][fleethistory]")
+namespace
 {
-    // One endpoint, two proven keys: the entry mixes two machines, so it answers for neither -- the rule a machine
-    // row already follows when its registrations proved different keys.
-    PlacedWallClock clock;
+
+/// @param clock Where the readings are placed.
+/// @param minutes How many one-minute readings to take, each with the CPU at `100 * (minute + 1)`.
+/// @return The closed buckets a node would hand over, oldest first.
+[[nodiscard]] std::vector<FleetBucket> CpuMinutes(PlacedWallClock& clock, int minutes)
+{
     FleetHistory node { clock };
-    node.Record(CpuReading(100));
-    clock.Advance(std::chrono::minutes { 1 });
-    node.Record(CpuReading(200));
-    clock.Advance(std::chrono::minutes { 1 });
-    auto const batch = node.ClosedBucketsAfter(-1, 100);
-    REQUIRE(batch.size() == 2);
+    for (auto const minute: std::views::iota(0, minutes))
+    {
+        node.Record(CpuReading(static_cast<std::uint64_t>(minute + 1) * 100));
+        clock.Advance(std::chrono::minutes { 1 });
+    }
+    return node.ClosedBucketsAfter(-1, 100);
+}
+
+/// @param buckets A machine's view.
+/// @return Its CPU readings, oldest first, absent ones skipped.
+[[nodiscard]] std::vector<std::uint64_t> CpuReadings(std::vector<FleetBucket> const& buckets)
+{
+    auto out = std::vector<std::uint64_t> {};
+    for (auto const& bucket: buckets)
+        if (bucket.present && !IsAbsent(bucket, FleetMetric::CpuBusyPermille))
+            out.push_back(bucket.values[CpuSlot]);
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("A machine that moves endpoint keeps one series across both", "[distributed][fleethistory]")
+{
+    // Filed under the key it proved, so the minutes it reported from its old address and those from its new one are one
+    // machine's: none of them reads unsampled for having been handed over under the other label.
+    PlacedWallClock clock;
+    auto const batch = CpuMinutes(clock, 4);
+    REQUIRE(batch.size() == 4);
 
     FleetNodeHistories received { clock };
-    REQUIRE(received.AcceptHistory("a:1", "key-a", std::span { batch }.first(1)) == 1);
-    REQUIRE(received.MachineBuckets("key-a", FleetRange::OneHour).has_value());
-    REQUIRE(received.AcceptHistory("a:1", "key-b", std::span { batch }.subspan(1)) == 1);
-    CHECK_FALSE(received.MachineBuckets("key-a", FleetRange::OneHour).has_value());
-    CHECK_FALSE(received.MachineBuckets("key-b", FleetRange::OneHour).has_value());
-    // And an empty key is no key: never a match for a lookup.
+    REQUIRE(received.AcceptHistory("10.0.0.7:6674", "key-a", std::span { batch }.first(2)) == 2);
+    REQUIRE(received.AcceptHistory("192.168.1.7:6674", "key-a", std::span { batch }.subspan(2)) == 2);
+    CHECK(received.Count() == 1);
+    CHECK(received.HighWaterFor("192.168.1.7:6674") == batch.back().startMillis);
+    // The old label is no longer where it reports from.
+    CHECK(received.HighWaterFor("10.0.0.7:6674") == -1);
+
+    auto const machine = received.MachineBuckets("key-a", FleetRange::OneHour);
+    REQUIRE(machine.has_value());
+    CHECK(CpuReadings(Testing::Unwrap(machine)) == std::vector<std::uint64_t> { 100, 200, 300, 400 });
+}
+
+TEST_CASE("A second key at one endpoint is a second machine and takes nothing from the first", "[distributed][fleethistory]")
+{
+    // A wiped state directory mints a new key at the same host:port, and any member may NAME another's endpoint in its
+    // announcement. Either way the first machine's series stays its own and answers; the second has a series of its own.
+    PlacedWallClock clock;
+    auto const batch = CpuMinutes(clock, 4);
+    REQUIRE(batch.size() == 4);
+
+    FleetNodeHistories received { clock };
+    REQUIRE(received.AcceptHistory("10.0.0.7:6674", "key-a", std::span { batch }.first(2)) == 2);
+    REQUIRE(received.AcceptHistory("10.0.0.7:6674", "key-b", std::span { batch }.subspan(2)) == 2);
+    CHECK(received.Count() == 2);
+
+    auto const first = received.MachineBuckets("key-a", FleetRange::OneHour);
+    auto const second = received.MachineBuckets("key-b", FleetRange::OneHour);
+    REQUIRE(first.has_value());
+    REQUIRE(second.has_value());
+    CHECK(CpuReadings(Testing::Unwrap(first)) == std::vector<std::uint64_t> { 100, 200 });
+    CHECK(CpuReadings(Testing::Unwrap(second)) == std::vector<std::uint64_t> { 300, 400 });
+
+    // And the first keeps taking its own minutes afterwards: nothing it can be blocked by was recorded.
+    clock.Advance(std::chrono::minutes { 1 });
+    auto later = Testing::ClosedBucket(batch.back().startMillis + 60'000);
+    later.values[CpuSlot] = 900;
+    CHECK(received.AcceptHistory("10.0.0.7:6674", "key-a", std::span { &later, 1 }) == 1);
+    CHECK(CpuReadings(Testing::Unwrap(received.MachineBuckets("key-a", FleetRange::OneHour))).back() == 900);
+
+    // An empty key is no key: never a match for a lookup.
     CHECK_FALSE(received.MachineBuckets("", FleetRange::OneHour).has_value());
+}
+
+TEST_CASE("A series nobody proved is answered for no machine, and a lookup says how many there are",
+          "[distributed][fleethistory]")
+{
+    PlacedWallClock clock;
+    auto const batch = CpuMinutes(clock, 3);
+    REQUIRE(batch.size() == 3);
+
+    FleetNodeHistories received { clock };
+    REQUIRE(received.AcceptHistory("10.0.0.7:6674", std::span { batch }.first(2)) == 2);
+    auto const miss = received.MachineBuckets("key-a", FleetRange::OneHour);
+    REQUIRE_FALSE(miss.has_value());
+    CHECK(miss.error().unattributed == 1);
+
+    // A proven key that then reports from that endpoint is NOT given the unattributed minutes -- that would be a guess
+    // on the endpoint -- and its own series starts past them, so a replay of the ring is not filed twice.
+    REQUIRE(received.AcceptHistory("10.0.0.7:6674", "key-a", batch) == 1);
+    CHECK(received.Count() == 2);
+    CHECK(CpuReadings(Testing::Unwrap(received.MachineBuckets("key-a", FleetRange::OneHour)))
+          == std::vector<std::uint64_t> { 300 });
+
+    // A fleet window is filled once, from whichever series holds it.
+    FleetHistory leader { clock };
+    auto view = leader.Buckets(FleetRange::OneHour);
+    received.BackfillInto(view, FleetRange::OneHour);
+    CHECK(std::ranges::count_if(view, [](FleetBucket const& bucket) { return bucket.present; }) == 3);
+}
+
+TEST_CASE("A received-history store holds at most its ceiling, dropping the series heard from longest ago",
+          "[distributed][fleethistory]")
+{
+    PlacedWallClock clock;
+    FleetNodeHistories received { clock };
+    auto const base = Testing::MinuteBucketStart(clock.now()) - (static_cast<std::int64_t>(MaxReceivedHistories) * 60'000);
+    // One series per key, each reporting one minute later than the one before.
+    for (auto const index: std::views::iota(std::size_t { 0 }, MaxReceivedHistories))
+    {
+        auto bucket = Testing::ClosedBucket(base + (static_cast<std::int64_t>(index) * 60'000));
+        REQUIRE(received.AcceptHistory("e:1", std::format("key-{}", index), std::span { &bucket, 1 }) == 1);
+    }
+    CHECK(received.Count() == MaxReceivedHistories);
+
+    // One more key: the series whose newest reading is oldest -- key-0 -- goes, and nothing else does.
+    auto fresh = Testing::ClosedBucket(base + (static_cast<std::int64_t>(MaxReceivedHistories) * 60'000));
+    REQUIRE(received.AcceptHistory("e:1", "key-new", std::span { &fresh, 1 }) == 1);
+    CHECK(received.Count() == MaxReceivedHistories);
+    CHECK_FALSE(received.MachineBuckets("key-0", FleetRange::OneHour).has_value());
+    CHECK(received.MachineBuckets("key-1", FleetRange::OneHour).has_value());
+    CHECK(received.MachineBuckets("key-new", FleetRange::OneHour).has_value());
 }
 
 TEST_CASE("A fleet backfill never sums the CPU slot", "[distributed][fleethistory]")
