@@ -134,6 +134,64 @@ namespace
     /// Per version: its fingerprints, and the demand they carry together.
     using VersionDemand = std::map<std::vector<std::uint32_t>, std::pair<std::vector<std::string>, std::uint64_t>>;
 
+    /// What a family's basis is made of.
+    struct BasisFacts
+    {
+        std::uint64_t familyDemand {}; ///< Named compiles across the family's versions.
+        bool demandDecides {};         ///< Whether demand chose the target.
+        bool undecidedByFolded {};     ///< Whether unattributable compiles alone kept demand from deciding.
+        bool singleVersion {};         ///< Whether the family serves one version only.
+        bool targetFloor {};           ///< Whether the target's count is a lower bound.
+        std::uint64_t targetCount {};  ///< The target version's named compiles.
+        std::string targetText;        ///< The target version.
+        std::string compared;          ///< The versions compared, with their counts.
+    };
+
+    /// @param count A number of compiles.
+    /// @return "1 compile" or "N compiles".
+    [[nodiscard]] std::string CompilesWords(std::uint64_t count)
+    {
+        return std::format("{} compile{}", count, count == 1 ? "" : "s");
+    }
+
+    /// One family's basis. **Each case opens with its own words**, and none opens with "no demand data" once data was
+    /// read: not recorded, read but not weighed (with why), a covered window with no compiles for the family, demand
+    /// that decides, and demand that does not because unattributable compiles could change the order.
+    /// @param facts What the family's choice was made of.
+    /// @param context What is known about the demand.
+    /// @return The basis.
+    [[nodiscard]] std::string BasisOf(BasisFacts const& facts, DemandContext const& context)
+    {
+        auto const tail =
+            std::format("highest labelled version served: {}; versions compared: {}", facts.targetText, facts.compared);
+        if (!context.notWeighedBecause.empty())
+            return std::format("demand was read but does not decide ({}); {}", context.notWeighedBecause, tail);
+        if (facts.familyDemand == 0)
+            return context.weighed ? std::format("no compiles were recorded for this family in the window; {}", tail)
+                                   : std::format("no demand data; {}", tail);
+        if (facts.demandDecides)
+            return std::format("highest version the most demand uses: {} ({}{} of {} named); versions compared: {}{}",
+                               facts.targetText,
+                               facts.targetFloor ? "at least " : "",
+                               CompilesWords(facts.targetCount),
+                               CompilesWords(facts.familyDemand),
+                               facts.compared,
+                               context.unattributable > 0
+                                   ? std::format("; {} folded or unattributed (named for no toolchain) cannot "
+                                                 "reverse that lead",
+                                                 CompilesWords(context.unattributable))
+                                   : std::string {});
+        if (facts.undecidedByFolded)
+            return std::format("demand does not decide this family: unattributable demand (folded or unnamed) of {} "
+                               "could change the order; {}",
+                               CompilesWords(context.unattributable),
+                               tail);
+        return std::format("demand does not decide this family: {}; {}",
+                           facts.singleVersion ? "one version is served, so there is nothing to choose"
+                                               : "no version leads the others",
+                           tail);
+    }
+
     /// A count is exact only when nothing was folded away and none of its keys ever was; otherwise it is a floor.
     /// @param fingerprints A version's fingerprints.
     /// @param atLeastOf Fingerprints whose own count is a lower bound.
@@ -160,10 +218,10 @@ namespace
         auto compared = std::vector<std::string> {};
         for (auto const& [parts, row]: byVersion)
             compared.push_back(familyDemand == 0 ? VersionText(parts)
-                                                 : std::format("{} ({}{} compiles)",
+                                                 : std::format("{} ({}{})",
                                                                VersionText(parts),
                                                                inexact(row.first) ? "at least " : "",
-                                                               row.second));
+                                                               CompilesWords(row.second)));
         return compared;
     }
 
@@ -205,16 +263,15 @@ namespace
     /// @param members A family's fingerprints, every one parsed to a version of the same length.
     /// @param demandOf Compiles per fingerprint.
     /// @param atLeastOf Fingerprints whose count is a lower bound.
-    /// @param folded Compiles no fingerprint is named for; demand decides only by more than this.
-    /// @param anyDemandData Whether any demand was handed in at all, for any family.
+    /// @param context What else is known about the demand: its unattributable compiles and whether it was weighed.
     /// @return The advice for a family whose versions order.
     [[nodiscard]] UpgradeAdvice AdviseOrdered(std::string family,
                                               Family const& members,
                                               std::map<std::string, std::uint64_t> const& demandOf,
                                               std::set<std::string> const& atLeastOf,
-                                              std::uint64_t folded,
-                                              bool anyDemandData)
+                                              DemandContext const& context)
     {
+        auto const folded = context.unattributable;
         auto const demandFor = [&](std::string const& fingerprint) {
             auto const found = demandOf.find(fingerprint);
             return found != demandOf.end() ? found->second : std::uint64_t { 0 };
@@ -266,31 +323,15 @@ namespace
                                       .orderingUnknown = false };
         // "Labelled": a toolchain whose node stated no label has no version to compare and leaves the whole family
         // unordered before this point, so every version named here is one a label stated.
-        if (familyDemand == 0)
-            advice.basis = std::format("{}; highest labelled version served: {}; versions compared: {}",
-                                       anyDemandData ? "no demand data for this family" : "no demand data",
-                                       targetText,
-                                       Joined(compared));
-        else if (demandDecides)
-            advice.basis = std::format("highest version the most demand uses: {} ({}{} of {} compiles named); versions "
-                                       "compared: {}{}",
-                                       targetText,
-                                       inexact(target->second.first) ? "at least " : "",
-                                       target->second.second,
-                                       familyDemand,
-                                       Joined(compared),
-                                       folded > 0 ? std::format("; {} more compile(s) are folded into no named toolchain, "
-                                                                "and the lead exceeds them",
-                                                                folded)
-                                                  : std::string {});
-        else
-            advice.basis = std::format("demand does not decide this family{}; highest labelled version served: {}; "
-                                       "versions compared: {}",
-                                       undecidedBecauseFolded
-                                           ? std::format(": folded demand of {} compile(s) could change the order", folded)
-                                           : std::string { ": no version leads the others" },
-                                       targetText,
-                                       Joined(compared));
+        advice.basis = BasisOf(BasisFacts { .familyDemand = familyDemand,
+                                            .demandDecides = demandDecides,
+                                            .undecidedByFolded = undecidedBecauseFolded,
+                                            .singleVersion = byVersion.size() == 1,
+                                            .targetFloor = inexact(target->second.first),
+                                            .targetCount = target->second.second,
+                                            .targetText = targetText,
+                                            .compared = Joined(compared) },
+                               context);
 
         // The FINGERPRINT is chosen per DRIVER, never across two: `gcc` and `cc` at one version are one install under
         // two names, two fingerprints because each banner names its own driver, and neither is "the other build" of
@@ -315,10 +356,10 @@ namespace
             std::ranges::sort(ranked, std::ranges::greater {}, demandFor);
             auto shares = std::vector<std::string> {};
             for (auto const& fingerprint: underDriver)
-                shares.push_back(std::format("{} ({}{} compiles)",
+                shares.push_back(std::format("{} ({}{})",
                                              fingerprint,
                                              folded > 0 || atLeastOf.contains(fingerprint) ? "at least " : "",
-                                             demandFor(fingerprint)));
+                                             CompilesWords(demandFor(fingerprint))));
             if (demandFor(ranked[0]) > demandFor(ranked[1]) + folded)
             {
                 advice.recommendedFingerprints.emplace(driver, ranked[0]);
@@ -403,7 +444,7 @@ std::string VersionText(std::span<std::uint32_t const> parts)
 
 std::vector<UpgradeAdvice> AdviseUpgrades(std::span<WorkerReport const> workers,
                                           std::span<DemandRow const> demand,
-                                          std::uint64_t foldedCompiles)
+                                          DemandContext const& context)
 {
     auto families = std::map<std::string, Family> {};
     for (auto const& worker: workers)
@@ -435,7 +476,8 @@ std::vector<UpgradeAdvice> AdviseUpgrades(std::span<WorkerReport const> workers,
 
     auto demandOf = std::map<std::string, std::uint64_t> {};
     auto atLeastOf = std::set<std::string> {};
-    for (auto const& row: demand)
+    // Read but not weighed: the rows are ignored whoever handed them, so nothing can decide on them by accident.
+    for (auto const& row: context.notWeighedBecause.empty() ? demand : std::span<DemandRow const> {})
     {
         demandOf[row.fingerprint] += row.compiles;
         if (row.atLeast)
@@ -459,7 +501,7 @@ std::vector<UpgradeAdvice> AdviseUpgrades(std::span<WorkerReport const> workers,
                                              .orderingUnknown = true });
             continue;
         }
-        advice.push_back(AdviseOrdered(family, members, demandOf, atLeastOf, foldedCompiles, !demand.empty()));
+        advice.push_back(AdviseOrdered(family, members, demandOf, atLeastOf, context));
     }
     return advice;
 }

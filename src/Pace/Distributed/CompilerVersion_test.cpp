@@ -455,14 +455,80 @@ TEST_CASE("Demand decides only by more than the folded compiles, and counts are 
         DemandRow { .fingerprint = "fp-13", .compiles = 4 },
     };
     // A lead of 6: 5 folded compiles cannot reverse it, 6 can (a tie goes to nobody's lead).
-    auto const decided = FamilyOf(AdviseUpgrades(workers, demand, 5), "gcc");
+    auto const decided = FamilyOf(
+        AdviseUpgrades(workers, demand, DemandContext { .unattributable = 5, .weighed = true, .notWeighedBecause = {} }),
+        "gcc");
     CHECK(decided.recommendedVersion == std::optional<std::string> { "12.3.0" });
-    CHECK(decided.basis.contains("at least 10 of 14 compiles named"));
+    CHECK(decided.basis.contains("at least 10 compiles of 14 compiles named"));
     CHECK(decided.nodesLackingRecommended == Endpoints { "b:1" });
-    auto const undecided = FamilyOf(AdviseUpgrades(workers, demand, 6), "gcc");
+    auto const undecided = FamilyOf(
+        AdviseUpgrades(workers, demand, DemandContext { .unattributable = 6, .weighed = true, .notWeighedBecause = {} }),
+        "gcc");
     CHECK(undecided.recommendedVersion == std::optional<std::string> { "13.2.0" });
-    CHECK(undecided.basis.contains("folded demand of 6 compile(s) could change the order"));
+    CHECK(undecided.basis.contains("unattributable demand (folded or unnamed) of 6 compiles could change the order"));
     CHECK(undecided.nodesLackingRecommended == Endpoints { "a:1" });
     // Nothing folded: exact, and no floor wording.
-    CHECK_FALSE(FamilyOf(AdviseUpgrades(workers, demand, 0), "gcc").basis.contains("at least"));
+    CHECK_FALSE(
+        FamilyOf(
+            AdviseUpgrades(workers, demand, DemandContext { .unattributable = 0, .weighed = true, .notWeighedBecause = {} }),
+            "gcc")
+            .basis.contains("at least"));
+}
+
+TEST_CASE("Each basis opens with its own case, and none says no demand data once data was read", "[distributed][toolchains]")
+{
+    auto const workers = std::vector<WorkerReport> {
+        Entry("fp-12", "a:1", "gcc", "gcc 12.3.0"),
+        Entry("fp-13", "b:1", "gcc", "gcc 13.2.0"),
+    };
+    auto const demand = std::vector<DemandRow> { DemandRow { .fingerprint = "fp-12", .compiles = 9 },
+                                                 DemandRow { .fingerprint = "fp-13", .compiles = 1 } };
+    // Not recorded.
+    CHECK(FamilyOf(AdviseUpgrades(workers, {}), "gcc").basis.starts_with("no demand data;"));
+    // Read, covering the window, nothing for this family.
+    auto const zero = FamilyOf(
+        AdviseUpgrades(workers, {}, DemandContext { .unattributable = 0, .weighed = true, .notWeighedBecause = {} }), "gcc");
+    CHECK(zero.basis.starts_with("no compiles were recorded for this family in the window;"));
+    CHECK(zero.recommendedVersion == std::optional<std::string> { "13.2.0" });
+    // Read but not weighed: the reason leads, the rows are ignored.
+    auto const unweighed =
+        FamilyOf(AdviseUpgrades(workers,
+                                demand,
+                                DemandContext { .unattributable = 0,
+                                                .weighed = false,
+                                                .notWeighedBecause =
+                                                    "coverage is insufficient (3 minute(s) observed, 1440 required)" }),
+                 "gcc");
+    CHECK(unweighed.basis.starts_with("demand was read but does not decide (coverage is insufficient (3 minute(s)"));
+    CHECK(unweighed.recommendedVersion == std::optional<std::string> { "13.2.0" });
+    // Decides.
+    CHECK(FamilyOf(AdviseUpgrades(
+                       workers, demand, DemandContext { .unattributable = 0, .weighed = true, .notWeighedBecause = {} }),
+                   "gcc")
+              .basis.starts_with("highest version the most demand uses: 12.3.0 (9 compiles of 10 compiles named)"));
+    // Does not decide: nothing leads.
+    auto const tie = std::vector<DemandRow> { DemandRow { .fingerprint = "fp-12", .compiles = 5 },
+                                              DemandRow { .fingerprint = "fp-13", .compiles = 5 } };
+    CHECK(FamilyOf(
+              AdviseUpgrades(workers, tie, DemandContext { .unattributable = 0, .weighed = true, .notWeighedBecause = {} }),
+              "gcc")
+              .basis.starts_with("demand does not decide this family: no version leads the others;"));
+}
+
+TEST_CASE("lacks_recommended names a machine on another build of the recommended version", "[distributed][toolchains]")
+{
+    auto const workers = std::vector<WorkerReport> {
+        Entry("fp-13a", "a:1", "gcc", "gcc 13.2.0"),
+        Entry("fp-13b", "b:1", "gcc", "gcc 13.2.0"),
+    };
+    auto const demand = std::vector<DemandRow> { DemandRow { .fingerprint = "fp-13a", .compiles = 8 },
+                                                 DemandRow { .fingerprint = "fp-13b", .compiles = 2 } };
+    auto const gcc = FamilyOf(
+        AdviseUpgrades(workers, demand, DemandContext { .unattributable = 0, .weighed = true, .notWeighedBecause = {} }),
+        "gcc");
+    CHECK(gcc.recommendedFingerprints == Choices { { "gcc", "fp-13a" } });
+    CHECK(gcc.nodesBehind.empty());
+    CHECK(gcc.nodesAhead.empty());
+    CHECK(gcc.nodesSameVersionOtherFingerprint == Endpoints { "b:1" });
+    CHECK(gcc.nodesLackingRecommended == Endpoints { "b:1" });
 }

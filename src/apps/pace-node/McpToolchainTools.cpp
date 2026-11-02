@@ -244,12 +244,22 @@ namespace
     struct DemandReading
     {
         std::vector<Distributed::DemandRow> rows; ///< One per named fingerprint; empty unless `weighed`.
-        std::uint64_t foldedCompiles {};          ///< Compiles in `other`: attributed to no fingerprint.
+        std::uint64_t unattributable {};          ///< Compiles in `other` and `unattributed`: no fingerprint.
         bool weighed { false };                   ///< Whether `rows` may decide a recommendation.
+        std::string notWeighedBecause;            ///< Why demand was read but must not decide; empty when it may.
         bool available { false };                 ///< Whether there is a covered window to show.
         std::string basis;                        ///< Words appended to every ordered family's basis: what was used.
         Json::Value json;                         ///< The `demand` member: the figures used, or `null`.
     };
+
+    /// @param demand What was read.
+    /// @return The reading in one sentence, with the reason it does not decide when it does not.
+    [[nodiscard]] std::string Summary(DemandReading const& demand)
+    {
+        return demand.notWeighedBecause.empty()
+                   ? demand.basis
+                   : std::format("{}; demand was read but does not decide ({})", demand.basis, demand.notWeighedBecause);
+    }
 
     /// @param section A `toolchain_demand` section.
     /// @param key A member.
@@ -272,6 +282,9 @@ namespace
     {
         auto const unavailable = [&](std::string_view why) {
             return DemandReading { .rows = {},
+                                   .unattributable = 0,
+                                   .weighed = false,
+                                   .notWeighedBecause = {},
                                    .available = false,
                                    .basis = std::format("demand over {} was unavailable ({}), so this recommendation is "
                                                         "made on versions alone -- absence of demand data is not "
@@ -293,6 +306,15 @@ namespace
         if (*observed == 0)
             return unavailable("the leader counted for none of the window's minutes");
         auto const sufficient = *observed >= MinDemandCoverageMinutes;
+        // What no row names. A member that is absent or malformed makes its figure UNKNOWN, never zero: demand then
+        // does not decide, rather than deciding as if nothing were folded.
+        auto const* const other = section->Find("other");
+        auto const* const unattributed = section->Find("unattributed");
+        auto const otherOk =
+            other != nullptr
+            && (other->IsNull() || (UintAt(*other, "keys_folded").has_value() && UintAt(*other, "total").has_value()));
+        auto const unattributedOk =
+            unattributed != nullptr && (unattributed->IsNull() || UintAt(*unattributed, "total").has_value());
 
         auto reading = DemandReading {};
         auto named = std::uint64_t { 0 };
@@ -307,7 +329,7 @@ namespace
             // A key that was folded away and came back shows only what it did since: its count is a floor.
             auto const earlier = StringAt(row, "earlier_counts");
             auto const atLeast = earlier.value_or("unknown") != "none";
-            if (sufficient)
+            if (sufficient && otherOk && unattributedOk)
                 reading.rows.push_back(
                     Distributed::DemandRow { .fingerprint = *fingerprint, .compiles = *compiles, .atLeast = atLeast });
             rows.push_back(Obj(Json::Object { { "fingerprint", Str(*fingerprint) },
@@ -316,13 +338,22 @@ namespace
         }
         auto const* const sinceMember = section->Find("coverage_since_ms");
         auto const since = sinceMember != nullptr ? sinceMember->AsInt() : std::nullopt;
-        auto const* const other = section->Find("other");
-        auto const foldedKeys = other != nullptr && !other->IsNull() ? UintAt(*other, "keys_folded") : std::nullopt;
-        auto const folded = other != nullptr && !other->IsNull() ? UintAt(*other, "total") : std::nullopt;
+        auto const foldedKeys = otherOk && !other->IsNull() ? UintAt(*other, "keys_folded") : std::nullopt;
+        auto const folded = otherOk && !other->IsNull() ? UintAt(*other, "total") : std::nullopt;
+        auto const unnamed = unattributedOk && !unattributed->IsNull() ? UintAt(*unattributed, "total") : std::nullopt;
 
         reading.available = true;
-        reading.weighed = sufficient;
-        reading.foldedCompiles = sufficient ? folded.value_or(0) : 0;
+        reading.weighed = sufficient && otherOk && unattributedOk;
+        reading.unattributable = folded.value_or(0) + unnamed.value_or(0);
+        if (!sufficient)
+            reading.notWeighedBecause = std::format("coverage is insufficient ({} minute(s) observed, {} required); the "
+                                                    "figures are shown but do not decide",
+                                                    *observed,
+                                                    MinDemandCoverageMinutes);
+        else if (!otherOk || !unattributedOk)
+            reading.notWeighedBecause = std::format("the section's `{}` member is missing or malformed, so the compiles it "
+                                                    "holds are unknown, not zero",
+                                                    !otherOk ? "other" : "unattributed");
         reading.basis =
             std::format("demand over {}: counted for {} of the window's {} minute(s), since {}{}; {} compile(s) "
                         "named a toolchain of {} counted{}",
@@ -334,17 +365,15 @@ namespace
                         named,
                         *total,
                         folded.has_value() && foldedKeys.has_value()
-                            ? std::format("; {} more are in `other ({} toolchains)` and are attributed to no "
+                            ? std::format("; {} more are in `other ({} toolchain{})` and are attributed to no "
                                           "toolchain, so named counts are \"at least\" figures and demand decides a "
                                           "family only where its lead exceeds them",
                                           *folded,
-                                          *foldedKeys)
+                                          *foldedKeys,
+                                          *foldedKeys == 1 ? "" : "s")
                             : std::string {});
-        if (!sufficient)
-            reading.basis += std::format("; demand does NOT decide: coverage is insufficient ({} minute(s) observed, {} "
-                                         "required), so this recommendation is made on versions alone",
-                                         *observed,
-                                         MinDemandCoverageMinutes);
+        if (auto const carryNone = unnamed.value_or(0); carryNone > 0)
+            reading.basis += std::format("; {} more carry no fingerprint (`unattributed`)", carryNone);
         auto figures =
             Json::Object { { "range", Str(std::string { range }) },
                            { "observed_minutes", Int(static_cast<std::int64_t>(*observed)) },
@@ -422,7 +451,12 @@ namespace
         // Demand is the leader's own record over the window; where it is unavailable the report recommends on versions
         // alone, and says so in every basis it writes.
         auto const demand = ReadDemand(document->root, demandRange);
-        auto advice = Distributed::AdviseUpgrades(*workers, demand.rows, demand.foldedCompiles);
+        auto advice =
+            Distributed::AdviseUpgrades(*workers,
+                                        demand.rows,
+                                        Distributed::DemandContext { .unattributable = demand.unattributable,
+                                                                     .weighed = demand.weighed,
+                                                                     .notWeighedBecause = demand.notWeighedBecause });
         for (auto& family: advice)
             if (!family.orderingUnknown)
                 family.basis += std::format("; {}", demand.basis);
@@ -467,7 +501,7 @@ namespace
             familyless.empty() ? std::string {}
                                : std::format("; {} registered no family and join none", Joined(familyless, ", ")),
             unservedWords.empty() ? std::string { "none" } : Joined(unservedWords, "; "),
-            demand.basis,
+            Summary(demand),
             UnplacedNote(unplaced),
             Provenance(document->reply));
 
@@ -478,7 +512,7 @@ namespace
         result.emplace_back("nodes", Arr(std::move(machineRows)));
         result.emplace_back("unserved_note", Str(std::string { UnservedNote }));
         result.emplace_back("demand", demand.available ? demand.json : Null());
-        result.emplace_back("demand_note", Str(demand.weighed ? std::string { DemandNoteRead } : demand.basis));
+        result.emplace_back("demand_note", Str(demand.weighed ? std::string { DemandNoteRead } : Summary(demand)));
         result.emplace_back("upgrade_report", Arr(std::move(adviceRows)));
         return Answer(std::move(result), std::move(text));
     }

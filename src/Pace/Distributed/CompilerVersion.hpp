@@ -46,6 +46,21 @@ struct DemandRow
     bool atLeast {};
 };
 
+/// What the caller knows about the demand it hands to `AdviseUpgrades`, beyond the rows themselves.
+struct DemandContext
+{
+    /// Compiles in the demand window that no row names: the producer's folded `other` plus its `unattributed`
+    /// (no fingerprint). They could belong to any fingerprint, so **demand decides a choice only when its leader
+    /// exceeds the runner-up by MORE than this**, and every count is then printed as "at least".
+    std::uint64_t unattributable {};
+    /// True when demand was read and covers the window, even if no row carries a compile for any family: the
+    /// basis then says "no compiles recorded", never "no demand data".
+    bool weighed {};
+    /// When not empty, demand WAS read but must not decide (coverage below the floor, or a member whose figure is
+    /// unknown): the rows are ignored and every ordered basis opens with this reason.
+    std::string notWeighedBecause;
+};
+
 /// What the upgrade report says about one compiler family.
 ///
 /// Every machine list is of worker endpoints, sorted, and relative to `recommendedVersion`: a machine is placed by
@@ -106,13 +121,11 @@ struct UpgradeAdvice
 /// belongs to none.
 /// @param workers Every live registry entry.
 /// @param demand Compiles per fingerprint; empty when no demand is recorded.
-/// @param foldedCompiles Compiles in the demand window that no row names (the producer's folded `other`): they could
-///        belong to any fingerprint. **Demand decides a choice only when the leader exceeds the runner-up by MORE than
-///        this**; otherwise the choice falls back to the versions-alone rule and the basis says why, and with any
-///        folded compiles every count is printed as "at least".
+/// @param context What else is known about the demand (`DemandContext`): the compiles no row names, whether it was
+///        weighed at all, and why not. The default is "no demand was recorded".
 /// @return The advice per family.
 [[nodiscard]] std::vector<UpgradeAdvice> AdviseUpgrades(std::span<WorkerReport const> workers,
                                                         std::span<DemandRow const> demand,
-                                                        std::uint64_t foldedCompiles = 0);
+                                                        DemandContext const& context = {});
 
 } // namespace Pace::Distributed

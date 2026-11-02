@@ -409,7 +409,8 @@ TEST_CASE("toolchains recommends on versions alone when too few minutes were obs
     auto const gcc = GccAdvice(result.structured);
     CHECK(TextAt(gcc, "recommended_version") == std::optional<std::string> { "13.2.0" });
     auto const basis = TextAt(gcc, "basis").value_or(std::string {});
-    CHECK(basis.contains("coverage is insufficient (1 minute(s) observed, 1440 required)"));
+    CHECK(basis.starts_with("demand was read but does not decide (coverage is insufficient (1 minute(s) observed, 1440 "
+                            "required); the figures are shown but do not decide)"));
     CHECK_FALSE(basis.contains("highest version the most demand uses"));
     CHECK(TextAt(result.structured, "demand_note").value_or(std::string {}).contains("insufficient"));
 }
@@ -435,11 +436,12 @@ TEST_CASE("toolchains does not let demand decide where folded compiles could cha
     auto const basis = TextAt(gcc, "basis").value_or(std::string {});
     // fp-12 may well be the most used: the named 1 compile of fp-13 does not outweigh 10 nobody can attribute. The
     // recommendation is the versions rule's, and never claims demand chose it.
-    CHECK(basis.contains("demand does not decide this family: folded demand of 10 compile(s) could change the order"));
+    CHECK(basis.contains("demand does not decide this family: unattributable demand (folded or unnamed) of 10 compiles "
+                         "could change the order"));
     CHECK_FALSE(basis.contains("highest version the most demand uses"));
-    CHECK(basis.contains("13.2.0 (at least 1 compiles)"));
+    CHECK(basis.contains("13.2.0 (at least 1 compile)"));
     CHECK(basis.contains("12.3.0 (at least 0 compiles)"));
-    CHECK(basis.contains("10 more are in `other (1 toolchains)`"));
+    CHECK(basis.contains("10 more are in `other (1 toolchain)`"));
     auto const& other = At(At(result.structured, "demand"), "other");
     CHECK(At(other, "compiles").AsInt() == std::optional<std::int64_t> { 10 });
     CHECK(At(other, "toolchains_folded").AsInt() == std::optional<std::int64_t> { 1 });
@@ -469,11 +471,155 @@ TEST_CASE("toolchains lets demand decide when its lead exceeds the folded compil
     // 9 against 2 leads by 7, more than the 1 folded compile: demand decides, and the lower version is the answer.
     CHECK(TextAt(gcc, "recommended_version") == std::optional<std::string> { "12.3.0" });
     auto const basis = TextAt(gcc, "basis").value_or(std::string {});
-    CHECK(basis.contains("highest version the most demand uses: 12.3.0 (at least 9 of 11 compiles named)"));
-    CHECK(basis.contains("1 more compile(s) are folded into no named toolchain, and the lead exceeds them"));
+    CHECK(basis.contains("highest version the most demand uses: 12.3.0 (at least 9 compiles of 11 compiles named)"));
+    CHECK(basis.contains("1 compile folded or unattributed (named for no toolchain) cannot reverse that lead"));
     // The machine on 13.2.0 is ahead of the recommendation and still has to change to it.
     CHECK(StringsOf(At(gcc, "ahead")) == std::vector<std::string> { "b:1" });
     CHECK(StringsOf(At(gcc, "lacks_recommended")) == std::vector<std::string> { "b:1" });
+}
+
+/// @param document A fleet document.
+/// @param member A member of its `toolchain_demand` section.
+/// @param value What to put there; nothing removes the member.
+/// @return The document with that member replaced.
+[[nodiscard]] std::string WithDemandMember(std::string const& document,
+                                           std::string_view member,
+                                           std::optional<Json::Value> const& value)
+{
+    auto parsed = Json::Parse(document);
+    REQUIRE(parsed.has_value());
+    auto root = Unwrap(parsed);
+    auto* const members = std::get_if<Json::Object>(&root.v);
+    REQUIRE(members != nullptr);
+    for (auto& [name, section]: *members)
+        if (name == "toolchain_demand")
+        {
+            auto* const inner = std::get_if<Json::Object>(&section.v);
+            REQUIRE(inner != nullptr);
+            std::erase_if(*inner, [&](auto const& entry) { return entry.first == member; });
+            if (value.has_value())
+                inner->emplace_back(std::string { member }, *value);
+        }
+    return Json::Serialize(root);
+}
+
+/// The counts a decided-and-undecided pair of cases share: fp-12 nine compiles, fp-13 two.
+void CountNineAndTwo(Dist::CompileDemandHistory& demand)
+{
+    for ([[maybe_unused]] auto const index: std::views::iota(0, 9))
+        demand.CompileGranted("", "fp-12");
+    for ([[maybe_unused]] auto const index: std::views::iota(0, 2))
+        demand.CompileGranted("", "fp-13");
+}
+
+TEST_CASE("toolchains opens a covered window with no compiles for the family by saying so",
+          "[pace-node][mcp][toolchains][toolchain-demand]")
+{
+    Testing::PlacedWallClock wall;
+    Dist::CompileDemandHistory demand { 8, wall };
+    CountFor(wall, demand, 1500);
+    demand.CompileGranted("", "fp-other-family");
+    auto upstream = LeaderUpstream();
+    upstream.AnswerOk(DocumentWithDemand(TwoGccs(), demand));
+    auto const result = CallToolchains(upstream);
+    REQUIRE_FALSE(result.isError);
+    auto const basis = TextAt(GccAdvice(result.structured), "basis").value_or(std::string {});
+    CHECK(basis.starts_with("no compiles were recorded for this family in the window;"));
+    CHECK_FALSE(basis.contains("no demand data"));
+    CHECK(TextAt(GccAdvice(result.structured), "recommended_version") == std::optional<std::string> { "13.2.0" });
+}
+
+TEST_CASE("toolchains lets demand decide from exactly 1440 observed minutes and not from 1439",
+          "[pace-node][mcp][toolchains][toolchain-demand]")
+{
+    for (auto const [minutes, decides]: { std::pair { 1439, false }, std::pair { 1440, true } })
+    {
+        INFO("minutes " << minutes);
+        Testing::PlacedWallClock wall;
+        Dist::CompileDemandHistory demand { 8, wall };
+        CountFor(wall, demand, minutes);
+        CountNineAndTwo(demand);
+        auto upstream = LeaderUpstream();
+        upstream.AnswerOk(DocumentWithDemand(TwoGccs(), demand));
+        auto const result = CallToolchains(upstream);
+        REQUIRE_FALSE(result.isError);
+        CHECK(At(At(result.structured, "demand"), "observed_minutes").AsInt() == std::optional<std::int64_t> { minutes });
+        CHECK(TextAt(GccAdvice(result.structured), "recommended_version")
+              == std::optional<std::string> { decides ? "12.3.0" : "13.2.0" });
+    }
+}
+
+TEST_CASE("toolchains counts unattributed compiles against a demand lead, like folded ones",
+          "[pace-node][mcp][toolchains][toolchain-demand]")
+{
+    for (auto const [unnamed, decides]: { std::pair { 6, true }, std::pair { 7, false } })
+    {
+        INFO("unattributed " << unnamed);
+        Testing::PlacedWallClock wall;
+        Dist::CompileDemandHistory demand { 8, wall };
+        CountFor(wall, demand, 1500);
+        CountNineAndTwo(demand);
+        for ([[maybe_unused]] auto const index: std::views::iota(0, unnamed))
+            demand.CompileGranted("", "");
+        auto upstream = LeaderUpstream();
+        upstream.AnswerOk(DocumentWithDemand(TwoGccs(), demand));
+        auto const result = CallToolchains(upstream);
+        REQUIRE_FALSE(result.isError);
+        auto const gcc = GccAdvice(result.structured);
+        INFO(TextAt(gcc, "basis").value_or(std::string {}));
+        CHECK(TextAt(gcc, "recommended_version") == std::optional<std::string> { decides ? "12.3.0" : "13.2.0" });
+        if (!decides)
+            CHECK(TextAt(gcc, "basis")
+                      .value_or(std::string {})
+                      .contains("unattributable demand (folded or unnamed) of 7 compiles"));
+    }
+}
+
+TEST_CASE("toolchains lets no demand decide when the other or unattributed member is missing or malformed",
+          "[pace-node][mcp][toolchains][toolchain-demand]")
+{
+    Testing::PlacedWallClock wall;
+    Dist::CompileDemandHistory demand { 8, wall };
+    CountFor(wall, demand, 1500);
+    CountNineAndTwo(demand);
+    auto const body = DocumentWithDemand(TwoGccs(), demand);
+
+    // Control: the same document, intact, lets demand decide.
+    {
+        auto upstream = LeaderUpstream();
+        upstream.AnswerOk(body);
+        CHECK(TextAt(GccAdvice(CallToolchains(upstream).structured), "recommended_version")
+              == std::optional<std::string> { "12.3.0" });
+    }
+    struct Damage
+    {
+        std::string_view member;
+        std::optional<Json::Value> value;
+    };
+    auto const damages = std::vector<Damage> {
+        { .member = "other", .value = Json::Value { .v = std::string { "garbage" } } },
+        { .member = "other",
+          .value = Json::Value { .v = Json::Object { { "keys_folded", Json::Value { .v = std::string { "x" } } } } } },
+        { .member = "unattributed", .value = Json::Value { .v = std::string { "garbage" } } },
+        { .member = "unattributed", .value = Json::Value { .v = Json::Object {} } },
+        // Absent altogether: unknown too, never zero.
+        { .member = "other", .value = std::nullopt },
+        { .member = "unattributed", .value = std::nullopt },
+    };
+    for (auto const& damage: damages)
+    {
+        INFO("damaged " << damage.member);
+        auto upstream = LeaderUpstream();
+        upstream.AnswerOk(WithDemandMember(body, damage.member, damage.value));
+        auto const result = CallToolchains(upstream);
+        REQUIRE_FALSE(result.isError);
+        auto const gcc = GccAdvice(result.structured);
+        CHECK(TextAt(gcc, "recommended_version") == std::optional<std::string> { "13.2.0" });
+        CHECK(TextAt(gcc, "basis")
+                  .value_or(std::string {})
+                  .starts_with("demand was read but does not decide (the section's `"));
+        CHECK(TextAt(gcc, "basis").value_or(std::string {}).contains("missing or malformed"));
+    }
 }
 
 TEST_CASE("toolchains reports an unparseable family as ordering unknown, recommending nothing",
