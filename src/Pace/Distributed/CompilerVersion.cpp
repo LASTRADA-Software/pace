@@ -114,14 +114,105 @@ namespace
         return std::nullopt;
     }
 
+    /// Who lacks what is recommended, whichever way their version lies: a machine that does not serve the recommended
+    /// fingerprint of some driver that has one. The three placement lists describe; this one instructs.
+    /// @param servedBy Each machine's fingerprints.
+    /// @param recommended The fingerprint recommended per driver.
+    /// @return The machines, sorted.
+    [[nodiscard]] std::vector<std::string> LackingRecommended(
+        std::map<std::string, std::vector<std::string>> const& servedBy,
+        std::map<std::string, std::string> const& recommended)
+    {
+        auto lacking = std::vector<std::string> {};
+        for (auto const& [endpoint, fingerprints]: servedBy)
+            if (std::ranges::any_of(recommended,
+                                    [&](auto const& choice) { return !std::ranges::contains(fingerprints, choice.second); }))
+                lacking.push_back(endpoint);
+        return lacking;
+    }
+
+    /// Per version: its fingerprints, and the demand they carry together.
+    using VersionDemand = std::map<std::vector<std::uint32_t>, std::pair<std::vector<std::string>, std::uint64_t>>;
+
+    /// A count is exact only when nothing was folded away and none of its keys ever was; otherwise it is a floor.
+    /// @param fingerprints A version's fingerprints.
+    /// @param atLeastOf Fingerprints whose own count is a lower bound.
+    /// @param folded Compiles no fingerprint is named for.
+    /// @return Whether the version's count must be read as "at least".
+    [[nodiscard]] bool IsFloor(std::vector<std::string> const& fingerprints,
+                               std::set<std::string> const& atLeastOf,
+                               std::uint64_t folded)
+    {
+        return folded > 0 || std::ranges::any_of(fingerprints, [&](std::string const& fingerprint) {
+                   return atLeastOf.contains(fingerprint);
+               });
+    }
+
+    /// @param byVersion A family's versions with their demand.
+    /// @param familyDemand The family's named demand.
+    /// @param inexact Whether a version's count is a floor.
+    /// @return One entry per version: its text, with its count when the family has any demand.
+    template <typename Floor>
+    [[nodiscard]] std::vector<std::string> ComparedWords(VersionDemand const& byVersion,
+                                                         std::uint64_t familyDemand,
+                                                         Floor const& inexact)
+    {
+        auto compared = std::vector<std::string> {};
+        for (auto const& [parts, row]: byVersion)
+            compared.push_back(familyDemand == 0 ? VersionText(parts)
+                                                 : std::format("{} ({}{} compiles)",
+                                                               VersionText(parts),
+                                                               inexact(row.first) ? "at least " : "",
+                                                               row.second));
+        return compared;
+    }
+
+    /// Which version a family converges on, and whether demand is what chose it.
+    struct TargetChoice
+    {
+        VersionDemand::value_type const* target {}; ///< The version chosen.
+        bool demandDecides {};                      ///< Whether demand, rather than the versions rule, chose it.
+        bool undecidedByFolded {};                  ///< Whether folded compiles alone kept demand from deciding.
+    };
+
+    /// Choose the target: the highest version the most demand uses -- but only where that demand LEADS by more than the
+    /// compiles no row can attribute, since those could belong to any runner-up. Otherwise the highest served version.
+    /// @param byVersion The family's versions, ascending, with their demand.
+    /// @param folded Compiles attributed to no fingerprint.
+    /// @return The choice.
+    [[nodiscard]] TargetChoice ChooseTarget(VersionDemand const& byVersion, std::uint64_t folded)
+    {
+        // The highest version among those carrying the most demand: `byVersion` is ascending, so the last maximum
+        // found walking it is the highest. With no demand every version ties at zero, which is the highest served.
+        auto const* demandTarget = &*byVersion.begin();
+        for (auto const& entry: byVersion)
+            if (entry.second.second >= demandTarget->second.second)
+                demandTarget = &entry;
+        if (byVersion.size() == 1)
+            return TargetChoice { .target = demandTarget, .demandDecides = false, .undecidedByFolded = false };
+        auto runnerUp = std::uint64_t { 0 };
+        for (auto const& entry: byVersion)
+            if (&entry != demandTarget)
+                runnerUp = std::max(runnerUp, entry.second.second);
+        auto const leads = demandTarget->second.second > runnerUp;
+        auto const decides = leads && demandTarget->second.second > runnerUp + folded;
+        return TargetChoice { .target = decides ? demandTarget : &*byVersion.rbegin(),
+                              .demandDecides = decides,
+                              .undecidedByFolded = leads && !decides && folded > 0 };
+    }
+
     /// @param family The family's name.
     /// @param members A family's fingerprints, every one parsed to a version of the same length.
     /// @param demandOf Compiles per fingerprint.
+    /// @param atLeastOf Fingerprints whose count is a lower bound.
+    /// @param folded Compiles no fingerprint is named for; demand decides only by more than this.
     /// @param anyDemandData Whether any demand was handed in at all, for any family.
     /// @return The advice for a family whose versions order.
     [[nodiscard]] UpgradeAdvice AdviseOrdered(std::string family,
                                               Family const& members,
                                               std::map<std::string, std::uint64_t> const& demandOf,
+                                              std::set<std::string> const& atLeastOf,
+                                              std::uint64_t folded,
                                               bool anyDemandData)
     {
         auto const demandFor = [&](std::string const& fingerprint) {
@@ -129,8 +220,7 @@ namespace
             return found != demandOf.end() ? found->second : std::uint64_t { 0 };
         };
 
-        // Per version: its fingerprints, and the demand they carry together.
-        auto byVersion = std::map<std::vector<std::uint32_t>, std::pair<std::vector<std::string>, std::uint64_t>> {};
+        auto byVersion = VersionDemand {};
         for (auto const& [fingerprint, member]: members)
         {
             if (!member.parsed.has_value())
@@ -147,23 +237,22 @@ namespace
                                    .nodesBehind = {},
                                    .nodesAhead = {},
                                    .nodesSameVersionOtherFingerprint = {},
+                                   .nodesLackingRecommended = {},
                                    .orderingUnknown = true };
 
         auto familyDemand = std::uint64_t { 0 };
         for (auto const& row: byVersion | std::views::values)
             familyDemand += row.second;
 
-        auto compared = std::vector<std::string> {};
-        for (auto const& [parts, row]: byVersion)
-            compared.push_back(familyDemand == 0 ? VersionText(parts)
-                                                 : std::format("{} ({} compiles)", VersionText(parts), row.second));
+        auto const inexact = [&](std::vector<std::string> const& fingerprints) {
+            return IsFloor(fingerprints, atLeastOf, folded);
+        };
+        auto const compared = ComparedWords(byVersion, familyDemand, inexact);
 
-        // The highest version among those carrying the most demand: `byVersion` is ascending, so the last maximum
-        // found walking it is the highest. With no demand every version ties at zero, which is the highest served.
-        auto const* target = &*byVersion.begin();
-        for (auto const& entry: byVersion)
-            if (entry.second.second >= target->second.second)
-                target = &entry;
+        auto const choice = ChooseTarget(byVersion, folded);
+        auto const* const target = choice.target;
+        auto const demandDecides = choice.demandDecides && familyDemand > 0;
+        auto const undecidedBecauseFolded = choice.undecidedByFolded && familyDemand > 0;
         auto const targetText = VersionText(target->first);
 
         auto advice = UpgradeAdvice { .family = std::move(family),
@@ -173,6 +262,7 @@ namespace
                                       .nodesBehind = {},
                                       .nodesAhead = {},
                                       .nodesSameVersionOtherFingerprint = {},
+                                      .nodesLackingRecommended = {},
                                       .orderingUnknown = false };
         // "Labelled": a toolchain whose node stated no label has no version to compare and leaves the whole family
         // unordered before this point, so every version named here is one a label stated.
@@ -181,12 +271,25 @@ namespace
                                        anyDemandData ? "no demand data for this family" : "no demand data",
                                        targetText,
                                        Joined(compared));
-        else
-            advice.basis = std::format("highest version the most demand uses: {} ({} of {} compiles); versions "
-                                       "compared: {}",
+        else if (demandDecides)
+            advice.basis = std::format("highest version the most demand uses: {} ({}{} of {} compiles named); versions "
+                                       "compared: {}{}",
                                        targetText,
+                                       inexact(target->second.first) ? "at least " : "",
                                        target->second.second,
                                        familyDemand,
+                                       Joined(compared),
+                                       folded > 0 ? std::format("; {} more compile(s) are folded into no named toolchain, "
+                                                                "and the lead exceeds them",
+                                                                folded)
+                                                  : std::string {});
+        else
+            advice.basis = std::format("demand does not decide this family{}; highest labelled version served: {}; "
+                                       "versions compared: {}",
+                                       undecidedBecauseFolded
+                                           ? std::format(": folded demand of {} compile(s) could change the order", folded)
+                                           : std::string { ": no version leads the others" },
+                                       targetText,
                                        Joined(compared));
 
         // The FINGERPRINT is chosen per DRIVER, never across two: `gcc` and `cc` at one version are one install under
@@ -212,8 +315,11 @@ namespace
             std::ranges::sort(ranked, std::ranges::greater {}, demandFor);
             auto shares = std::vector<std::string> {};
             for (auto const& fingerprint: underDriver)
-                shares.push_back(std::format("{} ({} compiles)", fingerprint, demandFor(fingerprint)));
-            if (demandFor(ranked[0]) > demandFor(ranked[1]))
+                shares.push_back(std::format("{} ({}{} compiles)",
+                                             fingerprint,
+                                             folded > 0 || atLeastOf.contains(fingerprint) ? "at least " : "",
+                                             demandFor(fingerprint)));
+            if (demandFor(ranked[0]) > demandFor(ranked[1]) + folded)
             {
                 advice.recommendedFingerprints.emplace(driver, ranked[0]);
                 advice.basis += std::format("; {} under `{}` is served by {} fingerprints and demand favours {}: {}",
@@ -270,6 +376,8 @@ namespace
             if (otherBuild)
                 advice.nodesSameVersionOtherFingerprint.push_back(endpoint);
         }
+
+        advice.nodesLackingRecommended = LackingRecommended(servedBy, advice.recommendedFingerprints);
         return advice;
     }
 } // namespace
@@ -293,7 +401,9 @@ std::string VersionText(std::span<std::uint32_t const> parts)
     return text;
 }
 
-std::vector<UpgradeAdvice> AdviseUpgrades(std::span<WorkerReport const> workers, std::span<DemandRow const> demand)
+std::vector<UpgradeAdvice> AdviseUpgrades(std::span<WorkerReport const> workers,
+                                          std::span<DemandRow const> demand,
+                                          std::uint64_t foldedCompiles)
 {
     auto families = std::map<std::string, Family> {};
     for (auto const& worker: workers)
@@ -324,8 +434,13 @@ std::vector<UpgradeAdvice> AdviseUpgrades(std::span<WorkerReport const> workers,
     }
 
     auto demandOf = std::map<std::string, std::uint64_t> {};
+    auto atLeastOf = std::set<std::string> {};
     for (auto const& row: demand)
+    {
         demandOf[row.fingerprint] += row.compiles;
+        if (row.atLeast)
+            atLeastOf.insert(row.fingerprint);
+    }
 
     auto advice = std::vector<UpgradeAdvice> {};
     advice.reserve(families.size());
@@ -340,10 +455,11 @@ std::vector<UpgradeAdvice> AdviseUpgrades(std::span<WorkerReport const> workers,
                                              .nodesBehind = {},
                                              .nodesAhead = {},
                                              .nodesSameVersionOtherFingerprint = {},
+                                             .nodesLackingRecommended = {},
                                              .orderingUnknown = true });
             continue;
         }
-        advice.push_back(AdviseOrdered(family, members, demandOf, !demand.empty()));
+        advice.push_back(AdviseOrdered(family, members, demandOf, atLeastOf, foldedCompiles, !demand.empty()));
     }
     return advice;
 }

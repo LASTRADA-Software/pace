@@ -442,3 +442,27 @@ TEST_CASE("No workers give no advice", "[distributed][toolchains]")
 {
     CHECK(AdviseUpgrades(std::span<WorkerReport const> {}, {}).empty());
 }
+
+TEST_CASE("Demand decides only by more than the folded compiles, and counts are then printed as floors",
+          "[distributed][toolchains]")
+{
+    auto const workers = std::vector<WorkerReport> {
+        Entry("fp-12", "a:1", "gcc", "gcc 12.3.0"),
+        Entry("fp-13", "b:1", "gcc", "gcc 13.2.0"),
+    };
+    auto const demand = std::vector<DemandRow> {
+        DemandRow { .fingerprint = "fp-12", .compiles = 10 },
+        DemandRow { .fingerprint = "fp-13", .compiles = 4 },
+    };
+    // A lead of 6: 5 folded compiles cannot reverse it, 6 can (a tie goes to nobody's lead).
+    auto const decided = FamilyOf(AdviseUpgrades(workers, demand, 5), "gcc");
+    CHECK(decided.recommendedVersion == std::optional<std::string> { "12.3.0" });
+    CHECK(decided.basis.contains("at least 10 of 14 compiles named"));
+    CHECK(decided.nodesLackingRecommended == Endpoints { "b:1" });
+    auto const undecided = FamilyOf(AdviseUpgrades(workers, demand, 6), "gcc");
+    CHECK(undecided.recommendedVersion == std::optional<std::string> { "13.2.0" });
+    CHECK(undecided.basis.contains("folded demand of 6 compile(s) could change the order"));
+    CHECK(undecided.nodesLackingRecommended == Endpoints { "a:1" });
+    // Nothing folded: exact, and no floor wording.
+    CHECK_FALSE(FamilyOf(AdviseUpgrades(workers, demand, 0), "gcc").basis.contains("at least"));
+}

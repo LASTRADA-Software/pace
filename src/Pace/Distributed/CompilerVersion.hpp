@@ -41,6 +41,9 @@ struct DemandRow
 {
     std::string fingerprint;   ///< The toolchain, as a registry entry names it.
     std::uint64_t compiles {}; ///< Compiles asked for it over the window the producer states.
+    /// True when the producer knows `compiles` is only a LOWER bound: the key had counts that were folded away and
+    /// came back, so what it did before is in the folded total and not here.
+    bool atLeast {};
 };
 
 /// What the upgrade report says about one compiler family.
@@ -67,6 +70,10 @@ struct UpgradeAdvice
     /// one: the same version built differently, which `toolchain_diff` explains. Empty for a driver with no
     /// recommended fingerprint.
     std::vector<std::string> nodesSameVersionOtherFingerprint;
+    /// Machines that do not serve the recommended fingerprint of some driver that has one, whatever the direction
+    /// (lower, higher or another build of the same version): the machines whose toolchain should change to match.
+    /// Empty when no fingerprint is recommended. `nodesBehind` and the other two are descriptive; this is the list.
+    std::vector<std::string> nodesLackingRecommended;
     /// True when the family's versions cannot be ordered unambiguously, so nothing is recommended.
     bool orderingUnknown {};
 };
@@ -99,8 +106,13 @@ struct UpgradeAdvice
 /// belongs to none.
 /// @param workers Every live registry entry.
 /// @param demand Compiles per fingerprint; empty when no demand is recorded.
+/// @param foldedCompiles Compiles in the demand window that no row names (the producer's folded `other`): they could
+///        belong to any fingerprint. **Demand decides a choice only when the leader exceeds the runner-up by MORE than
+///        this**; otherwise the choice falls back to the versions-alone rule and the basis says why, and with any
+///        folded compiles every count is printed as "at least".
 /// @return The advice per family.
 [[nodiscard]] std::vector<UpgradeAdvice> AdviseUpgrades(std::span<WorkerReport const> workers,
-                                                        std::span<DemandRow const> demand);
+                                                        std::span<DemandRow const> demand,
+                                                        std::uint64_t foldedCompiles = 0);
 
 } // namespace Pace::Distributed

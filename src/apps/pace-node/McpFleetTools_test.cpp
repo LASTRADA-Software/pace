@@ -1024,11 +1024,33 @@ TEST_CASE("history's headline gives the selected row's own total, with the windo
     CHECK(all.text.contains("5 compile(s) granted"));
     CHECK_FALSE(all.text.contains("whole total"));
 
-    // A key naming no row granted nothing in the rows shown; its counts, if folded, are in other.
+    // A key naming no row is UNKNOWN, never zero: if it was folded, its counts are in other.
     auto none = LeaderUpstream();
     none.AnswerOk(fleet.body);
     auto const nobody = Call(none, "history", R"({"series":"requesters","range":"24h","key":"nobody"})");
-    CHECK(nobody.text.contains("0 compile(s) granted"));
+    CHECK_FALSE(nobody.text.contains("0 compile(s) granted"));
+    CHECK(nobody.text.contains("the count for \"nobody\" is unknown"));
+    CHECK(nobody.text.contains("the window's whole total is 5"));
+}
+
+TEST_CASE("history's headline says at least where the selected key had counts folded away before",
+          "[node][mcp][fleet-tools][fleet-keyed-history]")
+{
+    KeyedFleet fleet;
+    // The earliest machine was folded into `other` (ceiling two) and now asks again: its row shows only what it did since.
+    auto const early = Testing::TestKeyPair("early").PublicKey();
+    fleet.wall.Advance(std::chrono::seconds { 1 });
+    fleet.demand.CompileGranted(RawMachine(early), "clang-19-def");
+    fleet.Render();
+    auto upstream = LeaderUpstream();
+    upstream.AnswerOk(fleet.body);
+    auto const result =
+        Call(upstream,
+             "history",
+             std::format(R"({{"series":"requesters","range":"24h","key":"{}"}})", FormatEd25519PublicKey(early)));
+    REQUIRE_FALSE(result.isError);
+    INFO(result.text);
+    CHECK(result.text.contains("at least 1 compile(s) granted"));
 }
 
 TEST_CASE("history refuses node on a keyed series and key on a slot series, asking nothing",

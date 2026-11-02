@@ -129,6 +129,19 @@ constexpr std::uint64_t TermHere = 4;
     return Dist::RenderFleetJson(snapshot, view);
 }
 
+/// Have the leader count for @p minutes minutes, one after another, asking for nothing.
+/// @param wall The clock the history reads.
+/// @param demand The history.
+/// @param minutes How long it counted.
+void CountFor(Testing::PlacedWallClock& wall, Dist::CompileDemandHistory& demand, int minutes)
+{
+    for ([[maybe_unused]] auto const minute: std::views::iota(0, minutes))
+    {
+        wall.Advance(std::chrono::seconds { 60 });
+        demand.Fold();
+    }
+}
+
 /// Run `toolchains` against @p upstream.
 /// @param upstream What it asks.
 /// @return What it answered.
@@ -296,6 +309,7 @@ TEST_CASE("advice basis cites demand counts from toolchain-demand over 7d", "[pa
 {
     Testing::PlacedWallClock wall;
     Dist::CompileDemandHistory demand { 8, wall };
+    CountFor(wall, demand, 1500);
     for ([[maybe_unused]] auto const index: std::views::iota(0, 5))
         demand.CompileGranted("", "fp-12");
     for ([[maybe_unused]] auto const index: std::views::iota(0, 2))
@@ -310,23 +324,27 @@ TEST_CASE("advice basis cites demand counts from toolchain-demand over 7d", "[pa
     CHECK(FleetTextAsked(upstream).range == "7d");
 
     // Demand decides the way the spec says: the version the most demand already uses, NOT the highest served.
+    auto const observed = At(At(result.structured, "demand"), "observed_minutes").AsInt().value_or(0);
     auto const gcc = GccAdvice(result.structured);
     CHECK(TextAt(gcc, "recommended_version") == std::optional<std::string> { "12.3.0" });
     CHECK(TextAt(At(gcc, "recommended_fingerprints"), "gcc") == std::optional<std::string> { "fp-12" });
     CHECK(StringsOf(At(gcc, "behind")).empty());
     CHECK(StringsOf(At(gcc, "ahead")) == std::vector<std::string> { "b:1" });
+    // The machine on the higher version is AHEAD, and still lacks what is recommended: that list instructs.
+    CHECK(StringsOf(At(gcc, "lacks_recommended")) == std::vector<std::string> { "b:1" });
     auto const basis = TextAt(gcc, "basis").value_or(std::string {});
     // The counts it used, per version, and the coverage they were counted over.
     CHECK(basis.contains("12.3.0 (5 compiles)"));
     CHECK(basis.contains("13.2.0 (2 compiles)"));
     CHECK(basis.contains("demand over 7d"));
-    CHECK(basis.contains("counted for 1 of the window's 10080 minute(s)"));
+    CHECK(basis.contains(std::format("counted for {} of the window's 10080 minute(s)", observed)));
     CHECK(basis.contains("PARTIAL coverage"));
     CHECK_FALSE(basis.contains("unavailable"));
+    CHECK_FALSE(basis.contains("at least"));
 
     auto const& figures = At(result.structured, "demand");
     CHECK(TextAt(figures, "range") == std::optional<std::string> { "7d" });
-    CHECK(At(figures, "observed_minutes").AsInt() == std::optional<std::int64_t> { 1 });
+    CHECK(observed >= 1440);
     CHECK(At(figures, "window_minutes").AsInt() == std::optional<std::int64_t> { 10080 });
     CHECK(At(figures, "partial_coverage").AsBool() == std::optional<bool> { true });
     CHECK_FALSE(At(figures, "coverage_since").IsNull());
@@ -334,7 +352,7 @@ TEST_CASE("advice basis cites demand counts from toolchain-demand over 7d", "[pa
           == std::optional<std::int64_t> { 5 });
     CHECK(At(figures, "other").IsNull());
     // The text a reader of the answer sees carries it too.
-    CHECK(result.text.contains("counted for 1 of the window's 10080 minute(s)"));
+    CHECK(result.text.contains(std::format("counted for {} of the window's 10080 minute(s)", observed)));
 }
 
 TEST_CASE("toolchains falls back to versions alone, and says so, when demand is unavailable",
@@ -372,12 +390,37 @@ TEST_CASE("toolchains falls back to versions alone, and says so, when demand is 
     }
 }
 
-TEST_CASE("toolchains never attributes folded demand to a toolchain, and says what was folded",
+TEST_CASE("toolchains recommends on versions alone when too few minutes were observed, showing the figures",
+          "[pace-node][mcp][toolchains][toolchain-demand]")
+{
+    Testing::PlacedWallClock wall;
+    Dist::CompileDemandHistory demand { 8, wall };
+    for ([[maybe_unused]] auto const index: std::views::iota(0, 5))
+        demand.CompileGranted("", "fp-12");
+    demand.CompileGranted("", "fp-13");
+
+    auto upstream = LeaderUpstream();
+    upstream.AnswerOk(DocumentWithDemand(TwoGccs(), demand));
+    auto const result = CallToolchains(upstream);
+    INFO(result.text);
+    REQUIRE_FALSE(result.isError);
+    // The figures are shown; they do not decide. The versions rule stands, and the basis says how little was observed.
+    CHECK_FALSE(At(result.structured, "demand").IsNull());
+    auto const gcc = GccAdvice(result.structured);
+    CHECK(TextAt(gcc, "recommended_version") == std::optional<std::string> { "13.2.0" });
+    auto const basis = TextAt(gcc, "basis").value_or(std::string {});
+    CHECK(basis.contains("coverage is insufficient (1 minute(s) observed, 1440 required)"));
+    CHECK_FALSE(basis.contains("highest version the most demand uses"));
+    CHECK(TextAt(result.structured, "demand_note").value_or(std::string {}).contains("insufficient"));
+}
+
+TEST_CASE("toolchains does not let demand decide where folded compiles could change the order",
           "[pace-node][mcp][toolchains][toolchain-demand]")
 {
     Testing::PlacedWallClock wall;
     // One key kept: the older toolchain, with ten compiles, is folded into `other` when the newer one is counted.
     Dist::CompileDemandHistory demand { 1, wall };
+    CountFor(wall, demand, 1500);
     for ([[maybe_unused]] auto const index: std::views::iota(0, 10))
         demand.CompileGranted("", "fp-12");
     wall.Advance(std::chrono::seconds { 1 });
@@ -389,16 +432,48 @@ TEST_CASE("toolchains never attributes folded demand to a toolchain, and says wh
     INFO(result.text);
     REQUIRE_FALSE(result.isError);
     auto const gcc = GccAdvice(result.structured);
-    // The ten folded compiles are named by no fingerprint: they do not make 12.3.0 the most demanded.
-    CHECK(TextAt(gcc, "recommended_version") == std::optional<std::string> { "13.2.0" });
     auto const basis = TextAt(gcc, "basis").value_or(std::string {});
-    CHECK(basis.contains("12.3.0 (0 compiles)"));
-    CHECK(basis.contains("13.2.0 (1 compiles)"));
+    // fp-12 may well be the most used: the named 1 compile of fp-13 does not outweigh 10 nobody can attribute. The
+    // recommendation is the versions rule's, and never claims demand chose it.
+    CHECK(basis.contains("demand does not decide this family: folded demand of 10 compile(s) could change the order"));
+    CHECK_FALSE(basis.contains("highest version the most demand uses"));
+    CHECK(basis.contains("13.2.0 (at least 1 compiles)"));
+    CHECK(basis.contains("12.3.0 (at least 0 compiles)"));
     CHECK(basis.contains("10 more are in `other (1 toolchains)`"));
-    CHECK(basis.contains("count toward no recommendation"));
     auto const& other = At(At(result.structured, "demand"), "other");
     CHECK(At(other, "compiles").AsInt() == std::optional<std::int64_t> { 10 });
     CHECK(At(other, "toolchains_folded").AsInt() == std::optional<std::int64_t> { 1 });
+}
+
+TEST_CASE("toolchains lets demand decide when its lead exceeds the folded compiles, even below the highest version",
+          "[pace-node][mcp][toolchains][toolchain-demand]")
+{
+    Testing::PlacedWallClock wall;
+    // Two keys kept: fp-11 (one compile, no node serves it) is the oldest and is folded when fp-13 arrives.
+    Dist::CompileDemandHistory demand { 2, wall };
+    CountFor(wall, demand, 1500);
+    demand.CompileGranted("", "fp-11");
+    wall.Advance(std::chrono::seconds { 1 });
+    for ([[maybe_unused]] auto const index: std::views::iota(0, 9))
+        demand.CompileGranted("", "fp-12");
+    wall.Advance(std::chrono::seconds { 1 });
+    for ([[maybe_unused]] auto const index: std::views::iota(0, 2))
+        demand.CompileGranted("", "fp-13");
+
+    auto upstream = LeaderUpstream();
+    upstream.AnswerOk(DocumentWithDemand(TwoGccs(), demand));
+    auto const result = CallToolchains(upstream);
+    INFO(result.text);
+    REQUIRE_FALSE(result.isError);
+    auto const gcc = GccAdvice(result.structured);
+    // 9 against 2 leads by 7, more than the 1 folded compile: demand decides, and the lower version is the answer.
+    CHECK(TextAt(gcc, "recommended_version") == std::optional<std::string> { "12.3.0" });
+    auto const basis = TextAt(gcc, "basis").value_or(std::string {});
+    CHECK(basis.contains("highest version the most demand uses: 12.3.0 (at least 9 of 11 compiles named)"));
+    CHECK(basis.contains("1 more compile(s) are folded into no named toolchain, and the lead exceeds them"));
+    // The machine on 13.2.0 is ahead of the recommendation and still has to change to it.
+    CHECK(StringsOf(At(gcc, "ahead")) == std::vector<std::string> { "b:1" });
+    CHECK(StringsOf(At(gcc, "lacks_recommended")) == std::vector<std::string> { "b:1" });
 }
 
 TEST_CASE("toolchains reports an unparseable family as ordering unknown, recommending nothing",

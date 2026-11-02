@@ -886,22 +886,31 @@ namespace
         // for one minute of sixty, is a part of the window nobody counted, and the total is that part's.
         // The headline is the SELECTED rows' own totals when `key` narrowed the list -- "N compile(s) granted" beside
         // "the row for X" must be X's N, with the whole window's total still in the section for a reader who wants it.
-        auto granted = numberAt("total");
+        auto grantedWords = std::format("{} compile(s) granted", numberAt("total"));
         if (key.has_value())
         {
-            granted = 0;
+            auto granted = std::uint64_t { 0 };
+            auto floor = false;
             for (auto const& row: *section.Find("keys")->AsArray())
             {
                 auto const* const rowTotal = row.Find("total");
                 granted += rowTotal != nullptr ? rowTotal->AsUint().value_or(0) : std::uint64_t { 0 };
+                // A key folded away and seen again shows only what it did since: its count is a floor.
+                auto const* const earlier = row.Find("earlier_counts");
+                floor = floor || earlier == nullptr || earlier->AsString() == nullptr || *earlier->AsString() != "none";
             }
+            // No row means UNKNOWN -- folded into other, or never seen -- never zero.
+            grantedWords = named == 0 ? std::format("the count for \"{}\" is unknown (no row: folded into other, or never "
+                                                    "counted)",
+                                                    *key)
+                                      : std::format("{}{} compile(s) granted", floor ? "at least " : "", granted);
             selected += std::format("; the window's whole total is {}", numberAt("total"));
         }
-        auto text = std::format("{} over {}: {} compile(s) granted, {} {} named{}{}{}; counted for {} of the window's {} "
+        auto text = std::format("{} over {}: {}, {} {} named{}{}{}; counted for {} of the window's {} "
                                 "minute(s), first at {}; {}",
                                 dimension.series,
                                 range.key,
-                                granted,
+                                grantedWords,
                                 named,
                                 dimension.noun,
                                 otherText,

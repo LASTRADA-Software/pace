@@ -191,6 +191,7 @@ namespace
             { "behind", Strings(advice.nodesBehind) },
             { "ahead", Strings(advice.nodesAhead) },
             { "same_version_other_fingerprint", Strings(advice.nodesSameVersionOtherFingerprint) },
+            { "lacks_recommended", Strings(advice.nodesLackingRecommended) },
             { "ordering_unknown", Bool(advice.orderingUnknown) },
         });
     }
@@ -219,21 +220,33 @@ namespace
         if (!advice.recommendedVersion.has_value())
             return std::format("{}: no recommendation ({})", advice.family, advice.basis);
         return std::format("{}: converge on {} ({}) -- behind: {}; ahead: {}; same version, other fingerprint (ask "
-                           "toolchain_diff): {} ({})",
+                           "toolchain_diff): {}; lacking the recommended fingerprint: {} ({})",
                            advice.family,
                            *advice.recommendedVersion,
                            ChoicesWords(advice),
                            MachinesWords(advice.nodesBehind),
                            MachinesWords(advice.nodesAhead),
                            MachinesWords(advice.nodesSameVersionOtherFingerprint),
+                           MachinesWords(advice.nodesLackingRecommended),
                            advice.basis);
     }
+
+    /// How many minutes of a window the leader must have counted before demand may DECIDE a recommendation: 24 hours,
+    /// within the 7-day window asked for.
+    ///
+    /// A recommendation sends an operator to install a compiler, and a day is the shortest span that holds one full
+    /// working cycle of a team's builds: an hour of counts is whatever one person happened to be building, and a
+    /// leader that took office minutes ago has seen almost nothing. Below this the figures are still SHOWN, but the
+    /// report recommends on versions alone and says how much was observed against how much is required.
+    constexpr std::uint64_t MinDemandCoverageMinutes = 1440;
 
     /// What the leader's `toolchain_demand` section said, read for the upgrade report.
     struct DemandReading
     {
-        std::vector<Distributed::DemandRow> rows; ///< One per named fingerprint; empty unless `available`.
-        bool available { false };                 ///< Whether there is a covered window to weigh.
+        std::vector<Distributed::DemandRow> rows; ///< One per named fingerprint; empty unless `weighed`.
+        std::uint64_t foldedCompiles {};          ///< Compiles in `other`: attributed to no fingerprint.
+        bool weighed { false };                   ///< Whether `rows` may decide a recommendation.
+        bool available { false };                 ///< Whether there is a covered window to show.
         std::string basis;                        ///< Words appended to every ordered family's basis: what was used.
         Json::Value json;                         ///< The `demand` member: the figures used, or `null`.
     };
@@ -269,7 +282,7 @@ namespace
         };
         auto const* const section = root.Find("toolchain_demand");
         if (section == nullptr || section->IsNull())
-            return unavailable("the leader keeps no toolchain-demand history; it counts only while it leads");
+            return unavailable("the answering node keeps no toolchain-demand history; a leader counts only while it leads");
         auto const* const keys = section->Find("keys");
         auto const observed = UintAt(*section, "observed_minutes");
         auto const window = UintAt(*section, "window_minutes");
@@ -279,6 +292,7 @@ namespace
             return unavailable("the section is not one this build reads");
         if (*observed == 0)
             return unavailable("the leader counted for none of the window's minutes");
+        auto const sufficient = *observed >= MinDemandCoverageMinutes;
 
         auto reading = DemandReading {};
         auto named = std::uint64_t { 0 };
@@ -290,9 +304,15 @@ namespace
             if (!fingerprint.has_value() || !compiles.has_value())
                 return unavailable("a row of the section is not one this build reads");
             named += *compiles;
-            reading.rows.push_back(Distributed::DemandRow { .fingerprint = *fingerprint, .compiles = *compiles });
+            // A key that was folded away and came back shows only what it did since: its count is a floor.
+            auto const earlier = StringAt(row, "earlier_counts");
+            auto const atLeast = earlier.value_or("unknown") != "none";
+            if (sufficient)
+                reading.rows.push_back(
+                    Distributed::DemandRow { .fingerprint = *fingerprint, .compiles = *compiles, .atLeast = atLeast });
             rows.push_back(Obj(Json::Object { { "fingerprint", Str(*fingerprint) },
-                                              { "compiles", Int(static_cast<std::int64_t>(*compiles)) } }));
+                                              { "compiles", Int(static_cast<std::int64_t>(*compiles)) },
+                                              { "at_least", Bool(atLeast) } }));
         }
         auto const* const sinceMember = section->Find("coverage_since_ms");
         auto const since = sinceMember != nullptr ? sinceMember->AsInt() : std::nullopt;
@@ -301,6 +321,8 @@ namespace
         auto const folded = other != nullptr && !other->IsNull() ? UintAt(*other, "total") : std::nullopt;
 
         reading.available = true;
+        reading.weighed = sufficient;
+        reading.foldedCompiles = sufficient ? folded.value_or(0) : 0;
         reading.basis =
             std::format("demand over {}: counted for {} of the window's {} minute(s), since {}{}; {} compile(s) "
                         "named a toolchain of {} counted{}",
@@ -313,10 +335,16 @@ namespace
                         *total,
                         folded.has_value() && foldedKeys.has_value()
                             ? std::format("; {} more are in `other ({} toolchains)` and are attributed to no "
-                                          "toolchain, so they count toward no recommendation",
+                                          "toolchain, so named counts are \"at least\" figures and demand decides a "
+                                          "family only where its lead exceeds them",
                                           *folded,
                                           *foldedKeys)
                             : std::string {});
+        if (!sufficient)
+            reading.basis += std::format("; demand does NOT decide: coverage is insufficient ({} minute(s) observed, {} "
+                                         "required), so this recommendation is made on versions alone",
+                                         *observed,
+                                         MinDemandCoverageMinutes);
         auto figures =
             Json::Object { { "range", Str(std::string { range }) },
                            { "observed_minutes", Int(static_cast<std::int64_t>(*observed)) },
@@ -394,7 +422,7 @@ namespace
         // Demand is the leader's own record over the window; where it is unavailable the report recommends on versions
         // alone, and says so in every basis it writes.
         auto const demand = ReadDemand(document->root, demandRange);
-        auto advice = Distributed::AdviseUpgrades(*workers, demand.rows);
+        auto advice = Distributed::AdviseUpgrades(*workers, demand.rows, demand.foldedCompiles);
         for (auto& family: advice)
             if (!family.orderingUnknown)
                 family.basis += std::format("; {}", demand.basis);
@@ -450,7 +478,7 @@ namespace
         result.emplace_back("nodes", Arr(std::move(machineRows)));
         result.emplace_back("unserved_note", Str(std::string { UnservedNote }));
         result.emplace_back("demand", demand.available ? demand.json : Null());
-        result.emplace_back("demand_note", Str(demand.available ? std::string { DemandNoteRead } : demand.basis));
+        result.emplace_back("demand_note", Str(demand.weighed ? std::string { DemandNoteRead } : demand.basis));
         result.emplace_back("upgrade_report", Arr(std::move(adviceRows)));
         return Answer(std::move(result), std::move(text));
     }
@@ -987,8 +1015,8 @@ namespace
         R"("machine_count":{"type":"integer","description":"Distinct worker endpoints: a machine serving two toolchains counts once."},)"
         R"("toolchains":{"type":"array","description":"Per fingerprint: label and version (\"unknown\" when the label does not parse) where its entries agree on one label, every label in labels, family as the node read it off the banner (null when none or disagreeing), driver (the label's compiler name without a version suffix, null when the label does not parse), and the machines serving it."},)"
         R"("nodes":{"type":"array","description":"Per machine: endpoint; node_id and display_name, of the member whose identity key the machine's registrations PROVED, as the leader's node-id column joins it -- never by the endpoint, which a registration only claims (both null when no member holds that key or its registrations disagree -- absent, never guessed); the fingerprints it serves, and unserved -- the fleet's fingerprints in the same families it does not serve; null when it serves no toolchain of a known family (see unserved_note)."},)"
-        R"("unserved_note":{"type":"string"},"demand":{"type":["object","null"],"description":"The leader's toolchain-demand over 7d, which the upgrade report weighs: range, observed_minutes of window_minutes, coverage_since, partial_coverage, total, toolchains (fingerprint, compiles) and other (toolchains_folded, compiles -- attributed to no toolchain). Null (absent, NOT zero) when the answering node keeps no such history or counted for no minute; demand_note then says why and the report is on versions alone."},"demand_note":{"type":"string"},)"
-        R"("upgrade_report":{"type":"array","description":"Per banner-derived compiler family: recommended_version, and recommended_fingerprints -- an object from DRIVER (gcc, cc, g++: one install answers to several) to fingerprint, a driver absent when its builds of the version cannot be told apart, null when the ordering is unknown; basis (the versions compared and any demand), and machines placed by their highest version of the family: behind (lower: should upgrade), ahead (higher), same_version_other_fingerprint (the recommended version under another fingerprint for the SAME driver: ask toolchain_diff); ordering_unknown."}}})";
+        R"("unserved_note":{"type":"string"},"demand":{"type":["object","null"],"description":"The leader's toolchain-demand over 7d, which the upgrade report weighs only once at least 1440 minutes (24 h) were observed and only where a lead exceeds the folded other compiles: range, observed_minutes of window_minutes, coverage_since, partial_coverage, total, toolchains (fingerprint, compiles) and other (toolchains_folded, compiles -- attributed to no toolchain). Null (absent, NOT zero) when the answering node keeps no such history or counted for no minute; demand_note then says why and the report is on versions alone."},"demand_note":{"type":"string"},)"
+        R"("upgrade_report":{"type":"array","description":"Per banner-derived compiler family: recommended_version, and recommended_fingerprints -- an object from DRIVER (gcc, cc, g++: one install answers to several) to fingerprint, a driver absent when its builds of the version cannot be told apart, null when the ordering is unknown; basis (the versions compared and any demand), and machines placed by their highest version of the family: behind (lower: should upgrade), ahead (higher), same_version_other_fingerprint (the recommended version under another fingerprint for the SAME driver: ask toolchain_diff); lacks_recommended (every machine that does not serve the recommended fingerprint of a driver that has one, whatever its version: these should change); ordering_unknown."}}})";
 
 } // namespace
 
