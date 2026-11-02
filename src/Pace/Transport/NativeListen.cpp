@@ -290,7 +290,7 @@ namespace
         struct socket_fdinfo info {};
 
         auto const size = ::proc_pidfdinfo(::getpid(), socket, PROC_PIDFDSOCKETINFO, &info, sizeof(info));
-        if (size != static_cast<int>(sizeof(info)))
+        if (std::cmp_not_equal(size, sizeof(info)))
             return std::unexpected { std::format("adopt: the descriptor could not be asked whether it listens ({})",
                                                  OsErrorText("proc_pidfdinfo")) };
         return (info.psi.soi_options & SO_ACCEPTCONN) != 0 ? 1 : 0;
