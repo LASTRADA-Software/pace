@@ -23,6 +23,7 @@
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -380,6 +381,8 @@ TEST_CASE("mcp-action: learner standing refusal message", "[node][mcp][mcp-actio
              std::pair { std::string_view { "enrollment_auto_approve" }, std::string { R"({"minutes":5})" } },
              // A learner asking the leader to rename a member: the refusal the leader's OperatorStanding gate answers.
              std::pair { std::string_view { "set_display_name" }, std::string { R"({"node":"node-b","name":"lab"})" } },
+             std::pair { std::string_view { "set_cache_budget" }, std::string { R"({"node":"node-b","memory":"64m"})" } },
+             std::pair { std::string_view { "clear_cache_budget" }, std::string { R"({"node":"node-b","which":"disk"})" } },
          })
     {
         CAPTURE(tool);
@@ -499,6 +502,8 @@ TEST_CASE("mcp-action: tools/list shows readOnlyHint false on every action", "[n
         { .name = "enrollment_reject", .readOnly = false, .destructive = true },
         { .name = "enrollment_auto_approve", .readOnly = false, .destructive = false },
         { .name = "set_display_name", .readOnly = false, .destructive = false },
+        { .name = "set_cache_budget", .readOnly = false, .destructive = false },
+        { .name = "clear_cache_budget", .readOnly = false, .destructive = false },
         { .name = "cordon", .readOnly = false, .destructive = false },
         { .name = "uncordon", .readOnly = false, .destructive = false },
         { .name = "explain_admission", .readOnly = true, .destructive = false },
@@ -629,5 +634,101 @@ TEST_CASE("mcp-action: a taken name is the leader's refusal, reported as it says
     auto const result = rig.Call("set_display_name", R"({"node":"node-b","name":"LAB"})");
     CHECK(result.isError);
     CHECK(result.text.contains("already answers to"));
+    CHECK(rig.InfoLines().empty());
+}
+
+// --------------------------------------------------------------------------
+// set_cache_budget / clear_cache_budget
+
+TEST_CASE("mcp-action: set_cache_budget asks the leader one MEMBER-EDIT built from validated sizes",
+          "[node][mcp][mcp-action][budget]")
+{
+    Rig rig;
+    FixedCluster named { NamedState() };
+    auto const tools = ActionTools(rig.upstream, named, std::string { SelfId }, rig.logger);
+    auto const call = [&tools](std::string_view tool, std::string_view arguments) {
+        auto const* const row = core::findOrNull(tools, tool, &Mcp::ToolRow::name);
+        REQUIRE(row != nullptr);
+        return row->handler(Mcp::ToolCall { .arguments = Unwrap(Json::Parse(arguments)), .clientName = ClientName });
+    };
+    rig.upstream.AnswerOk(std::string {});
+    constexpr auto MiB = std::uint64_t { 1024 * 1024 };
+
+    SECTION("both tiers, the member named by its display name and the frame by its id")
+    {
+        auto const result = call("set_cache_budget", R"({"node":"build-box","memory":"64m","disk":"2g"})");
+        INFO(result.text);
+        REQUIRE_FALSE(result.isError);
+        REQUIRE(rig.upstream.calls.size() == 1);
+        CHECK(rig.upstream.calls[0].target == UpstreamTarget::Leader);
+        auto const value = Wire::EncodeBudgetSetValue(Wire::BudgetSetValue { .bytes = { 64 * MiB, 2048 * MiB } });
+        CHECK(rig.upstream.calls[0].frame
+              == Text(Wire::EncodeMemberEdit(Wire::MemberEditRequest {
+                  .verb = Wire::MemberEditVerb::SetBudget, .memberId = "node-b", .value = Wire::AsStringView(value) })));
+        CHECK(*At(result, "node_id").AsString() == "node-b");
+        CHECK(*At(result, "display_name").AsString() == "build-box");
+        CHECK(At(result, "memory").AsUint() == std::optional { 64 * MiB });
+        CHECK(At(result, "disk").AsUint() == std::optional { 2048 * MiB });
+        CHECK(*At(result, "state").AsString() == "replicating");
+        auto const lines = rig.InfoLines();
+        REQUIRE(lines.size() == 1);
+        CHECK(lines[0]
+              == std::format(
+                  R"(mcp action set_cache_budget {{"node":"node-b","memory":"64m","disk":"2g"}} by {} answered by {})",
+                  ClientName,
+                  AnsweredAt));
+    }
+    SECTION("one tier leaves the other as it was: absent on the wire, null in the answer")
+    {
+        auto const result = call("set_cache_budget", R"({"node":"node-b","disk":"1g"})");
+        REQUIRE_FALSE(result.isError);
+        auto const value = Wire::EncodeBudgetSetValue(Wire::BudgetSetValue { .bytes = { std::nullopt, 1024 * MiB } });
+        CHECK(rig.upstream.calls[0].frame
+              == Text(Wire::EncodeMemberEdit(Wire::MemberEditRequest {
+                  .verb = Wire::MemberEditVerb::SetBudget, .memberId = "node-b", .value = Wire::AsStringView(value) })));
+        CHECK(At(result, "memory").IsNull());
+    }
+    SECTION("clear_cache_budget names one tier")
+    {
+        auto const result = call("clear_cache_budget", R"({"node":"node-b","which":"memory"})");
+        REQUIRE_FALSE(result.isError);
+        auto const value = Wire::EncodeBudgetClearValue(Wire::BudgetClearValue { .tier = 0, .only = std::nullopt });
+        CHECK(rig.upstream.calls[0].frame
+              == Text(Wire::EncodeMemberEdit(Wire::MemberEditRequest {
+                  .verb = Wire::MemberEditVerb::ClearBudget, .memberId = "node-b", .value = Wire::AsStringView(value) })));
+        CHECK(*At(result, "which").AsString() == "memory");
+        CHECK(*At(result, "display_name").AsString() == "build-box");
+        CHECK(rig.InfoLines()
+              == std::vector<std::string> {
+                  std::format(R"(mcp action clear_cache_budget {{"node":"node-b","which":"memory"}} by {} answered by {})",
+                              ClientName,
+                              AnsweredAt) });
+    }
+}
+
+TEST_CASE("mcp-action: set_cache_budget refuses what the leader would, before anything is sent",
+          "[node][mcp][mcp-action][budget]")
+{
+    Rig rig;
+    rig.upstream.AnswerOk(std::string {});
+    for (auto const& [tool, arguments, says]: {
+             std::tuple { "set_cache_budget", R"({"memory":"64m"})", "`node` must name the member" },
+             std::tuple { "set_cache_budget", R"({"node":"node-b"})", "give `memory`, `disk` or both" },
+             std::tuple { "set_cache_budget", R"({"node":"node-b","memory":"0"})", "an override cannot remove a tier" },
+             std::tuple { "set_cache_budget", R"({"node":"node-b","memory":"25%"})", "absolute size" },
+             std::tuple { "set_cache_budget", R"({"node":"node-b","disk":"lots"})", "--cache-disk could take" },
+             std::tuple { "set_cache_budget", R"({"node":"node-b","memory":64})", "`memory` must be a string" },
+             std::tuple { "set_cache_budget", R"({"node":"node-b","memory":"1m","ram":"1m"})", "no argument `ram`" },
+             std::tuple { "clear_cache_budget", R"({"node":"node-b"})", "`which` must name one tier" },
+             std::tuple { "clear_cache_budget", R"({"node":"node-b","which":"both"})", "`which` must name one tier" },
+             std::tuple { "clear_cache_budget", R"({"which":"disk"})", "`node` must name the member" },
+         })
+    {
+        CAPTURE(tool, arguments);
+        auto const result = rig.Call(tool, arguments);
+        CHECK(result.isError);
+        CHECK(result.text.contains(says));
+    }
+    CHECK(rig.upstream.calls.empty());
     CHECK(rig.InfoLines().empty());
 }

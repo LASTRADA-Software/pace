@@ -1111,13 +1111,18 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     /// @return `Ok` once the entry is appended, or a refusal.
     [[nodiscard]] SchedulerReply ClusterSet(CallerContext const& caller, std::string_view name, std::string_view value);
 
-    /// Edit one member's replicated record: MEMBER-EDIT, proposed by the leader as the command its edit names
-    /// (`SetDisplayName` today), through `Offer` as every cluster control verb is -- so a non-leader answers `NotLeader`
-    /// naming the leader, and every rule `Cluster::ValidateAgainst` holds is the refusal the operator reads.
+    /// Edit one member's replicated record: MEMBER-EDIT, proposed by the leader as the command or commands its edit
+    /// names (a display name; a budget override per tier, stamped with this leader's wall clock; a clear; a member's
+    /// baseline), through `Offer` as every cluster control verb is -- so a non-leader answers `NotLeader` naming the
+    /// leader, and every rule `Cluster::ValidateAgainst` holds is the refusal the operator reads. Who may send which
+    /// edit is the edit's `authority` column (`CompileCacheWire::MemberEditVerbTable`): an operator's standing, or the
+    /// member the edit names proving the key this state records for it. An edit naming two tiers is judged whole
+    /// before either is proposed.
     /// @param caller Who is asking.
     /// @param verb The edit byte as received; one this build does not know is refused by name.
     /// @param memberId The member, by its id exactly.
-    /// @param value The edit's value: for a display name, the name, empty to clear it.
+    /// @param value The edit's value: for a display name, the name, empty to clear it; for a budget edit, the bytes of
+    ///        its `CompileCacheWire` value record.
     /// @return `Ok` once the entry is appended, or a refusal.
     [[nodiscard]] SchedulerReply MemberEdit(CallerContext const& caller,
                                             std::uint8_t verb,

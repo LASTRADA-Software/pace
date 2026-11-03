@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <format>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -918,21 +919,196 @@ SchedulerReply SchedulerService::ClusterSet(CallerContext const& caller, std::st
 
 namespace
 {
-    /// The replicated command one member edit proposes.
-    struct MemberEditCommandRow
+    /// Which callers one `Wire::EditAuthority` admits.
+    struct EditAuthorityRow
     {
-        Wire::MemberEditVerb verb; ///< The edit.
-        Cluster::CommandKind
-            kind; ///< The command the leader proposes for it: the member's id as `key`, the value as `value`.
+        Wire::EditAuthority authority; ///< The column value this row answers.
+        bool operatorMay;              ///< An operator's standing suffices.
+        bool subjectMay;               ///< The member the edit names, proving its own key, suffices.
     };
 
-    /// One row per `MemberEditVerb`, in enumerator order: the next edit is a row here and a row of the wire's table.
-    constexpr EnumTable<Wire::MemberEditVerb, MemberEditCommandRow> MemberEditCommands { {
-        { .verb = Wire::MemberEditVerb::SetDisplayName, .kind = Cluster::CommandKind::SetDisplayName },
+    /// One row per `Wire::EditAuthority`, in enumerator order: who may send an edit, read off the edit's row.
+    constexpr EnumTable<Wire::EditAuthority, EditAuthorityRow> EditAuthorities { {
+        { .authority = Wire::EditAuthority::Operator, .operatorMay = true, .subjectMay = false },
+        { .authority = Wire::EditAuthority::OperatorOrSubject, .operatorMay = true, .subjectMay = true },
+        { .authority = Wire::EditAuthority::Subject, .operatorMay = false, .subjectMay = true },
     } };
 
-    static_assert(RowsInEnumeratorOrder(MemberEditCommands, &MemberEditCommandRow::verb),
-                  "MemberEditCommands must hold one row per MemberEditVerb, in enumerator order");
+    static_assert(RowsInEnumeratorOrder(EditAuthorities, &EditAuthorityRow::authority),
+                  "EditAuthorities must hold one row per EditAuthority, in enumerator order");
+
+    /// A refusal as the service's `Refuse` takes it: the code and the sentence.
+    using EditRefusal = std::pair<Wire::ErrorCode, std::string>;
+
+    /// Whether @p caller may send @p edit about @p memberId: an operator's standing, or -- for an edit its row lets the
+    /// subject make -- the very member it names, proven on this connection by the key the applied state records for
+    /// that id. The key, never the id the connection claims: a proof binds a key, and the state says whose it is.
+    /// @param caller Who is asking.
+    /// @param edit The edit's row.
+    /// @param state The state this leader applied.
+    /// @param memberId The member the edit names.
+    /// @return Why the caller may not, or nullopt.
+    [[nodiscard]] std::optional<EditRefusal> RefuseUnlessMayEdit(CallerContext const& caller,
+                                                                 Wire::MemberEditVerbRow const& edit,
+                                                                 Cluster::ClusterState const& state,
+                                                                 std::string_view memberId)
+    {
+        auto const& who = EditAuthorities[static_cast<std::size_t>(edit.authority)];
+        auto const recorded = Cluster::LiveKeyOf(state, memberId);
+        auto const isSubject = caller.provenKey.has_value() && recorded.has_value() && *caller.provenKey == *recorded;
+        if (who.subjectMay && isSubject)
+            return std::nullopt;
+        auto const* const operatorUnmet = UnmetRequirement(Wire::IdentityRequirement::OperatorStanding, caller);
+        if (who.operatorMay && operatorUnmet == nullptr)
+            return std::nullopt;
+        if (who.operatorMay)
+            return EditRefusal { operatorUnmet->refusal,
+                                 std::format("member-edit {} {}", edit.name, operatorUnmet->remedy) };
+        if (auto const* const unproven = UnmetRequirement(Wire::IdentityRequirement::ProvenNodeOnly, caller);
+            unproven != nullptr)
+            return EditRefusal { unproven->refusal, std::format("member-edit {} {}", edit.name, unproven->remedy) };
+        return EditRefusal { Wire::ErrorCode::NodeIdentityRequired,
+                             std::format("member-edit {} is sent only by the member it names, {}, proving the key "
+                                         "this cluster records for it; this connection proved {}",
+                                         edit.name,
+                                         memberId,
+                                         caller.provenNodeId.value_or(std::string { "another key" })) };
+    }
+
+    /// The tier a positional byte names, as `PerTier`'s rule numbers them.
+    /// @param position The tier's position on the wire.
+    /// @return The tier, or nullopt for one this build does not have.
+    [[nodiscard]] std::optional<StorageTier> TierAt(std::size_t position) noexcept
+    {
+        if (position >= EnumeratorCount<StorageTier>)
+            return std::nullopt;
+        return static_cast<StorageTier>(position);
+    }
+
+    /// A budget command naming one member's tier: the shape every budget verb shares.
+    /// @param kind The verb.
+    /// @param memberId The member.
+    /// @param tier The tier.
+    /// @return The command, with no figures yet.
+    [[nodiscard]] Cluster::Command BudgetCommand(Cluster::CommandKind kind, std::string_view memberId, StorageTier tier)
+    {
+        return Cluster::Command { .kind = kind,
+                                  .key = std::string { memberId },
+                                  .value = std::string { Cluster::TierName(tier) },
+                                  .schedulerEndpoint = {},
+                                  .publicKey = std::nullopt };
+    }
+
+    /// What a member-edit value could not be read as: the edit, and what it was.
+    /// @param edit The edit's row.
+    /// @param why What was wrong.
+    /// @return The refusal.
+    [[nodiscard]] EditRefusal UnreadableEdit(Wire::MemberEditVerbRow const& edit, std::string_view why)
+    {
+        return EditRefusal { Wire::ErrorCode::InvalidClusterChange,
+                             std::format("member-edit {}'s value {}", edit.name, why) };
+    }
+
+    /// The commands one member edit proposes, read from its value, or why the value names none.
+    ///
+    /// **A table of readers, one per edit**, so the next edit is a row rather than another arm threaded through
+    /// `MemberEdit`. `setAt` is the LEADER's clock, read once by the caller and stamped on every override this edit
+    /// records -- never read inside `Apply`, which reads no clock.
+    using EditReader = std::expected<std::vector<Cluster::Command>, EditRefusal> (*)(Wire::MemberEditVerbRow const& edit,
+                                                                                     std::string_view memberId,
+                                                                                     std::span<std::byte const> value,
+                                                                                     std::int64_t setAt);
+
+    /// One row per `Wire::MemberEditVerb`, in enumerator order.
+    struct MemberEditReaderRow
+    {
+        Wire::MemberEditVerb verb; ///< The edit.
+        EditReader read;           ///< How its value becomes commands.
+    };
+
+    constexpr EnumTable<Wire::MemberEditVerb, MemberEditReaderRow> MemberEditReaders { {
+        { .verb = Wire::MemberEditVerb::SetDisplayName,
+          .read = [](Wire::MemberEditVerbRow const&,
+                     std::string_view memberId,
+                     std::span<std::byte const> value,
+                     std::int64_t) -> std::expected<std::vector<Cluster::Command>, EditRefusal> {
+              return std::vector { Cluster::Command { .kind = Cluster::CommandKind::SetDisplayName,
+                                                      .key = std::string { memberId },
+                                                      .value = std::string { Wire::AsStringView(value) },
+                                                      .schedulerEndpoint = {},
+                                                      .publicKey = std::nullopt } };
+          } },
+        { .verb = Wire::MemberEditVerb::SetBudget,
+          .read = [](Wire::MemberEditVerbRow const& edit,
+                     std::string_view memberId,
+                     std::span<std::byte const> value,
+                     std::int64_t setAt) -> std::expected<std::vector<Cluster::Command>, EditRefusal> {
+              auto const decoded = Wire::DecodeBudgetSetValue(value);
+              if (!decoded.has_value())
+                  return std::unexpected(UnreadableEdit(edit, "is not a figure or an absence per tier"));
+              auto commands = std::vector<Cluster::Command> {};
+              for (auto const position: std::views::iota(std::size_t { 0 }, decoded->bytes.size()))
+              {
+                  auto const& bytes = decoded->bytes[position];
+                  if (!bytes.has_value())
+                      continue;
+                  auto const tier = TierAt(position);
+                  if (!tier.has_value())
+                      return std::unexpected(UnreadableEdit(
+                          edit,
+                          std::format("names cache tier {}, which this leader's build does not have; upgrade it to "
+                                      "the client's build",
+                                      position)));
+                  auto command = BudgetCommand(Cluster::CommandKind::SetBudget, memberId, *tier);
+                  command.budgetBytes = bytes;
+                  command.setAtUnixSeconds = setAt;
+                  commands.push_back(std::move(command));
+              }
+              if (commands.empty())
+                  return std::unexpected(UnreadableEdit(edit, "names no tier, so there is nothing to override"));
+              return commands;
+          } },
+        { .verb = Wire::MemberEditVerb::ClearBudget,
+          .read = [](Wire::MemberEditVerbRow const& edit,
+                     std::string_view memberId,
+                     std::span<std::byte const> value,
+                     std::int64_t) -> std::expected<std::vector<Cluster::Command>, EditRefusal> {
+              auto const decoded = Wire::DecodeBudgetClearValue(value);
+              if (!decoded.has_value())
+                  return std::unexpected(UnreadableEdit(edit, "is not a tier with both figures or neither"));
+              auto const tier = TierAt(decoded->tier);
+              if (!tier.has_value())
+                  return std::unexpected(UnreadableEdit(
+                      edit, std::format("names cache tier {}, which this leader's build does not have", decoded->tier)));
+              auto command = BudgetCommand(Cluster::CommandKind::ClearBudget, memberId, *tier);
+              command.budgetBytes =
+                  decoded->only.transform([](Wire::BudgetIdentity const& only) -> std::uint64_t { return only.bytes; });
+              command.setAtUnixSeconds = decoded->only.transform(
+                  [](Wire::BudgetIdentity const& only) -> std::int64_t { return only.setAtUnixSeconds; });
+              return std::vector { std::move(command) };
+          } },
+        { .verb = Wire::MemberEditVerb::RecordBaseline,
+          .read = [](Wire::MemberEditVerbRow const& edit,
+                     std::string_view memberId,
+                     std::span<std::byte const> value,
+                     std::int64_t) -> std::expected<std::vector<Cluster::Command>, EditRefusal> {
+              auto const decoded = Wire::DecodeBudgetBaselineValue(value);
+              if (!decoded.has_value())
+                  return std::unexpected(UnreadableEdit(edit, "is not a tier, a baseline and the override it answers"));
+              auto const tier = TierAt(decoded->tier);
+              if (!tier.has_value())
+                  return std::unexpected(UnreadableEdit(
+                      edit, std::format("names cache tier {}, which this leader's build does not have", decoded->tier)));
+              auto command = BudgetCommand(Cluster::CommandKind::RecordBaseline, memberId, *tier);
+              command.baselineBytes = decoded->baseline;
+              command.budgetBytes = decoded->measuredFor.bytes;
+              command.setAtUnixSeconds = decoded->measuredFor.setAtUnixSeconds;
+              return std::vector { std::move(command) };
+          } },
+    } };
+
+    static_assert(RowsInEnumeratorOrder(MemberEditReaders, &MemberEditReaderRow::verb),
+                  "MemberEditReaders must hold one row per MemberEditVerb, in enumerator order");
 } // namespace
 
 SchedulerReply SchedulerService::MemberEdit(CallerContext const& caller,
@@ -954,12 +1130,35 @@ SchedulerReply SchedulerService::MemberEdit(CallerContext const& caller,
                       std::format("member-edit verb {} is one this leader's build does not know; upgrade it to the "
                                   "client's build",
                                   static_cast<unsigned>(verb)));
+    auto const& row = Wire::MemberEditRowOf(*edit);
 
-    return Offer(Cluster::Command { .kind = MemberEditCommands[static_cast<std::size_t>(*edit)].kind,
-                                    .key = std::string { memberId },
-                                    .value = std::string { value },
-                                    .schedulerEndpoint = {},
-                                    .publicKey = std::nullopt });
+    // Who may send it, now the edit is known: the door asked only that the caller be identified (`OpTable`), and the
+    // edit's own column says whether an operator's standing, the member itself, or either will do.
+    auto const state = _admin->ClusterState();
+    if (auto refusal = RefuseUnlessMayEdit(caller, row, state, memberId); refusal.has_value())
+        return Refuse(refusal->first, std::move(refusal->second));
+
+    // The leader's clock, once, for every override this edit records: stamped here, where the proposal is made,
+    // because `Apply` reads no clock and every replica must record the same instant.
+    auto const setAt = std::chrono::duration_cast<std::chrono::seconds>(_wallClock.now().time_since_epoch()).count();
+    auto commands = MemberEditReaders[static_cast<std::size_t>(*edit)].read(
+        row, memberId, std::as_bytes(std::span { value.data(), value.size() }), static_cast<std::int64_t>(setAt));
+    if (!commands.has_value())
+        return Refuse(commands.error().first, std::move(commands.error().second));
+
+    // Every command judged before any is proposed, so one edit naming both tiers is refused whole rather than half
+    // recorded; `Offer` asks again, and `Apply` is the guarantee.
+    for (auto const& command: *commands)
+        if (auto const allowed = Cluster::ValidateAgainst(state, command); !allowed.has_value())
+            return Refuse(WireCodeFor(allowed.error().code), allowed.error().context);
+    auto reply = SchedulerReply::Success();
+    for (auto const& command: *commands)
+    {
+        reply = Offer(command);
+        if (reply.status != Wire::Status::Ok)
+            return reply;
+    }
+    return reply;
 }
 
 SchedulerReply SchedulerService::ClusterForget(CallerContext const& caller, std::string_view memberId)

@@ -36,7 +36,10 @@
 #                                         `enrollment_status`; and the audit line each
 #                                         action leaves in the node's log; `set_display_name`
 #                                         of this node, read back from the fleet document's
-#                                         member row and by `node_status` resolving that name.
+#                                         member row and by `node_status` resolving that name;
+#                                         `set_cache_budget` of this node's memory tier, read back
+#                                         from the fleet document's member row once it commits,
+#                                         then `clear_cache_budget`, read back absent again.
 #   2f. toolchains answers              — on that same scheduler, once its worker has
 #                                         registered what it identified: every toolchain
 #                                         served by this one machine, counted once, each
@@ -342,7 +345,7 @@ listed="$(curl -s -i -m 20 -X POST -H "Content-Type: application/json" -H "Accep
     --data "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"tools/list\",\"params\":{${ACTION_META}}}" \
     "http://127.0.0.1:${action_mcp_port}/mcp")" || fail "curl could not complete tools/list on the acting node"
 json_check "tools/list actions" "$(body_of "$listed")" \
-    "(lambda a: all(a[t]['readOnlyHint'] is False for t in ['enrollment_approve','enrollment_reject','enrollment_auto_approve','set_display_name','cordon','uncordon']) and a['enrollment_reject']['destructiveHint'] is True and a['cordon']['destructiveHint'] is False and a['explain_admission']['readOnlyHint'] is True)({x['name']: x['annotations'] for x in d['result']['tools']})"
+    "(lambda a: all(a[t]['readOnlyHint'] is False for t in ['enrollment_approve','enrollment_reject','enrollment_auto_approve','set_display_name','set_cache_budget','clear_cache_budget','cordon','uncordon']) and a['enrollment_reject']['destructiveHint'] is True and a['cordon']['destructiveHint'] is False and a['explain_admission']['readOnlyHint'] is True)({x['name']: x['annotations'] for x in d['result']['tools']})"
 e2e_note "tools/list names the actions, none read-only, the reject destructive"
 
 # The worker answers node_status with a cordon state only once it runs; wait on that STATE rather than a delay.
@@ -409,8 +412,30 @@ json_check "set_display_name refuses a control byte" "$(call_action set_display_
     "d['result']['isError'] is True and 'control character' in d['result']['content'][0]['text']"
 e2e_note "set_display_name named this node e2e-box, shown replicated in the fleet document, and node_status resolved it by that name"
 
+# set_cache_budget, then the RECORDED override read back where every node reads it -- the fleet document's member row,
+# once the entry commits -- and cleared again. Recorded, never applied here: applying is the member's own act.
+budgeted="$(call_action set_cache_budget "{\"node\":\"e2e-box\",\"memory\":\"64m\"}")"
+json_check "set_cache_budget" "$budgeted" \
+    "${OK} and ${SC}['node_id'] == '${self_id}' and ${SC}['display_name'] == 'e2e-box' and ${SC}['memory'] == 67108864 and ${SC}['disk'] is None and ${SC}['state'] == 'replicating'"
+member_override_reads() {
+    local expected="$1" body
+    body="$(call_action fleet_overview '{}')"
+    python3 -I -c "import json,sys; d=json.loads(sys.stdin.read()); sys.exit(0 if d['result']['isError'] is False and any(m['id'] == '${self_id}' and m['memory_override'] == ${expected} and m['disk_override'] is None for m in d['result']['structuredContent']['members']) else 1)" <<< "$body"
+}
+member_override_recorded() { member_override_reads 67108864; }
+member_override_cleared() { member_override_reads None; }
+wait_until member_override_recorded "the fleet document to record this member's 64 MiB memory override" "$action_pid" "${workdir}/node.log" 30
+json_check "set_cache_budget refuses a share of RAM" "$(call_action set_cache_budget "{\"node\":\"${self_id}\",\"memory\":\"25%\"}")" \
+    "d['result']['isError'] is True and 'absolute size' in d['result']['content'][0]['text']"
+cleared="$(call_action clear_cache_budget "{\"node\":\"${self_id}\",\"which\":\"memory\"}")"
+json_check "clear_cache_budget" "$cleared" "${OK} and ${SC}['node_id'] == '${self_id}' and ${SC}['which'] == 'memory'"
+wait_until member_override_cleared "the fleet document to show this member's memory override cleared" "$action_pid" "${workdir}/node.log" 30
+e2e_note "set_cache_budget recorded this node's 64 MiB memory override in the fleet document, and clear_cache_budget removed it"
+
 # Every action left its audit line, naming the client; the read did not.
 for line in "mcp action set_display_name {\"node\":\"${self_id}\",\"name\":\"e2e-box\"} by ${ACTION_CLIENT} answered by" \
+            "mcp action set_cache_budget {\"node\":\"${self_id}\",\"memory\":\"64m\"} by ${ACTION_CLIENT} answered by" \
+            "mcp action clear_cache_budget {\"node\":\"${self_id}\",\"which\":\"memory\"} by ${ACTION_CLIENT} answered by" \
             "mcp action cordon {\"node\":\"${self_id}\"} by ${ACTION_CLIENT} answered by" \
             "mcp action uncordon {\"node\":\"${self_id}\"} by ${ACTION_CLIENT} answered by" \
             "mcp action enrollment_auto_approve {\"minutes\":1} by ${ACTION_CLIENT} answered by" \

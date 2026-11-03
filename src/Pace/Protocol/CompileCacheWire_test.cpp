@@ -619,7 +619,10 @@ TEST_CASE("MEMBER-EDIT keeps its bytes: the opcode, the edit, and a frame that d
     // The raw enumerators -- the anchor, not a smell: a symbol both ends spell tests only its name.
     CHECK(static_cast<std::uint8_t>(Op::MemberEdit) == 0x26);
     CHECK(static_cast<std::uint8_t>(MemberEditVerb::SetDisplayName) == 0);
-    CHECK(static_cast<std::uint8_t>(MemberEditVerb::Last) == 1);
+    CHECK(static_cast<std::uint8_t>(MemberEditVerb::SetBudget) == 1);
+    CHECK(static_cast<std::uint8_t>(MemberEditVerb::ClearBudget) == 2);
+    CHECK(static_cast<std::uint8_t>(MemberEditVerb::RecordBaseline) == 3);
+    CHECK(static_cast<std::uint8_t>(MemberEditVerb::Last) == 4);
     REQUIRE(FindOp(0x26) != nullptr);
     CHECK(FindOp(0x26)->code == Op::MemberEdit);
 
@@ -628,8 +631,13 @@ TEST_CASE("MEMBER-EDIT keeps its bytes: the opcode, the edit, and a frame that d
     CHECK(row->name == "member-edit");
     CHECK(row->fieldCount == 3);
     CHECK(row->family == VerbFamily::Scheduler);
-    CHECK(row->identity == IdentityRequirement::OperatorStanding);
+    // Identified at the door; each edit's own requirement is its row's `authority`, asked once the edit is known.
+    CHECK(row->identity == IdentityRequirement::IdentifiedCaller);
     CHECK(row->maxPayload.Bytes() == MaxControlPayload);
+    CHECK(MemberEditRowOf(MemberEditVerb::SetDisplayName).authority == EditAuthority::Operator);
+    CHECK(MemberEditRowOf(MemberEditVerb::SetBudget).authority == EditAuthority::Operator);
+    CHECK(MemberEditRowOf(MemberEditVerb::ClearBudget).authority == EditAuthority::OperatorOrSubject);
+    CHECK(MemberEditRowOf(MemberEditVerb::RecordBaseline).authority == EditAuthority::Subject);
 
     // The frame: the header, then the edit byte, the member and the value -- read back as asked.
     auto const frame =
@@ -644,7 +652,8 @@ TEST_CASE("MEMBER-EDIT keeps its bytes: the opcode, the edit, and a frame that d
     // An edit byte this build does not know decodes as a byte -- refused by name further in, never as a malformed
     // frame -- and `DecodeMemberEditVerb` knows exactly the rows of the table.
     CHECK(DecodeMemberEditVerb(0) == std::optional { MemberEditVerb::SetDisplayName });
-    CHECK_FALSE(DecodeMemberEditVerb(1).has_value());
+    CHECK(DecodeMemberEditVerb(3) == std::optional { MemberEditVerb::RecordBaseline });
+    CHECK_FALSE(DecodeMemberEditVerb(4).has_value());
     CHECK_FALSE(DecodeMemberEditVerb(0xFF).has_value());
 
     // An edit field that is not exactly one byte is malformed.
@@ -665,14 +674,16 @@ TEST_CASE("An operator's control verb is refused an unidentified caller under it
     // The column, asked of the rows one at a time so a failure names the verb; the set itself is
     // `ControlVerbsNeedOperatorStanding`'s, a build failure. An unidentified caller is refused on
     // the way there: `IdentifiedCaller` is `OperatorStanding`'s prerequisite.
-    for (auto const op:
-         { Op::ClusterSet, Op::ClusterForget, Op::ClusterAdmit, Op::ClusterAdmitLearner, Op::EnrollControl, Op::MemberEdit })
+    for (auto const op: { Op::ClusterSet, Op::ClusterForget, Op::ClusterAdmit, Op::ClusterAdmitLearner, Op::EnrollControl })
     {
         auto const* const row = FindOp(static_cast<std::uint8_t>(op));
         REQUIRE(row != nullptr);
         INFO(row->name);
         CHECK(row->identity == IdentityRequirement::OperatorStanding);
     }
+    // MEMBER-EDIT is refused an unidentified caller AT THE DOOR, its requirement there being exactly that; whether an
+    // identified caller may make the edit is the edit's own column, asked by the scheduler.
+    CHECK(FindOp(static_cast<std::uint8_t>(Op::MemberEdit))->identity == IdentityRequirement::IdentifiedCaller);
     // And the verbs a client sends are not: a launcher on an open node leases and reads as before.
     for (auto const op: { Op::Lease, Op::Release, Op::ClusterStatus, Op::NodeStatus, Op::Fetch, Op::Enroll })
     {
@@ -6707,4 +6718,44 @@ TEST_CASE("MACHINE-BUDGET, like REGISTER, needs a proven node and ADMIT does not
         CHECK_FALSE(row.preAuth.Allowed());
         CHECK(row.maxPayload.IsBounded());
     }
+}
+
+TEST_CASE("The budget edits' values keep their layout and read back as sent", "[wire][member-edit][budget]")
+{
+    // SetBudget: one field per tier, positionally; an absent tier is an empty field.
+    auto const set = BudgetSetValue { .bytes = { std::nullopt, std::uint64_t { 0x0102030405060708 } } };
+    auto const setBytes = EncodeBudgetSetValue(set);
+    auto const setFields = Unwrap(WireFields::SplitAll(setBytes));
+    REQUIRE(setFields.size() == 2);
+    CHECK(setFields[0].empty());
+    REQUIRE(setFields[1].size() == 8);
+    CHECK(setFields[1][0] == std::byte { 0x01 }); // big-endian
+    CHECK(Unwrap(DecodeBudgetSetValue(setBytes)).bytes == set.bytes);
+    auto const sevenBytes = std::array<std::byte, 7> {};
+    CHECK_FALSE(DecodeBudgetSetValue(WireFields::Encode({ std::span<std::byte const> { sevenBytes } })).has_value());
+
+    // ClearBudget: the tier byte, then both figures of the override it may remove, or neither.
+    auto const bare = BudgetClearValue { .tier = 1, .only = std::nullopt };
+    CHECK(Unwrap(DecodeBudgetClearValue(EncodeBudgetClearValue(bare))).tier == 1);
+    CHECK_FALSE(Unwrap(DecodeBudgetClearValue(EncodeBudgetClearValue(bare))).only.has_value());
+    auto const named = BudgetClearValue { .tier = 0, .only = BudgetIdentity { .bytes = 64, .setAtUnixSeconds = -7 } };
+    CHECK(Unwrap(DecodeBudgetClearValue(EncodeBudgetClearValue(named))).only == named.only);
+    auto const tier = std::array { std::byte { 0 } };
+    auto const figure = std::array<std::byte, 8> {};
+    CHECK_FALSE(DecodeBudgetClearValue(WireFields::Encode({ std::span<std::byte const> { tier },
+                                                            std::span<std::byte const> { figure },
+                                                            std::span<std::byte const> {} }))
+                    .has_value());
+
+    // RecordBaseline: the tier byte, the baseline, and the override it was measured against.
+    auto const baseline = BudgetBaselineValue {
+        .tier = 1, .baseline = 0, .measuredFor = BudgetIdentity { .bytes = 2048, .setAtUnixSeconds = 1793613600 }
+    };
+    auto const baselineBytes = EncodeBudgetBaselineValue(baseline);
+    CHECK(Unwrap(WireFields::SplitAll(baselineBytes)).size() == 4);
+    auto const decoded = Unwrap(DecodeBudgetBaselineValue(baselineBytes));
+    CHECK(decoded.tier == 1);
+    CHECK(decoded.baseline == 0);
+    CHECK(decoded.measuredFor == baseline.measuredFor);
+    CHECK_FALSE(DecodeBudgetBaselineValue(EncodeBudgetClearValue(bare)).has_value());
 }

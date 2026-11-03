@@ -4,7 +4,9 @@
 #include "McpActionTools.hpp"
 #include "McpToolSupport.hpp"
 
+#include <Pace/Cluster/BudgetOverride.hpp>
 #include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Config/ByteSize.hpp>
 #include <Pace/Core/Ed25519.hpp>
 #include <Pace/Core/EnumTable.hpp>
 #include <Pace/Core/PeerText.hpp>
@@ -515,6 +517,136 @@ namespace
                                   Provenance(*reply)));
     }
 
+    // ------------------------------------------------------------ set_cache_budget / clear_cache_budget
+
+    constexpr std::array BudgetArguments { std::string_view { "node" },
+                                           std::string_view { "memory" },
+                                           std::string_view { "disk" } };
+    constexpr std::array ClearBudgetArguments { std::string_view { "node" }, std::string_view { "which" } };
+
+    /// The member a budget tool names: REQUIRED, for `set_display_name`'s reason -- an override that fell back to this
+    /// node because `node` was forgotten would resize a machine nobody named.
+    /// @param context The tools' collaborators.
+    /// @param call The call.
+    /// @param tool The tool, for the refusal.
+    /// @return The resolved target, or the tool error naming why there is none.
+    [[nodiscard]] std::expected<NodeTarget, Mcp::ToolResult> BudgetTargetOf(ActionContext const& context,
+                                                                            Mcp::ToolCall const& call,
+                                                                            std::string_view tool)
+    {
+        if (call.arguments.Find("node") == nullptr)
+            return std::unexpected { Error(
+                std::format("`node` must name the member {} acts on: its id or its display name, matched exactly", tool)) };
+        auto target = NodeTargetOf(call, *context.cluster, context.selfId);
+        if (!target.has_value())
+            return std::unexpected { std::move(target.error()) };
+        if (target->nodeId.empty())
+            target->nodeId = context.selfId;
+        if (target->nodeId.empty())
+            return std::unexpected { Error("this node has no id, so it cannot name itself; give `node` as a member's id") };
+        return std::move(*target);
+    }
+
+    [[nodiscard]] Mcp::ToolResult SetCacheBudget(ActionContext const& context, Mcp::ToolCall const& call)
+    {
+        if (auto unknown = UnknownArgument(call, BudgetArguments); unknown.has_value())
+            return std::move(*unknown);
+        auto target = BudgetTargetOf(context, call, "set_cache_budget");
+        if (!target.has_value())
+            return std::move(target.error());
+
+        // Each tier through the ONE grammar every door shares (`Cluster::ParseOverrideBudget`): the tier's startup
+        // flag's sizes, zero and a share of RAM refused -- before anything is sent, and never a second copy of the rule.
+        auto value = Wire::BudgetSetValue { .bytes = Wire::PerTier<std::uint64_t>(EnumeratorCount<StorageTier>) };
+        auto audited = Json::Object { { "node", Str(target->nodeId) } };
+        auto result = Json::Object {};
+        auto asked = std::string {};
+        for (auto const& row: Cluster::BudgetTierTable)
+        {
+            auto const name = Cluster::TierName(row.tier);
+            auto const* const argument = call.arguments.Find(name);
+            if (argument == nullptr || argument->IsNull())
+            {
+                result.emplace_back(std::string { name }, Null());
+                continue;
+            }
+            auto const* const text = argument->AsString();
+            if (text == nullptr)
+                return Error(std::format(R"(`{}` must be a string: a size as {} takes it, e.g. "64m")", name, row.flag));
+            auto const bytes = Cluster::ParseOverrideBudget(row.tier, *text);
+            if (!bytes.has_value())
+                return Error(std::format("`{}` is not a budget {} could take: {}", name, row.flag, bytes.error().context));
+            value.bytes[static_cast<std::size_t>(row.tier)] = *bytes;
+            audited.emplace_back(std::string { name }, Str(*text));
+            result.emplace_back(std::string { name }, Json::Unsigned(*bytes));
+            asked +=
+                std::format("{}{} {}", asked.empty() ? "" : ", ", name, FormatByteSize(static_cast<std::size_t>(*bytes)));
+        }
+        if (asked.empty())
+            return Error("give `memory`, `disk` or both: a size per tier to override, e.g. \"64m\"");
+
+        auto const encoded = Wire::EncodeBudgetSetValue(value);
+        auto reply = Ask(context,
+                         UpstreamTarget::Leader,
+                         Wire::EncodeMemberEdit(Wire::MemberEditRequest { .verb = Wire::MemberEditVerb::SetBudget,
+                                                                          .memberId = target->nodeId,
+                                                                          .value = Wire::AsStringView(encoded) }),
+                         "member-edit");
+        if (!reply.has_value())
+            return std::move(reply.error());
+        Audit(context, call, "set_cache_budget", std::move(audited), *reply);
+
+        auto answer = Envelope(*reply);
+        AppendNaming(answer, NamingOfMember(context.cluster->AppliedState(), target->nodeId));
+        for (auto& member: result)
+            answer.push_back(std::move(member));
+        answer.emplace_back("state", Str("replicating"));
+        // Appended, never committed; and recorded, never applied: the member applies it, and only it can refuse it.
+        return Answer(std::move(answer),
+                      std::format("{}: override of {} asked; the leader appended it, which is replicating (not yet "
+                                  "committed). The member applies it -- when it is down, when it returns -- and may "
+                                  "still refuse a tier it does not have; {}",
+                                  target->nodeId,
+                                  asked,
+                                  Provenance(*reply)));
+    }
+
+    [[nodiscard]] Mcp::ToolResult ClearCacheBudget(ActionContext const& context, Mcp::ToolCall const& call)
+    {
+        if (auto unknown = UnknownArgument(call, ClearBudgetArguments); unknown.has_value())
+            return std::move(*unknown);
+        auto target = BudgetTargetOf(context, call, "clear_cache_budget");
+        if (!target.has_value())
+            return std::move(target.error());
+        auto const which = StringAt(call.arguments, "which");
+        auto const tier = which.has_value() ? Cluster::TierNamed(*which) : std::nullopt;
+        if (!tier.has_value())
+            return Error(R"(`which` must name one tier: "memory" or "disk")");
+
+        auto const encoded = Wire::EncodeBudgetClearValue(
+            Wire::BudgetClearValue { .tier = static_cast<std::uint8_t>(*tier), .only = std::nullopt });
+        auto reply = Ask(context,
+                         UpstreamTarget::Leader,
+                         Wire::EncodeMemberEdit(Wire::MemberEditRequest { .verb = Wire::MemberEditVerb::ClearBudget,
+                                                                          .memberId = target->nodeId,
+                                                                          .value = Wire::AsStringView(encoded) }),
+                         "member-edit");
+        if (!reply.has_value())
+            return std::move(reply.error());
+        Audit(context, call, "clear_cache_budget", { { "node", Str(target->nodeId) }, { "which", Str(*which) } }, *reply);
+
+        auto answer = Envelope(*reply);
+        AppendNaming(answer, NamingOfMember(context.cluster->AppliedState(), target->nodeId));
+        answer.emplace_back("which", Str(*which));
+        answer.emplace_back("state", Str("replicating"));
+        return Answer(std::move(answer),
+                      std::format("{}: {} override cleared at the leader, which is replicating (not yet committed); "
+                                  "the member returns to its own configured value; {}",
+                                  target->nodeId,
+                                  *which,
+                                  Provenance(*reply)));
+    }
+
     // ------------------------------------------------------------ explain_admission
 
     constexpr std::array ExplainArguments { std::string_view { "machine" } };
@@ -642,6 +774,35 @@ namespace
         R"("answered_by":{"type":"string"},"term":{"type":["integer","null"]},"term_scope":{"const":"this-node"},)"
         R"("node_id":{"type":"string","description":"The member renamed, by its id."},)"
         R"("display_name":{"type":["string","null"],"description":"The name ASKED FOR, not confirmed as applied: the leader appended the change, and one that stops holding before it commits (the member forgotten, or the name taken by a rename judged first) is dropped there. Read fleet_overview or node_status to see the name in force. null when clearing was asked."},)"
+        R"("state":{"const":"replicating","description":"Appended at the leader, not yet committed."}}})";
+
+    constexpr std::string_view BudgetInput =
+        R"({"type":"object","properties":{)"
+        R"("node":{"type":"string","description":"The member whose budget to override: its id or its display name, matched exactly -- never by prefix."},)"
+        R"("memory":{"type":"string","description":"The memory tier's budget as --cache-memory takes a size: k, m or g (\"512m\", \"2g\"). Never 0 (an override removes no tier) and never a share of RAM (it would be the wrong machine's)."},)"
+        R"("disk":{"type":"string","description":"The disk tier's budget as --cache-disk takes it: k, m or g. Never 0."}},)"
+        R"("required":["node"],"anyOf":[{"required":["memory"]},{"required":["disk"]}],"additionalProperties":false})";
+
+    constexpr std::string_view BudgetOutput =
+        R"({"type":"object","required":["answered_by","term","term_scope","node_id","display_name","memory","disk","state"],"properties":{)"
+        R"("answered_by":{"type":"string"},"term":{"type":["integer","null"]},"term_scope":{"const":"this-node"},)"
+        R"("node_id":{"type":"string","description":"The member, by its id."},)"
+        R"("display_name":{"type":["string","null"],"description":"Its display name as this node's applied state records it; null when it has none."},)"
+        R"("memory":{"type":["integer","null"],"description":"The memory budget ASKED FOR, in bytes; null when this call left that tier as it was. Not confirmed as applied: the member applies an override, and reports the baseline it was set against."},)"
+        R"("disk":{"type":["integer","null"],"description":"The disk budget asked for, in bytes; null when left as it was."},)"
+        R"("state":{"const":"replicating","description":"Appended at the leader, not yet committed."}}})";
+
+    constexpr std::string_view ClearBudgetInput =
+        R"({"type":"object","properties":{)"
+        R"("node":{"type":"string","description":"The member: its id or its display name, matched exactly."},)"
+        R"("which":{"type":"string","enum":["memory","disk"],"description":"Whose override to clear."}},)"
+        R"("required":["node","which"],"additionalProperties":false})";
+
+    constexpr std::string_view ClearBudgetOutput =
+        R"({"type":"object","required":["answered_by","term","term_scope","node_id","display_name","which","state"],"properties":{)"
+        R"("answered_by":{"type":"string"},"term":{"type":["integer","null"]},"term_scope":{"const":"this-node"},)"
+        R"("node_id":{"type":"string"},"display_name":{"type":["string","null"]},)"
+        R"("which":{"type":"string"},)"
         R"("state":{"const":"replicating","description":"Appended at the leader, not yet committed."}}})";
 
     constexpr std::string_view CordonInput =
@@ -774,6 +935,33 @@ std::vector<Mcp::ToolRow> ActionTools(IMcpUpstream& upstream,
             .outputSchema = DisplayNameOutput,
             .effect = Mcp::ToolEffect::Mutating,
             .handler = [context](Mcp::ToolCall const& call) { return SetDisplayName(context, call); },
+        },
+        Mcp::ToolRow {
+            .name = "set_cache_budget",
+            .title = "Override cache budget",
+            .description = "Override one member's cache budget -- memory, disk or both -- in the replicated cluster "
+                           "state. The leader records it (settable while the member is down) and the member applies "
+                           "it live: a smaller memory tier evicts, a smaller disk tier evicts in bounded slices. "
+                           "Sizes as --cache-memory and --cache-disk take them (k, m, g); 0 and a share of RAM are "
+                           "refused. The member's own LATER change of that flag outranks the override, which it then "
+                           "drops. Needs this node to hold an operator's standing at the leader. The same change as "
+                           "`pacectl cluster-budget` and `pace-node --cluster-budget`.",
+            .inputSchema = BudgetInput,
+            .outputSchema = BudgetOutput,
+            .effect = Mcp::ToolEffect::Mutating,
+            .handler = [context](Mcp::ToolCall const& call) { return SetCacheBudget(context, call); },
+        },
+        Mcp::ToolRow {
+            .name = "clear_cache_budget",
+            .title = "Clear cache budget override",
+            .description = "Clear one member's override of one cache tier's budget (`which`: memory or disk), so the "
+                           "member returns to its own configured value. Needs this node to hold an operator's standing "
+                           "at the leader. The same change as `pacectl cluster-budget-clear` and `pace-node "
+                           "--cluster-budget-clear`.",
+            .inputSchema = ClearBudgetInput,
+            .outputSchema = ClearBudgetOutput,
+            .effect = Mcp::ToolEffect::Mutating,
+            .handler = [context](Mcp::ToolCall const& call) { return ClearCacheBudget(context, call); },
         },
         Mcp::ToolRow {
             .name = "cordon",

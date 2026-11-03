@@ -82,6 +82,13 @@ std::vector<std::byte> EncodeClusterRequest(ClusterRequest const& request)
         case ClusterAction::Name:
             return Wire::EncodeMemberEdit(Wire::MemberEditRequest {
                 .verb = Wire::MemberEditVerb::SetDisplayName, .memberId = request.key, .value = request.value });
+        // The value is the edit's record as it travels, encoded by the flag's applier from the one grammar.
+        case ClusterAction::Budget:
+            return Wire::EncodeMemberEdit(Wire::MemberEditRequest {
+                .verb = Wire::MemberEditVerb::SetBudget, .memberId = request.key, .value = request.value });
+        case ClusterAction::BudgetClear:
+            return Wire::EncodeMemberEdit(Wire::MemberEditRequest {
+                .verb = Wire::MemberEditVerb::ClearBudget, .memberId = request.key, .value = request.value });
         case ClusterAction::Forget:
             return Wire::EncodeClusterForget(request.key);
         case ClusterAction::Admit:
@@ -134,6 +141,16 @@ std::string RenderClusterState(Cluster::ClusterState const& state)
                            scheduler,
                            FormatEd25519PublicKey(member.publicKey),
                            member.displayName.empty() ? std::string { Absent } : member.displayName);
+        // Each tier's override on a line of its own beneath, only where one is recorded: the figure, the baseline the
+        // member reported or that it has not, and when the leader recorded it -- one rendering, `pacectl
+        // cluster-members` prints the same cell.
+        for (auto const& row: Cluster::BudgetSlots)
+            if (auto const& budget = member.*row.slot; budget.has_value())
+                out += std::format("  {:<{}} {}-budget={}\n",
+                                   "",
+                                   IdColumn,
+                                   Cluster::TierName(row.tier),
+                                   Cluster::FormatBudgetOverride(*budget));
     }
 
     out += std::format("revoked keys ({}):\n", state.revokedKeys.size());
@@ -181,6 +198,8 @@ std::expected<std::string, std::string> InterpretClusterReply(ClusterAction acti
         case ClusterAction::Set:
         case ClusterAction::Forget:
         case ClusterAction::Name:
+        case ClusterAction::Budget:
+        case ClusterAction::BudgetClear:
             // Appended, not committed, and the wording says so: the leader cannot know
             // the difference until a majority answers, and claiming otherwise would be
             // the one thing a report like this must not do.

@@ -1420,6 +1420,77 @@ TEST_CASE("cluster-name sends the member, the name and the edit, and refuses a n
     }
 }
 
+TEST_CASE("cluster-budget sends one MEMBER-EDIT through the one budget grammar, and refuses what the leader would",
+          "[cli][node][cluster][budget]")
+{
+    std::vector<std::byte> const noPayload;
+    constexpr auto MiB = std::uint64_t { 1024 * 1024 };
+    {
+        ScriptedNodeExchange node { { CacheWire::EncodeReply(CacheWire::Status::Ok, noPayload) } };
+        (void) RunNodeVerb("cluster-budget", node, { "node-b:memory=64m,disk=2g" });
+        REQUIRE(node.Sent().size() == 1);
+        auto const& frame = SentFrame(node);
+        auto const view =
+            Unwrap(CacheWire::DecodeMemberEditPayload(std::span { frame }.subspan(CacheWire::RequestHeaderSize)));
+        CHECK(view.verb == static_cast<std::uint8_t>(CacheWire::MemberEditVerb::SetBudget));
+        CHECK(CacheWire::AsStringView(view.memberId) == "node-b");
+        CHECK(Unwrap(CacheWire::DecodeBudgetSetValue(view.value)).bytes
+              == CacheWire::PerTier<std::uint64_t> { 64 * MiB, 2048 * MiB });
+    }
+    {
+        ScriptedNodeExchange node { { CacheWire::EncodeReply(CacheWire::Status::Ok, noPayload) } };
+        (void) RunNodeVerb("cluster-budget-clear", node, { "node-b:memory" });
+        REQUIRE(node.Sent().size() == 1);
+        auto const& frame = SentFrame(node);
+        auto const view =
+            Unwrap(CacheWire::DecodeMemberEditPayload(std::span { frame }.subspan(CacheWire::RequestHeaderSize)));
+        CHECK(view.verb == static_cast<std::uint8_t>(CacheWire::MemberEditVerb::ClearBudget));
+        CHECK(Unwrap(CacheWire::DecodeBudgetClearValue(view.value)).tier == 0);
+    }
+    for (auto const& [verb, operand]: { std::pair { "cluster-budget", "node-b:memory=0" },
+                                        std::pair { "cluster-budget", "node-b:memory=25%" },
+                                        std::pair { "cluster-budget", "node-b" },
+                                        std::pair { "cluster-budget-clear", "node-b:both" } })
+    {
+        INFO(verb << " " << operand);
+        ScriptedNodeExchange node { { CacheWire::EncodeReply(CacheWire::Status::Ok, noPayload) } };
+        auto const answer = RunNodeVerb(verb, node, { operand });
+        CHECK(answer.outcome == Outcome::Usage);
+        CHECK(node.Sent().empty());
+    }
+}
+
+TEST_CASE("cluster-members shows each member's recorded budget override, absent where none is",
+          "[cli][node][cluster][budget]")
+{
+    auto state = Cluster::ClusterState {};
+    for (auto const* const id: { "node-a", "node-b" })
+        Cluster::Apply(state,
+                       Cluster::Command { .kind = Cluster::CommandKind::AddMember,
+                                          .key = id,
+                                          .value = "10.0.0.1:6675",
+                                          .schedulerEndpoint = {},
+                                          .publicKey = MemberKey(id) });
+    Cluster::Apply(state,
+                   Cluster::Command { .kind = Cluster::CommandKind::SetBudget,
+                                      .key = "node-b",
+                                      .value = "disk",
+                                      .schedulerEndpoint = {},
+                                      .publicKey = std::nullopt,
+                                      .budgetBytes = 2ULL << 30,
+                                      .setAtUnixSeconds = 1793613600 });
+    ScriptedNodeExchange node { { ClusterStatusReply(state) } };
+    auto const answer = RunNodeVerb("cluster-members", node);
+    CHECK(answer.outcome == Outcome::Affirmative);
+    auto const& rows = RowsOf(answer);
+    REQUIRE(rows.size() == 2);
+    auto const memory = ColumnOf(answer, "memory-budget");
+    auto const disk = ColumnOf(answer, "disk-budget");
+    CHECK(rows[0][disk].kind == CellKind::Absent);
+    CHECK(rows[1][memory].kind == CellKind::Absent);
+    CHECK(rows[1][disk].lexical == "2G baseline=unset set=2026-11-02T10:00:00Z");
+}
+
 TEST_CASE("cluster-settings names every key this build knows, set or not", "[cli][node][cluster]")
 {
     // An operator's real question is usually *what CAN I set*, and a report listing only
@@ -1483,7 +1554,9 @@ TEST_CASE("a cluster change reports ACCEPTED, never committed", "[cli][node][clu
     for (auto const& spec:
          { std::pair { std::string_view { "cluster-set" }, std::vector<std::string> { "fleet-open", "1" } },
            std::pair { std::string_view { "cluster-forget" }, std::vector<std::string> { "node-b" } },
-           std::pair { std::string_view { "cluster-name" }, std::vector<std::string> { "node-b", "build-box" } } })
+           std::pair { std::string_view { "cluster-name" }, std::vector<std::string> { "node-b", "build-box" } },
+           std::pair { std::string_view { "cluster-budget" }, std::vector<std::string> { "node-b:memory=64m" } },
+           std::pair { std::string_view { "cluster-budget-clear" }, std::vector<std::string> { "node-b:disk" } } })
     {
         INFO("verb: " << spec.first);
         // A typed empty payload: `{}` is ambiguous against `std::span`, and these two
@@ -1692,6 +1765,8 @@ TEST_CASE("the cluster verbs send the opcodes the wire table names", "[cli][node
            Expectation { .verb = "cluster-set", .operands = { "fleet-open", "1" }, .op = CacheWire::Op::ClusterSet },
            Expectation { .verb = "cluster-forget", .operands = { "node-b" }, .op = CacheWire::Op::ClusterForget },
            Expectation { .verb = "cluster-name", .operands = { "node-b", "build-box" }, .op = CacheWire::Op::MemberEdit },
+           Expectation { .verb = "cluster-budget", .operands = { "node-b:disk=1g" }, .op = CacheWire::Op::MemberEdit },
+           Expectation { .verb = "cluster-budget-clear", .operands = { "node-b:disk" }, .op = CacheWire::Op::MemberEdit },
            Expectation {
                .verb = "cluster-admit", .operands = { "node-c", "10.0.0.9:6675" }, .op = CacheWire::Op::ClusterAdmit },
            Expectation { .verb = "cluster-admit-learner",

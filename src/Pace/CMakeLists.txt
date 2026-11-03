@@ -56,6 +56,7 @@ target_sources(Pace
         Core/X25519.cpp
         Cluster/AnnouncedEndpoints.cpp
         Cluster/BeaconDestinations.cpp
+        Cluster/BudgetOverride.cpp
         Cluster/ClusterState.cpp
         Cluster/ClusterStateMachine.cpp
         Cluster/ChallengeCookies.cpp

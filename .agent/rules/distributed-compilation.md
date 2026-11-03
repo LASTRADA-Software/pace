@@ -3811,9 +3811,13 @@ caller could approve its own enrollment or arm an auto-approve window. Two colum
 never an `if` at a handler:
 - `OpDescriptor::identity` names the verbs: `IdentityRequirement::OperatorStanding` on
   `ClusterSet`, `ClusterForget`, `ClusterAdmit`, `ClusterAdmitLearner` and `EnrollControl`
-  (`ClusterAdmitWorker`, 0x1D, is retired), pinned by `ControlVerbsNeedOperatorStanding`; `IdentifiedCaller` is only its
-  PREREQUISITE (`IdentityRequirementRow::prerequisite`, walked by `UnmetRequirement`) and no verb
-  names it.
+  (`ClusterAdmitWorker`, 0x1D, is retired), pinned by `ControlVerbsNeedOperatorStanding`; `IdentifiedCaller` is its
+  PREREQUISITE (`IdentityRequirementRow::prerequisite`, walked by `UnmetRequirement`), and the one verb that names it,
+  `MemberEdit`, names it at the DOOR alone: who may make an edit depends on the edit, so each `MemberEditVerbTable` row
+  carries an `authority` -- an operator's standing, or the edited member's own key proved on the connection
+  (`RecordBaseline`: what a machine had configured is that machine's to say) -- asked by `SchedulerService::MemberEdit`
+  once the edit byte is read, through the same `UnmetRequirement`. A per-verb column that weakened at the door must be
+  re-asked per edit, or the door IS the rule; the same static_assert pins that only `MemberEdit` names it.
 - `Distributed::MembershipRoutes`' `standing` column names the routes: loopback is an `Operator`
   at the node being asked, a proven key and a verified ticket identify a `MachineSeat`, and
   `OpenPolicy` is `Anonymous`.

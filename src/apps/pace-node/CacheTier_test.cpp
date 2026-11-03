@@ -590,22 +590,6 @@ TEST_CASE("absent tier refused as a live tier budget", "[node][cache-tier][resiz
     CHECK(Unwrap(At(tier->SnapshotTiers(), StorageTier::Memory)).bytesLimit == cfg.cacheMemoryBytes);
 }
 
-TEST_CASE("A live tier budget is parsed by its startup flag's own grammar", "[node][cache-tier][resize]")
-{
-    // `N%` is `--cache-memory`'s and not `--cache-disk`'s, and zero is refused for both.
-    CHECK(Unwrap(ParseTierBudget(StorageTier::Memory, "64m")) == 64ULL * 1024 * 1024);
-    CHECK(Unwrap(ParseTierBudget(StorageTier::Disk, "2g")) == 2ULL * 1024 * 1024 * 1024);
-    CHECK(ParseTierBudget(StorageTier::Memory, "10%").has_value());
-    auto const percentDisk = ParseTierBudget(StorageTier::Disk, "10%");
-    REQUIRE_FALSE(percentDisk.has_value());
-    CHECK(percentDisk.error().field == "--cache-disk");
-    auto const zero = ParseTierBudget(StorageTier::Memory, "0");
-    REQUIRE_FALSE(zero.has_value());
-    CHECK(zero.error().context == TierOverrideCannotRemoveTier);
-    CHECK(zero.error().field == "--cache-memory");
-    CHECK_FALSE(ParseTierBudget(StorageTier::Disk, "lots").has_value());
-}
-
 TEST_CASE("capacity recomputed after shrink", "[node][cache-tier][resize][capacity]")
 {
     // What a node holds back from compiles is what its tier HOLDS (#167), so a shrink must

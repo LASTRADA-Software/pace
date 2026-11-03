@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <Pace/Cluster/BudgetOverride.hpp>
 #include <Pace/Consensus/RaftTypes.hpp>
 #include <Pace/Consensus/Standing.hpp>
 #include <Pace/Core/Ed25519.hpp>
@@ -173,8 +174,45 @@ struct ClusterMember
     /// (`DisplayNameHolder`).
     std::string displayName {};
 
+    /// The memory tier's budget as the cluster overrides it for this machine, or absent when nobody has.
+    ///
+    /// Written by `CommandKind::SetBudget` and `ClearBudget`, and its baseline by `RecordBaseline` from the member
+    /// itself. **Decides nothing about the roster** -- `RosterDiffers` leaves it out -- and, like the display name, is
+    /// KEPT across a re-admission, which states no budget, and removed with the record by a forget. Reached by tier
+    /// through `BudgetSlots`, never by naming the field at a site that means "the tier's".
+    std::optional<BudgetOverride> memoryOverride {};
+
+    /// The disk tier's budget as the cluster overrides it for this machine, or absent when nobody has. As
+    /// `memoryOverride`.
+    std::optional<BudgetOverride> diskOverride {};
+
     [[nodiscard]] friend bool operator==(ClusterMember const&, ClusterMember const&) = default;
 };
+
+/// Where one tier's override lives in a member record.
+struct BudgetSlotRow
+{
+    StorageTier tier;                                    ///< The tier.
+    std::optional<BudgetOverride> ClusterMember::* slot; ///< Its field.
+};
+
+/// One row per `StorageTier`, in enumerator order: the ONE map from a tier to its field, so `Apply`, the encoder, the
+/// decoder and every renderer reach a tier's override the same way, and a third tier is a row and a field.
+inline constexpr EnumTable<StorageTier, BudgetSlotRow> BudgetSlots { {
+    { .tier = StorageTier::Memory, .slot = &ClusterMember::memoryOverride },
+    { .tier = StorageTier::Disk, .slot = &ClusterMember::diskOverride },
+} };
+
+static_assert(RowsInEnumeratorOrder(BudgetSlots, &BudgetSlotRow::tier),
+              "BudgetSlots must hold one row per StorageTier, in enumerator order");
+
+/// @param member A member record.
+/// @param tier A tier.
+/// @return The override the cluster records for that tier of that member, absent when none.
+[[nodiscard]] constexpr std::optional<BudgetOverride> const& BudgetOf(ClusterMember const& member, StorageTier tier) noexcept
+{
+    return member.*(BudgetSlots[static_cast<std::size_t>(tier)].slot);
+}
 
 /// The longest display name a member may carry, in bytes.
 ///
@@ -820,6 +858,33 @@ enum class CommandKind : std::uint8_t
     /// been taken since it was judged (`DisplayNameHolder`), as every verb is when its preconditions stop holding.
     SetDisplayName,
 
+    /// Record a cache budget override for one member's tier (`ClusterMember::memoryOverride`/`diskOverride`): `key`
+    /// is the member's id, `value` the tier's name (`memory`, `disk`), `budgetBytes` the budget and
+    /// `setAtUnixSeconds` the LEADER's clock when it proposed it. MEMBER-EDIT's `SetBudget`, proposed by the leader.
+    ///
+    /// Replaces any override recorded for that tier, baseline included: a new figure is a new override, whose
+    /// baseline the member reports afresh. Settable for a member that is down -- the record is the state, and the
+    /// member applies it when it returns. Dropped at commit when the member is gone.
+    SetBudget,
+
+    /// Clear one member's override for one tier: `key` is the member's id, `value` the tier's name. MEMBER-EDIT's
+    /// `ClearBudget`.
+    ///
+    /// With `budgetBytes` and `setAtUnixSeconds` both present it clears only the override they name, and is dropped
+    /// at commit when another has been recorded since -- how a member dropping an override its own later edit
+    /// outranks cannot also drop a newer one an operator set in between. With neither, it clears whatever is
+    /// recorded.
+    ClearBudget,
+
+    /// Record the baseline a member reports for its own override: `key` is the member's id, `value` the tier's name,
+    /// `baselineBytes` the member's own configured value, and `budgetBytes` with `setAtUnixSeconds` the override it
+    /// answers. MEMBER-EDIT's `RecordBaseline`, sent by the member itself under its proven identity.
+    ///
+    /// Dropped at commit unless that very override is still recorded and has no baseline yet -- an override replaced
+    /// or cleared since the member measured never inherits the measurement, and the first report wins. Deterministic,
+    /// so every replica records the same baseline or none.
+    RecordBaseline,
+
     Last, ///< Not a verb, and has no row: the length of a table keyed by one.
 };
 
@@ -935,11 +1000,11 @@ struct Command
 {
     CommandKind kind { CommandKind::AddMember };
     /// The member id for `AddMember`/`AddLearner`, the setting name for `SetSetting`, the
-    /// member's id for `Forget` and `SetDisplayName`, and the survivor's id for `DissolveInto`.
+    /// member's id for `Forget`, `SetDisplayName` and the budget verbs, and the survivor's id for `DissolveInto`.
     std::string key;
     /// The consensus endpoint for `AddMember`/`AddLearner`, the value for `SetSetting`, the
     /// survivor's leader endpoint for `DissolveInto`, the display name for `SetDisplayName`
-    /// (empty clears it), empty otherwise.
+    /// (empty clears it), the tier's name for the budget verbs, empty otherwise.
     std::string value;
 
     /// `AddMember`/`AddLearner` only: where this member's `0xFC` port answers.
@@ -968,6 +1033,19 @@ struct Command
     /// `DissolveInto` only, and required there: the survivor's leader's key, reached from
     /// `publicKey` (`DissolveOrder::leaderKey`). Refused for every other verb.
     std::optional<Ed25519PublicKey> leaderKey {};
+
+    /// The budget verbs only: the override's bytes -- the one `SetBudget` records, and the one `RecordBaseline` and a
+    /// conditional `ClearBudget` name. Refused for every other verb.
+    std::optional<std::uint64_t> budgetBytes {};
+
+    /// `RecordBaseline` only, and required there: the member's own configured value for the tier. Refused for every
+    /// other verb.
+    std::optional<std::uint64_t> baselineBytes {};
+
+    /// The budget verbs only: when the leader recorded the override, by the leader's clock -- stamped by the
+    /// proposing leader for `SetBudget`, and naming the override for `RecordBaseline` and a conditional
+    /// `ClearBudget`. Never read from a clock inside `Apply`. Refused for every other verb.
+    std::optional<std::int64_t> setAtUnixSeconds {};
 
     [[nodiscard]] friend bool operator==(Command const&, Command const&) = default;
 };

@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <charconv>
 #include <chrono>
 #include <cstdint>
@@ -137,12 +138,14 @@ namespace
     /// (`SetDisplayName`). The new verb alone would not have moved it -- an older build refuses its byte by name -- and
     /// the move is taken here, once, so the member-record changes this branch lands on top (the per-node budget
     /// overrides) extend 7 rather than spending a second bump: the version marks one release's arrangement, and a node
-    /// whose own log a 6 wrote refuses to start by name (#1542) as every earlier move made it.
+    /// whose own log a 6 wrote refuses to start by name (#1542) as every earlier move made it. And they did: the budget
+    /// verbs (`SetBudget`, `ClearBudget`, `RecordBaseline`) added an eighth, ninth and tenth field -- the override's
+    /// bytes, the member's baseline and the leader's stamp -- within 7, which no build outside this branch ever wrote.
     constexpr std::uint8_t CommandVersion = 7;
 
     /// Fields in an encoded command: the header, then key, value, scheduler endpoint,
-    /// public key, creation time and leader key.
-    constexpr std::size_t CommandFields = 7;
+    /// public key, creation time, leader key, budget bytes, baseline bytes and the leader's stamp.
+    constexpr std::size_t CommandFields = 10;
 
     /// Wire tag in front of every encoded state: a snapshot, and a `ClusterStatus` body.
     ///
@@ -156,17 +159,28 @@ namespace
     /// forgotten by its key alone. 9 added the dissolve order a healing split replicates, as a
     /// group of zero or one. 10 removed the principals group and its count (principal mode is
     /// retired: every machine that joins is a learner member). 11 added each member's display name, a
-    /// seventh member field.
+    /// seventh member field, and -- within 11, which no build outside this branch wrote -- its two budget overrides,
+    /// the eighth and ninth.
     constexpr std::uint8_t StateVersion = 11;
 
     /// Fields one member occupies in an encoded state: id, Raft, scheduler, the
-    /// scheduler endpoint's history, the seat, the public key, and the display name.
+    /// scheduler endpoint's history, the seat, the public key, the display name, and one budget override per tier
+    /// (`BudgetSlots`, positionally).
     ///
-    /// Named because the decoder's arithmetic is otherwise seven unexplained sevens,
+    /// Named because the decoder's arithmetic is otherwise nine unexplained nines,
     /// and getting one of them wrong reads every member's scheduler endpoint as the
     /// next member's id -- which decodes, and produces a state nothing would report as
     /// wrong.
-    constexpr std::size_t MemberFields = 7;
+    constexpr std::size_t MemberFields = 7 + EnumeratorCount<StorageTier>;
+
+    /// Where a member's first budget override sits among its fields.
+    constexpr std::size_t FirstBudgetField = 7;
+
+    /// An override's encoded width without a baseline -- bytes, then the leader's stamp -- and with one, after them.
+    constexpr std::size_t BudgetFieldBytes = 16;
+
+    /// An override's encoded width with its baseline.
+    constexpr std::size_t BudgetFieldWithBaselineBytes = 24;
 
     /// Fields one setting occupies: name, value.
     constexpr std::size_t SettingFields = 2;
@@ -212,6 +226,85 @@ namespace
     [[nodiscard]] std::span<std::byte const> OptionalKeyBytes(std::optional<Ed25519PublicKey> const& key) noexcept
     {
         return key.has_value() ? std::span<std::byte const> { *key } : std::span<std::byte const> {};
+    }
+
+    /// An optional eight-byte figure's bytes: empty when absent, big-endian when present.
+    /// @param value The figure, or nothing.
+    /// @return Its encoding.
+    [[nodiscard]] std::vector<std::byte> OptionalU64Bytes(std::optional<std::uint64_t> value)
+    {
+        if (!value.has_value())
+            return {};
+        auto const bytes = WireFields::ToBigEndian<std::uint64_t>(*value);
+        return { bytes.begin(), bytes.end() };
+    }
+
+    /// Read an optional eight-byte figure: empty is absent, eight bytes is one, anything else is refused.
+    /// @param field The field.
+    /// @return Absent, a figure, or nullopt-of-the-outer when the width is wrong.
+    [[nodiscard]] std::optional<std::optional<std::uint64_t>> ReadU64Field(std::span<std::byte const> field)
+    {
+        if (field.empty())
+            return std::optional<std::uint64_t> {};
+        auto const value = WireFields::FromBigEndian<std::uint64_t>(field);
+        if (!value.has_value())
+            return std::nullopt;
+        return std::optional<std::optional<std::uint64_t>> { value };
+    }
+
+    /// A stamp's eight bytes, two's complement: the one signed figure these wires carry.
+    /// @param value The figure, or nothing.
+    /// @return Its encoding.
+    [[nodiscard]] std::vector<std::byte> OptionalI64Bytes(std::optional<std::int64_t> value)
+    {
+        return OptionalU64Bytes(value.transform([](std::int64_t v) { return std::bit_cast<std::uint64_t>(v); }));
+    }
+
+    /// One override as its field: empty when there is none; else bytes and stamp, then the baseline when there is
+    /// one -- the width says which.
+    /// @param budget The override, or nothing.
+    /// @return Its encoding.
+    [[nodiscard]] std::vector<std::byte> EncodeBudgetField(std::optional<BudgetOverride> const& budget)
+    {
+        auto out = std::vector<std::byte> {};
+        if (!budget.has_value())
+            return out;
+        auto const append = [&out](std::uint64_t value) {
+            auto const bytes = WireFields::ToBigEndian<std::uint64_t>(value);
+            out.insert(out.end(), bytes.begin(), bytes.end());
+        };
+        append(budget->bytes);
+        append(std::bit_cast<std::uint64_t>(budget->setAtUnixSeconds));
+        if (budget->baseline.has_value())
+            append(*budget->baseline);
+        return out;
+    }
+
+    /// Read one override back: absent, or an override `Apply` could have recorded.
+    /// @param field The field.
+    /// @return Absent, the override, or why it is not one -- a width neither form has, or a zero budget, which
+    ///         `Apply` never records (`TierOverrideCannotRemoveTier`).
+    [[nodiscard]] std::expected<std::optional<BudgetOverride>, std::string> DecodeBudgetField(
+        std::span<std::byte const> field)
+    {
+        if (field.empty())
+            return std::optional<BudgetOverride> {};
+        if (field.size() != BudgetFieldBytes && field.size() != BudgetFieldWithBaselineBytes)
+            return std::unexpected(std::format("a budget override is {} bytes, neither {} nor {}",
+                                               field.size(),
+                                               BudgetFieldBytes,
+                                               BudgetFieldWithBaselineBytes));
+        auto const at = [field](std::size_t offset) {
+            return WireFields::FromBigEndian<std::uint64_t>(field.subspan(offset, 8)).value_or(0);
+        };
+        auto budget = BudgetOverride { .bytes = at(0),
+                                       .baseline = std::nullopt,
+                                       .setAtUnixSeconds = std::bit_cast<std::int64_t>(at(8)) };
+        if (field.size() == BudgetFieldWithBaselineBytes)
+            budget.baseline = at(16);
+        if (budget.bytes == 0)
+            return std::unexpected(std::string { "a budget override of zero bytes, which removes no tier" });
+        return std::optional { budget };
     }
 
     /// Read a key field: empty is no key, exactly 32 bytes is one, anything else is refused.
@@ -458,13 +551,19 @@ std::vector<std::byte> Encode(Command const& command)
         auto const bytes = WireFields::ToBigEndian<std::uint64_t>(*command.createdAtUnixSeconds);
         created.assign(bytes.begin(), bytes.end());
     }
+    auto const budget = OptionalU64Bytes(command.budgetBytes);
+    auto const baseline = OptionalU64Bytes(command.baselineBytes);
+    auto const setAt = OptionalI64Bytes(command.setAtUnixSeconds);
     return WireFields::Encode({ std::span<std::byte const> { header },
                                 WireFields::AsBytes(command.key),
                                 WireFields::AsBytes(command.value),
                                 WireFields::AsBytes(command.schedulerEndpoint),
                                 OptionalKeyBytes(command.publicKey),
                                 std::span<std::byte const> { created },
-                                OptionalKeyBytes(command.leaderKey) });
+                                OptionalKeyBytes(command.leaderKey),
+                                std::span<std::byte const> { budget },
+                                std::span<std::byte const> { baseline },
+                                std::span<std::byte const> { setAt } });
 }
 
 std::expected<Command, ConsensusError> DecodeCommand(std::span<std::byte const> payload)
@@ -481,7 +580,7 @@ std::expected<Command, ConsensusError> DecodeCommand(std::span<std::byte const> 
 
     auto const fields = WireFields::SplitExactly(payload, CommandFields);
     if (!fields.has_value())
-        return std::unexpected(MalformedWireFrame("a cluster command is not seven fields"));
+        return std::unexpected(MalformedWireFrame(std::format("a cluster command is not {} fields", CommandFields)));
 
     auto const header = (*fields)[0];
     if (header.empty())
@@ -532,13 +631,22 @@ std::expected<Command, ConsensusError> DecodeCommand(std::span<std::byte const> 
     if (!leaderKey.has_value())
         return std::unexpected(MalformedWireFrame("a cluster command's leader key is neither absent nor 32 bytes"));
 
+    auto const budget = ReadU64Field((*fields)[7]);
+    auto const baseline = ReadU64Field((*fields)[8]);
+    auto const setAt = ReadU64Field((*fields)[9]);
+    if (!budget.has_value() || !baseline.has_value() || !setAt.has_value())
+        return std::unexpected(MalformedWireFrame("a cluster command's budget figures are neither absent nor eight bytes"));
+
     return Command { .kind = *kind,
                      .key = std::string { WireFields::AsStringView((*fields)[1]) },
                      .value = std::string { WireFields::AsStringView((*fields)[2]) },
                      .schedulerEndpoint = std::string { WireFields::AsStringView((*fields)[3]) },
                      .publicKey = *publicKey,
                      .createdAtUnixSeconds = created,
-                     .leaderKey = *leaderKey };
+                     .leaderKey = *leaderKey,
+                     .budgetBytes = *budget,
+                     .baselineBytes = *baseline,
+                     .setAtUnixSeconds = setAt->transform([](std::uint64_t v) { return std::bit_cast<std::int64_t>(v); }) };
 }
 
 std::vector<std::byte> Encode(ClusterState const& state)
@@ -566,10 +674,15 @@ std::vector<std::byte> Encode(ClusterState const& state)
     // walks both.
     std::vector<std::byte> memberBytes;
     memberBytes.reserve(state.members.size() * 2);
+    // And every override's field, one per member per tier, built whole before any span is taken for the same reason.
+    std::vector<std::vector<std::byte>> budgetBytes;
+    budgetBytes.reserve(state.members.size() * BudgetSlots.size());
     for (auto const& member: state.members)
     {
         memberBytes.push_back(static_cast<std::byte>(member.schedulerEndpointHistory));
         memberBytes.push_back(static_cast<std::byte>(member.seat));
+        for (auto const& row: BudgetSlots)
+            budgetBytes.push_back(EncodeBudgetField(member.*row.slot));
     }
 
     fields.emplace_back(header);
@@ -579,6 +692,7 @@ std::vector<std::byte> Encode(ClusterState const& state)
     fields.emplace_back(rosterVersion);
     fields.emplace_back(dissolveCount);
     auto cursor = std::span<std::byte const> { memberBytes };
+    auto budget = budgetBytes.cbegin();
     for (auto const& member: state.members)
     {
         fields.push_back(WireFields::AsBytes(member.id));
@@ -588,6 +702,8 @@ std::vector<std::byte> Encode(ClusterState const& state)
         fields.push_back(cursor.subspan(1, 1));
         fields.emplace_back(member.publicKey);
         fields.push_back(WireFields::AsBytes(member.displayName));
+        for ([[maybe_unused]] auto const& row: BudgetSlots)
+            fields.emplace_back(*budget++);
         cursor = cursor.subspan(2);
     }
     for (auto const& setting: state.settings)
@@ -700,6 +816,19 @@ std::expected<ClusterState, ConsensusError> DecodeState(std::span<std::byte cons
                                       .publicKey = **publicKey,
                                       .displayName = at(index + 6) };
 
+        // Each tier's override, positionally: a width neither form has, or a zero budget `Apply` never records, is
+        // refused by name. Per record only -- whether the member's machine HAS that tier is its own question, which
+        // no state can answer and the member reports.
+        for (auto const& row: BudgetSlots)
+        {
+            auto const ordinalOfTier = static_cast<std::size_t>(row.tier);
+            auto budget = DecodeBudgetField((*fields)[StateHeaderFields + index + FirstBudgetField + ordinalOfTier]);
+            if (!budget.has_value())
+                return std::unexpected(MalformedWireFrame(
+                    std::format("member {}'s {} override: {}", member.id, TierName(row.tier), budget.error())));
+            member.*row.slot = *budget;
+        }
+
         // A name `Apply` would never have recorded -- not text a page can carry, too long, a control byte -- is read
         // as it stands by every renderer, so it is refused here rather than half-believed, as the roster's rules are.
         if (auto const refused = RefuseDisplayName(member.displayName); refused.has_value())
@@ -761,6 +890,85 @@ std::expected<ClusterState, ConsensusError> DecodeState(std::span<std::byte cons
                     MalformedWireFrame(std::format("members {} and {} answer to one display name", member.id, *holder)));
     return state;
 }
+
+namespace
+{
+    /// Whether @p budget is the override @p command names by its bytes and the leader's stamp.
+    /// @param budget A recorded override.
+    /// @param command A `RecordBaseline` or a conditional `ClearBudget`.
+    /// @return True when both figures match.
+    [[nodiscard]] bool NamesOverride(BudgetOverride const& budget, Command const& command) noexcept
+    {
+        return command.budgetBytes == budget.bytes && command.setAtUnixSeconds == budget.setAtUnixSeconds;
+    }
+
+    /// Why a budget command no longer applies to @p state, or nothing when it does.
+    ///
+    /// **The one author of the rule** `ValidateAgainst` refuses by and `Apply` drops by: the member must be recorded;
+    /// a clear must find an override, and a conditional one the override it names; a baseline must answer the very
+    /// override still recorded, which carries no other baseline yet. So a baseline measured against an override that
+    /// has since been replaced or cleared is never attached to its successor, on any replica.
+    /// @param state The state the command applies to.
+    /// @param command A `SetBudget`, `ClearBudget` or `RecordBaseline` that `Validate` accepted.
+    /// @return Why it does not apply, or nullopt.
+    [[nodiscard]] std::optional<ConsensusError> BudgetRefusal(ClusterState const& state, Command const& command)
+    {
+        auto const member = std::ranges::find(state.members, command.key, &ClusterMember::id);
+        if (member == state.members.end())
+            return InvalidConfiguration(std::format("{} is no member of this cluster, so there is no budget of its to "
+                                                    "override; the members are listed by --cluster-status",
+                                                    command.key));
+        auto const tier = TierNamed(command.value);
+        if (!tier.has_value())
+            return InvalidConfiguration(std::format("{} is no cache tier", command.value));
+        auto const& recorded = BudgetOf(*member, *tier);
+        // A set replaces whatever is recorded, so only the member had to exist.
+        if (command.kind == CommandKind::ClearBudget)
+        {
+            if (!recorded.has_value())
+                return InvalidConfiguration(std::format(
+                    "no {} override is recorded for {}, so there is nothing to clear", command.value, command.key));
+            if (command.budgetBytes.has_value() && !NamesOverride(*recorded, command))
+                return InvalidConfiguration(std::format("the {} override recorded for {} is not the one named: another "
+                                                        "was set since, and it stands",
+                                                        command.value,
+                                                        command.key));
+        }
+        if (command.kind == CommandKind::RecordBaseline)
+        {
+            if (!recorded.has_value() || !NamesOverride(*recorded, command))
+                return InvalidConfiguration(std::format("the {} override recorded for {} is not the one this baseline "
+                                                        "was measured against: it was cleared or replaced since, so "
+                                                        "nothing is recorded",
+                                                        command.value,
+                                                        command.key));
+            if (recorded->baseline.has_value() && recorded->baseline != command.baselineBytes)
+                return InvalidConfiguration(std::format("{}'s {} override already records the baseline {}; the first "
+                                                        "report stands",
+                                                        command.key,
+                                                        command.value,
+                                                        *recorded->baseline));
+        }
+        return std::nullopt;
+    }
+
+    /// The override slot a budget command changes, when it still applies (`BudgetRefusal`).
+    /// @param state The state.
+    /// @param command A budget command.
+    /// @return The member's slot for the command's tier, or null when the command is dropped.
+    [[nodiscard]] std::optional<BudgetOverride>* AppliedBudgetSlot(ClusterState& state, Command const& command)
+    {
+        // `Validate` first, for the reason `DissolveInto`'s arm checks its fields: a committed entry reaches `Apply`
+        // decoded and unjudged, so a figure `Validate` requires -- or a zero it refuses -- is dropped here too.
+        if (!Validate(command).has_value() || BudgetRefusal(state, command).has_value())
+            return nullptr;
+        auto const member = std::ranges::find(state.members, command.key, &ClusterMember::id);
+        auto const tier = TierNamed(command.value);
+        if (member == state.members.end() || !tier.has_value())
+            return nullptr;
+        return &((*member).*(BudgetSlots[static_cast<std::size_t>(*tier)].slot));
+    }
+} // namespace
 
 namespace
 {
@@ -842,7 +1050,10 @@ namespace
                                     .publicKey = *key,
                                     // Kept, never restated: no admission carries a name, and the
                                     // next announced endpoint would otherwise wipe one an operator set.
-                                    .displayName = it != state.members.end() ? it->displayName : std::string {} };
+                                    .displayName = it != state.members.end() ? it->displayName : std::string {},
+                                    // Kept for the display name's reason: no admission states a budget.
+                                    .memoryOverride = it != state.members.end() ? it->memoryOverride : std::nullopt,
+                                    .diskOverride = it != state.members.end() ? it->diskOverride : std::nullopt };
                 if (it != state.members.end())
                 {
                     // Wholesale, both endpoints. A record is re-proposed only when it has
@@ -921,6 +1132,28 @@ namespace
                 it->displayName = command.value;
                 return;
             }
+
+            // The budget verbs: each through `BudgetRefusal`, the one function `ValidateAgainst` refuses by too, so the
+            // courtesy and the guarantee cannot disagree about which override a command still names.
+            case CommandKind::SetBudget:
+                if (auto* const slot = AppliedBudgetSlot(state, command);
+                    slot != nullptr && command.budgetBytes.has_value() && command.setAtUnixSeconds.has_value())
+                    *slot = BudgetOverride { .bytes = *command.budgetBytes,
+                                             .baseline = std::nullopt,
+                                             .setAtUnixSeconds = *command.setAtUnixSeconds };
+                return;
+            case CommandKind::ClearBudget:
+                if (auto* const slot = AppliedBudgetSlot(state, command); slot != nullptr)
+                    slot->reset();
+                return;
+            case CommandKind::RecordBaseline:
+                // The first report wins: a baseline already recorded stays, so a member reporting twice -- a restart
+                // before the first report replicated back -- cannot move it.
+                if (auto* const slot = AppliedBudgetSlot(state, command); slot != nullptr && slot->has_value()
+                                                                          && command.baselineBytes.has_value()
+                                                                          && !(*slot)->baseline.has_value())
+                    (*slot)->baseline = command.baselineBytes;
+                return;
 
             case CommandKind::SetSetting: {
                 auto const it = std::ranges::find(state.settings, command.key, &Setting::name);
@@ -1066,6 +1299,13 @@ namespace
         { .name = "a member's display name", .project = [](Command const& c) -> std::string_view { return c.value; } },
     } };
 
+    /// What the budget verbs record: the member they name and the tier's name, which `Validate` then holds to
+    /// `TierNamed`.
+    constexpr std::array<TextField<Command>, 2> BudgetText { {
+        { .name = "a member id", .project = [](Command const& c) -> std::string_view { return c.key; } },
+        { .name = "a cache tier's name", .project = [](Command const& c) -> std::string_view { return c.value; } },
+    } };
+
     /// What `DissolveInto` records: the survivor's id and its leader's endpoint, which every member
     /// then dials and every renderer of the state prints.
     constexpr std::array<TextField<Command>, 2> DissolveText { {
@@ -1096,6 +1336,9 @@ namespace
         FieldUse publicKey;                         ///< Whether it takes `Command::publicKey`.
         FieldUse createdAt;                         ///< Whether it takes `Command::createdAtUnixSeconds`.
         FieldUse leaderKey;                         ///< Whether it takes `Command::leaderKey`.
+        FieldUse budgetBytes;                       ///< Whether it takes `Command::budgetBytes`.
+        FieldUse baselineBytes;                     ///< Whether it takes `Command::baselineBytes`.
+        FieldUse setAt;                             ///< Whether it takes `Command::setAtUnixSeconds`.
     };
 
     /// One row per `CommandKind`, in enumerator order.
@@ -1109,55 +1352,111 @@ namespace
           .fields = AddMemberText,
           .publicKey = FieldUse::Optional,
           .createdAt = FieldUse::Refused,
-          .leaderKey = FieldUse::Refused },
+          .leaderKey = FieldUse::Refused,
+          .budgetBytes = FieldUse::Refused,
+          .baselineBytes = FieldUse::Refused,
+          .setAt = FieldUse::Refused },
         { .kind = CommandKind::Forget,
           .noun = "a forget",
           .fields = {},
           .publicKey = FieldUse::Optional,
           .createdAt = FieldUse::Refused,
-          .leaderKey = FieldUse::Refused },
+          .leaderKey = FieldUse::Refused,
+          .budgetBytes = FieldUse::Refused,
+          .baselineBytes = FieldUse::Refused,
+          .setAt = FieldUse::Refused },
         { .kind = CommandKind::SetSetting,
           .noun = "a setting",
           .fields = SetSettingText,
           .publicKey = FieldUse::Refused,
           .createdAt = FieldUse::Refused,
-          .leaderKey = FieldUse::Refused },
+          .leaderKey = FieldUse::Refused,
+          .budgetBytes = FieldUse::Refused,
+          .baselineBytes = FieldUse::Refused,
+          .setAt = FieldUse::Refused },
         { .kind = CommandKind::RetiredAdmitClient,
           .noun = "a retired verb",
           .fields = {},
           .publicKey = FieldUse::Refused,
           .createdAt = FieldUse::Refused,
-          .leaderKey = FieldUse::Refused },
+          .leaderKey = FieldUse::Refused,
+          .budgetBytes = FieldUse::Refused,
+          .baselineBytes = FieldUse::Refused,
+          .setAt = FieldUse::Refused },
         { .kind = CommandKind::RetiredForgetClient,
           .noun = "a retired verb",
           .fields = {},
           .publicKey = FieldUse::Refused,
           .createdAt = FieldUse::Refused,
-          .leaderKey = FieldUse::Refused },
+          .leaderKey = FieldUse::Refused,
+          .budgetBytes = FieldUse::Refused,
+          .baselineBytes = FieldUse::Refused,
+          .setAt = FieldUse::Refused },
         { .kind = CommandKind::AddLearner,
           .noun = "a member admission",
           .fields = AddMemberText,
           .publicKey = FieldUse::Optional,
           .createdAt = FieldUse::Refused,
-          .leaderKey = FieldUse::Refused },
+          .leaderKey = FieldUse::Refused,
+          .budgetBytes = FieldUse::Refused,
+          .baselineBytes = FieldUse::Refused,
+          .setAt = FieldUse::Refused },
         { .kind = CommandKind::RetiredAdmitPrincipal,
           .noun = "a retired verb",
           .fields = {},
           .publicKey = FieldUse::Refused,
           .createdAt = FieldUse::Refused,
-          .leaderKey = FieldUse::Refused },
+          .leaderKey = FieldUse::Refused,
+          .budgetBytes = FieldUse::Refused,
+          .baselineBytes = FieldUse::Refused,
+          .setAt = FieldUse::Refused },
         { .kind = CommandKind::DissolveInto,
           .noun = "a dissolve",
           .fields = DissolveText,
           .publicKey = FieldUse::Required,
           .createdAt = FieldUse::Required,
-          .leaderKey = FieldUse::Required },
+          .leaderKey = FieldUse::Required,
+          .budgetBytes = FieldUse::Refused,
+          .baselineBytes = FieldUse::Refused,
+          .setAt = FieldUse::Refused },
         { .kind = CommandKind::SetDisplayName,
           .noun = "a display name",
           .fields = DisplayNameText,
           .publicKey = FieldUse::Refused,
           .createdAt = FieldUse::Refused,
-          .leaderKey = FieldUse::Refused },
+          .leaderKey = FieldUse::Refused,
+          .budgetBytes = FieldUse::Refused,
+          .baselineBytes = FieldUse::Refused,
+          .setAt = FieldUse::Refused },
+        { .kind = CommandKind::SetBudget,
+          .noun = "a budget override",
+          .fields = BudgetText,
+          .publicKey = FieldUse::Refused,
+          .createdAt = FieldUse::Refused,
+          .leaderKey = FieldUse::Refused,
+          .budgetBytes = FieldUse::Required,
+          .baselineBytes = FieldUse::Refused,
+          .setAt = FieldUse::Required },
+        // Both figures or neither, which `Validate` asks: together they name the one override a conditional clear
+        // removes.
+        { .kind = CommandKind::ClearBudget,
+          .noun = "a budget clear",
+          .fields = BudgetText,
+          .publicKey = FieldUse::Refused,
+          .createdAt = FieldUse::Refused,
+          .leaderKey = FieldUse::Refused,
+          .budgetBytes = FieldUse::Optional,
+          .baselineBytes = FieldUse::Refused,
+          .setAt = FieldUse::Optional },
+        { .kind = CommandKind::RecordBaseline,
+          .noun = "a budget baseline",
+          .fields = BudgetText,
+          .publicKey = FieldUse::Refused,
+          .createdAt = FieldUse::Refused,
+          .leaderKey = FieldUse::Refused,
+          .budgetBytes = FieldUse::Required,
+          .baselineBytes = FieldUse::Required,
+          .setAt = FieldUse::Required },
     } };
 
     static_assert(RowsInEnumeratorOrder(CommandShapes, &CommandShapeRow::kind),
@@ -1218,6 +1517,15 @@ std::expected<void, ConsensusError> Validate(Command const& command)
         !refused.has_value())
         return refused;
     if (auto refused = RefuseFieldUse(shape, shape.leaderKey, command.leaderKey.has_value(), "leader key");
+        !refused.has_value())
+        return refused;
+    if (auto refused = RefuseFieldUse(shape, shape.budgetBytes, command.budgetBytes.has_value(), "budget");
+        !refused.has_value())
+        return refused;
+    if (auto refused = RefuseFieldUse(shape, shape.baselineBytes, command.baselineBytes.has_value(), "baseline");
+        !refused.has_value())
+        return refused;
+    if (auto refused = RefuseFieldUse(shape, shape.setAt, command.setAtUnixSeconds.has_value(), "leader's stamp");
         !refused.has_value())
         return refused;
 
@@ -1316,6 +1624,27 @@ std::expected<void, ConsensusError> Validate(Command const& command)
                                 CompileCacheWire::MaxIdBytes)));
             if (auto reason = RefuseDisplayName(command.value); reason.has_value())
                 return std::unexpected(InvalidConfiguration(*std::move(reason)));
+            return {};
+
+        // A figure for a tier of a member: the id to the one id bound, the tier to a name this build knows, and a
+        // budget to the rule every client holds it to before it sends -- zero removes no tier. Whether the member's
+        // machine HAS the tier is the member's question, which no state answers: the leader records, the member reports.
+        case CommandKind::SetBudget:
+        case CommandKind::ClearBudget:
+        case CommandKind::RecordBaseline:
+            if (!command.schedulerEndpoint.empty())
+                return std::unexpected(InvalidConfiguration("a budget override carries no scheduler endpoint"));
+            if (command.key.size() > CompileCacheWire::MaxIdBytes)
+                return std::unexpected(InvalidConfiguration(
+                    std::format("a budget override names a member id past the {} bytes every id is held to",
+                                CompileCacheWire::MaxIdBytes)));
+            if (!TierNamed(command.value).has_value())
+                return std::unexpected(InvalidConfiguration(std::format("{} is no cache tier", command.value)));
+            if (command.budgetBytes == std::optional<std::uint64_t> { 0 })
+                return std::unexpected(InvalidConfiguration(std::string { TierOverrideCannotRemoveTier }));
+            if (command.budgetBytes.has_value() != command.setAtUnixSeconds.has_value())
+                return std::unexpected(InvalidConfiguration(
+                    "a budget command names an override by its bytes AND the leader's stamp, or by neither"));
             return {};
 
         // The count rather than a verb; falls out to the refusal below.
@@ -1442,6 +1771,14 @@ std::expected<void, ConsensusError> ValidateAgainst(ClusterState const& state, C
                     *holder)));
             return {};
         }
+
+        // The courtesy for `Apply`'s guarantee, through the same function (`BudgetRefusal`).
+        case CommandKind::SetBudget:
+        case CommandKind::ClearBudget:
+        case CommandKind::RecordBaseline:
+            if (auto refusal = BudgetRefusal(state, command); refusal.has_value())
+                return std::unexpected(*std::move(refusal));
+            return {};
 
         // `Validate` refused them above; named rather than swept up by a `default`, for the
         // reason `Apply` names it.

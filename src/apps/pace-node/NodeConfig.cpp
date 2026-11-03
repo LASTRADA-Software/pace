@@ -374,6 +374,28 @@ namespace
                 request.key = *std::move(bounded);
                 request.value = std::string { name };
             }
+            else if constexpr (Action == ClusterAction::Budget)
+            {
+                // `<node>:memory=<size>,disk=<size>` through the ONE grammar every door shares
+                // (`Cluster::ParseBudgetSpec`): each size in its tier's startup flag's grammar, zero and a share
+                // of RAM refused, so the operator is told here what the leader would refuse.
+                auto spec = Cluster::ParseBudgetSpec(value);
+                if (!spec.has_value())
+                    return std::unexpected(ArgvError(ConfigErrorCode::ParseError, std::move(spec).error()));
+                request.key = std::move(spec->memberId);
+                request.value = std::string { CompileCacheWire::AsStringView(CompileCacheWire::EncodeBudgetSetValue(
+                    CompileCacheWire::BudgetSetValue { .bytes = { spec->bytes.begin(), spec->bytes.end() } })) };
+            }
+            else if constexpr (Action == ClusterAction::BudgetClear)
+            {
+                auto spec = Cluster::ParseBudgetClearSpec(value);
+                if (!spec.has_value())
+                    return std::unexpected(ArgvError(ConfigErrorCode::ParseError, std::move(spec).error()));
+                request.key = std::move(spec->memberId);
+                request.value = std::string { CompileCacheWire::AsStringView(
+                    CompileCacheWire::EncodeBudgetClearValue(CompileCacheWire::BudgetClearValue {
+                        .tier = static_cast<std::uint8_t>(spec->tier), .only = std::nullopt })) };
+            }
             else if constexpr (Action == ClusterAction::Admit || Action == ClusterAction::AdmitLearner)
             {
                 // The same grammar `--print-identity`'s line spells, through the same function:
@@ -1533,6 +1555,23 @@ std::span<OptionSpec<NodeConfig> const> NodeOptions() noexcept
                          "fleet with ASCII letters compared in one case, at\n"
                          "most 64 bytes of text. A label that decides\n"
                          "nothing: no admission, route or key reads it." },
+        { .primary = "--cluster-budget",
+          .arity = Arity::Value,
+          .operand = "=<node-id>:memory=<size>[,disk=<size>]",
+          .apply = SelectClusterAction<ClusterAction::Budget>(),
+          .description = "override a member's cache budgets and exit; name\n"
+                         "either tier or both. Recorded by the leader and\n"
+                         "applied by the member, also while it is down.\n"
+                         "Sizes as --cache-memory and --cache-disk take them\n"
+                         "(k, m, g), never a share of RAM or 0. The member's\n"
+                         "own later change of that flag outranks it." },
+        { .primary = "--cluster-budget-clear",
+          .arity = Arity::Value,
+          .operand = "=<node-id>:<memory|disk>",
+          .apply = SelectClusterAction<ClusterAction::BudgetClear>(),
+          .description = "clear a member's override of one cache tier's\n"
+                         "budget and exit; the member returns to its own\n"
+                         "configured value." },
         { .primary = "--cluster-forget",
           .arity = Arity::Value,
           .operand = "=<node-id>",
@@ -2288,6 +2327,12 @@ std::span<OptionSpec<NodeConfig> const> NodeOptions() noexcept
         { .kind = FileExclusion::Verb, .flag = "--cluster-status", .reason = "asks a running cluster a question and exits" },
         { .kind = FileExclusion::Verb, .flag = "--cluster-set", .reason = "changes a running cluster's settings and exits" },
         { .kind = FileExclusion::Verb, .flag = "--cluster-name", .reason = "names a member of a running cluster and exits" },
+        { .kind = FileExclusion::Verb,
+          .flag = "--cluster-budget",
+          .reason = "overrides a member's cache budget in a running cluster and exits" },
+        { .kind = FileExclusion::Verb,
+          .flag = "--cluster-budget-clear",
+          .reason = "clears a member's cache budget override in a running cluster and exits" },
         { .kind = FileExclusion::Verb, .flag = "--cluster-admit", .reason = "admits a member and exits" },
         { .kind = FileExclusion::Verb,
           .flag = "--cluster-admit-learner",
@@ -3049,27 +3094,6 @@ std::size_t CompileRequestMaxOf(NodeConfig const& cfg) noexcept
                                                   : WorkerMaxRequestBytes;
 }
 
-namespace
-{
-    /// The startup flag that sizes one tier, and the grammar it parses its value with.
-    struct TierBudgetGrammar
-    {
-        StorageTier tier;                                                     ///< The tier this row sizes.
-        std::string_view flag;                                                ///< Its startup flag, for refusals.
-        std::expected<std::uint64_t, ConfigError> (*parse)(std::string_view); ///< That flag's own parser.
-    };
-
-    /// One row per tier: the flag an operator sizes it with at startup, and that flag's parser.
-    /// A tier added to `StorageTier` without a row fails the `static_assert` below, rather than
-    /// accepting overrides in a grammar its flag does not have.
-    constexpr EnumTable<StorageTier, TierBudgetGrammar> TierBudgetGrammars { {
-        { .tier = StorageTier::Memory, .flag = "--cache-memory", .parse = &ParseCacheBytes },
-        { .tier = StorageTier::Disk, .flag = "--cache-disk", .parse = &ParseCacheDiskBytes },
-    } };
-    static_assert(RowsInEnumeratorOrder(TierBudgetGrammars, &TierBudgetGrammar::tier),
-                  "TierBudgetGrammars must hold one row per StorageTier, in enumerator order");
-} // namespace
-
 std::expected<std::size_t, std::string> CheckTierBudget(std::uint64_t bytes)
 {
     if (bytes == 0)
@@ -3077,20 +3101,6 @@ std::expected<std::size_t, std::string> CheckTierBudget(std::uint64_t bytes)
     if (!std::in_range<std::size_t>(bytes))
         return std::unexpected(std::format("a budget of {} bytes is more than this process can address", bytes));
     return static_cast<std::size_t>(bytes);
-}
-
-std::expected<std::uint64_t, ConfigError> ParseTierBudget(StorageTier tier, std::string_view text)
-{
-    auto const& grammar = TierBudgetGrammars[static_cast<std::size_t>(tier)];
-    auto parsed = grammar.parse(text).and_then([](std::uint64_t bytes) -> std::expected<std::uint64_t, ConfigError> {
-        auto const checked = CheckTierBudget(bytes);
-        if (!checked.has_value())
-            return std::unexpected(ArgvError(ConfigErrorCode::OutOfRange, checked.error()));
-        return bytes;
-    });
-    if (!parsed.has_value())
-        parsed.error().field = std::string { grammar.flag };
-    return parsed;
 }
 
 std::uint64_t CompileEstimateDefaultOf(NodeConfig const& cfg) noexcept

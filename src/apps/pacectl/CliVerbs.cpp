@@ -8,6 +8,7 @@
 
 #include <Pace/Cli/Duration.hpp>
 #include <Pace/Cli/MemberId.hpp>
+#include <Pace/Cluster/BudgetOverride.hpp>
 #include <Pace/Cluster/ClusterState.hpp>
 #include <Pace/Cluster/FleetPin.hpp>
 #include <Pace/Core/Ed25519.hpp>
@@ -1755,6 +1756,7 @@ namespace
         std::vector<std::vector<Cell>> rows;
         rows.reserve(state.members.size());
         for (auto const& member: state.members)
+        {
             // **Absent, not empty.** An empty `schedulerEndpoint` is the state of a
             // member that has announced none -- every member's record carries the
             // endpoint its join stated -- so it is a member that has not said, never a
@@ -1782,8 +1784,18 @@ namespace
                              // ABSENT when nobody named it, never an empty text cell: a label that decides nothing,
                              // last so the columns an operator compares keep their places.
                              member.displayName.empty() ? AbsentCell() : TextCell(member.displayName) });
+            // One column per tier's override, after the name: the figure, the baseline the member reported (or that it
+            // has not), and the leader's time -- `--cluster-status`'s rendering. ABSENT where none is recorded.
+            for (auto const& row: Cluster::BudgetSlots)
+            {
+                auto const& budget = member.*row.slot;
+                rows.back().push_back(budget.has_value() ? TextCell(Cluster::FormatBudgetOverride(*budget)) : AbsentCell());
+            }
+        }
 
-        return TableValue({ "id", "seat", "raft", "scheduler", "scheduler-state", "key", "name" }, std::move(rows));
+        return TableValue(
+            { "id", "seat", "raft", "scheduler", "scheduler-state", "key", "name", "memory-budget", "disk-budget" },
+            std::move(rows));
     }
 
     /// Every setting this build knows, with what the cluster has agreed for it.
@@ -1924,6 +1936,49 @@ namespace
             context,
             CompileCacheWire::EncodeMemberEdit(CompileCacheWire::MemberEditRequest {
                 .verb = CompileCacheWire::MemberEditVerb::SetDisplayName, .memberId = context.operands[0], .value = name }));
+        if (!reply.has_value())
+            return reply.error();
+        return Answered(ClusterChangeAccepted());
+    }
+
+    /// `cluster-budget <id>:memory=<size>[,disk=<size>]` -- override a member's cache budgets.
+    ///
+    /// Through the ONE grammar `pace-node --cluster-budget` and the MCP tool share (`Cluster::ParseBudgetSpec`), so a
+    /// budget the leader would refuse -- zero, a share of RAM, a size no flag takes -- is a usage error here.
+    /// @param context What to run against.
+    /// @return The answer.
+    [[nodiscard]] Answer ClusterBudget(VerbContext const& context)
+    {
+        auto spec = Cluster::ParseBudgetSpec(context.operands[0]);
+        if (!spec.has_value())
+            return Concluded(Outcome::Usage, std::move(spec).error());
+        auto const value = CompileCacheWire::EncodeBudgetSetValue(
+            CompileCacheWire::BudgetSetValue { .bytes = { spec->bytes.begin(), spec->bytes.end() } });
+        auto const reply = AskNode(context,
+                                   CompileCacheWire::EncodeMemberEdit(CompileCacheWire::MemberEditRequest {
+                                       .verb = CompileCacheWire::MemberEditVerb::SetBudget,
+                                       .memberId = spec->memberId,
+                                       .value = CompileCacheWire::AsStringView(value) }));
+        if (!reply.has_value())
+            return reply.error();
+        return Answered(ClusterChangeAccepted());
+    }
+
+    /// `cluster-budget-clear <id>:<memory|disk>` -- clear one tier's override.
+    /// @param context What to run against.
+    /// @return The answer.
+    [[nodiscard]] Answer ClusterBudgetClear(VerbContext const& context)
+    {
+        auto spec = Cluster::ParseBudgetClearSpec(context.operands[0]);
+        if (!spec.has_value())
+            return Concluded(Outcome::Usage, std::move(spec).error());
+        auto const value = CompileCacheWire::EncodeBudgetClearValue(
+            CompileCacheWire::BudgetClearValue { .tier = static_cast<std::uint8_t>(spec->tier), .only = std::nullopt });
+        auto const reply = AskNode(context,
+                                   CompileCacheWire::EncodeMemberEdit(CompileCacheWire::MemberEditRequest {
+                                       .verb = CompileCacheWire::MemberEditVerb::ClearBudget,
+                                       .memberId = spec->memberId,
+                                       .value = CompileCacheWire::AsStringView(value) }));
         if (!reply.has_value())
             return reply.error();
         return Answered(ClusterChangeAccepted());
@@ -2577,6 +2632,29 @@ namespace
           .protocolCommand = "member-edit",
           .modifiers = Modifier::None,
           .handler = &ClusterName,
+          .nodeFallback = nullptr,
+          .session = nullptr },
+        { .name = "cluster-budget",
+          .wire = Wire::Node,
+          .minOperands = 1,
+          .maxOperands = 1,
+          .operands = " <member-id>:memory=<size>[,disk=<size>]",
+          .summary = "override a member's cache budgets (k, m, g; never 0\n"
+                     "or a share of RAM); applied by the member, also later",
+          .protocolCommand = "member-edit",
+          .modifiers = Modifier::None,
+          .handler = &ClusterBudget,
+          .nodeFallback = nullptr,
+          .session = nullptr },
+        { .name = "cluster-budget-clear",
+          .wire = Wire::Node,
+          .minOperands = 1,
+          .maxOperands = 1,
+          .operands = " <member-id>:<memory|disk>",
+          .summary = "clear a member's override of one cache tier's budget",
+          .protocolCommand = "member-edit",
+          .modifiers = Modifier::None,
+          .handler = &ClusterBudgetClear,
           .nodeFallback = nullptr,
           .session = nullptr },
         { .name = "cluster-forget",

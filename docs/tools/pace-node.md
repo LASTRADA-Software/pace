@@ -1122,7 +1122,8 @@ every other node answers those verbs `not-shared-cache` (see [the named
 machine](#the-named-machine)).
 
 "Fleet" here is what the scheduler **serves** -- a lease, a status. What **decides** the fleet --
-`--cluster-admit` in every form, `--cluster-forget`, `--cluster-set`, `--cluster-name`, and the enrollment decisions
+`--cluster-admit` in every form, `--cluster-forget`, `--cluster-set`, `--cluster-name`, `--cluster-budget`,
+`--cluster-budget-clear`, and the enrollment decisions
 (`--enroll-approve`, `--enroll-reject`, auto-approval, the list) -- is answered only to a caller
 with an operator's standing: a process on this machine, or a **voter** of the cluster, by its
 proven key or the machine ticket its node mints. A caller that only `--fleet-open` admits is
@@ -2039,6 +2040,8 @@ pace-node --scheduler=10.0.0.1:6675 --cluster-set=fleet-open=1
 pace-node --scheduler=10.0.0.1:6675 --cluster-admit=n4=10.0.0.4:6680
 pace-node --scheduler=10.0.0.1:6675 --cluster-admit-learner=laptop=10.0.0.9:6680
 pace-node --scheduler=10.0.0.1:6675 --cluster-name=n4=build-box
+pace-node --scheduler=10.0.0.1:6675 --cluster-budget=n4:memory=2g,disk=64g
+pace-node --scheduler=10.0.0.1:6675 --cluster-budget-clear=n4:disk
 pace-node --scheduler=10.0.0.1:6675 --cluster-forget=n3
 ```
 
@@ -2050,6 +2053,17 @@ ASCII letters compared in one case; the leader refuses a taken one, naming the m
 keeps it, and `--cluster-forget` removes it with the record. A machine is tied to its member — the fleet page's
 `node-id`, and every MCP answer's `node_id` — by the identity key its connection proved, never by the endpoint it
 registered with, which is its own unverified claim.
+
+`--cluster-budget=<id>:memory=<size>[,disk=<size>]` records a **cache budget override** for a member's memory tier,
+disk tier or both, in its replicated record; `--cluster-budget-clear=<id>:<memory|disk>` removes one. Sizes are
+`--cache-memory`'s and `--cache-disk`'s (`k`, `m`, `g`), but never a share of RAM -- the leader records the figure and
+the member applies it, so `25%` would be the RAM of whichever machine read it -- and never `0`, since an override
+removes no tier. The leader records it even while the member is down. The member applies it when it next sees the
+state, and reports the value its own flag had as the override's **baseline**, which only it can know. The member's
+own LATER change of that flag outranks the override. A forget removes it with the record, and a re-admission keeps it.
+`--cluster-status` prints each recorded override beneath its member, as
+`memory-budget=2G baseline=unset set=2026-11-02T10:00:00Z` (the leader's clock), and the fleet page's members table has
+`memory-override` and `disk-override` columns.
 
 `--cluster-status` prints the members — each with the `seat` it was admitted into,
 `voter` or `learner` (see [admitting a learner](#a-machine-that-is-usually-away-admitting-a-learner))

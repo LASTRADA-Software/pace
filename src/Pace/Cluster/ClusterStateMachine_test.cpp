@@ -252,6 +252,39 @@ TEST_CASE("A snapshot round-trips through the machine", "[cluster][statemachine]
     CHECK(restored.published.back().members.size() == 1);
 }
 
+TEST_CASE("A budget override and its baseline survive the machine's own snapshot, recovered and installed alike",
+          "[cluster][statemachine][snapshot][budget]")
+{
+    // The production snapshot path, through `ClusterState`'s encoding: what the harness's restart case cannot see, since
+    // its snapshot is consensus-generic.
+    Watched source;
+    source.machine.Apply(Entry(1, Cmd(CommandKind::AddLearner, "n2", {})));
+    auto budget = Cmd(CommandKind::SetBudget, "n2", "memory");
+    budget.budgetBytes = 64ULL << 20;
+    budget.setAtUnixSeconds = 1793613600;
+    source.machine.Apply(Entry(2, budget));
+    auto baseline = Cmd(CommandKind::RecordBaseline, "n2", "memory");
+    baseline.budgetBytes = 64ULL << 20;
+    baseline.setAtUnixSeconds = 1793613600;
+    baseline.baselineBytes = 256ULL << 20;
+    source.machine.Apply(Entry(3, baseline));
+    REQUIRE(source.machine.State().members.size() == 1);
+    REQUIRE(source.machine.State().members[0].memoryOverride.has_value());
+
+    for (auto const origin: { Consensus::SnapshotOrigin::Recovered, Consensus::SnapshotOrigin::Installed })
+    {
+        Watched restored;
+        REQUIRE(restored.machine.RestoreSnapshot(source.machine.TakeSnapshot(), origin).has_value());
+        CHECK(restored.machine.State() == source.machine.State());
+        // A copy, never a reference into the temporary `State()` returns.
+        auto const state = restored.machine.State();
+        auto const recorded = Unwrap(state.members.at(0).memoryOverride);
+        CHECK(recorded.bytes == 64ULL << 20);
+        CHECK(recorded.baseline == std::optional<std::uint64_t> { 256ULL << 20 });
+        CHECK(recorded.setAtUnixSeconds == 1793613600);
+    }
+}
+
 TEST_CASE("A snapshot replaces, and an unreadable one changes nothing", "[cluster][statemachine]")
 {
     Watched watched;

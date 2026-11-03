@@ -62,6 +62,12 @@ enum class ClusterAction : std::uint8_t
 
     /// Give a member a display name, or clear it: MEMBER-EDIT's `SetDisplayName`.
     Name,
+
+    /// Override a member's cache budgets: MEMBER-EDIT's `SetBudget`.
+    Budget,
+
+    /// Clear one tier's override of a member's cache budget: MEMBER-EDIT's `ClearBudget`.
+    BudgetClear,
 };
 
 /// One cluster-administration request, as parsed from the command line.
@@ -69,12 +75,14 @@ struct ClusterRequest
 {
     ClusterAction action { ClusterAction::None };
 
-    /// The setting name for `Set`, the member id for `Forget`, `Admit`, `AdmitLearner`
-    /// and `Name`.
+    /// The setting name for `Set`, the member id for `Forget`, `Admit`, `AdmitLearner`,
+    /// `Name`, `Budget` and `BudgetClear`.
     std::string key;
 
     /// The setting's new value for `Set`, the consensus endpoint for `Admit` and
-    /// `AdmitLearner`, the display name for `Name` (empty clears it), empty otherwise.
+    /// `AdmitLearner`, the display name for `Name` (empty clears it), and for `Budget` and
+    /// `BudgetClear` the MEMBER-EDIT value as it travels (`CompileCacheWire::BudgetSetValue`,
+    /// `BudgetClearValue`), parsed and encoded by the flag's applier; empty otherwise.
     std::string value;
 
     /// The member's identity key for `Admit` and `AdmitLearner` when the operator typed
@@ -1029,37 +1037,20 @@ struct NodeConfig
 /// @return The ceiling, in bytes.
 [[nodiscard]] std::size_t CompileRequestMaxOf(NodeConfig const& cfg) noexcept;
 
-/// What a live budget override of zero is told.
-///
-/// Zero is how both tiers spell UNBOUNDED at startup, and `--cache-memory 0` is how a node
-/// builds no memory tier at all -- so a zero arriving at a running tier would mean either
-/// "remove this tier", which a live store cannot do (the tier stack is built once), or
-/// "unbound it", which is the opposite of what an override sent to shrink a node meant. It
-/// is refused rather than given either reading.
-inline constexpr std::string_view TierOverrideCannotRemoveTier = "an override cannot remove a tier";
+/// What a live budget override of zero is told: the cluster's one sentence (`Cluster::TierOverrideCannotRemoveTier`),
+/// which the leader refuses by too, so a node applying an override and a leader recording one cannot disagree.
+using Cluster::TierOverrideCannotRemoveTier;
 
 /// The value-level rule a live tier budget is held to, however it arrived.
 ///
-/// The ONE derivation a budget override shares with every surface that accepts one: a
-/// number off the wire (`CacheTier::ApplyTierBudget`) is held to this, and a number typed
-/// as text reaches it through `ParseTierBudget`, which first applies the tier's own flag
-/// grammar. Zero is refused (`TierOverrideCannotRemoveTier`), and so is a figure this
-/// process cannot address, which on a 64-bit build is none.
+/// What a number off the wire (`CacheTier::ApplyTierBudget`) is held to on the node that applies it. A number typed as
+/// text reaches the leader through `Cluster::ParseOverrideBudget` -- the tier's own flag grammar, the ONE derivation
+/// every door that sets an override shares -- and this asks the one question only the applying process can: zero is
+/// refused (`TierOverrideCannotRemoveTier`), and so is a figure this process cannot address, which on a 64-bit build is
+/// none.
 /// @param bytes The budget asked for.
 /// @return The budget as this process's size type, or why it cannot be set.
 [[nodiscard]] std::expected<std::size_t, std::string> CheckTierBudget(std::uint64_t bytes);
-
-/// A tier budget typed as text, held to exactly what the tier's startup flag accepts.
-///
-/// `--cache-memory`'s grammar for the memory tier (`k`/`m`/`g` or `N%` of host RAM) and
-/// `--cache-disk`'s for the disk tier (no `N%`), through the very parsers those rows apply,
-/// then `CheckTierBudget`. A budget an operator could not have set at startup therefore
-/// cannot be set this way, and the one zero the flags accept -- "no tier" or "unbounded" --
-/// is the one this refuses.
-/// @param tier Which tier the budget is for.
-/// @param text The budget as typed.
-/// @return The budget in bytes, or why it is not one; `field` names the tier's flag.
-[[nodiscard]] std::expected<std::uint64_t, ConfigError> ParseTierBudget(StorageTier tier, std::string_view text);
 
 /// The in-flight compile budget this worker runs with: `--compile-inflight-max`, or
 /// `DefaultCompileByteBudget` over the RESOLVED slot count when it names none (#1667).

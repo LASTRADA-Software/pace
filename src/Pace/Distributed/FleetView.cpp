@@ -354,7 +354,23 @@ namespace
     };
 
     /// What a member row shows.
-    constexpr std::array<FleetColumn<MemberRow>, 6> MemberColumns {
+    /// @tparam Tier A cache tier.
+    /// @param row A member row.
+    /// @return The cell a member row shows for that tier's recorded budget override: its bytes, absent when none.
+    template <StorageTier Tier>
+    [[nodiscard]] FleetCell BudgetCell(MemberRow const& row)
+    {
+        auto const& budget = Cluster::BudgetOf(row.member, Tier);
+        return budget.has_value() ? FleetCell::Of(budget->bytes) : FleetCell::Nothing();
+    }
+
+    /// What the override columns say in a header.
+    constexpr std::string_view BudgetHelp =
+        "The cache budget the cluster records for this member's tier, overriding the machine's own flag: recorded by "
+        "the leader, applied by the member. Absent when none is recorded. Recorded is not applied: the member's "
+        "status says what it runs with.";
+
+    constexpr std::array<FleetColumn<MemberRow>, 8> MemberColumns {
         FleetColumn<MemberRow> { .name = "id",
                                  .help = "The member's stable identity: what consensus counts.",
                                  .format = CellFormat::Text,
@@ -400,6 +416,18 @@ namespace
                 [](MemberRow const& r) {
                     return FleetCell::Of(std::string { Cluster::SchedulerEndpointStateName(r.member) });
                 } },
+        // The replicated record, so every node renders the same figure; whether the member applied it, and against
+        // which baseline, is the member's own status.
+        FleetColumn<MemberRow> { .name = "memory-override",
+                                 .help = BudgetHelp,
+                                 .format = CellFormat::Bytes,
+                                 .keep = ColumnKeep::Detail,
+                                 .project = &BudgetCell<StorageTier::Memory> },
+        FleetColumn<MemberRow> { .name = "disk-override",
+                                 .help = BudgetHelp,
+                                 .format = CellFormat::Bytes,
+                                 .keep = ColumnKeep::Detail,
+                                 .project = &BudgetCell<StorageTier::Disk> },
     };
 
     /// The member rows of @p snapshot: each record joined, by the identity key it holds, to what the machine proving

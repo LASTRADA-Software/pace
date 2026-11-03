@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <Pace/Cache/StorageTier.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
 #include <Pace/Core/WireFields.hpp>
 #include <Pace/Core/WireFrame.hpp>
 #include <Pace/Distributed/FleetHistory.hpp>
+#include <Pace/Distributed/IClusterAdmin.hpp>
 #include <Pace/Distributed/MembershipOracle.hpp>
 #include <Pace/Distributed/SchedulerProtocol.hpp>
 #include <Pace/Metrics/IMetricsSink.hpp>
@@ -13,6 +15,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <iterator>
 #include <optional>
 #include <span>
@@ -24,6 +27,7 @@
 #include <tests/FleetHistoryFakes.hpp>
 #include <tests/LeaseRosterFakes.hpp>
 #include <tests/MembershipFakes.hpp>
+#include <tests/RaftPeerKeyFakes.hpp>
 #include <tests/Unwrap.hpp>
 #include <tests/WireReply.hpp>
 
@@ -78,6 +82,30 @@ struct Fixture
     KeyPairLeaseSigner const signer = Testing::TestLeaseSigner();
     SchedulerService service { clock, wallClock, metrics, schedulerLogger, signer, FleetIdentity };
     SchedulerProtocol protocol { service, metrics };
+};
+
+/// A cluster recording one learner, `node-b`, that accepts every proposal: enough for a member edit to reach the
+/// edit's own requirement.
+struct OneLearnerCluster final: IClusterAdmin
+{
+    [[nodiscard]] Cluster::ClusterState ClusterState() const override
+    {
+        auto state = Cluster::ClusterState {};
+        Cluster::Apply(state,
+                       Cluster::Command { .kind = Cluster::CommandKind::AddLearner,
+                                          .key = "node-b",
+                                          .value = {},
+                                          .schedulerEndpoint = {},
+                                          .publicKey = Testing::TestKeyPair("node-b").PublicKey() });
+        return state;
+    }
+
+    [[nodiscard]] std::expected<void, ConsensusError> ProposeToCluster(Cluster::Command const& /*command*/) override
+    {
+        return {};
+    }
+
+    void NoteAnnouncedEndpoint(Consensus::NodeId const& /*member*/, std::string /*endpoint*/) override {}
 };
 
 } // namespace
@@ -1159,6 +1187,7 @@ TEST_CASE("An operator's control verb is refused a learner's ticket and a learne
     // can have its node mint one. So the control verbs ask for an operator's standing: this machine,
     // or an identity whose machine holds a voter's seat in the applied state. Every control verb
     // this surface serves, read FROM THE TABLE, so a verb that joins the column is asked here too.
+    OneLearnerCluster cluster; // declared first: the service holds a reference to it once a section attaches it
     Fixture fixture;
     Testing::OpenFleetFold fold;
     auto const contextOf = [&fold](ConnectionFacts facts) {
@@ -1168,7 +1197,9 @@ TEST_CASE("An operator's control verb is refused a learner's ticket and a learne
     std::ranges::copy_if(Wire::OpTable, std::back_inserter(controlVerbs), [](Wire::OpDescriptor const& row) {
         return row.identity == Wire::IdentityRequirement::OperatorStanding && row.family == Wire::VerbFamily::Scheduler;
     });
-    REQUIRE(controlVerbs.size() == 5); // admit, admit-learner, forget, set, member-edit (admit-worker is retired)
+    // admit, admit-learner, forget, set (admit-worker is retired). MEMBER-EDIT is not a row of this set: its door asks
+    // only that a caller be identified, and each edit's own requirement is asked after the payload -- below.
+    REQUIRE(controlVerbs.size() == 4);
     auto const counted = [&fixture] {
         return fixture.metrics.Read(IMetricsSink::Counter::SchedulerRequestsRefusedOperatorStandingRequired);
     };
@@ -1205,6 +1236,29 @@ TEST_CASE("An operator's control verb is refused a learner's ticket and a learne
     REQUIRE(message.has_value());
     CHECK(Unwrap(message).second.contains("run it on a voter, or promote this machine"));
     CHECK(counted() == ++refused);
+
+    // MEMBER-EDIT: past the door for an identified learner, and refused by the EDIT's requirement once it is read --
+    // the same code, counted in the same series, the message naming the edit.
+    {
+        fixture.service.AdministerWith(cluster);
+        auto const learner = contextOf(Testing::OpenFleetFold::LearnerProven());
+        CHECK_FALSE(fixture.protocol.RefusePeer(learner, static_cast<std::uint8_t>(Wire::Op::MemberEdit)).has_value());
+        auto const budget = Wire::EncodeBudgetSetValue(Wire::BudgetSetValue { .bytes = { std::uint64_t { 1024 } } });
+        auto const edit = fixture.protocol.Answer(
+            Wire::EncodeMemberEdit(Wire::MemberEditRequest {
+                .verb = Wire::MemberEditVerb::SetBudget, .memberId = "node-b", .value = Wire::AsStringView(budget) }),
+            learner);
+        CHECK(ErrorOf(edit) == Wire::ErrorCode::OperatorStandingRequired);
+        auto const editMessage = Wire::DecodeErrorPayload(PayloadOf(edit));
+        REQUIRE(editMessage.has_value());
+        CHECK(Unwrap(editMessage).second.contains("member-edit set-budget"));
+        CHECK(counted() == ++refused);
+        // And `--fleet-open` alone is refused at the door, before the payload, as every control verb's caller is.
+        auto const anonymous = fixture.protocol.RefusePeer(contextOf(Testing::OpenFleetFold::Anonymous()),
+                                                           static_cast<std::uint8_t>(Wire::Op::MemberEdit));
+        REQUIRE(anonymous.has_value());
+        CHECK(ErrorOf(Unwrap(anonymous)) == Wire::ErrorCode::IdentifiedCallerRequired);
+    }
 
     // A voter's ticket and this machine are accepted at every one of them.
     for (auto const& [what, facts]: { std::pair { "a voter's ticket", Testing::OpenFleetFold::Ticketed() },

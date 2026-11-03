@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cassert>
 #include <charconv>
 #include <chrono>
@@ -1651,9 +1652,11 @@ enum class IdentityRequirement : std::uint8_t
     ProvenNodeOnly,
 
     /// Only a caller admitted by a route that IDENTIFIES it -- this machine, a proven node key or
-    /// a verified machine ticket -- and never by `--fleet-open` alone. No verb names it any more: it
-    /// is `OperatorStanding`'s PREREQUISITE, asked first so a caller `--fleet-open` alone admitted is
-    /// still told that (`ErrorCode::IdentifiedCallerRequired`) rather than to go and find a voter.
+    /// a verified machine ticket -- and never by `--fleet-open` alone. `OperatorStanding`'s PREREQUISITE,
+    /// asked first so a caller `--fleet-open` alone admitted is still told that
+    /// (`ErrorCode::IdentifiedCallerRequired`) rather than to go and find a voter. One verb names it, at
+    /// its door alone: `MemberEdit`, whose every edit then asks more of the caller -- an operator's
+    /// standing, or the edited member's own proven key (`MemberEditVerbTable`'s `authority` column).
     /// Which routes identify is a column of the route table (`Distributed::MembershipRoutes`).
     IdentifiedCaller,
 
@@ -2492,7 +2495,12 @@ inline constexpr std::array OpTable {
                    .family = VerbFamily::Scheduler,
                    .identity = IdentityRequirement::OperatorStanding },
     // With the cluster control verbs and for their reason: it changes what every node believes,
-    // so the leader's scheduler answers it, behind the same gate and the same standing.
+    // so the leader's scheduler answers it. `IdentifiedCaller` at the DOOR, the one verb that names it,
+    // because who may send it depends on the EDIT (`MemberEditVerbTable`'s `authority` column): an
+    // operator's standing for the operator's edits, and the member's own proven identity for the one
+    // edit a member reports about itself (`RecordBaseline`). Both are identified callers, so the door
+    // still refuses an anonymous `--fleet-open` caller before the payload is read, and the edit's own
+    // requirement is asked once the edit byte is known (`SchedulerService::MemberEdit`).
     OpDescriptor { .code = Op::MemberEdit,
                    .name = "member-edit",
                    .fieldCount = 3, // edit (`MemberEditVerb`, one byte), member id, value
@@ -2501,7 +2509,7 @@ inline constexpr std::array OpTable {
                    .maxPayload = BoundedTo(MaxControlPayload),
                    .maxReply = ReplyBoundedTo(MaxReportReply),
                    .family = VerbFamily::Scheduler,
-                   .identity = IdentityRequirement::OperatorStanding },
+                   .identity = IdentityRequirement::IdentifiedCaller },
     // The fleet cache verbs: their twins' shapes -- the same objects -- and their own family,
     // which is where their policy lives. `AddressAdmits` because admission is the fold's answer
     // (a proven key, a ticket, loopback), never a column of this table.
@@ -2886,30 +2894,32 @@ static_assert(JoiningVerbsNeedAnIdentity(),
 
 /// Whether exactly an operator's CONTROL verbs require an operator's standing.
 ///
-/// The cluster verbs that change the fleet -- admit, admit as a learner, forget, set, edit a member -- and the
+/// The cluster verbs that change the fleet -- admit, admit as a learner, forget, set -- and the
 /// enrollment decisions (`EnrollControl`: approve, reject, arm or disarm auto-approval,
 /// clear, and the list that names the joiners' keys). Both directions: a control verb left at
 /// `AddressAdmits` is one an anonymous caller on a `--fleet-open` node sends, and any other verb
 /// marked here refuses every launcher -- and every learner's client -- that asks it. `Cordon` and
 /// `MintTicket` are not rows: each already answers this machine alone, a narrower rule its
-/// responder enforces. And no verb names `IdentifiedCaller`, which is only `OperatorStanding`'s
-/// prerequisite: a verb that named it would let a learner's ticket decide the fleet again.
-/// @return True when the column names exactly those six.
+/// responder enforces.
+///
+/// And `IdentifiedCaller`, `OperatorStanding`'s prerequisite, is named by `MemberEdit` ALONE: a verb that
+/// named it and nothing more would let a learner's ticket decide the fleet again, so the one that does
+/// must carry a stricter requirement per edit -- `MemberEditsRequireMoreThanIdentification` below.
+/// @return True when the column names exactly those five, and only `MemberEdit` names `IdentifiedCaller`.
 [[nodiscard]] constexpr bool ControlVerbsNeedOperatorStanding() noexcept
 {
     return std::ranges::all_of(OpTable, [](OpDescriptor const& row) {
         auto const control = row.code == Op::ClusterSet || row.code == Op::ClusterForget || row.code == Op::ClusterAdmit
-                             || row.code == Op::ClusterAdmitLearner || row.code == Op::EnrollControl
-                             || row.code == Op::MemberEdit;
+                             || row.code == Op::ClusterAdmitLearner || row.code == Op::EnrollControl;
         return control == (row.identity == IdentityRequirement::OperatorStanding)
-               && row.identity != IdentityRequirement::IdentifiedCaller;
+               && (row.code == Op::MemberEdit) == (row.identity == IdentityRequirement::IdentifiedCaller);
     });
 }
 
 static_assert(
     ControlVerbsNeedOperatorStanding(),
-    "exactly the cluster control verbs, MemberEdit and EnrollControl require an operator's standing, and no verb names "
-    "IdentifiedCaller -- see IdentityRequirement");
+    "exactly the cluster control verbs and EnrollControl require an operator's standing, and only MemberEdit names "
+    "IdentifiedCaller, its edits each requiring more -- see IdentityRequirement");
 
 /// Whether asking again, UNCHANGED, may be answered differently -- with nobody acting on the
 /// request in between.
@@ -6181,23 +6191,59 @@ struct ClusterSetView
 enum class MemberEditVerb : std::uint8_t
 {
     SetDisplayName = 0, ///< Give the member a display name, or clear it with an empty value.
-    Last = 1,           ///< Not an edit, and never travels: the length of a table keyed by one.
+    SetBudget = 1,      ///< Override the member's cache budgets: the value is a `BudgetSetValue`.
+    ClearBudget = 2,    ///< Clear one tier's override: the value is a `BudgetClearValue`.
+    RecordBaseline = 3, ///< The member reporting its own configured budget: the value is a `BudgetBaselineValue`.
+    Last = 4,           ///< Not an edit, and never travels: the length of a table keyed by one.
 };
 
-/// How one `MemberEditVerb` is spelled.
+/// Who may send one edit.
+///
+/// **PRIVATE: in-process only.** Read off `MemberEditVerbTable` at the receiving end and never transmitted, so the
+/// enumerator order is free.
+enum class EditAuthority : std::uint8_t
+{
+    /// An operator's standing (`IdentityRequirement::OperatorStanding`): the operator's edits of somebody's record.
+    Operator,
+    /// An operator's standing, OR the member the edit names proving its own identity key on this connection: an edit
+    /// a member may make to its own record and an operator to anybody's.
+    OperatorOrSubject,
+    /// Only the member the edit names, proving its own identity key on this connection: a fact only that machine can
+    /// report, which an operator's word must not stand in for.
+    Subject,
+    Last, ///< The count, for a table over this enum.
+};
+
+/// How one `MemberEditVerb` is spelled, and who may send it.
 struct MemberEditVerbRow
 {
-    MemberEditVerb verb;   ///< The edit this row describes.
-    std::string_view name; ///< Its one spelling, for a log line and a refusal.
+    MemberEditVerb verb;     ///< The edit this row describes.
+    std::string_view name;   ///< Its one spelling, for a log line and a refusal.
+    EditAuthority authority; ///< Who may send it: the per-edit half of `OpTable`'s identity column.
 };
 
 /// One row per `MemberEditVerb`, in enumerator order. Adding an edit is adding a row.
+///
+/// `ClearBudget` is `OperatorOrSubject` so a member may drop an override its own later configuration outranks -- a
+/// LEARNER has no operator's standing, and it is the machine that knows its configuration changed -- naming the
+/// override it drops, so it cannot remove a newer one. `RecordBaseline` is `Subject`: what a machine had configured
+/// is that machine's to say.
 inline constexpr EnumTable<MemberEditVerb, MemberEditVerbRow> MemberEditVerbTable { {
-    { .verb = MemberEditVerb::SetDisplayName, .name = "set-display-name" },
+    { .verb = MemberEditVerb::SetDisplayName, .name = "set-display-name", .authority = EditAuthority::Operator },
+    { .verb = MemberEditVerb::SetBudget, .name = "set-budget", .authority = EditAuthority::Operator },
+    { .verb = MemberEditVerb::ClearBudget, .name = "clear-budget", .authority = EditAuthority::OperatorOrSubject },
+    { .verb = MemberEditVerb::RecordBaseline, .name = "record-baseline", .authority = EditAuthority::Subject },
 } };
 
 static_assert(RowsInEnumeratorOrder(MemberEditVerbTable, &MemberEditVerbRow::verb),
               "MemberEditVerbTable must hold one row per MemberEditVerb, in enumerator order");
+
+/// @param verb An edit.
+/// @return Its row.
+[[nodiscard]] constexpr MemberEditVerbRow const& MemberEditRowOf(MemberEditVerb verb) noexcept
+{
+    return MemberEditVerbTable[static_cast<std::size_t>(verb)];
+}
 
 /// The edit @p raw names, if this build knows it.
 /// @param raw The edit byte, as received.
@@ -6250,6 +6296,190 @@ struct MemberEditView
     return MemberEditView { .verb = static_cast<std::uint8_t>((*fields)[0][0]),
                             .memberId = (*fields)[1],
                             .value = (*fields)[2] };
+}
+
+/// A `SetBudget` edit's value: the budget asked for each cache tier, POSITIONALLY by `StorageTier` (`PerTier`'s
+/// rule); an absent entry leaves that tier's override as it is.
+///
+/// One edit for both tiers, so `--cluster-budget=<node>:memory=..,disk=..` is one request the leader validates whole
+/// before proposing either. A list LONGER than this build knows names a tier it does not have, and is refused by the
+/// leader by name rather than truncated.
+struct BudgetSetValue
+{
+    PerTier<std::uint64_t> bytes; ///< Per tier: the budget in bytes, or absent for no change.
+};
+
+/// Which override a member's report or a conditional clear names: its bytes and the leader's stamp, as the
+/// replicated record holds them -- so an override replaced since is told apart from the one measured.
+struct BudgetIdentity
+{
+    std::uint64_t bytes {};           ///< The override's budget.
+    std::int64_t setAtUnixSeconds {}; ///< When the leader recorded it, by the leader's clock.
+
+    [[nodiscard]] friend bool operator==(BudgetIdentity const&, BudgetIdentity const&) = default;
+};
+
+/// A `ClearBudget` edit's value: the tier, by position, and optionally the override it may remove.
+struct BudgetClearValue
+{
+    std::uint8_t tier {};                  ///< The tier's position in `StorageTier`.
+    std::optional<BudgetIdentity> only {}; ///< When present, clear only this override; absent clears whatever is recorded.
+};
+
+/// A `RecordBaseline` edit's value: what the member had configured for a tier when it applied an override.
+struct BudgetBaselineValue
+{
+    std::uint8_t tier {};          ///< The tier's position in `StorageTier`.
+    std::uint64_t baseline {};     ///< The member's own configured budget for it; zero is *unbounded*, a real value.
+    BudgetIdentity measuredFor {}; ///< The override it was measured against.
+};
+
+namespace Detail
+{
+    /// Eight bytes, big-endian.
+    /// @param value The figure.
+    /// @return Its encoding.
+    [[nodiscard]] inline std::array<std::byte, 8> BudgetFigure(std::uint64_t value)
+    {
+        return WireFields::ToBigEndian<std::uint64_t>(value);
+    }
+
+    /// Read a field that must be exactly eight bytes.
+    /// @param field The field.
+    /// @return The figure, or nullopt for any other width.
+    [[nodiscard]] inline std::optional<std::uint64_t> ReadBudgetFigure(std::span<std::byte const> field)
+    {
+        return field.size() == 8 ? WireFields::FromBigEndian<std::uint64_t>(field) : std::nullopt;
+    }
+
+    /// Read a field that must be exactly one byte.
+    /// @param field The field.
+    /// @return The byte, or nullopt for any other width.
+    [[nodiscard]] inline std::optional<std::uint8_t> ReadTierByte(std::span<std::byte const> field)
+    {
+        return field.size() == 1 ? std::optional { static_cast<std::uint8_t>(field[0]) } : std::nullopt;
+    }
+} // namespace Detail
+
+/// Frame a `SetBudget` value.
+/// @param value The per-tier budgets.
+/// @return The bytes to send as MEMBER-EDIT's third field.
+[[nodiscard]] inline std::vector<std::byte> EncodeBudgetSetValue(BudgetSetValue const& value)
+{
+    auto owned = std::vector<std::array<std::byte, 8>> {};
+    auto fields = std::vector<std::span<std::byte const>> {};
+    owned.reserve(value.bytes.size());
+    fields.reserve(value.bytes.size());
+    for (auto const& tier: value.bytes)
+    {
+        if (!tier.has_value())
+        {
+            fields.emplace_back();
+            continue;
+        }
+        owned.push_back(Detail::BudgetFigure(*tier));
+        fields.emplace_back(owned.back());
+    }
+    return WireFields::Encode(WireFields::FieldList { fields });
+}
+
+/// Read a `SetBudget` value back.
+/// @param bytes MEMBER-EDIT's third field.
+/// @return The per-tier budgets, or nullopt when an entry is neither empty nor eight bytes.
+[[nodiscard]] inline std::optional<BudgetSetValue> DecodeBudgetSetValue(std::span<std::byte const> bytes)
+{
+    auto const fields = WireFields::SplitAll(bytes);
+    if (!fields.has_value())
+        return std::nullopt;
+    auto out = BudgetSetValue {};
+    out.bytes.reserve(fields->size());
+    for (auto const& field: *fields)
+    {
+        if (field.empty())
+        {
+            out.bytes.emplace_back();
+            continue;
+        }
+        auto const figure = Detail::ReadBudgetFigure(field);
+        if (!figure.has_value())
+            return std::nullopt;
+        out.bytes.emplace_back(*figure);
+    }
+    return out;
+}
+
+/// Frame a `ClearBudget` value: the tier byte, then the override's bytes and stamp, or two empty fields.
+/// @param value The tier and, optionally, the override.
+/// @return The bytes to send as MEMBER-EDIT's third field.
+[[nodiscard]] inline std::vector<std::byte> EncodeBudgetClearValue(BudgetClearValue const& value)
+{
+    auto const tier = std::array { static_cast<std::byte>(value.tier) };
+    auto const bytes = Detail::BudgetFigure(value.only.has_value() ? value.only->bytes : 0);
+    auto const setAt =
+        Detail::BudgetFigure(value.only.has_value() ? std::bit_cast<std::uint64_t>(value.only->setAtUnixSeconds) : 0);
+    auto const present = value.only.has_value();
+    return WireFields::Encode({ std::span<std::byte const> { tier },
+                                present ? std::span<std::byte const> { bytes } : std::span<std::byte const> {},
+                                present ? std::span<std::byte const> { setAt } : std::span<std::byte const> {} });
+}
+
+/// Read a `ClearBudget` value back.
+/// @param bytes MEMBER-EDIT's third field.
+/// @return The value, or nullopt when malformed: three fields, a one-byte tier, both figures or neither.
+[[nodiscard]] inline std::optional<BudgetClearValue> DecodeBudgetClearValue(std::span<std::byte const> bytes)
+{
+    auto const fields = WireFields::SplitExactly(bytes, 3);
+    if (!fields.has_value())
+        return std::nullopt;
+    auto const tier = Detail::ReadTierByte((*fields)[0]);
+    if (!tier.has_value())
+        return std::nullopt;
+    if ((*fields)[1].empty() && (*fields)[2].empty())
+        return BudgetClearValue { .tier = *tier, .only = std::nullopt };
+    auto const figure = Detail::ReadBudgetFigure((*fields)[1]);
+    auto const setAt = Detail::ReadBudgetFigure((*fields)[2]);
+    if (!figure.has_value() || !setAt.has_value())
+        return std::nullopt;
+    return BudgetClearValue {
+        .tier = *tier,
+        .only = BudgetIdentity { .bytes = *figure, .setAtUnixSeconds = std::bit_cast<std::int64_t>(*setAt) },
+    };
+}
+
+/// Frame a `RecordBaseline` value: the tier byte, the baseline, then the override's bytes and stamp.
+/// @param value The report.
+/// @return The bytes to send as MEMBER-EDIT's third field.
+[[nodiscard]] inline std::vector<std::byte> EncodeBudgetBaselineValue(BudgetBaselineValue const& value)
+{
+    auto const tier = std::array { static_cast<std::byte>(value.tier) };
+    auto const baseline = Detail::BudgetFigure(value.baseline);
+    auto const bytes = Detail::BudgetFigure(value.measuredFor.bytes);
+    auto const setAt = Detail::BudgetFigure(std::bit_cast<std::uint64_t>(value.measuredFor.setAtUnixSeconds));
+    return WireFields::Encode({ std::span<std::byte const> { tier },
+                                std::span<std::byte const> { baseline },
+                                std::span<std::byte const> { bytes },
+                                std::span<std::byte const> { setAt } });
+}
+
+/// Read a `RecordBaseline` value back.
+/// @param bytes MEMBER-EDIT's third field.
+/// @return The report, or nullopt when malformed: four fields, a one-byte tier and three eight-byte figures.
+[[nodiscard]] inline std::optional<BudgetBaselineValue> DecodeBudgetBaselineValue(std::span<std::byte const> bytes)
+{
+    auto const fields = WireFields::SplitExactly(bytes, 4);
+    if (!fields.has_value())
+        return std::nullopt;
+    auto const tier = Detail::ReadTierByte((*fields)[0]);
+    auto const baseline = Detail::ReadBudgetFigure((*fields)[1]);
+    auto const figure = Detail::ReadBudgetFigure((*fields)[2]);
+    auto const setAt = Detail::ReadBudgetFigure((*fields)[3]);
+    if (!tier.has_value() || !baseline.has_value() || !figure.has_value() || !setAt.has_value())
+        return std::nullopt;
+    return BudgetBaselineValue {
+        .tier = *tier,
+        .baseline = *baseline,
+        .measuredFor = BudgetIdentity { .bytes = *figure, .setAtUnixSeconds = std::bit_cast<std::int64_t>(*setAt) },
+    };
 }
 
 /// An operator adding a member to the cluster, or moving one.

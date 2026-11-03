@@ -1269,6 +1269,98 @@ TEST_CASE("An admission under an id a display name spells clears the name, and a
     RequireNoViolations(cluster);
 }
 
+namespace
+{
+/// @param id A member.
+/// @param tier Its tier's name.
+/// @param bytes The budget.
+/// @param setAt The leader's stamp.
+/// @return The `SetBudget` command.
+[[nodiscard]] std::vector<std::byte> BudgetBytes(std::string id, std::string tier, std::uint64_t bytes, std::int64_t setAt)
+{
+    return Cluster::Encode(Cluster::Command { .kind = Cluster::CommandKind::SetBudget,
+                                              .key = std::move(id),
+                                              .value = std::move(tier),
+                                              .schedulerEndpoint = {},
+                                              .publicKey = std::nullopt,
+                                              .budgetBytes = bytes,
+                                              .setAtUnixSeconds = setAt });
+}
+
+/// @param id A member.
+/// @param tier Its tier's name.
+/// @param baseline The member's report.
+/// @param bytes The override it measured against.
+/// @param setAt That override's stamp.
+/// @return The `RecordBaseline` command.
+[[nodiscard]] std::vector<std::byte> BaselineBytes(
+    std::string id, std::string tier, std::uint64_t baseline, std::uint64_t bytes, std::int64_t setAt)
+{
+    return Cluster::Encode(Cluster::Command { .kind = Cluster::CommandKind::RecordBaseline,
+                                              .key = std::move(id),
+                                              .value = std::move(tier),
+                                              .schedulerEndpoint = {},
+                                              .publicKey = std::nullopt,
+                                              .budgetBytes = bytes,
+                                              .baselineBytes = baseline,
+                                              .setAtUnixSeconds = setAt });
+}
+
+/// @param state A state.
+/// @param id A member.
+/// @param tier A tier.
+/// @return Its override, absent when the state records none or no such member.
+[[nodiscard]] std::optional<Cluster::BudgetOverride> BudgetIn(Cluster::ClusterState const& state,
+                                                              std::string_view id,
+                                                              StorageTier tier)
+{
+    auto const* const member = core::findOrNull(state.members, id, &Cluster::ClusterMember::id);
+    return member != nullptr ? Cluster::BudgetOf(*member, tier) : std::nullopt;
+}
+} // namespace
+
+TEST_CASE("override survives snapshot restore", "[consensus][raft][cluster][snapshot][budget]")
+{
+    // A restart case asserts `Member::application`, never only the log: the overrides and the baseline are proposed
+    // first and padding after, so the snapshot n2 recovers from covers every budget command, and what n2 holds before
+    // a single step is what recovery handed the application.
+    RaftClusterHarness cluster { { "n1", "n2", "n3" }, Members(), 1, CompactOften };
+    REQUIRE(SettleOnLeader(cluster));
+    auto lastBudget = LogIndex::BeforeFirst();
+    for (auto payload: { AdmitBytes("n1"),
+                         AdmitBytes("n2"),
+                         BudgetBytes("n1", "memory", 64ULL << 20, 1793613600),
+                         BudgetBytes("n2", "disk", 2ULL << 30, 1793613600),
+                         BaselineBytes("n2", "disk", 8ULL << 30, 2ULL << 30, 1793613600) })
+    {
+        lastBudget = Unwrap(cluster.ProposeOnLeader(std::move(payload)));
+        cluster.Run(5);
+    }
+    for (auto const* const id: { "n3", "n4", "n5", "n6" })
+    {
+        REQUIRE(cluster.ProposeOnLeader(AdmitBytes(id)).has_value());
+        cluster.Run(5);
+    }
+    cluster.Run(60);
+
+    auto const snapshotIndex = cluster.At("n2").driver->Node().SnapshotIndex();
+    REQUIRE(snapshotIndex >= lastBudget);
+    REQUIRE(cluster.Restart("n2").has_value());
+
+    auto const restored = FoldClusterState(cluster.At("n2").application);
+    auto const memory = Unwrap(BudgetIn(restored, "n1", StorageTier::Memory));
+    CHECK(memory.bytes == 64ULL << 20);
+    CHECK_FALSE(memory.baseline.has_value());
+    CHECK(memory.setAtUnixSeconds == 1793613600);
+    auto const disk = Unwrap(BudgetIn(restored, "n2", StorageTier::Disk));
+    CHECK(disk.baseline == std::optional<std::uint64_t> { 8ULL << 30 });
+
+    cluster.Run(120);
+    auto const leader = Unwrap(cluster.Leader());
+    CHECK(FoldClusterState(cluster.At("n2").application) == FoldClusterState(cluster.At(leader).application));
+    RequireNoViolations(cluster);
+}
+
 TEST_CASE("A follower caught up by an installed snapshot holds in its application what the snapshot covered",
           "[consensus][raft][cluster][snapshot]")
 {

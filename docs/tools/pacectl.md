@@ -142,7 +142,7 @@ the help renders `Verbs()` grouped by `WireSpec::heading`, and
 | Read (memcached) | `gat`, `gats`, `inspect`, `mc-stats` |
 | Write (memcached) | `touch`, `add`, `replace`, `append`, `prepend`, `cas`, `cache-memlimit` |
 | Node (`0xFC`) | `node`, `node-conditions`, `node-metrics`, `fleet`, `cordon`, `uncordon`, `explain-admission` |
-| Cluster (`0xFC`) | `cluster-members`, `cluster-settings`, `cluster-set`, `cluster-name`, `cluster-forget`, `cluster-admit`, `cluster-admit-learner` |
+| Cluster (`0xFC`) | `cluster-members`, `cluster-settings`, `cluster-set`, `cluster-name`, `cluster-budget`, `cluster-budget-clear`, `cluster-forget`, `cluster-admit`, `cluster-admit-learner` |
 
 ### The fleet verb
 
@@ -265,6 +265,13 @@ with none wiped the endpoint it had; it returns when that member next announces)
 answer show the same one, and deciding nothing -- no admission, route or key reads it. It is unique across the
 members, compared with ASCII letters folded to one case; the leader refuses a taken one, naming who holds it.
 
+`memory-budget` and `disk-budget` are the **cache budget overrides** the cluster records for the member, absent where
+none is: the figure, the `baseline` the member reported its own flag had (`unset` until it does), and when the leader
+recorded it, by the leader's clock. `cluster-budget <member-id>:memory=<size>[,disk=<size>]` records one (sizes as
+`--cache-memory` and `--cache-disk` take them, never `0` or a share of RAM), settable while the member is down, and
+`cluster-budget-clear <member-id>:<memory|disk>` removes one. Recorded is not applied: the member applies the override
+and may refuse a tier it does not have.
+
 `seat` is `voter` or `learner`: the set the member was **admitted into**, which is
 the record the leader moves consensus towards one change at a time. A learner is
 replicated to and counted by no quorum, and never stands for election, so a machine
@@ -325,7 +332,8 @@ settles — so the symptom points at consensus rather than at the character that
 mistyped, and one address costs an afternoon.
 
 The same verbs are also spelled `pace-node --cluster-status`,
-`--cluster-set`, `--cluster-name`, `--cluster-forget`, `--cluster-admit` and `--cluster-admit-learner`. Either works:
+`--cluster-set`, `--cluster-name`, `--cluster-budget`, `--cluster-budget-clear`, `--cluster-forget`, `--cluster-admit`
+and `--cluster-admit-learner`. Either works:
 the node's verbs ask this machine's own node unless `--scheduler` names another, and a node
 that serves is refused `--scheduler`, so it never ends up in a unit file.
 

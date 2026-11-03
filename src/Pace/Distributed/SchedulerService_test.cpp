@@ -2439,6 +2439,207 @@ TEST_CASE("The two verbs that share Offer answer exactly as they did", "[distrib
     CHECK_FALSE(admit.payload.empty());
 }
 
+namespace
+{
+/// A caller with an operator's standing: this machine, as `SelfCaller` spells it.
+CallerContext const OperatorCaller = SelfCaller();
+
+/// A learner machine proving its own key on the connection: identified, a member, no operator's standing.
+/// @param id The learner's member id.
+/// @return The context its connection folds to.
+[[nodiscard]] CallerContext ProvenLearner(std::string const& id)
+{
+    return CallerContext { .membership = Membership::Member,
+                           .peerId = "10.0.0.7",
+                           .provenNodeId = id,
+                           .provenKey = Testing::TestKeyPair(id).PublicKey(),
+                           .identified = true,
+                           .operatorStanding = false };
+}
+
+/// A caller only `--fleet-open` admitted: a member by address, identified by nothing.
+CallerContext const FleetOpenOnly { .membership = Membership::Member, .peerId = "10.0.0.99" };
+
+/// A fleet with voter `node-a` and learner `node-b` recorded, each under its test key; `node-b` never announced an
+/// endpoint, which is all the leader knows of a machine that is down.
+/// @param fleet The fleet to record them in.
+void RecordTwoMembers(Admitting& fleet)
+{
+    Cluster::Apply(fleet.cluster.state,
+                   Cluster::Command { .kind = Cluster::CommandKind::AddMember,
+                                      .key = "node-a",
+                                      .value = "10.0.0.1:6675",
+                                      .schedulerEndpoint = {},
+                                      .publicKey = Testing::TestKeyPair("node-a").PublicKey() });
+    Cluster::Apply(fleet.cluster.state,
+                   Cluster::Command { .kind = Cluster::CommandKind::AddLearner,
+                                      .key = "node-b",
+                                      .value = {},
+                                      .schedulerEndpoint = {},
+                                      .publicKey = Testing::TestKeyPair("node-b").PublicKey() });
+}
+
+/// @param memory The memory budget, or nothing.
+/// @param disk The disk budget, or nothing.
+/// @return A `SetBudget` value as it travels.
+[[nodiscard]] std::string BudgetValue(std::optional<std::uint64_t> memory, std::optional<std::uint64_t> disk)
+{
+    return std::string { Wire::AsStringView(
+        Wire::EncodeBudgetSetValue(Wire::BudgetSetValue { .bytes = { memory, disk } })) };
+}
+
+/// @param tier The tier's position.
+/// @param baseline The reported baseline.
+/// @param bytes The override it was measured against.
+/// @param setAt That override's stamp.
+/// @return A `RecordBaseline` value as it travels.
+[[nodiscard]] std::string BaselineValue(std::uint8_t tier, std::uint64_t baseline, std::uint64_t bytes, std::int64_t setAt)
+{
+    return std::string { Wire::AsStringView(Wire::EncodeBudgetBaselineValue(
+        Wire::BudgetBaselineValue { .tier = tier,
+                                    .baseline = baseline,
+                                    .measuredFor = Wire::BudgetIdentity { .bytes = bytes, .setAtUnixSeconds = setAt } })) };
+}
+
+/// @param tier The tier's position.
+/// @return An unconditional `ClearBudget` value as it travels.
+[[nodiscard]] std::string ClearValue(std::uint8_t tier)
+{
+    return std::string { Wire::AsStringView(
+        Wire::EncodeBudgetClearValue(Wire::BudgetClearValue { .tier = tier, .only = std::nullopt })) };
+}
+
+auto constexpr SetBudgetEdit = static_cast<std::uint8_t>(Wire::MemberEditVerb::SetBudget);
+auto constexpr ClearBudgetEdit = static_cast<std::uint8_t>(Wire::MemberEditVerb::ClearBudget);
+auto constexpr RecordBaselineEdit = static_cast<std::uint8_t>(Wire::MemberEditVerb::RecordBaseline);
+} // namespace
+
+TEST_CASE("A budget edit proposes one override per tier it names, stamped by the leader's clock",
+          "[distributed][scheduler][member-edit][budget]")
+{
+    Admitting fleet;
+    RecordTwoMembers(fleet);
+    fleet.leading.wallClock.setNow(Noon);
+    constexpr auto MiB = std::uint64_t { 1024 * 1024 };
+
+    // node-b is down -- it never announced -- and the override is proposed all the same, with no baseline.
+    auto const reply =
+        fleet.Service().MemberEdit(OperatorCaller, SetBudgetEdit, "node-b", BudgetValue(64 * MiB, 2048 * MiB));
+    REQUIRE(reply.status == Wire::Status::Ok);
+    REQUIRE(fleet.cluster.proposed.size() == 2);
+    auto const noonSeconds = std::chrono::duration_cast<std::chrono::seconds>(Noon.time_since_epoch()).count();
+    auto const expected = std::array { std::pair { std::string_view { "memory" }, 64 * MiB },
+                                       std::pair { std::string_view { "disk" }, 2048 * MiB } };
+    for (auto const index: std::views::iota(std::size_t { 0 }, expected.size()))
+    {
+        auto const& command = fleet.cluster.proposed[index];
+        auto const& [tier, bytes] = expected[index];
+        INFO(tier);
+        CHECK(command.kind == Cluster::CommandKind::SetBudget);
+        CHECK(command.key == "node-b");
+        CHECK(command.value == tier);
+        CHECK(command.budgetBytes == std::optional { bytes });
+        CHECK(command.setAtUnixSeconds == std::optional<std::int64_t> { noonSeconds });
+        CHECK_FALSE(command.baselineBytes.has_value());
+    }
+
+    // Judged whole: a zero for one tier refuses the edit before EITHER is proposed.
+    auto const zero = fleet.Service().MemberEdit(OperatorCaller, SetBudgetEdit, "node-b", BudgetValue(64 * MiB, 0));
+    REQUIRE(zero.status == Wire::Status::Error);
+    CHECK(zero.error == Wire::ErrorCode::InvalidClusterChange);
+    CHECK(zero.message.contains(Cluster::TierOverrideCannotRemoveTier));
+    CHECK(fleet.cluster.proposed.size() == 2);
+
+    // A member the state does not record, a tier this build lacks, and a value naming no tier: refused by name.
+    CHECK(fleet.Service()
+              .MemberEdit(OperatorCaller, SetBudgetEdit, "node-z", BudgetValue(MiB, {}))
+              .message.contains("no member"));
+    auto const thirdTier = std::string { Wire::AsStringView(Wire::EncodeBudgetSetValue(
+        Wire::BudgetSetValue { .bytes = { std::nullopt, std::nullopt, std::uint64_t { MiB } } })) };
+    CHECK(fleet.Service().MemberEdit(OperatorCaller, SetBudgetEdit, "node-b", thirdTier).message.contains("cache tier 2"));
+    CHECK(fleet.Service()
+              .MemberEdit(OperatorCaller, SetBudgetEdit, "node-b", BudgetValue({}, {}))
+              .message.contains("names no tier"));
+    CHECK(fleet.cluster.proposed.size() == 2);
+}
+
+TEST_CASE("learner caller refused", "[distributed][scheduler][member-edit][budget][operator-standing]")
+{
+    // An operator's edits ask an operator's standing: a learner proving its own key is identified, a member, and still
+    // refused -- the display name and a budget alike -- and a caller only `--fleet-open` admitted is told it is not
+    // identified first, the most basic thing it lacks.
+    Admitting fleet;
+    RecordTwoMembers(fleet);
+    auto const learner = ProvenLearner("node-b");
+    auto const edits = std::array {
+        std::pair { SetBudgetEdit, BudgetValue(1024, {}) },
+        std::pair { static_cast<std::uint8_t>(Wire::MemberEditVerb::SetDisplayName), std::string { "lab" } },
+    };
+    for (auto const& [edit, value]: edits)
+    {
+        INFO(static_cast<unsigned>(edit));
+        auto const refused = fleet.Service().MemberEdit(learner, edit, "node-b", value);
+        REQUIRE(refused.status == Wire::Status::Error);
+        CHECK(refused.error == Wire::ErrorCode::OperatorStandingRequired);
+        CHECK(refused.message.contains("run it on a voter, or promote this machine"));
+
+        auto const anonymous = fleet.Service().MemberEdit(FleetOpenOnly, edit, "node-b", value);
+        REQUIRE(anonymous.status == Wire::Status::Error);
+        CHECK(anonymous.error == Wire::ErrorCode::IdentifiedCallerRequired);
+    }
+    // Clearing ANOTHER member's override is an operator's act too.
+    CHECK(fleet.Service().MemberEdit(learner, ClearBudgetEdit, "node-a", ClearValue(0)).error
+          == Wire::ErrorCode::OperatorStandingRequired);
+    CHECK(fleet.cluster.proposed.empty());
+}
+
+TEST_CASE("RecordBaseline accepted only from that node's proven identity", "[distributed][scheduler][member-edit][budget]")
+{
+    Admitting fleet;
+    RecordTwoMembers(fleet);
+    Cluster::Apply(fleet.cluster.state,
+                   Cluster::Command { .kind = Cluster::CommandKind::SetBudget,
+                                      .key = "node-b",
+                                      .value = "memory",
+                                      .schedulerEndpoint = {},
+                                      .publicKey = std::nullopt,
+                                      .budgetBytes = 4096,
+                                      .setAtUnixSeconds = 1793613600 });
+    auto const report = BaselineValue(0, 8192, 4096, 1793613600);
+
+    // Not an operator's word, however much standing it has: this machine proved no key.
+    auto const local = fleet.Service().MemberEdit(OperatorCaller, RecordBaselineEdit, "node-b", report);
+    REQUIRE(local.status == Wire::Status::Error);
+    CHECK(local.error == Wire::ErrorCode::NodeIdentityRequired);
+
+    // Nor another member's, proving ITS key.
+    auto const other = fleet.Service().MemberEdit(ProvenLearner("node-a"), RecordBaselineEdit, "node-b", report);
+    REQUIRE(other.status == Wire::Status::Error);
+    CHECK(other.error == Wire::ErrorCode::NodeIdentityRequired);
+    CHECK(other.message.contains("only by the member it names, node-b"));
+
+    // Nor a connection claiming node-b's id under a key the state does not record for it.
+    auto impostor = ProvenLearner("node-b");
+    impostor.provenKey = Testing::TestKeyPair("somebody-else").PublicKey();
+    CHECK(fleet.Service().MemberEdit(impostor, RecordBaselineEdit, "node-b", report).error
+          == Wire::ErrorCode::NodeIdentityRequired);
+    CHECK(fleet.cluster.proposed.empty());
+
+    // node-b itself, proving the key the state records for it -- a learner, with no operator's standing.
+    auto const own = fleet.Service().MemberEdit(ProvenLearner("node-b"), RecordBaselineEdit, "node-b", report);
+    REQUIRE(own.status == Wire::Status::Ok);
+    REQUIRE(fleet.cluster.proposed.size() == 1);
+    CHECK(fleet.cluster.proposed[0].kind == Cluster::CommandKind::RecordBaseline);
+    CHECK(fleet.cluster.proposed[0].baselineBytes == std::optional<std::uint64_t> { 8192 });
+    CHECK(fleet.cluster.proposed[0].budgetBytes == std::optional<std::uint64_t> { 4096 });
+    CHECK(fleet.cluster.proposed[0].setAtUnixSeconds == std::optional<std::int64_t> { 1793613600 });
+
+    // And a member may drop its OWN override, which a learner has no standing to do for anybody else.
+    auto const dropped = fleet.Service().MemberEdit(ProvenLearner("node-b"), ClearBudgetEdit, "node-b", ClearValue(0));
+    REQUIRE(dropped.status == Wire::Status::Ok);
+    CHECK(fleet.cluster.proposed.size() == 2);
+}
+
 TEST_CASE("A member edit proposes the command its verb names, and is refused as the state refuses it",
           "[distributed][scheduler][member-edit][display-name]")
 {
@@ -2465,7 +2666,7 @@ TEST_CASE("A member edit proposes the command its verb names, and is refused as 
                                       .publicKey = std::nullopt });
     auto constexpr SetName = static_cast<std::uint8_t>(Wire::MemberEditVerb::SetDisplayName);
 
-    auto const named = fleet.Service().MemberEdit(Insider, SetName, "node-b", "build-box");
+    auto const named = fleet.Service().MemberEdit(OperatorCaller, SetName, "node-b", "build-box");
     REQUIRE(named.status == Wire::Status::Ok);
     CHECK(named.payload.empty());
     REQUIRE(fleet.cluster.proposed.size() == 1);
@@ -2474,7 +2675,7 @@ TEST_CASE("A member edit proposes the command its verb names, and is refused as 
     CHECK(fleet.cluster.proposed[0].value == "build-box");
 
     // Taken, compared with ASCII letters folded: refused before anything is proposed, naming the holder.
-    auto const taken = fleet.Service().MemberEdit(Insider, SetName, "node-b", "office");
+    auto const taken = fleet.Service().MemberEdit(OperatorCaller, SetName, "node-b", "office");
     REQUIRE(taken.status == Wire::Status::Error);
     CHECK(taken.error == Wire::ErrorCode::InvalidClusterChange);
     CHECK(taken.message.contains("node-a already answers to"));
@@ -2482,15 +2683,15 @@ TEST_CASE("A member edit proposes the command its verb names, and is refused as 
 
     // An edit this build does not know is refused by name, never read as the edit its byte aliases.
     auto const unknown =
-        fleet.Service().MemberEdit(Insider, static_cast<std::uint8_t>(Wire::MemberEditVerb::Last), "node-b", "x");
+        fleet.Service().MemberEdit(OperatorCaller, static_cast<std::uint8_t>(Wire::MemberEditVerb::Last), "node-b", "x");
     REQUIRE(unknown.status == Wire::Status::Error);
     CHECK(unknown.error == Wire::ErrorCode::InvalidClusterChange);
-    CHECK(unknown.message.contains("member-edit verb 1"));
+    CHECK(unknown.message.contains("member-edit verb 4"));
     CHECK(fleet.cluster.proposed.size() == 1);
 
     // A follower answers as it does for every control verb: `NotLeader`, naming the leader to redirect to.
     fleet.cluster.refusal = Pace::NotLeader(std::string { "10.0.0.1:6674" });
-    auto const follower = fleet.Service().MemberEdit(Insider, SetName, "node-b", "lab");
+    auto const follower = fleet.Service().MemberEdit(OperatorCaller, SetName, "node-b", "lab");
     REQUIRE(follower.status == Wire::Status::Error);
     CHECK(follower.error == Wire::ErrorCode::NotLeader);
     CHECK(follower.message == "10.0.0.1:6674");

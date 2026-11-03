@@ -443,6 +443,8 @@ TEST_CASE("NodeConfig: every flag that is worker state reaches the supervisor", 
         "--cluster-status",
         "--cluster-set",
         "--cluster-name",
+        "--cluster-budget",
+        "--cluster-budget-clear",
         "--cluster-forget",
         "--cluster-admit",
         // Same rule, and the consequence is a flap (#1449): a registration carrying it

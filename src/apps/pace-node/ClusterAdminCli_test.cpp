@@ -1269,3 +1269,68 @@ TEST_CASE("A name reaches the cluster as SetDisplayName, and a status report sho
     // A member nobody named shows the dash, never an empty `name=`.
     CHECK(rendered.contains("name=-"));
 }
+
+TEST_CASE("The cluster-budget flags parse the one budget grammar and refuse what the leader would",
+          "[node][clusteradmin][budget]")
+{
+    constexpr auto MiB = std::uint64_t { 1024 * 1024 };
+    auto const both = ParsedFrom({ "--cluster-budget=n2:memory=64m,disk=2g" });
+    CHECK(both.cluster.action == ClusterAction::Budget);
+    CHECK(both.cluster.key == "n2");
+    auto const value = Unwrap(Wire::DecodeBudgetSetValue(Wire::AsBytes(std::string_view { both.cluster.value })));
+    CHECK(value.bytes == Wire::PerTier<std::uint64_t> { 64 * MiB, 2048 * MiB });
+
+    auto const cleared = ParsedFrom({ "--cluster-budget-clear=n2:disk" });
+    CHECK(cleared.cluster.action == ClusterAction::BudgetClear);
+    CHECK(cleared.cluster.key == "n2");
+    auto const clear = Unwrap(Wire::DecodeBudgetClearValue(Wire::AsBytes(std::string_view { cleared.cluster.value })));
+    CHECK(clear.tier == static_cast<std::uint8_t>(StorageTier::Disk));
+    CHECK_FALSE(clear.only.has_value());
+
+    // Refused where the operator is watching: zero, a share of RAM, no tier, a tier twice, no member, no tier to clear.
+    for (auto const* const bad: { "--cluster-budget=n2:memory=0",
+                                  "--cluster-budget=n2:memory=50%",
+                                  "--cluster-budget=n2",
+                                  "--cluster-budget=n2:disk=1g,disk=2g",
+                                  "--cluster-budget=:memory=1m",
+                                  "--cluster-budget-clear=n2",
+                                  "--cluster-budget-clear=n2:both" })
+    {
+        INFO(bad);
+        NodeConfig cfg;
+        auto const args = std::vector<char const*> { bad };
+        CHECK_FALSE(ParseOptionsInto(NodeOptions(), std::span<char const* const> { args }, cfg).has_value());
+    }
+}
+
+TEST_CASE("A budget reaches the cluster as one override per tier, and a status report shows each member's",
+          "[node][clusteradmin][budget]")
+{
+    Fixture fixture;
+    FakeCluster cluster;
+    cluster.state = Agreed();
+    fixture.service.AdministerWith(cluster);
+
+    auto const request = ParsedFrom({ "--cluster-budget=n2:memory=64m,disk=2g" }).cluster;
+    CHECK(StatusOf(fixture.Ask(request)) == Wire::Status::Ok);
+    REQUIRE(cluster.proposed.size() == 2);
+    CHECK(cluster.proposed[0].kind == Cluster::CommandKind::SetBudget);
+    CHECK(cluster.proposed[0].value == "memory");
+    CHECK(cluster.proposed[1].value == "disk");
+    CHECK(InterpretClusterReply(ClusterAction::Budget, {})
+          == std::expected<std::string, std::string> { "accepted; the change is replicating\n" });
+
+    // The status report: an override recorded for n2's memory tier, beneath n2, and nothing for n1.
+    auto state = Agreed();
+    auto budget = Cluster::Command { .kind = Cluster::CommandKind::SetBudget,
+                                     .key = "n2",
+                                     .value = "memory",
+                                     .schedulerEndpoint = {},
+                                     .publicKey = std::nullopt,
+                                     .budgetBytes = 64ULL << 20,
+                                     .setAtUnixSeconds = 1793613600 };
+    Apply(state, budget);
+    auto const rendered = RenderClusterState(state);
+    CHECK(rendered.contains("memory-budget=64M baseline=unset set=2026-11-02T10:00:00Z"));
+    CHECK_FALSE(rendered.contains("disk-budget="));
+}
