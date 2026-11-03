@@ -636,8 +636,8 @@ is where they are explained one by one.
 
 | Series | Says |
 |---|---|
-| `pace_dispatch_leases_granted_total` | Work is being distributed. |
-| `pace_dispatch_leases_released_total` | Clients are reporting their jobs done. |
+| `pace_dispatch_leases_granted_total` | Work is being distributed — a lease or a queued admission granted to a worker. |
+| `pace_dispatch_leases_released_total` | Clients are reporting their jobs done; a closed connection is not one. |
 | `pace_dispatch_leases_no_worker_total` | The fleet is misconfigured — workers are up but nobody matches. |
 | `pace_dispatch_leases_no_capacity_total` | The fleet is too small -- or, where a worker reads `limited-by: compile-budget`, its compiles hold its `--compile-inflight-max` instead: raise that on it. |
 | `pace_dispatch_leases_withdrawn_total` | The fleet is unavailable — slots free on paper, machines busy elsewhere. |

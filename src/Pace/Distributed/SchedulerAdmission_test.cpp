@@ -562,3 +562,157 @@ TEST_CASE("SchedulerAdmission.fleet-collects-the-queue-with-machines-named",
     fleet.service.SetRole(SchedulerRole::Follower, "10.9.9.9:7100", 1);
     CHECK_FALSE(CollectFleet({ .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics }).admission);
 }
+
+namespace
+{
+/// The two dispatch counters a queued worker grant moves, read together so a case asserts both.
+struct DispatchCounts
+{
+    std::uint64_t granted = 0;  ///< `DispatchLeasesGranted`.
+    std::uint64_t released = 0; ///< `DispatchLeasesReleased`.
+
+    bool operator==(DispatchCounts const&) const = default;
+};
+
+/// @return What @p fleet's sink reads for the dispatch pair.
+[[nodiscard]] DispatchCounts DispatchCountsOf(Fleet const& fleet)
+{
+    return DispatchCounts { .granted = fleet.metrics.Read(IMetricsSink::Counter::DispatchLeasesGranted),
+                            .released = fleet.metrics.Read(IMetricsSink::Counter::DispatchLeasesReleased) };
+}
+} // namespace
+
+TEST_CASE("SchedulerAdmission.a-settled-worker-grant-counts-one-dispatch-and-one-release",
+          "[distributed][admission][scheduler][metrics]")
+{
+    // #1742: the fleet page's Dispatched figure reads `DispatchLeasesGranted`, and a fleet that placed every
+    // miss through the queue read zero -- only the `Lease` verb counted.
+    Fleet fleet;
+    (void) fleet.RegisterWorker();
+    fleet.Report(MachineOf(fleet.workerKey.PublicKey()));
+    auto const ticket = fleet.Admit("k1");
+    REQUIRE(DispatchCountsOf(fleet) == DispatchCounts { .granted = 0, .released = 0 });
+
+    REQUIRE(GrantOf(fleet.service.PumpAdmission().at(0)).kind == Wire::GrantKind::Worker);
+    CHECK(DispatchCountsOf(fleet) == DispatchCounts { .granted = 1, .released = 0 });
+
+    REQUIRE(fleet.service.SettleAdmission(ticket, Settlement { .outcome = Wire::SettleOutcome::Stored, .peakBytes = {} })
+            == SettleResult::Settled);
+    CHECK(DispatchCountsOf(fleet) == DispatchCounts { .granted = 1, .released = 1 });
+}
+
+TEST_CASE("SchedulerAdmission.a-local-grant-counts-no-dispatch", "[distributed][admission][scheduler][metrics]")
+{
+    // Nothing was placed on a worker, so nothing was dispatched and there is no lease to give back.
+    Fleet fleet;
+    fleet.Report(fleet.service.OwnMachineId());
+    auto const ticket = fleet.Admit("k1", Wire::AdmitKind::LocalOnly);
+    REQUIRE(GrantOf(fleet.service.PumpAdmission().at(0)).kind == Wire::GrantKind::Local);
+    CHECK(DispatchCountsOf(fleet) == DispatchCounts { .granted = 0, .released = 0 });
+
+    REQUIRE(fleet.service.SettleAdmission(ticket, Settlement { .outcome = Wire::SettleOutcome::Stored, .peakBytes = {} })
+            == SettleResult::Settled);
+    CHECK(DispatchCountsOf(fleet) == DispatchCounts { .granted = 0, .released = 0 });
+}
+
+TEST_CASE("SchedulerAdmission.an-abandoned-worker-grant-is-not-a-release", "[distributed][admission][scheduler][metrics]")
+{
+    // A connection that closed holding its grant is the client dying mid-job, which granted climbing while
+    // released stays flat is how the pair reports. Counting it a release would hide exactly that.
+    Fleet fleet;
+    auto const worker = fleet.RegisterWorker();
+    fleet.Report(MachineOf(fleet.workerKey.PublicKey()));
+    auto const ticket = fleet.Admit("k1");
+    REQUIRE(GrantOf(fleet.service.PumpAdmission().at(0)).kind == Wire::GrantKind::Worker);
+
+    fleet.service.AbandonAdmission(ticket);
+    // The lease is still given back -- only the count distinguishes the two endings.
+    CHECK(fleet.Leases() == 0);
+    CHECK(fleet.Jobs(worker) == 0);
+    CHECK(DispatchCountsOf(fleet) == DispatchCounts { .granted = 1, .released = 0 });
+}
+
+TEST_CASE("SchedulerAdmission.a-worker-refusal-is-a-release-and-its-regrant-another-dispatch",
+          "[distributed][admission][scheduler][metrics]")
+{
+    Fleet fleet;
+    (void) fleet.RegisterWorker();
+    auto const workerMachine = MachineOf(fleet.workerKey.PublicKey());
+    fleet.Report(workerMachine);
+    auto const ticket = fleet.Admit("k1");
+    REQUIRE(GrantOf(fleet.service.PumpAdmission().at(0)).kind == Wire::GrantKind::Worker);
+
+    REQUIRE(
+        fleet.service.SettleAdmission(ticket, Settlement { .outcome = Wire::SettleOutcome::WorkerRefused, .peakBytes = {} })
+        == SettleResult::Requeued);
+    CHECK(DispatchCountsOf(fleet) == DispatchCounts { .granted = 1, .released = 1 });
+
+    fleet.Report(workerMachine);
+    REQUIRE(GrantOf(fleet.service.PumpAdmission().at(0)).kind == Wire::GrantKind::Worker);
+    CHECK(DispatchCountsOf(fleet) == DispatchCounts { .granted = 2, .released = 1 });
+
+    REQUIRE(fleet.service.SettleAdmission(ticket, Settlement { .outcome = Wire::SettleOutcome::Stored, .peakBytes = {} })
+            == SettleResult::Settled);
+    CHECK(DispatchCountsOf(fleet) == DispatchCounts { .granted = 2, .released = 2 });
+}
+
+TEST_CASE("SchedulerAdmission.a-worker-refusal-settled-by-a-follower-is-a-release",
+          "[distributed][admission][scheduler][metrics]")
+{
+    Fleet fleet;
+    (void) fleet.RegisterWorker();
+    fleet.Report(MachineOf(fleet.workerKey.PublicKey()));
+    auto const ticket = fleet.Admit("k1");
+    REQUIRE(GrantOf(fleet.service.PumpAdmission().at(0)).kind == Wire::GrantKind::Worker);
+
+    fleet.service.SetRole(SchedulerRole::Follower, "10.0.0.9:7000", 7);
+    REQUIRE(
+        fleet.service.SettleAdmission(ticket, Settlement { .outcome = Wire::SettleOutcome::WorkerRefused, .peakBytes = {} })
+        == SettleResult::NotLeading);
+    CHECK(DispatchCountsOf(fleet) == DispatchCounts { .granted = 1, .released = 1 });
+}
+
+TEST_CASE("SchedulerAdmission.a-late-queue-settle-counts-released-late-and-an-abandon-does-not",
+          "[distributed][admission][scheduler][metrics]")
+{
+    // #1742: a SETTLE past the lease's lifetime is the same evidence the `Release` verb's late refusal is
+    // (a compile outran the bound), so it spends the same `ReleaseRefusalTable` row and not `Released`.
+    auto const releasedLate = [](Fleet const& fleet) {
+        return fleet.metrics.Read(IMetricsSink::Counter::DispatchLeasesReleasedLate);
+    };
+    auto const expireLease = [](Fleet& fleet, std::chrono::milliseconds lifetime) {
+        fleet.clock.advance(lifetime + 1s);
+        fleet.wallClock.advance(lifetime + 1s);
+    };
+
+    SECTION("settled")
+    {
+        Fleet fleet;
+        (void) fleet.RegisterWorker();
+        fleet.Report(MachineOf(fleet.workerKey.PublicKey()));
+        auto const ticket = fleet.Admit("k1");
+        auto const grant = GrantOf(fleet.service.PumpAdmission().at(0));
+        REQUIRE(grant.kind == Wire::GrantKind::Worker);
+
+        expireLease(fleet, grant.lifetime);
+        REQUIRE(fleet.service.SettleAdmission(ticket, Settlement { .outcome = Wire::SettleOutcome::Stored, .peakBytes = {} })
+                == SettleResult::Settled);
+        CHECK(releasedLate(fleet) == 1);
+        CHECK(DispatchCountsOf(fleet) == DispatchCounts { .granted = 1, .released = 0 });
+    }
+
+    SECTION("abandoned")
+    {
+        Fleet fleet;
+        (void) fleet.RegisterWorker();
+        fleet.Report(MachineOf(fleet.workerKey.PublicKey()));
+        auto const ticket = fleet.Admit("k1");
+        auto const grant = GrantOf(fleet.service.PumpAdmission().at(0));
+        REQUIRE(grant.kind == Wire::GrantKind::Worker);
+
+        expireLease(fleet, grant.lifetime);
+        fleet.service.AbandonAdmission(ticket);
+        CHECK(releasedLate(fleet) == 0);
+        CHECK(DispatchCountsOf(fleet) == DispatchCounts { .granted = 1, .released = 0 });
+    }
+}

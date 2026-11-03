@@ -1321,6 +1321,12 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     /// @return The refusal.
     [[nodiscard]] SchedulerReply Refuse(CompileCacheWire::ErrorCode code, std::string message = {}) const;
 
+    /// Count a lease release the table refused, when the refusal's row names a counter.
+    /// The one reader of `ReleaseRefusalTable`'s `counter` column, shared by the `Release` verb and a
+    /// queue settle so both spend it identically (#1742).
+    /// @param reason What the lease table observed.
+    void CountReleaseRefusal(LeaseTable::ReleaseRefusal reason) const;
+
     /// Offer a validated command to the cluster and render what came back.
     ///
     /// One place rather than one per verb, because the mapping from a consensus
@@ -1380,9 +1386,23 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     /// Tell the admission observer a pump is due. Called outside every lock.
     void NotifyAdmissionChanged();
 
+    /// Who ended an admission ticket's worker lease, which decides whether it counts as a release.
+    ///
+    /// Private: never transmitted nor persisted, so no enumerator carries a value.
+    enum class AdmissionLeaseEnd : std::uint8_t
+    {
+        /// The client's `SETTLE` gave it back: `DispatchLeasesReleased`, as the `Release` verb counts.
+        Settled,
+        /// The connection closed holding it. Not a release: granted climbing while released stays
+        /// flat is how that counter's pair reports clients dying mid-job.
+        Abandoned,
+    };
+
     /// Frees the lease a worker grant took and the speculative job count beside it.
+    /// Caller holds `_admissionMutex`.
     /// @param held The ticket record; its lease is taken.
-    void ReleaseAdmissionLease(AdmissionTicket& held);
+    /// @param end Who ended it; only `Settled` counts a release, and only of a lease actually held.
+    void ReleaseAdmissionLease(AdmissionTicket& held, AdmissionLeaseEnd end);
 
     /// Turn one decision into a verdict: re-gate, mint the lease, encode the grant.
     /// Caller holds `_admissionMutex`.

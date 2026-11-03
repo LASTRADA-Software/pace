@@ -83,12 +83,15 @@ class IMetricsSink
         /// Subset of `ConnectionsAdmissionRejected` that came in on a
         /// TLS-flagged bind. Pairs with ConnectionsTotalTls.
         ConnectionsAdmissionRejectedTls,
-        /// Lease requests the scheduler answered with a worker. The numerator of
+        /// Compiles the scheduler placed on a worker: a `Lease` request answered
+        /// with one, or a queued `ADMIT` granted to one (#1742). The numerator of
         /// "is distribution actually happening", and meaningless without the
         /// refusals below it -- a fleet where every lease is granted and a fleet
         /// nobody asks look identical on this counter alone.
         DispatchLeasesGranted,
-        /// Leases a client resolved when its job ended, however it ended.
+        /// Leases a client resolved when its job ended, however it ended: a
+        /// `Release`, or the `SETTLE` of a queued worker grant (a worker's refusal
+        /// included). A connection that closes holding one is NOT a release.
         ///
         /// The pair of `DispatchLeasesGranted`, and the difference between the two
         /// is the outstanding count. Its absence is what let a whole missing

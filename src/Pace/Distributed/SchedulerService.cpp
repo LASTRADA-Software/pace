@@ -1045,6 +1045,12 @@ SchedulerReply SchedulerService::Refuse(Wire::ErrorCode code, std::string messag
     return SchedulerReply { .status = Wire::Status::Error, .error = code, .message = std::move(message), .payload = {} };
 }
 
+void SchedulerService::CountReleaseRefusal(LeaseTable::ReleaseRefusal reason) const
+{
+    if (auto const& row = ReleaseRefusalTable[static_cast<std::size_t>(reason)]; row.counter.has_value())
+        _metrics.Increment(*row.counter);
+}
+
 std::optional<SchedulerReply> SchedulerService::Gate(CallerContext const& caller, GateScope scope) const
 {
     // Leadership first, and not only because it is cheaper to answer. A follower
@@ -1565,9 +1571,8 @@ SchedulerReply SchedulerService::Release(CallerContext const& caller, std::strin
         // the same guarantee `RefusalTable` gets from being consulted by `Refuse`,
         // reached differently -- there is exactly one call site here, so the
         // decision lives in the table rather than in what this line remembers.
+        CountReleaseRefusal(lease.error());
         auto const& row = ReleaseRefusalTable[static_cast<std::size_t>(lease.error())];
-        if (row.counter.has_value())
-            _metrics.Increment(*row.counter);
         return Refuse(row.code, std::string { row.detail });
     }
 

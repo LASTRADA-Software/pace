@@ -85,13 +85,14 @@ inline constexpr EnumTable<IMetricsSink::Counter, CounterDescriptor> CounterTabl
       .type = MetricType::Counter },
     { .counter = IMetricsSink::Counter::DispatchLeasesGranted,
       .prometheusName = "pace_dispatch_leases_granted_total",
-      .help = "Lease requests answered with a worker; work is being distributed.",
+      .help = "Compiles placed on a worker, by a lease or by the admission queue; work is being distributed.",
       .type = MetricType::Counter },
     { .counter = IMetricsSink::Counter::DispatchLeasesReleased,
       .prometheusName = "pace_dispatch_leases_released_total",
-      .help = "Leases a client resolved when its job ended. Subtracted from the "
-              "granted count this is what is outstanding; flat while that one "
-              "climbs means clients are dying mid-job.",
+      .help = "Leases a client resolved (released or settled) when its job ended; a "
+              "closed connection is not one. Subtracted from the granted count this "
+              "is what is outstanding; flat while that one climbs means clients are "
+              "dying mid-job.",
       .type = MetricType::Counter },
     { .counter = IMetricsSink::Counter::DispatchLeasesNoWorker,
       .prometheusName = "pace_dispatch_leases_no_worker_total",

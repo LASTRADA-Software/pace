@@ -35,10 +35,12 @@
 #include <utility>
 #include <vector>
 
+#include <core/Ranges.hpp>
 #include <core/net/BlockingSocket.hpp>
 #include <core/platform/Clock.hpp>
 #include <tests/FleetHistoryFakes.hpp>
 #include <tests/LeaseRosterFakes.hpp>
+#include <tests/RaftPeerKeyFakes.hpp>
 #include <tests/ScratchPath.hpp>
 #include <tests/ScriptedHostFacts.hpp>
 #include <tests/UnreadablePath.hpp>
@@ -2040,4 +2042,90 @@ TEST_CASE("Both pages this binary serves open with the one document prologue", "
         INFO("site: " << site.what);
         CHECK(site.body.contains(Distributed::HtmlDocumentPrologue));
     }
+}
+
+TEST_CASE("A compile the admission queue placed on a worker reads as dispatched on the fleet page",
+          "[node][admin][dashboard][fleethistory]")
+{
+    // #1742: every miss a fleet distributed went through the queue, and the Dispatched tile read 0 --
+    // the queue's worker grant counted nothing the page reads, while the `Lease` verb that did count had
+    // stopped being asked. No case caught it because every case fed the counter rather than the grant.
+    // So this one drives a real queued grant through the production chain: the scheduler and its sink,
+    // `FleetSampler` sampling them, and the `/fleet.json` route reading the sampler's history.
+    core::platform::ManualClock clock;
+    AtomicMetricsSink metrics;
+    NullLogger logger;
+    Testing::PlacedWallClock wall;
+    auto const signer = Testing::TestLeaseSigner();
+    Distributed::SchedulerService scheduler { clock, wall, metrics, logger, signer, {} };
+    scheduler.SetRole(Distributed::SchedulerRole::Leader, {}, Distributed::StandaloneSchedulerTerm);
+
+    // One worker machine, proven by its key (an unproven one is never placed on) and reporting a budget
+    // the queue may charge.
+    auto const workerKey = Testing::TestKeyPair("dispatched-worker");
+    Distributed::CallerContext const worker { .membership = Distributed::Membership::Member,
+                                              .peerId = "10.0.0.2",
+                                              .provenNodeId = "worker-node",
+                                              .provenKey = workerKey.PublicKey(),
+                                              .identified = true };
+    REQUIRE(scheduler
+                .Register(worker,
+                          Distributed::WorkerRegistration {
+                              .fingerprint = "gcc-14", .endpoint = "10.0.0.2:7100", .slots = 2, .codecs = {} })
+                .status
+            == CompileCacheWire::Status::Ok);
+    std::string workerMachine;
+    for (auto const byte: workerKey.PublicKey())
+        workerMachine.push_back(static_cast<char>(std::to_integer<unsigned char>(byte)));
+    REQUIRE(
+        scheduler
+            .ReportMachineBudget(
+                worker,
+                workerMachine,
+                CompileCacheWire::MachineBudgetReport {
+                    .memoryBudgetBytes = 1024ULL * 1024 * 1024, .slots = 4, .heldSlots = 0, .heldBytes = 0, .peaks = {} })
+            .status
+        == CompileCacheWire::Status::Ok);
+
+    Distributed::FleetSources const sources { .scheduler = &scheduler, .cluster = nullptr, .metrics = &metrics };
+    FleetSampler sampler { sources, metrics, NodeFacts(), wall, HistoryPaths {}, logger };
+    // The reading before the compile: a delta needs one to be taken from.
+    REQUIRE(sampler.SampleOnce());
+
+    // One interval on, so the next reading is adjacent and lands in a bucket of its own -- of the `1h`
+    // range too, whose buckets are one interval wide, since the KPI folds deltas BETWEEN render buckets.
+    // Moved BEFORE the grant, so whatever the sampler's own thread records in either bucket brackets the
+    // compile.
+    wall.Advance(Distributed::FleetSampleInterval);
+    Distributed::CallerContext insider { .membership = Distributed::Membership::Member, .peerId = "127.0.0.1" };
+    auto const ticket = scheduler.Admit(
+        insider,
+        [insider] { return insider; },
+        scheduler.OwnMachineId(),
+        CompileCacheWire::AdmitRequestFields { .kind = CompileCacheWire::AdmitKind::Dispatchable,
+                                               .fingerprint = "gcc-14",
+                                               .cacheKey = "k1",
+                                               .sourcePath = "src/a.cpp",
+                                               .treeLabel = "tree",
+                                               .storable = false,
+                                               .acceptedCodecs = {},
+                                               .excluded = {},
+                                               .toolchainLabel = "gcc 14.2.0" });
+    REQUIRE(ticket.has_value());
+    auto const verdicts = scheduler.PumpAdmission();
+    REQUIRE(verdicts.size() == 1);
+    REQUIRE_FALSE(verdicts[0].refusal.has_value());
+    REQUIRE(Unwrap(CompileCacheWire::DecodeAdmitGrant(verdicts[0].grant)).kind == CompileCacheWire::GrantKind::Worker);
+    REQUIRE(scheduler.SettleAdmission(
+                *ticket, Distributed::Settlement { .outcome = CompileCacheWire::SettleOutcome::Stored, .peakBytes = {} })
+            == Distributed::SettleResult::Settled);
+    REQUIRE(sampler.SampleOnce());
+
+    auto const routes = MakeFleetRoutes(sources, AdminCredential {}, DashboardRefreshSeconds, &sampler);
+    auto const* const route = core::findOrNull(routes, std::string_view { "/fleet.json" }, &AdminRoute::path);
+    REQUIRE(route != nullptr);
+    auto const json = route->handler(AdminRequest { .path = "/fleet.json", .query = "range=1h" });
+    REQUIRE(json.status == "200 OK");
+    // Exactly one: the compile the queue placed, and neither the absent `null` nor the `0` it read before.
+    CHECK(json.body.contains(R"("dispatched":{"value":1,)"));
 }
