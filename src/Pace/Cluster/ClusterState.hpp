@@ -858,31 +858,32 @@ enum class CommandKind : std::uint8_t
     /// been taken since it was judged (`DisplayNameHolder`), as every verb is when its preconditions stop holding.
     SetDisplayName,
 
-    /// Record a cache budget override for one member's tier (`ClusterMember::memoryOverride`/`diskOverride`): `key`
-    /// is the member's id, `value` the tier's name (`memory`, `disk`), `budgetBytes` the budget and
-    /// `setAtUnixSeconds` the LEADER's clock when it proposed it. MEMBER-EDIT's `SetBudget`, proposed by the leader.
+    /// Record cache budget overrides for one member (`ClusterMember::memoryOverride`/`diskOverride`): `key` is the
+    /// member's id, `budgetBytes` the figure per tier (an absent tier left as it is), `setAtUnixSeconds` the LEADER's
+    /// clock and `setBy` the member whose key the proposing connection proved. MEMBER-EDIT's `SetBudget`, proposed by
+    /// the leader.
     ///
-    /// Replaces any override recorded for that tier, baseline included: a new figure is a new override, whose
-    /// baseline the member reports afresh. Settable for a member that is down -- the record is the state, and the
-    /// member applies it when it returns. Dropped at commit when the member is gone.
+    /// **One command for every tier it names**, so a two-tier edit is recorded whole or not at all. Each tier it names
+    /// gets a new override identified by the entry's log index (`BudgetOverride::id`), baseline unset: a new figure is a
+    /// new override, whose baseline the member reports afresh. Settable for a member that is down -- the record is the
+    /// state, and the member applies it when it returns. Dropped at commit when the member is gone.
     SetBudget,
 
-    /// Clear one member's override for one tier: `key` is the member's id, `value` the tier's name. MEMBER-EDIT's
-    /// `ClearBudget`.
+    /// Clear one member's override for one tier: `key` is the member's id, `value` the tier's name.
     ///
-    /// With `budgetBytes` and `setAtUnixSeconds` both present it clears only the override they name, and is dropped
-    /// at commit when another has been recorded since -- how a member dropping an override its own later edit
-    /// outranks cannot also drop a newer one an operator set in between. With neither, it clears whatever is
-    /// recorded.
+    /// Two senders. An operator's MEMBER-EDIT `ClearBudget` names no override and clears whatever is recorded. A
+    /// member's MEMBER-REPORT `DropOverride` names the override its own later configuration outranks (`overrideId`),
+    /// and is dropped at commit when another has been recorded since, so a member cannot drop a newer override an
+    /// operator set in between.
     ClearBudget,
 
-    /// Record the baseline a member reports for its own override: `key` is the member's id, `value` the tier's name,
-    /// `baselineBytes` the member's own configured value, and `budgetBytes` with `setAtUnixSeconds` the override it
-    /// answers. MEMBER-EDIT's `RecordBaseline`, sent by the member itself under its proven identity.
+    /// Record the baseline a member reports for its own override: `key` is the member's id (taken by the leader from
+    /// the key the reporting connection proved), `value` the tier's name, `baselineBytes` the member's own configured
+    /// value, `overrideId` the override it answers. MEMBER-REPORT's `RecordBaseline`.
     ///
-    /// Dropped at commit unless that very override is still recorded and has no baseline yet -- an override replaced
-    /// or cleared since the member measured never inherits the measurement, and the first report wins. Deterministic,
-    /// so every replica records the same baseline or none.
+    /// Dropped at commit unless that very override is still recorded and has no other baseline yet -- an override
+    /// replaced or cleared since the member measured never inherits the measurement, and the first report wins.
+    /// Deterministic, so every replica records the same baseline or none.
     RecordBaseline,
 
     Last, ///< Not a verb, and has no row: the length of a table keyed by one.
@@ -1034,18 +1035,25 @@ struct Command
     /// `publicKey` (`DissolveOrder::leaderKey`). Refused for every other verb.
     std::optional<Ed25519PublicKey> leaderKey {};
 
-    /// The budget verbs only: the override's bytes -- the one `SetBudget` records, and the one `RecordBaseline` and a
-    /// conditional `ClearBudget` name. Refused for every other verb.
-    std::optional<std::uint64_t> budgetBytes {};
+    /// `SetBudget` only, and at least one tier there: the figure per tier, positionally by `StorageTier`; an absent
+    /// tier is left as it is. Refused (every tier absent) for every other verb.
+    std::array<std::optional<std::uint64_t>, EnumeratorCount<StorageTier>> budgetBytes {};
 
     /// `RecordBaseline` only, and required there: the member's own configured value for the tier. Refused for every
     /// other verb.
     std::optional<std::uint64_t> baselineBytes {};
 
-    /// The budget verbs only: when the leader recorded the override, by the leader's clock -- stamped by the
-    /// proposing leader for `SetBudget`, and naming the override for `RecordBaseline` and a conditional
-    /// `ClearBudget`. Never read from a clock inside `Apply`. Refused for every other verb.
+    /// `SetBudget` only, and required there: when the leader proposed it, by the leader's clock -- for display, never
+    /// read from a clock inside `Apply`. Refused for every other verb.
     std::optional<std::int64_t> setAtUnixSeconds {};
+
+    /// The override a member's report names (`BudgetOverride::id`): required for `RecordBaseline`, optional for
+    /// `ClearBudget` (a member's conditional drop), refused for every other verb.
+    std::optional<std::uint64_t> overrideId {};
+
+    /// `SetBudget` only: the member whose key the proposing connection proved (`BudgetOverride::setBy`), empty when
+    /// none did. Empty for every other verb.
+    std::string setBy {};
 
     [[nodiscard]] friend bool operator==(Command const&, Command const&) = default;
 };
@@ -1095,13 +1103,29 @@ struct Command
 ///         for bytes that are not a state.
 [[nodiscard]] std::expected<ClusterState, ConsensusError> DecodeState(std::span<std::byte const> bytes);
 
-/// Apply one command, in place.
+/// Apply one command, in place, as the entry at @p entryIndex.
 ///
 /// Total: every well-formed command has an effect or is a no-op, and none can fail.
 /// That is a property consensus needs rather than a convenience — an entry is
 /// applied *after* it is committed, so there is nobody left to report a failure to
 /// and no way to un-commit it. Anything that could be refused has to be refused
 /// **before** it is proposed, which is what `Validate` is for.
+///
+/// The index is the entry's position in the Raft log, handed down by whoever applies the log
+/// (`ClusterStateMachine::Apply`); it is what identifies an override `SetBudget` records
+/// (`BudgetOverride::id`), the one fact a command cannot carry because it is assigned when the
+/// entry is appended. Every replica applies the entry at the same index, so every replica records
+/// the same id.
+/// @param state The state to change.
+/// @param command The change.
+/// @param entryIndex The log index of the entry carrying @p command.
+void Apply(ClusterState& state, Command const& command, std::uint64_t entryIndex);
+
+/// Apply one command that sits in no log -- a test's state, a preview.
+///
+/// Exactly `Apply(state, command, entryIndex)`, except that a `SetBudget` is DROPPED: an override is identified by
+/// the entry that recorded it, and a command outside any log has no such entry to be identified by. A production path
+/// applying committed entries always has an index, and uses the overload that takes it.
 /// @param state The state to change.
 /// @param command The change.
 void Apply(ClusterState& state, Command const& command);

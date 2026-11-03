@@ -1474,11 +1474,13 @@ TEST_CASE("cluster-members shows each member's recorded budget override, absent 
     Cluster::Apply(state,
                    Cluster::Command { .kind = Cluster::CommandKind::SetBudget,
                                       .key = "node-b",
-                                      .value = "disk",
+                                      .value = {},
                                       .schedulerEndpoint = {},
                                       .publicKey = std::nullopt,
-                                      .budgetBytes = 2ULL << 30,
-                                      .setAtUnixSeconds = 1793613600 });
+                                      .budgetBytes = { std::nullopt, 2ULL << 30 },
+                                      .setAtUnixSeconds = 1793613600,
+                                      .setBy = "node-a" },
+                   3);
     ScriptedNodeExchange node { { ClusterStatusReply(state) } };
     auto const answer = RunNodeVerb("cluster-members", node);
     CHECK(answer.outcome == Outcome::Affirmative);
@@ -1488,7 +1490,7 @@ TEST_CASE("cluster-members shows each member's recorded budget override, absent 
     auto const disk = ColumnOf(answer, "disk-budget");
     CHECK(rows[0][disk].kind == CellKind::Absent);
     CHECK(rows[1][memory].kind == CellKind::Absent);
-    CHECK(rows[1][disk].lexical == "2G baseline=unset set=2026-11-02T10:00:00Z");
+    CHECK(rows[1][disk].lexical == "2G baseline=unset set=2026-11-02T10:00:00Z by=node-a");
 }
 
 TEST_CASE("cluster-settings names every key this build knows, set or not", "[cli][node][cluster]")

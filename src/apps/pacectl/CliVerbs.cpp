@@ -1973,7 +1973,7 @@ namespace
         if (!spec.has_value())
             return Concluded(Outcome::Usage, std::move(spec).error());
         auto const value = CompileCacheWire::EncodeBudgetClearValue(
-            CompileCacheWire::BudgetClearValue { .tier = static_cast<std::uint8_t>(spec->tier), .only = std::nullopt });
+            CompileCacheWire::BudgetClearValue { .tier = static_cast<std::uint8_t>(spec->tier) });
         auto const reply = AskNode(context,
                                    CompileCacheWire::EncodeMemberEdit(CompileCacheWire::MemberEditRequest {
                                        .verb = CompileCacheWire::MemberEditVerb::ClearBudget,

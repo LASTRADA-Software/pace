@@ -1434,11 +1434,11 @@ TEST_CASE("A command carries its key, and the layout before the role left is ref
     REQUIRE(decoded.has_value());
     CHECK(*decoded == member);
 
-    // Ten fields: the header, key, value, scheduler endpoint, public key, creation time, leader
-    // key, and the budget verbs' bytes, baseline and leader's stamp. The sixth field of the layout
-    // before -- a principal's role -- is gone with the verb that carried it.
+    // Twelve fields: the header, key, value, scheduler endpoint, public key, creation time, leader
+    // key, and the budget verbs' per-tier figures, baseline, leader's stamp, override id and setter. The sixth field of the
+    // layout before -- a principal's role -- is gone with the verb that carried it.
     auto const fields = Unwrap(WireFields::SplitAll(Encode(member)));
-    CHECK(fields.size() == 10);
+    CHECK(fields.size() == 12);
 
     // A command of the version-5 layout -- eight fields, the role sixth -- is refused by its
     // VERSION, by name, before its arity is judged: it is intact, and reading it as this layout
@@ -1465,6 +1465,8 @@ TEST_CASE("A command carries its key, and the layout before the role left is ref
                                                               WireFields::AsBytes(std::string_view {}),
                                                               WireFields::AsBytes(std::string_view {}),
                                                               std::span<std::byte const> { shortKey },
+                                                              WireFields::AsBytes(std::string_view {}),
+                                                              WireFields::AsBytes(std::string_view {}),
                                                               WireFields::AsBytes(std::string_view {}),
                                                               WireFields::AsBytes(std::string_view {}),
                                                               WireFields::AsBytes(std::string_view {}),
@@ -2112,40 +2114,56 @@ constexpr std::uint64_t MiB = 1024ULL * 1024ULL;
 constexpr std::int64_t SetAt = 1793613600;
 
 /// @param id A member.
-/// @param tier Its tier.
-/// @param bytes The budget.
-/// @param setAt The leader's stamp.
+/// @param memory The memory tier's figure, or nothing.
+/// @param disk The disk tier's figure, or nothing.
+/// @param setBy Who set it.
 /// @return The `SetBudget` command.
-[[nodiscard]] Command Budget(std::string id, StorageTier tier, std::uint64_t bytes, std::int64_t setAt = SetAt)
+[[nodiscard]] Command Budget(std::string id,
+                             std::optional<std::uint64_t> memory,
+                             std::optional<std::uint64_t> disk = std::nullopt,
+                             std::string setBy = "n1")
 {
-    auto command = Keyless(CommandKind::SetBudget, std::move(id), std::string { TierName(tier) });
-    command.budgetBytes = bytes;
-    command.setAtUnixSeconds = setAt;
+    auto command = Keyless(CommandKind::SetBudget, std::move(id));
+    command.budgetBytes = { memory, disk };
+    command.setAtUnixSeconds = SetAt;
+    command.setBy = std::move(setBy);
     return command;
 }
 
 /// @param id A member.
 /// @param tier Its tier.
 /// @param baseline What the member reports it had configured.
-/// @param bytes The override it measured against.
-/// @param setAt That override's stamp.
+/// @param overrideId The override it measured against: the index of the entry that set it.
 /// @return The `RecordBaseline` command.
-[[nodiscard]] Command Baseline(
-    std::string id, StorageTier tier, std::uint64_t baseline, std::uint64_t bytes, std::int64_t setAt = SetAt)
+[[nodiscard]] Command Baseline(std::string id, StorageTier tier, std::uint64_t baseline, std::uint64_t overrideId)
 {
     auto command = Keyless(CommandKind::RecordBaseline, std::move(id), std::string { TierName(tier) });
     command.baselineBytes = baseline;
-    command.budgetBytes = bytes;
-    command.setAtUnixSeconds = setAt;
+    command.overrideId = overrideId;
     return command;
 }
 
 /// @param id A member.
 /// @param tier Its tier.
-/// @return The unconditional `ClearBudget` command.
-[[nodiscard]] Command Clear(std::string id, StorageTier tier)
+/// @param overrideId The override a member's drop names, or nothing for an operator's clear.
+/// @return The `ClearBudget` command.
+[[nodiscard]] Command Clear(std::string id, StorageTier tier, std::optional<std::uint64_t> overrideId = std::nullopt)
 {
-    return Keyless(CommandKind::ClearBudget, std::move(id), std::string { TierName(tier) });
+    auto command = Keyless(CommandKind::ClearBudget, std::move(id), std::string { TierName(tier) });
+    command.overrideId = overrideId;
+    return command;
+}
+
+/// Apply @p command as the entry at @p index, after requiring the proposal be accepted against @p state.
+/// @param state The state.
+/// @param command The change.
+/// @param index The entry's log index.
+void AcceptedAt(ClusterState& state, Command const& command, std::uint64_t index)
+{
+    auto const allowed = ValidateAgainst(state, command);
+    INFO((allowed.has_value() ? std::string {} : allowed.error().context));
+    REQUIRE(allowed.has_value());
+    Apply(state, command, index);
 }
 
 /// @param state A state.
@@ -2173,28 +2191,52 @@ TEST_CASE("override set for a down node is recorded with baseline unset", "[clus
     // n3 is a learner that never announced an endpoint -- nothing the leader holds says it is up -- and the override
     // is recorded all the same: the record is the state, and the member applies it when it returns.
     auto state = ThreeMembers();
-    Accepted(state, Budget("n3", StorageTier::Memory, 64 * MiB));
+    AcceptedAt(state, Budget("n3", 64 * MiB), 41);
     auto const recorded = Unwrap(BudgetIn(state, "n3", StorageTier::Memory));
     CHECK(recorded.bytes == 64 * MiB);
     CHECK_FALSE(recorded.baseline.has_value());
     CHECK(recorded.setAtUnixSeconds == SetAt);
+    CHECK(recorded.id == 41);
+    CHECK(recorded.setBy == "n1");
     // The other tier is untouched, and so is every other member.
     CHECK_FALSE(BudgetIn(state, "n3", StorageTier::Disk).has_value());
     CHECK_FALSE(BudgetIn(state, "n1", StorageTier::Memory).has_value());
+}
+
+TEST_CASE("A two-tier override is one command, applied whole, both tiers identified by its entry",
+          "[cluster][state][budget]")
+{
+    auto state = ThreeMembers();
+    AcceptedAt(state, Budget("n2", 64 * MiB, 2048 * MiB), 17);
+    CHECK(Unwrap(BudgetIn(state, "n2", StorageTier::Memory)).id == 17);
+    CHECK(Unwrap(BudgetIn(state, "n2", StorageTier::Disk)).id == 17);
+    CHECK(Unwrap(BudgetIn(state, "n2", StorageTier::Disk)).bytes == 2048 * MiB);
+
+    // A zero for either tier refuses the whole command, and `Apply` drops it whole: no tier is half recorded.
+    auto const before = state;
+    CHECK(Refused(Budget("n2", 32 * MiB, 0)) == TierOverrideCannotRemoveTier);
+    Apply(state, Budget("n2", 32 * MiB, 0), 18);
+    CHECK(state == before);
+
+    // A command in no log has no entry to identify an override by, so it records nothing.
+    Apply(state, Budget("n2", 1 * MiB));
+    CHECK(state == before);
 }
 
 TEST_CASE("An override and its baseline survive a command's encoding and the state's snapshot",
           "[cluster][state][wire][budget]")
 {
     auto state = ThreeMembers();
-    Accepted(state, Budget("n1", StorageTier::Memory, 64 * MiB));
-    Accepted(state, Budget("n1", StorageTier::Disk, 2048 * MiB));
-    Accepted(state, Baseline("n1", StorageTier::Disk, 0, 2048 * MiB)); // a present zero: unbounded, a real value
-    Accepted(state, Budget("n2", StorageTier::Disk, 512 * MiB, -5));   // a stamp before the epoch still round-trips
+    AcceptedAt(state, Budget("n1", 64 * MiB, 2048 * MiB), 5);
+    AcceptedAt(state, Baseline("n1", StorageTier::Disk, 0, 5), 6); // a present zero: unbounded, a real value
+    auto setBeforeEpoch = Budget("n2", std::nullopt, 512 * MiB, "");
+    setBeforeEpoch.setAtUnixSeconds = -5; // a stamp before the epoch still round-trips, and nobody's key set it
+    AcceptedAt(state, setBeforeEpoch, 7);
 
-    for (auto const& command: { Budget("n1", StorageTier::Memory, 64 * MiB),
-                                Baseline("n1", StorageTier::Disk, 7, 2048 * MiB),
-                                Clear("n1", StorageTier::Disk) })
+    for (auto const& command: { Budget("n1", 64 * MiB),
+                                Baseline("n1", StorageTier::Disk, 7, 5),
+                                Clear("n1", StorageTier::Disk),
+                                Clear("n1", StorageTier::Disk, 5) })
         CHECK(Unwrap(DecodeCommand(Encode(command))) == command);
 
     auto const decoded = Unwrap(DecodeState(Encode(state)));
@@ -2202,28 +2244,40 @@ TEST_CASE("An override and its baseline survive a command's encoding and the sta
     CHECK(Unwrap(BudgetIn(decoded, "n1", StorageTier::Disk)).baseline == std::optional<std::uint64_t> { 0 });
     CHECK_FALSE(Unwrap(BudgetIn(decoded, "n1", StorageTier::Memory)).baseline.has_value());
     CHECK(Unwrap(BudgetIn(decoded, "n2", StorageTier::Disk)).setAtUnixSeconds == -5);
+    CHECK(Unwrap(BudgetIn(decoded, "n2", StorageTier::Disk)).setBy.empty());
+    CHECK(Unwrap(BudgetIn(decoded, "n1", StorageTier::Memory)).setBy == "n1");
 }
 
-TEST_CASE("An override names a member the state records, a tier this build knows, and never zero",
-          "[cluster][state][budget]")
+TEST_CASE("An override names a member the state records, tiers this build knows, and never zero", "[cluster][state][budget]")
 {
     auto state = ThreeMembers();
-    CHECK(RefusedAgainst(state, Budget("n9", StorageTier::Memory, MiB)).context.find("no member") != std::string::npos);
-    CHECK(Refused(Budget("n1", StorageTier::Memory, 0)) == TierOverrideCannotRemoveTier);
-    auto unknownTier = Budget("n1", StorageTier::Memory, MiB);
-    unknownTier.value = "ram";
-    CHECK(Refused(unknownTier).find("no cache tier") != std::string::npos);
-    auto noStamp = Budget("n1", StorageTier::Memory, MiB);
+    CHECK(RefusedAgainst(state, Budget("n9", MiB)).context.find("no member") != std::string::npos);
+    CHECK(Refused(Budget("n1", 0)) == TierOverrideCannotRemoveTier);
+    auto namedTier = Budget("n1", MiB);
+    namedTier.value = "memory"; // a set names its tiers by position, never by name
+    CHECK_FALSE(Validate(namedTier).has_value());
+    auto noStamp = Budget("n1", MiB);
     noStamp.setAtUnixSeconds.reset();
     CHECK_FALSE(Validate(noStamp).has_value());
-    // And no other verb carries a budget figure.
+    auto noTier = Budget("n1", std::nullopt);
+    CHECK_FALSE(Validate(noTier).has_value());
+    // And no other verb carries a budget figure, an override id or a setter.
     auto stray = Named("n1", "office-pc");
-    stray.budgetBytes = MiB;
+    stray.budgetBytes[0] = MiB;
     CHECK_FALSE(Validate(stray).has_value());
+    auto strayId = Named("n1", "office-pc");
+    strayId.overrideId = 3;
+    CHECK_FALSE(Validate(strayId).has_value());
+    auto straySetter = Clear("n1", StorageTier::Memory);
+    straySetter.setBy = "n2";
+    CHECK_FALSE(Validate(straySetter).has_value());
+    auto unknownTier = Clear("n1", StorageTier::Memory);
+    unknownTier.value = "ram";
+    CHECK(Refused(unknownTier).find("no cache tier") != std::string::npos);
 
     // `Apply` is the guarantee: a committed zero or a member forgotten since is dropped, deterministically.
-    Apply(state, Budget("n1", StorageTier::Memory, 0));
-    Apply(state, Budget("n9", StorageTier::Memory, MiB));
+    Apply(state, Budget("n1", 0), 3);
+    Apply(state, Budget("n9", MiB), 4);
     CHECK(state == ThreeMembers());
 }
 
@@ -2231,71 +2285,66 @@ TEST_CASE("RecordBaseline racing a SetBudget never attaches the old baseline to 
           "[cluster][state][budget]")
 {
     auto state = ThreeMembers();
-    Accepted(state, Budget("n2", StorageTier::Memory, 64 * MiB, SetAt));
-    // The member measures against the first override; before its report commits, an operator sets another.
-    auto const report = Baseline("n2", StorageTier::Memory, 256 * MiB, 64 * MiB, SetAt);
+    AcceptedAt(state, Budget("n2", 64 * MiB), 10);
+    // The member measures against the first override; before its report commits, an operator sets another -- the SAME
+    // figure in the same second, which only the entry's index tells apart.
+    auto const report = Baseline("n2", StorageTier::Memory, 256 * MiB, 10);
     REQUIRE(ValidateAgainst(state, report).has_value());
-    Accepted(state, Budget("n2", StorageTier::Memory, 32 * MiB, SetAt + 60));
+    AcceptedAt(state, Budget("n2", 64 * MiB), 11);
 
     // Refused where somebody reads the answer, and dropped where nobody can.
-    CHECK(RefusedAgainst(state, report).context.find("cleared or replaced") != std::string::npos);
-    Apply(state, report);
+    CHECK(RefusedAgainst(state, report).context.find("another was set since") != std::string::npos);
+    Apply(state, report, 12);
     auto const recorded = Unwrap(BudgetIn(state, "n2", StorageTier::Memory));
-    CHECK(recorded.bytes == 32 * MiB);
+    CHECK(recorded.id == 11);
     CHECK_FALSE(recorded.baseline.has_value());
 
-    // Same bytes, another stamp, is still another override.
-    Accepted(state, Budget("n2", StorageTier::Memory, 32 * MiB, SetAt + 120));
-    Apply(state, Baseline("n2", StorageTier::Memory, 256 * MiB, 32 * MiB, SetAt + 60));
-    CHECK_FALSE(Unwrap(BudgetIn(state, "n2", StorageTier::Memory)).baseline.has_value());
-
     // The report naming the override that stands is recorded, and the first report wins.
-    Accepted(state, Baseline("n2", StorageTier::Memory, 256 * MiB, 32 * MiB, SetAt + 120));
-    Apply(state, Baseline("n2", StorageTier::Memory, 1, 32 * MiB, SetAt + 120));
+    AcceptedAt(state, Baseline("n2", StorageTier::Memory, 256 * MiB, 11), 13);
+    Apply(state, Baseline("n2", StorageTier::Memory, 1, 11), 14);
     CHECK(Unwrap(BudgetIn(state, "n2", StorageTier::Memory)).baseline == std::optional { 256 * MiB });
-    CHECK(RefusedAgainst(state, Baseline("n2", StorageTier::Memory, 1, 32 * MiB, SetAt + 120))
-              .context.find("first report stands")
+    CHECK(RefusedAgainst(state, Baseline("n2", StorageTier::Memory, 1, 11)).context.find("first report stands")
           != std::string::npos);
 
     // A new figure is a new override, whose baseline the member reports afresh.
-    Accepted(state, Budget("n2", StorageTier::Memory, 16 * MiB, SetAt + 180));
+    AcceptedAt(state, Budget("n2", 16 * MiB), 15);
     CHECK_FALSE(Unwrap(BudgetIn(state, "n2", StorageTier::Memory)).baseline.has_value());
 }
 
 TEST_CASE("A baseline for an override cleared meanwhile is a no-op", "[cluster][state][budget]")
 {
     auto state = ThreeMembers();
-    Accepted(state, Budget("n1", StorageTier::Disk, 64 * MiB));
-    auto const report = Baseline("n1", StorageTier::Disk, 128 * MiB, 64 * MiB);
-    Accepted(state, Clear("n1", StorageTier::Disk));
+    AcceptedAt(state, Budget("n1", std::nullopt, 64 * MiB), 20);
+    auto const report = Baseline("n1", StorageTier::Disk, 128 * MiB, 20);
+    AcceptedAt(state, Clear("n1", StorageTier::Disk), 21);
     auto const before = state;
-    Apply(state, report);
+    Apply(state, report, 22);
     CHECK(state == before);
     CHECK_FALSE(BudgetIn(state, "n1", StorageTier::Disk).has_value());
 }
 
-TEST_CASE("A clear naming an override removes only that one, and a bare clear removes whatever stands",
+TEST_CASE("A member's drop naming a stale override is a no-op, and an operator's clear removes whatever stands",
           "[cluster][state][budget]")
 {
     auto state = ThreeMembers();
     CHECK(RefusedAgainst(state, Clear("n1", StorageTier::Memory)).context.find("nothing to clear") != std::string::npos);
 
-    Accepted(state, Budget("n1", StorageTier::Memory, 64 * MiB, SetAt));
+    AcceptedAt(state, Budget("n1", 64 * MiB), 30);
     // The member drops the override its own later edit outranks -- but an operator set a newer one in between.
-    auto drop = Clear("n1", StorageTier::Memory);
-    drop.budgetBytes = 64 * MiB;
-    drop.setAtUnixSeconds = SetAt;
-    Accepted(state, Budget("n1", StorageTier::Memory, 48 * MiB, SetAt + 60));
+    auto const drop = Clear("n1", StorageTier::Memory, 30);
+    AcceptedAt(state, Budget("n1", 48 * MiB), 31);
     CHECK(RefusedAgainst(state, drop).context.find("another was set since") != std::string::npos);
-    Apply(state, drop);
+    auto const before = state;
+    Apply(state, drop, 32);
+    CHECK(state == before);
     CHECK(Unwrap(BudgetIn(state, "n1", StorageTier::Memory)).bytes == 48 * MiB);
 
-    // Half an identity is refused.
-    auto half = Clear("n1", StorageTier::Memory);
-    half.budgetBytes = 48 * MiB;
-    CHECK_FALSE(Validate(half).has_value());
+    // The drop naming the override that stands removes it.
+    AcceptedAt(state, Clear("n1", StorageTier::Memory, 31), 33);
+    CHECK_FALSE(BudgetIn(state, "n1", StorageTier::Memory).has_value());
 
-    Accepted(state, Clear("n1", StorageTier::Memory));
+    AcceptedAt(state, Budget("n1", 8 * MiB), 34);
+    AcceptedAt(state, Clear("n1", StorageTier::Memory), 35);
     CHECK_FALSE(BudgetIn(state, "n1", StorageTier::Memory).has_value());
 }
 
@@ -2304,22 +2353,21 @@ TEST_CASE("An override goes with a forgotten record, stays across a re-admission
 {
     auto state = ThreeMembers();
     auto const version = state.rosterVersion;
-    Accepted(state, Budget("n1", StorageTier::Memory, 64 * MiB));
-    Accepted(state, Baseline("n1", StorageTier::Memory, 128 * MiB, 64 * MiB));
-    Accepted(state, Clear("n1", StorageTier::Memory));
-    Accepted(state, Budget("n1", StorageTier::Memory, 64 * MiB));
+    AcceptedAt(state, Budget("n1", 64 * MiB), 40);
+    AcceptedAt(state, Baseline("n1", StorageTier::Memory, 128 * MiB, 40), 41);
+    AcceptedAt(state, Clear("n1", StorageTier::Memory), 42);
+    AcceptedAt(state, Budget("n1", 64 * MiB), 43);
     CHECK(state.rosterVersion == version);
 
-    // A promotion -- a re-admission stating its endpoints and no budget -- keeps it.
+    // A promotion -- a re-admission stating its endpoints and no budget -- keeps both tiers.
     Apply(state, Keyless(CommandKind::AddMember, "n3", "10.0.0.3:6675", "10.0.0.3:6674"));
-    Accepted(state, Budget("n3", StorageTier::Disk, MiB));
-    Accepted(state, Budget("n3", StorageTier::Memory, 2 * MiB));
+    AcceptedAt(state, Budget("n3", 2 * MiB, MiB), 44);
     Apply(state, Keyless(CommandKind::AddLearner, "n3", {}, "10.0.0.3:6674"));
     CHECK(Unwrap(BudgetIn(state, "n3", StorageTier::Disk)).bytes == MiB);
     CHECK(Unwrap(BudgetIn(state, "n3", StorageTier::Memory)).bytes == 2 * MiB);
     CHECK(Unwrap(BudgetIn(state, "n1", StorageTier::Memory)).bytes == 64 * MiB);
 
-    // A forget takes the record, and the override with it; admitted again later, the id starts with none.
+    // A forget takes the record, and the override with it.
     Apply(state, Cmd(CommandKind::Forget, "n3"));
     CHECK(std::ranges::find(state.members, "n3", &ClusterMember::id) == state.members.end());
 }
@@ -2327,27 +2375,44 @@ TEST_CASE("An override goes with a forgotten record, stays across a re-admission
 TEST_CASE("A snapshot holding an override Apply never records is refused by name", "[cluster][state][wire][budget]")
 {
     auto state = ThreeMembers();
-    Accepted(state, Budget("n1", StorageTier::Memory, 64 * MiB));
+    AcceptedAt(state, Budget("n1", 64 * MiB), 50);
     auto const good = Encode(state);
     REQUIRE(DecodeState(good).has_value());
 
-    // Rewrite n1's memory override field in place: first to zero bytes, then to a width neither form has.
+    // n1's memory override is the one non-empty nested record among the state's fields; rewrite it in place.
     auto fields = Unwrap(WireFields::SplitAll(good));
-    auto const at = std::ranges::find_if(fields, [](std::span<std::byte const> field) { return field.size() == 16; });
+    auto const at = std::ranges::find_if(fields, [](std::span<std::byte const> field) {
+        auto const parts = WireFields::SplitAll(field);
+        return field.size() > 32 && parts.has_value() && parts->size() == 5;
+    });
     REQUIRE(at != fields.end());
     auto const index = static_cast<std::size_t>(std::distance(fields.begin(), at));
-
     auto rebuild = [&fields, index](std::vector<std::byte> const& replacement) {
         auto copy = std::vector<std::span<std::byte const>> { fields.begin(), fields.end() };
         copy[index] = replacement;
         return WireFields::Encode(WireFields::FieldList { copy });
     };
-    auto zero = std::vector<std::byte>(16, std::byte { 0 });
-    auto const zeroed = DecodeState(rebuild(zero));
+    auto const record = [](std::uint64_t bytes, std::string_view setBy) {
+        auto const figure = WireFields::ToBigEndian<std::uint64_t>(bytes);
+        auto const id = WireFields::ToBigEndian<std::uint64_t>(50);
+        auto const setAt = WireFields::ToBigEndian<std::uint64_t>(1);
+        return WireFields::Encode({ std::span<std::byte const> { figure },
+                                    std::span<std::byte const> { id },
+                                    std::span<std::byte const> { setAt },
+                                    std::span<std::byte const> {},
+                                    WireFields::AsBytes(setBy) });
+    };
+    REQUIRE(DecodeState(rebuild(record(64 * MiB, "n1"))).has_value()); // the rebuild itself decodes
+
+    auto const zeroed = DecodeState(rebuild(record(0, "n1")));
     REQUIRE_FALSE(zeroed.has_value());
     CHECK(zeroed.error().context.find("zero bytes") != std::string::npos);
 
     auto const odd = DecodeState(rebuild(std::vector<std::byte>(9, std::byte { 1 })));
     REQUIRE_FALSE(odd.has_value());
-    CHECK(odd.error().context.find("neither 16 nor 24") != std::string::npos);
+    CHECK(odd.error().context.find("not a record of 5 fields") != std::string::npos);
+
+    auto const longSetter = DecodeState(rebuild(record(64 * MiB, std::string(CompileCacheWire::MaxIdBytes + 1, 'x'))));
+    REQUIRE_FALSE(longSetter.has_value());
+    CHECK(longSetter.error().context.find("past the") != std::string::npos);
 }

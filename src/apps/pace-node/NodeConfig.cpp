@@ -392,9 +392,8 @@ namespace
                 if (!spec.has_value())
                     return std::unexpected(ArgvError(ConfigErrorCode::ParseError, std::move(spec).error()));
                 request.key = std::move(spec->memberId);
-                request.value = std::string { CompileCacheWire::AsStringView(
-                    CompileCacheWire::EncodeBudgetClearValue(CompileCacheWire::BudgetClearValue {
-                        .tier = static_cast<std::uint8_t>(spec->tier), .only = std::nullopt })) };
+                request.value = std::string { CompileCacheWire::AsStringView(CompileCacheWire::EncodeBudgetClearValue(
+                    CompileCacheWire::BudgetClearValue { .tier = static_cast<std::uint8_t>(spec->tier) })) };
             }
             else if constexpr (Action == ClusterAction::Admit || Action == ClusterAction::AdmitLearner)
             {

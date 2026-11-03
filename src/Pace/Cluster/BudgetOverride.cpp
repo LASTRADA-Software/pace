@@ -129,11 +129,12 @@ std::expected<BudgetClearSpec, std::string> ParseBudgetClearSpec(std::string_vie
 std::string FormatBudgetOverride(BudgetOverride const& budget)
 {
     auto const at = std::chrono::sys_seconds { std::chrono::seconds { budget.setAtUnixSeconds } };
-    return std::format("{} baseline={} set={:%Y-%m-%dT%H:%M:%SZ}",
+    return std::format("{} baseline={} set={:%Y-%m-%dT%H:%M:%SZ} by={}",
                        FormatByteSize(static_cast<std::size_t>(budget.bytes)),
                        budget.baseline.has_value() ? FormatByteSize(static_cast<std::size_t>(*budget.baseline))
                                                    : std::string { "unset" },
-                       at);
+                       at,
+                       budget.setBy.empty() ? std::string { "-" } : budget.setBy);
 }
 
 } // namespace Pace::Cluster

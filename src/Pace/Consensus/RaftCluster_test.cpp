@@ -1154,7 +1154,7 @@ namespace
     {
         auto const command = Cluster::DecodeCommand(entry.payload);
         REQUIRE(command.has_value());
-        Cluster::Apply(state, *command);
+        Cluster::Apply(state, *command, entry.index.value);
     }
     return state;
 }
@@ -1272,38 +1272,40 @@ TEST_CASE("An admission under an id a display name spells clears the name, and a
 namespace
 {
 /// @param id A member.
-/// @param tier Its tier's name.
-/// @param bytes The budget.
-/// @param setAt The leader's stamp.
+/// @param memory The memory tier's figure, or nothing.
+/// @param disk The disk tier's figure, or nothing.
 /// @return The `SetBudget` command.
-[[nodiscard]] std::vector<std::byte> BudgetBytes(std::string id, std::string tier, std::uint64_t bytes, std::int64_t setAt)
+[[nodiscard]] std::vector<std::byte> BudgetBytes(std::string id,
+                                                 std::optional<std::uint64_t> memory,
+                                                 std::optional<std::uint64_t> disk)
 {
     return Cluster::Encode(Cluster::Command { .kind = Cluster::CommandKind::SetBudget,
                                               .key = std::move(id),
-                                              .value = std::move(tier),
+                                              .value = {},
                                               .schedulerEndpoint = {},
                                               .publicKey = std::nullopt,
-                                              .budgetBytes = bytes,
-                                              .setAtUnixSeconds = setAt });
+                                              .budgetBytes = { memory, disk },
+                                              .setAtUnixSeconds = 1793613600,
+                                              .setBy = "n1" });
 }
 
 /// @param id A member.
 /// @param tier Its tier's name.
 /// @param baseline The member's report.
-/// @param bytes The override it measured against.
-/// @param setAt That override's stamp.
+/// @param overrideId The override it measured against: the index of the entry that set it.
 /// @return The `RecordBaseline` command.
-[[nodiscard]] std::vector<std::byte> BaselineBytes(
-    std::string id, std::string tier, std::uint64_t baseline, std::uint64_t bytes, std::int64_t setAt)
+[[nodiscard]] std::vector<std::byte> BaselineBytes(std::string id,
+                                                   std::string tier,
+                                                   std::uint64_t baseline,
+                                                   std::uint64_t overrideId)
 {
     return Cluster::Encode(Cluster::Command { .kind = Cluster::CommandKind::RecordBaseline,
                                               .key = std::move(id),
                                               .value = std::move(tier),
                                               .schedulerEndpoint = {},
                                               .publicKey = std::nullopt,
-                                              .budgetBytes = bytes,
                                               .baselineBytes = baseline,
-                                              .setAtUnixSeconds = setAt });
+                                              .overrideId = overrideId });
 }
 
 /// @param state A state.
@@ -1326,16 +1328,16 @@ TEST_CASE("override survives snapshot restore", "[consensus][raft][cluster][snap
     // a single step is what recovery handed the application.
     RaftClusterHarness cluster { { "n1", "n2", "n3" }, Members(), 1, CompactOften };
     REQUIRE(SettleOnLeader(cluster));
-    auto lastBudget = LogIndex::BeforeFirst();
-    for (auto payload: { AdmitBytes("n1"),
-                         AdmitBytes("n2"),
-                         BudgetBytes("n1", "memory", 64ULL << 20, 1793613600),
-                         BudgetBytes("n2", "disk", 2ULL << 30, 1793613600),
-                         BaselineBytes("n2", "disk", 8ULL << 30, 2ULL << 30, 1793613600) })
-    {
-        lastBudget = Unwrap(cluster.ProposeOnLeader(std::move(payload)));
+    auto const propose = [&cluster](std::vector<std::byte> payload) {
+        auto const index = Unwrap(cluster.ProposeOnLeader(std::move(payload)));
         cluster.Run(5);
-    }
+        return index;
+    };
+    (void) propose(AdmitBytes("n1"));
+    (void) propose(AdmitBytes("n2"));
+    auto const memoryEntry = propose(BudgetBytes("n1", 64ULL << 20, std::nullopt));
+    auto const diskEntry = propose(BudgetBytes("n2", std::nullopt, 2ULL << 30));
+    auto const lastBudget = propose(BaselineBytes("n2", "disk", 8ULL << 30, diskEntry.value));
     for (auto const* const id: { "n3", "n4", "n5", "n6" })
     {
         REQUIRE(cluster.ProposeOnLeader(AdmitBytes(id)).has_value());
@@ -1352,6 +1354,8 @@ TEST_CASE("override survives snapshot restore", "[consensus][raft][cluster][snap
     CHECK(memory.bytes == 64ULL << 20);
     CHECK_FALSE(memory.baseline.has_value());
     CHECK(memory.setAtUnixSeconds == 1793613600);
+    CHECK(memory.id == memoryEntry.value);
+    CHECK(memory.setBy == "n1");
     auto const disk = Unwrap(BudgetIn(restored, "n2", StorageTier::Disk));
     CHECK(disk.baseline == std::optional<std::uint64_t> { 8ULL << 30 });
 

@@ -835,9 +835,9 @@ TEST_CASE("A member that never announced and one a re-admit cleared render diffe
     // both endpoint cells are the absent marker. Members sort by id, so `moved` first.
     auto const members = RenderFleetText(snapshot, NoHistory(), FleetSection::Members);
     INFO(members);
-    // The two trailing dashes are the budget overrides neither member has.
-    CHECK(members.contains("moved\t-\t-\t10.0.0.2:6675\t-\tcleared\t-\t-\n"));
-    CHECK(members.contains("quiet\t-\t-\t10.0.0.1:6675\t-\tnever-announced\t-\t-\n"));
+    // The four trailing dashes are the budget override columns (figure, setter per tier) neither member has.
+    CHECK(members.contains("moved\t-\t-\t10.0.0.2:6675\t-\tcleared\t-\t-\t-\t-\n"));
+    CHECK(members.contains("quiet\t-\t-\t10.0.0.1:6675\t-\tnever-announced\t-\t-\t-\t-\n"));
 
     // And the JSON, where the endpoint stays `null` for both rather than becoming a word.
     auto const json = RenderFleetJson(snapshot, NoHistory());
@@ -863,19 +863,22 @@ TEST_CASE("A member's recorded budget override is a column of the members table,
     Apply(state,
           Cluster::Command { .kind = Cluster::CommandKind::SetBudget,
                              .key = "box",
-                             .value = "disk",
+                             .value = {},
                              .schedulerEndpoint = {},
                              .publicKey = std::nullopt,
-                             .budgetBytes = 2ULL << 30,
-                             .setAtUnixSeconds = 1793613600 });
+                             .budgetBytes = { std::nullopt, 2ULL << 30 },
+                             .setAtUnixSeconds = 1793613600,
+                             .setBy = "voter-1" },
+          2);
     snapshot.cluster = state;
 
     auto const json = RenderFleetJson(snapshot, NoHistory());
     INFO(json);
-    CHECK(json.contains(R"("memory-override":null,"disk-override":2147483648)"));
+    CHECK(json.contains(
+        R"("memory-override":null,"disk-override":2147483648,"memory-override-by":null,"disk-override-by":"voter-1")"));
     auto const members = RenderFleetText(snapshot, NoHistory(), FleetSection::Members);
     INFO(members);
-    CHECK(members.contains("never-announced\t-\t2147483648\n")); // bytes as /fleet.txt writes every byte cell
+    CHECK(members.contains("never-announced\t-\t2147483648\t-\tvoter-1\n")); // bytes as /fleet.txt writes them
     CHECK(FleetColumnFormat(FleetSection::Members, "disk-override") == std::optional { CellFormat::Bytes });
 }
 

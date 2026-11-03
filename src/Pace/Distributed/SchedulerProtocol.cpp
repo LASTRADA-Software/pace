@@ -33,7 +33,8 @@ namespace
     constexpr std::array SchedulerOps {
         Wire::Op::Register,      Wire::Op::NodeAnnounce, Wire::Op::Heartbeat,           Wire::Op::Withdraw,
         Wire::Op::Lease,         Wire::Op::Release,      Wire::Op::ClusterStatus,       Wire::Op::ClusterSet,
-        Wire::Op::ClusterForget, Wire::Op::ClusterAdmit, Wire::Op::ClusterAdmitLearner, Wire::Op::MemberEdit
+        Wire::Op::ClusterForget, Wire::Op::ClusterAdmit, Wire::Op::ClusterAdmitLearner, Wire::Op::MemberEdit,
+        Wire::Op::MemberReport
     };
 
     /// Whether this scheduler serves @p op at all.
@@ -491,6 +492,13 @@ SchedulerReply SchedulerProtocol::Route(Wire::Op op, std::span<std::byte const> 
             if (!fields.has_value())
                 return SchedulerReply::Malformed();
             return _service.ClusterSet(caller, Wire::AsStringView(fields->name), Wire::AsStringView(fields->value));
+        }
+
+        case Wire::Op::MemberReport: {
+            auto const fields = Wire::DecodeMemberReportPayload(payload);
+            if (!fields.has_value())
+                return SchedulerReply::Malformed();
+            return _service.MemberReport(caller, fields->verb, Wire::AsStringView(fields->value));
         }
 
         case Wire::Op::MemberEdit: {

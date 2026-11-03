@@ -103,6 +103,11 @@ namespace
                             .code = Wire::ErrorCode::NoCluster,
                             .why = "this endpoint is a cache and belongs to no cluster; ask a "
                                    "pace-node instead" },
+        // And a member's report about its own record: a cache daemon holds none.
+        Wire::RefusedVerb { .op = Wire::Op::MemberReport,
+                            .code = Wire::ErrorCode::NoCluster,
+                            .why = "this endpoint is a cache and belongs to no cluster; ask a "
+                                   "pace-node instead" },
         Wire::RefusedVerb { .op = Wire::Op::ClusterForget,
                             .code = Wire::ErrorCode::NoCluster,
                             .why = "this endpoint is a cache and belongs to no cluster; ask a "
@@ -1288,6 +1293,7 @@ core::async::Task<void> CompileCacheHandler::Run(core::net::ISocket* socket,
             case Wire::Op::ClusterStatus:
             case Wire::Op::ClusterSet:
             case Wire::Op::MemberEdit:
+            case Wire::Op::MemberReport:
             case Wire::Op::ClusterForget:
             case Wire::Op::ClusterAdmit:
             case Wire::Op::ClusterAdmitLearner:

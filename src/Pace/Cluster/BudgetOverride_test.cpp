@@ -98,12 +98,15 @@ TEST_CASE("An override renders its figure, its baseline or that it has none, and
 {
     // 2026-11-02T10:00:00Z.
     auto const unset = BudgetOverride { .bytes = 64 * MiB, .baseline = std::nullopt, .setAtUnixSeconds = 1793613600 };
-    CHECK(FormatBudgetOverride(unset) == "64M baseline=unset set=2026-11-02T10:00:00Z");
+    CHECK(FormatBudgetOverride(unset) == "64M baseline=unset set=2026-11-02T10:00:00Z by=-");
     auto const measured = BudgetOverride { .bytes = 2 * GiB, .baseline = 4 * GiB, .setAtUnixSeconds = 1793613600 };
-    CHECK(FormatBudgetOverride(measured) == "2G baseline=4G set=2026-11-02T10:00:00Z");
+    CHECK(FormatBudgetOverride(measured) == "2G baseline=4G set=2026-11-02T10:00:00Z by=-");
     // A present zero is a real configuration -- unbounded -- never rendered as "unset".
     auto const unbounded = BudgetOverride { .bytes = MiB, .baseline = 0, .setAtUnixSeconds = 1793613600 };
-    CHECK(FormatBudgetOverride(unbounded) == "1M baseline=0B set=2026-11-02T10:00:00Z");
+    CHECK(FormatBudgetOverride(unbounded) == "1M baseline=0B set=2026-11-02T10:00:00Z by=-");
+    auto byMember = unbounded;
+    byMember.setBy = "voter-1";
+    CHECK(FormatBudgetOverride(byMember).ends_with(" by=voter-1"));
 }
 
 TEST_CASE("A budget override decides no credential destination: it is no replicated setting at all", "[cluster][budget]")

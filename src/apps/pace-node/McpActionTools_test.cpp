@@ -7,6 +7,10 @@
 #include <Pace/Core/Ed25519.hpp>
 #include <Pace/Core/Json.hpp>
 #include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/IClusterAdmin.hpp>
+#include <Pace/Distributed/SchedulerProtocol.hpp>
+#include <Pace/Distributed/SchedulerService.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
 #include <Pace/Protocol/Mcp/McpServer.hpp>
 #include <Pace/Server/AdminHttpServer.hpp>
@@ -17,10 +21,12 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <initializer_list>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -28,8 +34,11 @@
 #include <vector>
 
 #include <core/Ranges.hpp>
+#include <core/platform/Clock.hpp>
+#include <tests/LeaseRosterFakes.hpp>
 #include <tests/RaftPeerKeyFakes.hpp>
 #include <tests/Unwrap.hpp>
+#include <tests/WireReply.hpp>
 
 using namespace Pace;
 using namespace Pace::Node;
@@ -692,7 +701,7 @@ TEST_CASE("mcp-action: set_cache_budget asks the leader one MEMBER-EDIT built fr
     {
         auto const result = call("clear_cache_budget", R"({"node":"node-b","which":"memory"})");
         REQUIRE_FALSE(result.isError);
-        auto const value = Wire::EncodeBudgetClearValue(Wire::BudgetClearValue { .tier = 0, .only = std::nullopt });
+        auto const value = Wire::EncodeBudgetClearValue(Wire::BudgetClearValue { .tier = 0 });
         CHECK(rig.upstream.calls[0].frame
               == Text(Wire::EncodeMemberEdit(Wire::MemberEditRequest {
                   .verb = Wire::MemberEditVerb::ClearBudget, .memberId = "node-b", .value = Wire::AsStringView(value) })));
@@ -731,4 +740,109 @@ TEST_CASE("mcp-action: set_cache_budget refuses what the leader would, before an
     }
     CHECK(rig.upstream.calls.empty());
     CHECK(rig.InfoLines().empty());
+}
+
+namespace
+{
+/// A cluster recording `node-self` and `node-b` (a learner), each under its test key, that accepts every proposal.
+class TwoMemberCluster final: public Distributed::IClusterAdmin
+{
+  public:
+    std::vector<Cluster::Command> proposed; ///< Every proposal, in order.
+
+    [[nodiscard]] Cluster::ClusterState ClusterState() const override
+    {
+        auto state = Cluster::ClusterState {};
+        Cluster::Apply(state,
+                       Cluster::Command { .kind = Cluster::CommandKind::AddMember,
+                                          .key = std::string { SelfId },
+                                          .value = "10.0.0.1:6675",
+                                          .schedulerEndpoint = {},
+                                          .publicKey = Testing::TestKeyPair(std::string { SelfId }).PublicKey() });
+        Cluster::Apply(state,
+                       Cluster::Command { .kind = Cluster::CommandKind::AddLearner,
+                                          .key = "node-b",
+                                          .value = {},
+                                          .schedulerEndpoint = {},
+                                          .publicKey = Testing::TestKeyPair("node-b").PublicKey() });
+        return state;
+    }
+
+    [[nodiscard]] std::expected<void, ConsensusError> ProposeToCluster(Cluster::Command const& command) override
+    {
+        proposed.push_back(command);
+        return {};
+    }
+
+    void NoteAnnouncedEndpoint(Consensus::NodeId const& /*member*/, std::string /*endpoint*/) override {}
+};
+
+/// An upstream whose LEADER is a real scheduler, asked as a learner machine proving its own key: what production's
+/// leader answers the frame an MCP action tool built, not what a script says it would.
+class LearnerAtRealLeader final: public IMcpUpstream
+{
+  public:
+    LearnerAtRealLeader()
+    {
+        service.SetRole(Distributed::SchedulerRole::Leader, {}, Distributed::StandaloneSchedulerTerm);
+        service.AdministerWith(cluster);
+    }
+
+    [[nodiscard]] UpstreamResult Ask(UpstreamTarget /*target*/, std::string_view /*node*/, std::string frame) override
+    {
+        auto const learner = Distributed::CallerContext { .membership = Distributed::Membership::Member,
+                                                          .peerId = "10.0.0.7",
+                                                          .provenNodeId = "node-b",
+                                                          .provenKey = Testing::TestKeyPair("node-b").PublicKey(),
+                                                          .identified = true,
+                                                          .operatorStanding = false };
+        auto const bytes = std::as_bytes(std::span { frame.data(), frame.size() });
+        // The door first, as the surface asks it before reading a payload; then the whole exchange.
+        auto reply = std::vector<std::byte> {};
+        if (auto refused = protocol.RefusePeer(learner, static_cast<std::uint8_t>(bytes[2])); refused.has_value())
+            reply = std::move(*refused);
+        else
+            reply = protocol.Answer(bytes, learner);
+        if (Testing::StatusOf(reply) == Wire::Status::Ok)
+            return UpstreamReply { .status = Wire::Status::Ok, .payload = {}, .answeredBy = "leader", .term = 1 };
+        auto const code = Testing::ErrorOf(reply).value_or(Wire::ErrorCode::MalformedFrame);
+        return std::unexpected { std::pair { RefusalFailureOf(code), std::string { "refused by the leader" } } };
+    }
+
+    TwoMemberCluster cluster; ///< Declared before the service, which holds a reference to it.
+    core::platform::ManualClock clock;
+    core::platform::ManualWallClock wallClock;
+    AtomicMetricsSink metrics;
+    NullLogger schedulerLogger;
+    Distributed::KeyPairLeaseSigner const signer = Testing::TestLeaseSigner();
+    Distributed::SchedulerService service { clock, wallClock, metrics, schedulerLogger, signer, {} };
+    Distributed::SchedulerProtocol protocol { service, metrics };
+};
+} // namespace
+
+TEST_CASE("mcp-action: a learner's clear_cache_budget of its own override is refused by the real leader's door",
+          "[node][mcp][mcp-action][budget][operator-standing]")
+{
+    // The hole the scripted upstream could not show: on a learner, `clear_cache_budget` naming THAT learner reaches the
+    // leader over the learner's own proven connection. MEMBER-EDIT's door asks an operator's standing, so it is
+    // refused there -- by the production decision, with the counter moving -- and the tool says so by name.
+    LearnerAtRealLeader leader;
+    FixedCluster state { McpFakes::StateOf({ SelfId, "node-b" }) };
+    CapturingLogger logger;
+    auto const tools = ActionTools(leader, state, "node-b", logger);
+    for (auto const& [tool, arguments]: { std::pair { std::string_view { "clear_cache_budget" },
+                                                      std::string_view { R"({"node":"node-b","which":"memory"})" } },
+                                          std::pair { std::string_view { "set_cache_budget" },
+                                                      std::string_view { R"({"node":"node-b","memory":"64m"})" } } })
+    {
+        CAPTURE(tool);
+        auto const* const row = core::findOrNull(tools, tool, &Mcp::ToolRow::name);
+        REQUIRE(row != nullptr);
+        auto const result =
+            row->handler(Mcp::ToolCall { .arguments = Unwrap(Json::Parse(arguments)), .clientName = ClientName });
+        CHECK(result.isError);
+        CHECK(result.text.contains("lacks operator standing"));
+    }
+    CHECK(leader.cluster.proposed.empty());
+    CHECK(leader.metrics.Read(IMetricsSink::Counter::SchedulerRequestsRefusedOperatorStandingRequired) == 2);
 }

@@ -66,7 +66,8 @@ void ClusterStateMachine::Apply(Consensus::AppliedEntry const& entry)
     {
         auto const guard = std::unique_lock { _mutex };
         yielded = DisplayNameYieldingTo(_state, *command);
-        Cluster::Apply(_state, *command);
+        // At the entry's index, which identifies any budget override it records (`BudgetOverride::id`).
+        Cluster::Apply(_state, *command, entry.index.value);
         published = _state;
     }
     // A label yielded to an identity (`DisplayNameYieldingTo`): said at Warn, naming both, because an operator who

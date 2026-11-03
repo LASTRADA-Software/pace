@@ -1285,7 +1285,6 @@ TEST_CASE("The cluster-budget flags parse the one budget grammar and refuse what
     CHECK(cleared.cluster.key == "n2");
     auto const clear = Unwrap(Wire::DecodeBudgetClearValue(Wire::AsBytes(std::string_view { cleared.cluster.value })));
     CHECK(clear.tier == static_cast<std::uint8_t>(StorageTier::Disk));
-    CHECK_FALSE(clear.only.has_value());
 
     // Refused where the operator is watching: zero, a share of RAM, no tier, a tier twice, no member, no tier to clear.
     for (auto const* const bad: { "--cluster-budget=n2:memory=0",
@@ -1313,10 +1312,10 @@ TEST_CASE("A budget reaches the cluster as one override per tier, and a status r
 
     auto const request = ParsedFrom({ "--cluster-budget=n2:memory=64m,disk=2g" }).cluster;
     CHECK(StatusOf(fixture.Ask(request)) == Wire::Status::Ok);
-    REQUIRE(cluster.proposed.size() == 2);
+    // ONE proposal carrying both tiers, so the edit is recorded whole.
+    REQUIRE(cluster.proposed.size() == 1);
     CHECK(cluster.proposed[0].kind == Cluster::CommandKind::SetBudget);
-    CHECK(cluster.proposed[0].value == "memory");
-    CHECK(cluster.proposed[1].value == "disk");
+    CHECK(cluster.proposed[0].budgetBytes == std::array<std::optional<std::uint64_t>, 2> { 64ULL << 20, 2ULL << 30 });
     CHECK(InterpretClusterReply(ClusterAction::Budget, {})
           == std::expected<std::string, std::string> { "accepted; the change is replicating\n" });
 
@@ -1324,13 +1323,37 @@ TEST_CASE("A budget reaches the cluster as one override per tier, and a status r
     auto state = Agreed();
     auto budget = Cluster::Command { .kind = Cluster::CommandKind::SetBudget,
                                      .key = "n2",
-                                     .value = "memory",
+                                     .value = {},
                                      .schedulerEndpoint = {},
                                      .publicKey = std::nullopt,
-                                     .budgetBytes = 64ULL << 20,
-                                     .setAtUnixSeconds = 1793613600 };
-    Apply(state, budget);
+                                     .budgetBytes = { 64ULL << 20, std::nullopt },
+                                     .setAtUnixSeconds = 1793613600,
+                                     .setBy = "n1" };
+    Apply(state, budget, 9);
     auto const rendered = RenderClusterState(state);
-    CHECK(rendered.contains("memory-budget=64M baseline=unset set=2026-11-02T10:00:00Z"));
+    CHECK(rendered.contains("memory-budget=64M baseline=unset set=2026-11-02T10:00:00Z by=n1"));
     CHECK_FALSE(rendered.contains("disk-budget="));
+}
+
+TEST_CASE("A learner's --cluster-budget-clear is refused at the leader's door, counted",
+          "[node][clusteradmin][budget][operator-standing]")
+{
+    // The one-shot proves the learner's key; MEMBER-EDIT asks an operator's standing, so a learner clearing even its
+    // OWN override is refused before the payload is read. A member drops its override only by MEMBER-REPORT.
+    Fixture fixture;
+    FakeCluster cluster;
+    cluster.state = Agreed();
+    fixture.service.AdministerWith(cluster);
+    auto const learner = Distributed::CallerContext { .membership = Distributed::Membership::Member,
+                                                      .peerId = "10.0.0.2",
+                                                      .provenNodeId = "n2",
+                                                      .provenKey = Testing::TestKeyPair("n2").PublicKey(),
+                                                      .identified = true,
+                                                      .operatorStanding = false };
+    auto const request = ParsedFrom({ "--cluster-budget-clear=n2:memory" }).cluster;
+    auto const door = fixture.protocol.RefusePeer(learner, static_cast<std::uint8_t>(Wire::Op::MemberEdit));
+    CHECK(ErrorOf(Unwrap(door)) == Wire::ErrorCode::OperatorStandingRequired);
+    CHECK(ErrorOf(fixture.Ask(request, learner)) == Wire::ErrorCode::OperatorStandingRequired);
+    CHECK(fixture.metrics.Read(IMetricsSink::Counter::SchedulerRequestsRefusedOperatorStandingRequired) == 2);
+    CHECK(cluster.proposed.empty());
 }

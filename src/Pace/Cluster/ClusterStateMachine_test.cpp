@@ -259,13 +259,13 @@ TEST_CASE("A budget override and its baseline survive the machine's own snapshot
     // its snapshot is consensus-generic.
     Watched source;
     source.machine.Apply(Entry(1, Cmd(CommandKind::AddLearner, "n2", {})));
-    auto budget = Cmd(CommandKind::SetBudget, "n2", "memory");
-    budget.budgetBytes = 64ULL << 20;
+    auto budget = Cmd(CommandKind::SetBudget, "n2");
+    budget.budgetBytes = { 64ULL << 20, std::nullopt };
     budget.setAtUnixSeconds = 1793613600;
+    budget.setBy = "n1";
     source.machine.Apply(Entry(2, budget));
     auto baseline = Cmd(CommandKind::RecordBaseline, "n2", "memory");
-    baseline.budgetBytes = 64ULL << 20;
-    baseline.setAtUnixSeconds = 1793613600;
+    baseline.overrideId = 2; // the entry that set it
     baseline.baselineBytes = 256ULL << 20;
     source.machine.Apply(Entry(3, baseline));
     REQUIRE(source.machine.State().members.size() == 1);
@@ -282,6 +282,8 @@ TEST_CASE("A budget override and its baseline survive the machine's own snapshot
         CHECK(recorded.bytes == 64ULL << 20);
         CHECK(recorded.baseline == std::optional<std::uint64_t> { 256ULL << 20 });
         CHECK(recorded.setAtUnixSeconds == 1793613600);
+        CHECK(recorded.id == 2); // the machine handed the entry's index down to `Apply`
+        CHECK(recorded.setBy == "n1");
     }
 }
 

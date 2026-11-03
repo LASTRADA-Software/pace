@@ -364,13 +364,30 @@ namespace
         return budget.has_value() ? FleetCell::Of(budget->bytes) : FleetCell::Nothing();
     }
 
+    /// @tparam Tier A cache tier.
+    /// @param row A member row.
+    /// @return Who recorded that tier's override: the member whose key the proposing connection proved; absent when
+    ///         there is no override or no member key attributes it.
+    template <StorageTier Tier>
+    [[nodiscard]] FleetCell BudgetSetByCell(MemberRow const& row)
+    {
+        auto const& budget = Cluster::BudgetOf(row.member, Tier);
+        return budget.has_value() && !budget->setBy.empty() ? FleetCell::Of(budget->setBy) : FleetCell::Nothing();
+    }
+
+    /// What the override setter columns say in a header.
+    constexpr std::string_view BudgetSetByHelp =
+        "Who recorded the override: the member whose identity key the operator's connection proved to the leader -- the "
+        "machine acted from, never a person. Absent when there is no override, or the leader's own machine or a voter's "
+        "ticket set it, which no member key attributes.";
+
     /// What the override columns say in a header.
     constexpr std::string_view BudgetHelp =
         "The cache budget the cluster records for this member's tier, overriding the machine's own flag: recorded by "
         "the leader, applied by the member. Absent when none is recorded. Recorded is not applied: the member's "
         "status says what it runs with.";
 
-    constexpr std::array<FleetColumn<MemberRow>, 8> MemberColumns {
+    constexpr std::array<FleetColumn<MemberRow>, 10> MemberColumns {
         FleetColumn<MemberRow> { .name = "id",
                                  .help = "The member's stable identity: what consensus counts.",
                                  .format = CellFormat::Text,
@@ -428,6 +445,16 @@ namespace
                                  .format = CellFormat::Bytes,
                                  .keep = ColumnKeep::Detail,
                                  .project = &BudgetCell<StorageTier::Disk> },
+        FleetColumn<MemberRow> { .name = "memory-override-by",
+                                 .help = BudgetSetByHelp,
+                                 .format = CellFormat::Text,
+                                 .keep = ColumnKeep::Detail,
+                                 .project = &BudgetSetByCell<StorageTier::Memory> },
+        FleetColumn<MemberRow> { .name = "disk-override-by",
+                                 .help = BudgetSetByHelp,
+                                 .format = CellFormat::Text,
+                                 .keep = ColumnKeep::Detail,
+                                 .project = &BudgetSetByCell<StorageTier::Disk> },
     };
 
     /// The member rows of @p snapshot: each record joined, by the identity key it holds, to what the machine proving

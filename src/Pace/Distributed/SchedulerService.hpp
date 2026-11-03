@@ -1111,13 +1111,11 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     /// @return `Ok` once the entry is appended, or a refusal.
     [[nodiscard]] SchedulerReply ClusterSet(CallerContext const& caller, std::string_view name, std::string_view value);
 
-    /// Edit one member's replicated record: MEMBER-EDIT, proposed by the leader as the command or commands its edit
-    /// names (a display name; a budget override per tier, stamped with this leader's wall clock; a clear; a member's
-    /// baseline), through `Offer` as every cluster control verb is -- so a non-leader answers `NotLeader` naming the
-    /// leader, and every rule `Cluster::ValidateAgainst` holds is the refusal the operator reads. Who may send which
-    /// edit is the edit's `authority` column (`CompileCacheWire::MemberEditVerbTable`): an operator's standing, or the
-    /// member the edit names proving the key this state records for it. An edit naming two tiers is judged whole
-    /// before either is proposed.
+    /// Edit one member's replicated record: MEMBER-EDIT, proposed by the leader as the ONE command its edit names (a
+    /// display name; the budget overrides of every tier it names, stamped with this leader's wall clock and the member
+    /// whose key the asking connection proved; a clear), through `Offer` as every cluster control verb is -- so a
+    /// non-leader answers `NotLeader` naming the leader, and every rule `Cluster::ValidateAgainst` holds is the refusal
+    /// the operator reads. An operator's standing is the verb's door (`OpTable`), asked by the surface.
     /// @param caller Who is asking.
     /// @param verb The edit byte as received; one this build does not know is refused by name.
     /// @param memberId The member, by its id exactly.
@@ -1128,6 +1126,18 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
                                             std::uint8_t verb,
                                             std::string_view memberId,
                                             std::string_view value);
+
+    /// A member reporting about its OWN record: MEMBER-REPORT, proposed by the leader as the command its report names
+    /// (an override's baseline; a drop of the exact override the member's own configuration outranks).
+    ///
+    /// **About the member holding the key the connection PROVED**, never one a frame names: a report from a connection
+    /// that proved no member's key is refused `NodeIdentityRequired`. The door (`ProvenNodeOnly`) asks for the proof
+    /// first; this asks again, because it is where the member is read off it.
+    /// @param caller Who is asking.
+    /// @param verb The report byte as received; one this build does not know is refused by name.
+    /// @param value The report's `CompileCacheWire` value record.
+    /// @return `Ok` once the entry is appended, or a refusal.
+    [[nodiscard]] SchedulerReply MemberReport(CallerContext const& caller, std::uint8_t verb, std::string_view value);
 
     /// Forget a machine: remove the id's member record and revoke the key it was admitted
     /// under (#1555).

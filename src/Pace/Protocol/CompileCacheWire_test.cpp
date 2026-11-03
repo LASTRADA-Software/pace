@@ -621,8 +621,7 @@ TEST_CASE("MEMBER-EDIT keeps its bytes: the opcode, the edit, and a frame that d
     CHECK(static_cast<std::uint8_t>(MemberEditVerb::SetDisplayName) == 0);
     CHECK(static_cast<std::uint8_t>(MemberEditVerb::SetBudget) == 1);
     CHECK(static_cast<std::uint8_t>(MemberEditVerb::ClearBudget) == 2);
-    CHECK(static_cast<std::uint8_t>(MemberEditVerb::RecordBaseline) == 3);
-    CHECK(static_cast<std::uint8_t>(MemberEditVerb::Last) == 4);
+    CHECK(static_cast<std::uint8_t>(MemberEditVerb::Last) == 3);
     REQUIRE(FindOp(0x26) != nullptr);
     CHECK(FindOp(0x26)->code == Op::MemberEdit);
 
@@ -631,13 +630,10 @@ TEST_CASE("MEMBER-EDIT keeps its bytes: the opcode, the edit, and a frame that d
     CHECK(row->name == "member-edit");
     CHECK(row->fieldCount == 3);
     CHECK(row->family == VerbFamily::Scheduler);
-    // Identified at the door; each edit's own requirement is its row's `authority`, asked once the edit is known.
-    CHECK(row->identity == IdentityRequirement::IdentifiedCaller);
+    // Every edit is an operator's: the door asks an operator's standing, the cluster control verbs' column.
+    CHECK(row->identity == IdentityRequirement::OperatorStanding);
     CHECK(row->maxPayload.Bytes() == MaxControlPayload);
-    CHECK(MemberEditRowOf(MemberEditVerb::SetDisplayName).authority == EditAuthority::Operator);
-    CHECK(MemberEditRowOf(MemberEditVerb::SetBudget).authority == EditAuthority::Operator);
-    CHECK(MemberEditRowOf(MemberEditVerb::ClearBudget).authority == EditAuthority::OperatorOrSubject);
-    CHECK(MemberEditRowOf(MemberEditVerb::RecordBaseline).authority == EditAuthority::Subject);
+    CHECK(MemberEditRowOf(MemberEditVerb::ClearBudget).name == "clear-budget");
 
     // The frame: the header, then the edit byte, the member and the value -- read back as asked.
     auto const frame =
@@ -652,8 +648,8 @@ TEST_CASE("MEMBER-EDIT keeps its bytes: the opcode, the edit, and a frame that d
     // An edit byte this build does not know decodes as a byte -- refused by name further in, never as a malformed
     // frame -- and `DecodeMemberEditVerb` knows exactly the rows of the table.
     CHECK(DecodeMemberEditVerb(0) == std::optional { MemberEditVerb::SetDisplayName });
-    CHECK(DecodeMemberEditVerb(3) == std::optional { MemberEditVerb::RecordBaseline });
-    CHECK_FALSE(DecodeMemberEditVerb(4).has_value());
+    CHECK(DecodeMemberEditVerb(2) == std::optional { MemberEditVerb::ClearBudget });
+    CHECK_FALSE(DecodeMemberEditVerb(3).has_value());
     CHECK_FALSE(DecodeMemberEditVerb(0xFF).has_value());
 
     // An edit field that is not exactly one byte is malformed.
@@ -674,16 +670,14 @@ TEST_CASE("An operator's control verb is refused an unidentified caller under it
     // The column, asked of the rows one at a time so a failure names the verb; the set itself is
     // `ControlVerbsNeedOperatorStanding`'s, a build failure. An unidentified caller is refused on
     // the way there: `IdentifiedCaller` is `OperatorStanding`'s prerequisite.
-    for (auto const op: { Op::ClusterSet, Op::ClusterForget, Op::ClusterAdmit, Op::ClusterAdmitLearner, Op::EnrollControl })
+    for (auto const op:
+         { Op::ClusterSet, Op::ClusterForget, Op::ClusterAdmit, Op::ClusterAdmitLearner, Op::EnrollControl, Op::MemberEdit })
     {
         auto const* const row = FindOp(static_cast<std::uint8_t>(op));
         REQUIRE(row != nullptr);
         INFO(row->name);
         CHECK(row->identity == IdentityRequirement::OperatorStanding);
     }
-    // MEMBER-EDIT is refused an unidentified caller AT THE DOOR, its requirement there being exactly that; whether an
-    // identified caller may make the edit is the edit's own column, asked by the scheduler.
-    CHECK(FindOp(static_cast<std::uint8_t>(Op::MemberEdit))->identity == IdentityRequirement::IdentifiedCaller);
     // And the verbs a client sends are not: a launcher on an open node leases and reads as before.
     for (auto const op: { Op::Lease, Op::Release, Op::ClusterStatus, Op::NodeStatus, Op::Fetch, Op::Enroll })
     {
@@ -6720,7 +6714,42 @@ TEST_CASE("MACHINE-BUDGET, like REGISTER, needs a proven node and ADMIT does not
     }
 }
 
-TEST_CASE("The budget edits' values keep their layout and read back as sent", "[wire][member-edit][budget]")
+TEST_CASE("MEMBER-REPORT keeps its bytes: the opcode, the report, a proven node's door and no member id",
+          "[wire][member-report][budget]")
+{
+    // The raw enumerators -- the anchor, not a smell.
+    CHECK(static_cast<std::uint8_t>(Op::MemberReport) == 0x27);
+    CHECK(static_cast<std::uint8_t>(MemberReportVerb::RecordBaseline) == 0);
+    CHECK(static_cast<std::uint8_t>(MemberReportVerb::DropOverride) == 1);
+    CHECK(static_cast<std::uint8_t>(MemberReportVerb::Last) == 2);
+    REQUIRE(FindOp(0x27) != nullptr);
+    CHECK(FindOp(0x27)->code == Op::MemberReport);
+
+    auto const* const row = FindOp(static_cast<std::uint8_t>(Op::MemberReport));
+    REQUIRE(row != nullptr);
+    CHECK(row->name == "member-report");
+    // Two fields: no member id travels, the leader reads it off the proven key.
+    CHECK(row->fieldCount == 2);
+    CHECK(row->family == VerbFamily::Scheduler);
+    // A proven node only: no ticket, no unproven loopback.
+    CHECK(row->identity == IdentityRequirement::ProvenNodeOnly);
+    CHECK(row->maxPayload.Bytes() == MaxControlPayload);
+
+    auto const value = EncodeBudgetDropValue(BudgetDropValue { .tier = 1, .overrideId = 77 });
+    auto const frame = EncodeMemberReport(MemberReportRequest { .verb = MemberReportVerb::DropOverride, .value = value });
+    CHECK(static_cast<std::uint8_t>(frame[2]) == 0x27);
+    auto const view = Unwrap(DecodeMemberReportPayload(std::span { frame }.subspan(RequestHeaderSize)));
+    CHECK(view.verb == 1);
+    auto const drop = Unwrap(DecodeBudgetDropValue(view.value));
+    CHECK(drop.tier == 1);
+    CHECK(drop.overrideId == 77);
+
+    CHECK(DecodeMemberReportVerb(1) == std::optional { MemberReportVerb::DropOverride });
+    CHECK_FALSE(DecodeMemberReportVerb(2).has_value());
+}
+
+TEST_CASE("The budget values keep their layout, read back as sent, and refuse a tier past the ones carried",
+          "[wire][member-edit][budget]")
 {
     // SetBudget: one field per tier, positionally; an absent tier is an empty field.
     auto const set = BudgetSetValue { .bytes = { std::nullopt, std::uint64_t { 0x0102030405060708 } } };
@@ -6733,29 +6762,33 @@ TEST_CASE("The budget edits' values keep their layout and read back as sent", "[
     CHECK(Unwrap(DecodeBudgetSetValue(setBytes)).bytes == set.bytes);
     auto const sevenBytes = std::array<std::byte, 7> {};
     CHECK_FALSE(DecodeBudgetSetValue(WireFields::Encode({ std::span<std::byte const> { sevenBytes } })).has_value());
-
-    // ClearBudget: the tier byte, then both figures of the override it may remove, or neither.
-    auto const bare = BudgetClearValue { .tier = 1, .only = std::nullopt };
-    CHECK(Unwrap(DecodeBudgetClearValue(EncodeBudgetClearValue(bare))).tier == 1);
-    CHECK_FALSE(Unwrap(DecodeBudgetClearValue(EncodeBudgetClearValue(bare))).only.has_value());
-    auto const named = BudgetClearValue { .tier = 0, .only = BudgetIdentity { .bytes = 64, .setAtUnixSeconds = -7 } };
-    CHECK(Unwrap(DecodeBudgetClearValue(EncodeBudgetClearValue(named))).only == named.only);
-    auto const tier = std::array { std::byte { 0 } };
+    // An entry past the carried tiers is refused whether it is a figure or EMPTY: never truncated.
     auto const figure = std::array<std::byte, 8> {};
-    CHECK_FALSE(DecodeBudgetClearValue(WireFields::Encode({ std::span<std::byte const> { tier },
-                                                            std::span<std::byte const> { figure },
-                                                            std::span<std::byte const> {} }))
+    static_assert(CarriedCacheTiers == 2);
+    CHECK_FALSE(DecodeBudgetSetValue(WireFields::Encode({ std::span<std::byte const> {},
+                                                          std::span<std::byte const> {},
+                                                          std::span<std::byte const> { figure } }))
+                    .has_value());
+    CHECK_FALSE(DecodeBudgetSetValue(WireFields::Encode({ std::span<std::byte const> { figure },
+                                                          std::span<std::byte const> {},
+                                                          std::span<std::byte const> {} }))
                     .has_value());
 
-    // RecordBaseline: the tier byte, the baseline, and the override it was measured against.
-    auto const baseline = BudgetBaselineValue {
-        .tier = 1, .baseline = 0, .measuredFor = BudgetIdentity { .bytes = 2048, .setAtUnixSeconds = 1793613600 }
-    };
+    // ClearBudget: exactly the tier byte.
+    CHECK(Unwrap(DecodeBudgetClearValue(EncodeBudgetClearValue(BudgetClearValue { .tier = 1 }))).tier == 1);
+    auto const tier = std::array { std::byte { 0 } };
+    CHECK_FALSE(DecodeBudgetClearValue(
+                    WireFields::Encode({ std::span<std::byte const> { tier }, std::span<std::byte const> { figure } }))
+                    .has_value());
+
+    // RecordBaseline: the tier byte, the baseline, and the override id it was measured against.
+    auto const baseline = BudgetBaselineValue { .tier = 1, .baseline = 0, .overrideId = 4242 };
     auto const baselineBytes = EncodeBudgetBaselineValue(baseline);
-    CHECK(Unwrap(WireFields::SplitAll(baselineBytes)).size() == 4);
+    CHECK(Unwrap(WireFields::SplitAll(baselineBytes)).size() == 3);
     auto const decoded = Unwrap(DecodeBudgetBaselineValue(baselineBytes));
     CHECK(decoded.tier == 1);
     CHECK(decoded.baseline == 0);
-    CHECK(decoded.measuredFor == baseline.measuredFor);
-    CHECK_FALSE(DecodeBudgetBaselineValue(EncodeBudgetClearValue(bare)).has_value());
+    CHECK(decoded.overrideId == 4242);
+    CHECK_FALSE(DecodeBudgetBaselineValue(EncodeBudgetClearValue(BudgetClearValue { .tier = 1 })).has_value());
+    CHECK_FALSE(DecodeBudgetDropValue(baselineBytes).has_value());
 }

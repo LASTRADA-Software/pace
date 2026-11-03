@@ -279,25 +279,17 @@ its one capture walk recorded.
 
 ### MEMBER-EDIT
 
-`0x26`, three fields: the **edit** (one byte), the member's **id**, and the edit's **value**. Answered by the leader
--- any other node answers `not-leader` naming it, as for `CLUSTER-SET`. `Ok` and empty: the change is **appended, not
-committed**.
+`0x26`, three fields: the **edit** (one byte), the member's **id**, and the edit's **value**. An operator's control verb,
+answered by the leader -- any other node answers `not-leader` naming it, as for `CLUSTER-SET` -- and only to a caller
+with an operator's standing, asked at the door before the payload is read: `identified-caller-required` for a caller
+only `--fleet-open` admits, `operator-standing-required` for a learner's ticket or key. `Ok` and empty: the change is
+**appended, not committed**.
 
-Who may send it depends on the edit. The door asks only that the caller be **identified**: a caller only
-`--fleet-open` admits is refused `identified-caller-required` before the payload is read. Once the edit is known:
-
-- an **operator** edit needs an operator's standing -- this machine, or a voter's ticket or key -- and a learner is
-  refused `operator-standing-required`;
-- a **subject** edit is sent only by the member it names, proving on that connection the identity key the leader's
-  applied state records for that id. Anybody else is refused `node-identity-required`, an operator included, since
-  what a machine had configured is that machine's to say.
-
-| Edit | Byte | Who | Value |
-| --- | --- | --- | --- |
-| set-display-name | `0x00` | operator | The member's display name, at most 64 bytes of UTF-8 a fleet page can carry and no control byte; empty clears it. |
-| set-budget | `0x01` | operator | One field per cache tier, by position (memory, then disk), each an eight-byte big-endian byte count or empty to leave that tier as it is. At least one, never zero. |
-| clear-budget | `0x02` | operator, or the member itself | Three fields: the tier's position (one byte), then the override's bytes and the leader's stamp (eight bytes each) to clear only that override, or two empty fields to clear whatever is recorded. |
-| record-baseline | `0x03` | the member itself | Four fields: the tier's position (one byte), the member's own configured budget, then the override's bytes and the leader's stamp it was measured against (eight bytes each). |
+| Edit | Byte | Value |
+| --- | --- | --- |
+| set-display-name | `0x00` | The member's display name, at most 64 bytes of UTF-8 a fleet page can carry and no control byte; empty clears it. |
+| set-budget | `0x01` | One field per cache tier, by position (memory, then disk), each an eight-byte big-endian byte count or empty to leave that tier as it is. At least one, never zero, and no entry past the tiers this build carries. |
+| clear-budget | `0x02` | One field: the tier's position (one byte). Clears whatever is recorded for that tier. |
 
 An edit byte this build does not know is refused `invalid-cluster-change`, naming the byte, never read as another
 edit, and so is a tier position past the tiers the leader's build has.
@@ -308,18 +300,38 @@ is taken too. A taken name is refused `invalid-cluster-change`, naming the membe
 `pacectl cluster-name <member-id> [<name>]`, `pace-node --cluster-name=<id>=<name>` and the MCP `set_display_name`
 tool all send it.
 
-A **budget override** is recorded in the member's replicated record, one per tier, with the leader's clock at the
-time it proposed it. The leader stamps it once for every tier one edit names, and judges the whole edit before
-proposing either tier. The leader validates the figure (never zero) and that the member is recorded. Only the member
-knows whether it has the tier and what it had configured: it applies the override, settable while it is down, and
-reports that configured value as the override's **baseline** with `record-baseline`.
+A **budget override** is recorded in the member's replicated record, one per tier. A `set-budget` naming both tiers is
+ONE replicated command, so it is recorded whole or not at all. Each override records:
 
-A baseline attaches only to the override it names. One cleared or replaced since, with a new figure or a new stamp,
-never inherits it, and the first report wins. `pacectl cluster-budget <id>:memory=<size>[,disk=<size>]`, `pace-node
---cluster-budget=<id>:memory=<size>[,disk=<size>]` and the MCP `set_cache_budget` tool send `set-budget`, all
-through one grammar: `--cache-memory`'s and `--cache-disk`'s sizes, never a share of RAM (it would size the member by
-another machine's memory) and never zero. `cluster-budget-clear`, `--cluster-budget-clear` and `clear_cache_budget`
-send `clear-budget`.
+- its **id**, the Raft log index of the entry that recorded it -- the same on every replica, and never reused;
+- **when**, the leader's clock at proposal time, for display only;
+- **by whom**, the member holding the identity key the asking connection proved. That is the operator's MACHINE: an
+  MCP call or a one-shot verb on a member that is not the leader reaches the leader over that member's own proven
+  connection. It is absent for the leader's own machine over loopback, and for a voter's ticket.
+
+The leader validates the figure (never zero) and that the member is recorded; only the member knows whether it has the
+tier and what it had configured, which it reports with MEMBER-REPORT. `pacectl cluster-budget
+<id>:memory=<size>[,disk=<size>]`, `pace-node --cluster-budget=<id>:memory=<size>[,disk=<size>]` and the MCP
+`set_cache_budget` tool send `set-budget`, all through one grammar: `--cache-memory`'s and `--cache-disk`'s sizes,
+never a share of RAM (it would size the member by another machine's memory) and never zero. `cluster-budget-clear`,
+`--cluster-budget-clear` and `clear_cache_budget` send `clear-budget`.
+
+### MEMBER-REPORT
+
+`0x27`, two fields: the **report** (one byte) and its **value**. A member reporting about its OWN record: **no member id
+travels**, and the leader takes the member from the identity key the connection proved. So only a connection that
+proved a live key sends it (`node-identity-required` otherwise, a ticket and unproven loopback included), a report is
+only ever about the machine sending it, and no operator tool builds one. Answered by the leader; `Ok` and empty, the
+change appended.
+
+| Report | Byte | Value |
+| --- | --- | --- |
+| record-baseline | `0x00` | Three fields: the tier's position (one byte), what the member had configured for it, and the override's id it was measured against (eight bytes each). |
+| drop-override | `0x01` | Two fields: the tier's position (one byte) and the id of the override the member's own later configuration outranks (eight bytes). |
+
+Both name the override by its id. A baseline attaches only to that override and only once: one replaced or cleared
+since -- even with the same figure in the same second -- never inherits it, and the first report wins. A drop removes
+only that override; one an operator set since stands. A report naming a stale override is a no-op.
 
 ### FLEET-SUMMARY
 
@@ -407,7 +419,8 @@ and the pool behaves as one rather than advertising N times the machine.
 
 `REGISTER`, `HEARTBEAT`, `LEASE` and `RELEASE` go to the scheduler, along with the
 cluster-administration verbs (`CLUSTER-STATUS` `0x08`, `CLUSTER-SET` `0x09`,
-`CLUSTER-FORGET` `0x0a`, `CLUSTER-ADMIT` `0x0b`, [`MEMBER-EDIT`](#member-edit) `0x26`),
+`CLUSTER-FORGET` `0x0a`, `CLUSTER-ADMIT` `0x0b`, [`MEMBER-EDIT`](#member-edit) `0x26`,
+[`MEMBER-REPORT`](#member-report) `0x27`),
 which the **leader** answers and only to a member. `COMPILE` goes to a worker on the **same** `--listen-node` port
 that carries its cache verbs and, where the node's mode serves them, the scheduler's:
 [#290](https://github.com/LASTRADA-Software/pace/issues/290) merged what were

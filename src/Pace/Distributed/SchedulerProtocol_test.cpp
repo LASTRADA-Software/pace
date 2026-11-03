@@ -1070,10 +1070,10 @@ TEST_CASE("Exactly the verbs a machine joins the fleet with require a proven ide
     // The column, read back: a verb gaining the requirement by accident refuses every client that
     // sends it, and one losing it re-opens the address route for a node. Named here rather than
     // derived, because the SET is the decision being pinned.
-    // MachineBudget (#1728) is a machine stating how much memory it may be charged, so it joins them.
-    auto const joining = std::array {
-        Wire::Op::Register, Wire::Op::NodeAnnounce, Wire::Op::Heartbeat, Wire::Op::Withdraw, Wire::Op::MachineBudget
-    };
+    // MachineBudget (#1728) is a machine stating how much memory it may be charged, so it joins them; MemberReport is
+    // a member stating facts about its own record, read off the key it proved.
+    auto const joining = std::array { Wire::Op::Register, Wire::Op::NodeAnnounce,  Wire::Op::Heartbeat,
+                                      Wire::Op::Withdraw, Wire::Op::MachineBudget, Wire::Op::MemberReport };
     for (auto const& row: Wire::OpTable)
     {
         auto const joins = std::ranges::contains(joining, row.code);
@@ -1197,9 +1197,7 @@ TEST_CASE("An operator's control verb is refused a learner's ticket and a learne
     std::ranges::copy_if(Wire::OpTable, std::back_inserter(controlVerbs), [](Wire::OpDescriptor const& row) {
         return row.identity == Wire::IdentityRequirement::OperatorStanding && row.family == Wire::VerbFamily::Scheduler;
     });
-    // admit, admit-learner, forget, set (admit-worker is retired). MEMBER-EDIT is not a row of this set: its door asks
-    // only that a caller be identified, and each edit's own requirement is asked after the payload -- below.
-    REQUIRE(controlVerbs.size() == 4);
+    REQUIRE(controlVerbs.size() == 5); // admit, admit-learner, forget, set, member-edit (admit-worker is retired)
     auto const counted = [&fixture] {
         return fixture.metrics.Read(IMetricsSink::Counter::SchedulerRequestsRefusedOperatorStandingRequired);
     };
@@ -1237,27 +1235,23 @@ TEST_CASE("An operator's control verb is refused a learner's ticket and a learne
     CHECK(Unwrap(message).second.contains("run it on a voter, or promote this machine"));
     CHECK(counted() == ++refused);
 
-    // MEMBER-EDIT: past the door for an identified learner, and refused by the EDIT's requirement once it is read --
-    // the same code, counted in the same series, the message naming the edit.
+    // A learner's MEMBER-EDIT ClearBudget -- the frame `pace-node --cluster-budget-clear`, `pacectl cluster-budget-clear`
+    // and the MCP `clear_cache_budget` tool send -- naming the learner ITSELF: refused at the door, before the payload,
+    // counted; and again after it. A member drops its own override only through MEMBER-REPORT, naming it exactly.
     {
         fixture.service.AdministerWith(cluster);
         auto const learner = contextOf(Testing::OpenFleetFold::LearnerProven());
-        CHECK_FALSE(fixture.protocol.RefusePeer(learner, static_cast<std::uint8_t>(Wire::Op::MemberEdit)).has_value());
-        auto const budget = Wire::EncodeBudgetSetValue(Wire::BudgetSetValue { .bytes = { std::uint64_t { 1024 } } });
+        auto const door = fixture.protocol.RefusePeer(learner, static_cast<std::uint8_t>(Wire::Op::MemberEdit));
+        REQUIRE(door.has_value());
+        CHECK(ErrorOf(Unwrap(door)) == Wire::ErrorCode::OperatorStandingRequired);
+        CHECK(counted() == ++refused);
+        auto const clear = Wire::EncodeBudgetClearValue(Wire::BudgetClearValue { .tier = 0 });
         auto const edit = fixture.protocol.Answer(
             Wire::EncodeMemberEdit(Wire::MemberEditRequest {
-                .verb = Wire::MemberEditVerb::SetBudget, .memberId = "node-b", .value = Wire::AsStringView(budget) }),
+                .verb = Wire::MemberEditVerb::ClearBudget, .memberId = "node-b", .value = Wire::AsStringView(clear) }),
             learner);
         CHECK(ErrorOf(edit) == Wire::ErrorCode::OperatorStandingRequired);
-        auto const editMessage = Wire::DecodeErrorPayload(PayloadOf(edit));
-        REQUIRE(editMessage.has_value());
-        CHECK(Unwrap(editMessage).second.contains("member-edit set-budget"));
         CHECK(counted() == ++refused);
-        // And `--fleet-open` alone is refused at the door, before the payload, as every control verb's caller is.
-        auto const anonymous = fixture.protocol.RefusePeer(contextOf(Testing::OpenFleetFold::Anonymous()),
-                                                           static_cast<std::uint8_t>(Wire::Op::MemberEdit));
-        REQUIRE(anonymous.has_value());
-        CHECK(ErrorOf(Unwrap(anonymous)) == Wire::ErrorCode::IdentifiedCallerRequired);
     }
 
     // A voter's ticket and this machine are accepted at every one of them.
@@ -1272,6 +1266,32 @@ TEST_CASE("An operator's control verb is refused a learner's ticket and a learne
             CHECK_FALSE(fixture.protocol.RefusePeer(caller, static_cast<std::uint8_t>(row.code)).has_value());
     }
     CHECK(counted() == refused);
+}
+
+TEST_CASE("MEMBER-REPORT is refused at the door to a ticket and to a caller that proved nothing",
+          "[distributed][scheduler][protocol][admission][security][member-report]")
+{
+    // A member's report about itself is a joining machine's verb: only a connection that PROVED a live identity key
+    // sends it. A ticket proves a machine to the CALLER's node, never on this connection; loopback proves nothing.
+    Fixture fixture;
+    Testing::OpenFleetFold fold;
+    auto const contextOf = [&fold](ConnectionFacts facts) {
+        return CallerContextOf(fold.admitted, std::move(facts));
+    };
+    for (auto const& [what, facts]: { std::pair { "a voter's ticket", Testing::OpenFleetFold::Ticketed() },
+                                      std::pair { "a learner's ticket", Testing::OpenFleetFold::LearnerTicketed() },
+                                      std::pair { "loopback", Testing::OpenFleetFold::Local() } })
+    {
+        INFO(what);
+        auto const refusal =
+            fixture.protocol.RefusePeer(contextOf(facts), static_cast<std::uint8_t>(Wire::Op::MemberReport));
+        REQUIRE(refusal.has_value());
+        CHECK(ErrorOf(Unwrap(refusal)) == Wire::ErrorCode::NodeIdentityRequired);
+    }
+    // A proven key passes the door, a learner's included: its standing is not the question, its identity is.
+    for (auto const& facts: { Testing::OpenFleetFold::Proven(), Testing::OpenFleetFold::LearnerProven() })
+        CHECK_FALSE(
+            fixture.protocol.RefusePeer(contextOf(facts), static_cast<std::uint8_t>(Wire::Op::MemberReport)).has_value());
 }
 
 TEST_CASE("Where a worker was seen and what it answers on cross the wire into a grant's dial hint",

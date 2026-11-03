@@ -623,8 +623,8 @@ namespace
         if (!tier.has_value())
             return Error(R"(`which` must name one tier: "memory" or "disk")");
 
-        auto const encoded = Wire::EncodeBudgetClearValue(
-            Wire::BudgetClearValue { .tier = static_cast<std::uint8_t>(*tier), .only = std::nullopt });
+        auto const encoded =
+            Wire::EncodeBudgetClearValue(Wire::BudgetClearValue { .tier = static_cast<std::uint8_t>(*tier) });
         auto reply = Ask(context,
                          UpstreamTarget::Leader,
                          Wire::EncodeMemberEdit(Wire::MemberEditRequest { .verb = Wire::MemberEditVerb::ClearBudget,

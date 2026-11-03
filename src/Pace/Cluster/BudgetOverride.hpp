@@ -22,11 +22,11 @@ namespace Pace::Cluster
 
 /// A cache budget the cluster records for one member's tier, overriding what the machine's own flag configured.
 ///
-/// **Recorded by the leader, applied by the member** (`BudgetOverrideApplier`, on the node): the leader cannot see a
-/// node's cache flags, so it records the figure an operator asked for and the node decides, against its own
-/// configuration, whether the override still stands. It decides nothing about where anything is SENT -- no address,
-/// no credential, no peer -- so a replicated budget cannot be the rule `RefusedSettingTable` refuses: it changes how
-/// much one machine keeps, on that machine.
+/// **Recorded by the leader, applied by the member** (the node, Task 19): the leader cannot see a node's cache flags,
+/// so it records the figure an operator asked for and the node decides, against its own configuration, whether the
+/// override still stands. It decides nothing about where anything is SENT -- no address, no credential, no peer -- so a
+/// replicated budget cannot be the rule `RefusedSettingTable` refuses: it changes how much one machine keeps, on that
+/// machine.
 struct BudgetOverride
 {
     /// The budget, in bytes. Never zero: zero is how both tiers spell *unbounded* or *no tier* at startup, and an
@@ -34,16 +34,33 @@ struct BudgetOverride
     std::uint64_t bytes {};
 
     /// What the member itself had configured for the tier when it first applied this override, reported by the member
-    /// (MEMBER-EDIT `RecordBaseline`) and never by the leader, which cannot see a node's flags. Unset until the member
+    /// (MEMBER-REPORT `RecordBaseline`) and never by the leader, which cannot see a node's flags. Unset until the member
     /// reports it -- an override set while the member is down stays unset until it returns. A present zero is a real
     /// configuration (*unbounded*), never an absence.
     std::optional<std::uint64_t> baseline {};
 
     /// When the leader recorded it, in seconds since the Unix epoch, by the LEADER's clock: stamped when the leader
-    /// proposes the change, never read inside `Apply`, which reads no clock. For display and for telling one override
-    /// from the next (`RecordBaseline` names the override it answers by this and `bytes`); nothing compares it with
-    /// another machine's clock.
+    /// proposes the change, never read inside `Apply`, which reads no clock. **For display only**: nothing compares it
+    /// with another machine's clock, and it identifies nothing -- `id` does.
     std::int64_t setAtUnixSeconds {};
+
+    /// Which override this is: the Raft log index of the entry that recorded it.
+    ///
+    /// Exact and the same on every replica, since every replica applies that entry at that index, and never reused,
+    /// since an index is assigned once. A member's baseline and its drop name the override by this, so one set again
+    /// since -- even with the same figure in the same second, even by a new leader whose clock is behind -- is never
+    /// confused with the one the member measured. Both tiers one `SetBudget` records share it; a tier and an id name
+    /// one override.
+    std::uint64_t id {};
+
+    /// Who recorded it: the member id holding the identity key the proposing connection PROVED to the leader.
+    ///
+    /// An MCP call or a one-shot `pacectl`/`pace-node` verb run on a member that is not the leader reaches the leader
+    /// over that node's own proven connection, so this is the MACHINE the operator acted from, never a person (Pace has
+    /// no per-user identity). EMPTY when the proposing connection proved no member key: the leader's own machine over
+    /// loopback, or a voter's machine ticket -- an operator's standing nobody's key attributes. A label, deciding
+    /// nothing.
+    std::string setBy {};
 
     [[nodiscard]] friend bool operator==(BudgetOverride const&, BudgetOverride const&) = default;
 };
@@ -128,7 +145,8 @@ struct BudgetClearSpec
 /// @return The spec, or why it is not one.
 [[nodiscard]] std::expected<BudgetClearSpec, std::string> ParseBudgetClearSpec(std::string_view text);
 
-/// An override as one cell of text: `64M`, then `baseline=<size>` or `baseline=unset`, then `set=<UTC time>`.
+/// An override as one cell of text: `64M`, then `baseline=<size>` or `baseline=unset`, then `set=<UTC time>`, then
+/// `by=<member>` or `by=-` when no member key attributes it.
 ///
 /// The one rendering `--cluster-status` and `pacectl cluster-members` print, so the two say the same thing.
 /// @param budget The override.
