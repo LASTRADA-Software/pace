@@ -152,14 +152,21 @@ std::expected<Ticket, SchedulerReply> SchedulerService::Admit(CallerContext cons
     return ticket;
 }
 
-void SchedulerService::ReleaseAdmissionLease(AdmissionTicket& held)
+void SchedulerService::ReleaseAdmissionLease(AdmissionTicket& held, AdmissionLeaseEnd end)
 {
     if (!held.lease.has_value())
         return;
     // The same two undoings `Release` makes, for the same two reasons: the key stops being in flight,
-    // and the registry speculative job count the grant added comes back.
+    // and the registry speculative job count the grant added comes back. And the same count, but only
+    // when the CLIENT resolved it: a closed connection is the case `DispatchLeasesReleased` staying
+    // flat beside a climbing grant count exists to show (#1742). The sink is an atomic, so counting
+    // under `_admissionMutex` takes no second lock.
     if (_leases.Release(held.lease->token, held.lease->key).has_value())
+    {
         _workers.JobFinished(held.lease->workerId);
+        if (end == AdmissionLeaseEnd::Settled)
+            _metrics.Increment(IMetricsSink::Counter::DispatchLeasesReleased);
+    }
     held.lease.reset();
 }
 
@@ -205,6 +212,10 @@ std::optional<AdmissionVerdict> SchedulerService::GrantFor(Decision const& decis
                 return verdict;
             }
             _workers.JobStarted(worker->id);
+            // A queued worker grant IS a dispatch, as a `Lease` grant is: the fleet page's Dispatched
+            // figure reads this counter, and read zero for every compile the queue placed (#1742).
+            // Under `_admissionMutex`, for `LocalGrantSignals`' reason below.
+            _metrics.Increment(IMetricsSink::Counter::DispatchLeasesGranted);
             held.lease = *lease;
             // The token signs the OBJECT key, as a `Lease` grant's does: the table's key is a bookkeeping
             // name the worker never sees, and what a grant covers is the key the client missed.
@@ -325,7 +336,7 @@ SettleResult SchedulerService::SettleAdmission(Ticket ticket, Settlement const& 
         _queue.Abandon(ticket);
         if (auto const held = _admissionTickets.find(ticket); held != _admissionTickets.end())
         {
-            ReleaseAdmissionLease(held->second);
+            ReleaseAdmissionLease(held->second, AdmissionLeaseEnd::Settled);
             _admissionTickets.erase(held);
         }
         return SettleResult::NotLeading;
@@ -338,7 +349,7 @@ SettleResult SchedulerService::SettleAdmission(Ticket ticket, Settlement const& 
     if (auto const held = _admissionTickets.find(ticket); held != _admissionTickets.end())
     {
         // The worker the grant named is not running it, whatever the outcome: its lease goes back.
-        ReleaseAdmissionLease(held->second);
+        ReleaseAdmissionLease(held->second, AdmissionLeaseEnd::Settled);
         if (!refused)
             _admissionTickets.erase(held);
         else
@@ -355,7 +366,7 @@ void SchedulerService::AbandonAdmission(Ticket ticket)
     _queue.Abandon(ticket);
     if (auto const held = _admissionTickets.find(ticket); held != _admissionTickets.end())
     {
-        ReleaseAdmissionLease(held->second);
+        ReleaseAdmissionLease(held->second, AdmissionLeaseEnd::Abandoned);
         _admissionTickets.erase(held);
     }
 }

@@ -1380,9 +1380,23 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     /// Tell the admission observer a pump is due. Called outside every lock.
     void NotifyAdmissionChanged();
 
+    /// Who ended an admission ticket's worker lease, which decides whether it counts as a release.
+    ///
+    /// Private: never transmitted nor persisted, so no enumerator carries a value.
+    enum class AdmissionLeaseEnd : std::uint8_t
+    {
+        /// The client's `SETTLE` gave it back: `DispatchLeasesReleased`, as the `Release` verb counts.
+        Settled,
+        /// The connection closed holding it. Not a release: granted climbing while released stays
+        /// flat is how that counter's pair reports clients dying mid-job.
+        Abandoned,
+    };
+
     /// Frees the lease a worker grant took and the speculative job count beside it.
+    /// Caller holds `_admissionMutex`.
     /// @param held The ticket record; its lease is taken.
-    void ReleaseAdmissionLease(AdmissionTicket& held);
+    /// @param end Who ended it; only `Settled` counts a release, and only of a lease actually held.
+    void ReleaseAdmissionLease(AdmissionTicket& held, AdmissionLeaseEnd end);
 
     /// Turn one decision into a verdict: re-gate, mint the lease, encode the grant.
     /// Caller holds `_admissionMutex`.

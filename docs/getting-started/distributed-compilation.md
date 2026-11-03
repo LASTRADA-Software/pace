@@ -566,8 +566,8 @@ start it with `--admin-listen` and these count the outcomes.
 
 | Counter | Rising means |
 |---------|--------------|
-| `pace_dispatch_leases_granted_total` | Work is being distributed. |
-| `pace_dispatch_leases_released_total` | Clients are reporting their jobs done. Granted minus released is what is outstanding; flat while granted climbs means clients are dying mid-job, or predate the verb. |
+| `pace_dispatch_leases_granted_total` | Work is being distributed — a lease or a queued admission granted to a worker. |
+| `pace_dispatch_leases_released_total` | Clients are reporting their jobs done (a release, or the settle of a queued grant; a closed connection is not one). Granted minus released is what is outstanding; flat while granted climbs means clients are dying mid-job, or predate the verb. |
 | `pace_dispatch_leases_no_worker_total` | The fleet is **misconfigured** — workers are up but nobody matches. |
 | `pace_dispatch_leases_no_capacity_total` | The fleet is **too small** — full of your own build — or, where a worker reads `limited-by: compile-budget`, its compiles hold its `--compile-inflight-max` instead: raise that on it. |
 | `pace_dispatch_leases_withdrawn_total` | The fleet is **unavailable** — slots free on paper, machines busy elsewhere or out of scratch space. |
