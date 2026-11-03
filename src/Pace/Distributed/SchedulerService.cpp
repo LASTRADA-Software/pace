@@ -1104,6 +1104,33 @@ namespace
             return {};
         return state.HolderOf(*caller.provenKey).value_or(std::string {});
     }
+
+    /// Which member an operator's edit is ATTRIBUTED to (`BudgetOverride::setBy`): a label, deciding nothing.
+    ///
+    /// The member holding the key the connection PROVED; else the one holding the key a verified machine TICKET was
+    /// signed by, since that is the minting machine's own live key exactly as a proof's is; else, for a caller on THIS
+    /// machine, the member holding this leader's own key -- the rule an admission's charge follows
+    /// (`ReportLeaseDemand`), since a loopback route is by definition this machine. Empty when none of them names a
+    /// member: `--fleet-open` identifies nobody.
+    /// @param caller Who is asking.
+    /// @param state The state this leader applied.
+    /// @param ownKey This leader's own identity key.
+    /// @return The member's id, or empty.
+    [[nodiscard]] std::string AttributedMemberOf(CallerContext const& caller,
+                                                 Cluster::ClusterState const& state,
+                                                 Ed25519PublicKey const& ownKey)
+    {
+        // In order of precedence: what the connection proved, what its ticket was signed by, this machine.
+        auto const candidates = std::array {
+            caller.provenKey,
+            caller.ticketKey,
+            IsLoopbackHost(caller.peerId) ? std::optional { ownKey } : std::nullopt,
+        };
+        for (auto const& candidate: candidates)
+            if (candidate.has_value())
+                return state.HolderOf(*candidate).value_or(std::string {});
+        return {};
+    }
 } // namespace
 
 SchedulerReply SchedulerService::MemberEdit(CallerContext const& caller,
@@ -1128,15 +1155,17 @@ SchedulerReply SchedulerService::MemberEdit(CallerContext const& caller,
                                   "client's build",
                                   static_cast<unsigned>(verb)));
 
-    // The leader's clock, once, stamped where the proposal is made because `Apply` reads no clock; and who set it,
-    // from the key the connection PROVED -- the operator's machine, or the node an MCP call or a one-shot verb was
-    // forwarded through.
+    // The leader's clock, once, stamped where the proposal is made because `Apply` reads no clock; and who set it
+    // (`AttributedMemberOf`): the machine whose key the connection proved or whose ticket it presented -- the
+    // operator's machine, or the node an MCP call or a one-shot verb was forwarded through -- else this leader's own
+    // machine for a caller on it.
     auto const state = _admin->ClusterState();
     auto const setAt = std::chrono::duration_cast<std::chrono::seconds>(_wallClock.now().time_since_epoch()).count();
     auto command = MemberEditReaders[static_cast<std::size_t>(*edit)].read(
         memberId,
         std::as_bytes(std::span { value.data(), value.size() }),
-        EditStamp { .setAtUnixSeconds = static_cast<std::int64_t>(setAt), .setBy = ProvenMemberOf(caller, state) });
+        EditStamp { .setAtUnixSeconds = static_cast<std::int64_t>(setAt),
+                    .setBy = AttributedMemberOf(caller, state, _signer.PublicKey()) });
     if (!command.has_value())
         return Refuse(command.error().first, std::move(command.error().second));
     return Offer(*command);

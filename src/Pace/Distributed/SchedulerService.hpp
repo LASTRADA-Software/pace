@@ -483,6 +483,15 @@ struct CallerContext
     /// same fold that engaged `provenNodeId`.
     std::optional<Ed25519PublicKey> provenKey {};
 
+    /// The key a machine TICKET this connection presented verified under, engaged only while that key is LIVE and the
+    /// ticket is among the routes that admitted the connection.
+    ///
+    /// **A label, deciding nothing**: what a ticket proves is a CALLER, never a machine joining the fleet, so no gate
+    /// reads this -- `provenNodeId` and the routes' columns decide. It is read only to say WHICH machine an operator
+    /// acted from (`BudgetOverride::setBy`), since a verified ticket is signed by that machine's own live key exactly as
+    /// a proof is. Filled by `Distributed::CallerContextOf`, from the same fold as every field above.
+    std::optional<Ed25519PublicKey> ticketKey {};
+
     /// Whether a route that IDENTIFIES the caller admitted it -- this machine, a live proven key or
     /// a verified ticket (`MembershipRoutes`) -- rather than `--fleet-open` alone.
     ///

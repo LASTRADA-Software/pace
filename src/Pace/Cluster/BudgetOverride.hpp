@@ -53,13 +53,14 @@ struct BudgetOverride
     /// one override.
     std::uint64_t id {};
 
-    /// Who recorded it: the member id holding the identity key the proposing connection PROVED to the leader.
+    /// Who recorded it: the MACHINE the operator acted from, never a person (Pace has no per-user identity).
     ///
-    /// An MCP call or a one-shot `pacectl`/`pace-node` verb run on a member that is not the leader reaches the leader
-    /// over that node's own proven connection, so this is the MACHINE the operator acted from, never a person (Pace has
-    /// no per-user identity). EMPTY when the proposing connection proved no member key: the leader's own machine over
-    /// loopback, or a voter's machine ticket -- an operator's standing nobody's key attributes. A label, deciding
-    /// nothing.
+    /// The member holding the identity key the proposing connection PROVED to the leader; else the one whose key signed
+    /// the verified machine TICKET it presented; else, for a caller on the leader's own machine over loopback, the
+    /// leader's own member id (`SchedulerService`'s attribution, the rule an admission's charge follows). An MCP call or
+    /// a one-shot `pacectl`/`pace-node` verb run on a member that is not the leader reaches the leader over that node's
+    /// own proven connection, and MCP on the leader presents the leader's own proof. EMPTY only when no route named a
+    /// member -- a caller `--fleet-open` alone admitted. A label, deciding nothing.
     std::string setBy {};
 
     [[nodiscard]] friend bool operator==(BudgetOverride const&, BudgetOverride const&) = default;
@@ -146,7 +147,7 @@ struct BudgetClearSpec
 [[nodiscard]] std::expected<BudgetClearSpec, std::string> ParseBudgetClearSpec(std::string_view text);
 
 /// An override as one cell of text: `64M`, then `baseline=<size>` or `baseline=unset`, then `set=<UTC time>`, then
-/// `by=<member>` or `by=-` when no member key attributes it.
+/// `by=<member>` or `by=-` when no member was attributed.
 ///
 /// The one rendering `--cluster-status` and `pacectl cluster-members` print, so the two say the same thing.
 /// @param budget The override.

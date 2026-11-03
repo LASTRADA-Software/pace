@@ -2062,8 +2062,9 @@ removes no tier. The leader records it even while the member is down. The member
 state, and reports the value its own flag had as the override's **baseline**, which only it can know. The member's
 own LATER change of that flag outranks the override. A forget removes it with the record, and a re-admission keeps it.
 `--cluster-status` prints each recorded override beneath its member, as
-`memory-budget=2G baseline=unset set=2026-11-02T10:00:00Z by=n1` (the leader's clock, and the member whose key the
-operator's connection proved, `-` for the leader's own machine), and the fleet page's members table has
+`memory-budget=2G baseline=unset set=2026-11-02T10:00:00Z by=n1` (the leader's clock, and the machine the operator
+acted from: the member whose key the connection proved or whose key signed its ticket, or the leader itself for a
+caller on its own machine; `-` only when nothing identified the caller), and the fleet page's members table has
 `memory-override`, `disk-override` and their `-by` columns.
 
 `--cluster-status` prints the members — each with the `seat` it was admitted into,

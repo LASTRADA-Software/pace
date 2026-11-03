@@ -267,8 +267,9 @@ members, compared with ASCII letters folded to one case; the leader refuses a ta
 
 `memory-budget` and `disk-budget` are the **cache budget overrides** the cluster records for the member, absent where
 none is: the figure, the `baseline` the member reported its own flag had (`unset` until it does), and when the leader
-recorded it, by the leader's clock, and `by=` the member whose key the operator's connection proved (`-` for the
-leader's own machine or a ticket). `cluster-budget <member-id>:memory=<size>[,disk=<size>]` records one (sizes as
+recorded it, by the leader's clock, and `by=` the machine the operator acted from -- the member whose key the
+connection proved or whose key signed the ticket it presented, or the leader itself for a caller on the leader's own
+machine (`-` only when nothing identified the caller, `--fleet-open` alone). `cluster-budget <member-id>:memory=<size>[,disk=<size>]` records one (sizes as
 `--cache-memory` and `--cache-disk` take them, never `0` or a share of RAM), settable while the member is down, and
 `cluster-budget-clear <member-id>:<memory|disk>` removes one. Recorded is not applied: the member applies the override
 and may refuse a tier it does not have.

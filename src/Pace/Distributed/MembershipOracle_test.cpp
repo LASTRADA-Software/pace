@@ -191,10 +191,19 @@ TEST_CASE("A ticket admits a caller and never stands in for a proof", "[distribu
     CHECK(caller.peerId == "10.0.0.7");
     // So `Register` over a ticket is refused `NodeIdentityRequired`.
     CHECK_FALSE(caller.provenNodeId.has_value());
+    CHECK_FALSE(caller.provenKey.has_value());
+    // The ticket's key is carried as a LABEL only -- which machine an operator acted from -- and no gate reads it.
+    CHECK(caller.ticketKey == std::optional { IdentityOf("pc-07").key });
 
     auto const proven =
         Distributed::CallerContextOf(fold.admitted, ConnectionFacts { .host = "10.0.0.7", .proven = IdentityOf("pc-07") });
     CHECK(proven.provenNodeId == std::optional<std::string> { "pc-07" });
+    CHECK_FALSE(proven.ticketKey.has_value());
+
+    // A ticket the roster does not hold admits nobody by itself, so it labels nobody either.
+    auto const unheld = Distributed::CallerContextOf(
+        fold.admitted, ConnectionFacts { .host = "10.0.0.7", .authenticatedMachine = IdentityOf("stranger") });
+    CHECK_FALSE(unheld.ticketKey.has_value());
 
     // The shape where the ATTRIBUTION is the only guard: a connection that proved a key the roster
     // does not hold AND presented a ticket for one it does. The ticket admits it -- and must not

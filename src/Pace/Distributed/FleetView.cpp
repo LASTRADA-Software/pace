@@ -366,8 +366,8 @@ namespace
 
     /// @tparam Tier A cache tier.
     /// @param row A member row.
-    /// @return Who recorded that tier's override: the member whose key the proposing connection proved; absent when
-    ///         there is no override or no member key attributes it.
+    /// @return Who recorded that tier's override (`BudgetOverride::setBy`); absent when there is no override or no
+    ///         member was attributed.
     template <StorageTier Tier>
     [[nodiscard]] FleetCell BudgetSetByCell(MemberRow const& row)
     {
@@ -377,9 +377,10 @@ namespace
 
     /// What the override setter columns say in a header.
     constexpr std::string_view BudgetSetByHelp =
-        "Who recorded the override: the member whose identity key the operator's connection proved to the leader -- the "
-        "machine acted from, never a person. Absent when there is no override, or the leader's own machine or a voter's "
-        "ticket set it, which no member key attributes.";
+        "Who recorded the override: the machine the operator acted from, never a person -- the member whose identity key "
+        "the connection proved, or whose key signed the machine ticket it presented, or the leader itself for a caller "
+        "on the leader's own machine. Absent when there is no override, or when nothing identified the caller "
+        "(--fleet-open alone).";
 
     /// What the override columns say in a header.
     constexpr std::string_view BudgetHelp =

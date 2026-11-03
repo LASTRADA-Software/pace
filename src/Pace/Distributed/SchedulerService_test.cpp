@@ -2522,7 +2522,8 @@ TEST_CASE("A budget edit is ONE proposal for every tier it names, stamped with t
     CHECK_FALSE(command.baselineBytes.has_value());
     CHECK_FALSE(command.overrideId.has_value());
 
-    // This machine over loopback proved no key, so no member is named as the setter.
+    // This machine over loopback proved no key, and the leader's own key is recorded under no member yet: nobody is
+    // named, rather than a guess.
     REQUIRE(fleet.Service().MemberEdit(OperatorCaller, SetBudgetEdit, "node-b", BudgetValue(MiB, {})).status
             == Wire::Status::Ok);
     CHECK(fleet.cluster.proposed.back().setBy.empty());
@@ -2547,6 +2548,59 @@ TEST_CASE("A budget edit is ONE proposal for every tier it names, stamped with t
     CHECK(fleet.cluster.proposed.size() == 2);
 }
 
+TEST_CASE("A budget edit names its setter by the machine a route identified, and loopback names the leader's own",
+          "[distributed][scheduler][member-edit][budget]")
+{
+    Admitting fleet;
+    RecordTwoMembers(fleet);
+    // The leader's own machine, recorded under its own key: what `AttributedMemberOf` reads a loopback caller as.
+    Cluster::Apply(fleet.cluster.state,
+                   Cluster::Command { .kind = Cluster::CommandKind::AddMember,
+                                      .key = "leader-self",
+                                      .value = "10.0.0.3:6675",
+                                      .schedulerEndpoint = {},
+                                      .publicKey = fleet.leading.signer.PublicKey() });
+    constexpr auto MiB = std::uint64_t { 1024 * 1024 };
+
+    SECTION("an unproven caller on this machine is the leader's own machine")
+    {
+        REQUIRE(fleet.Service().MemberEdit(OperatorCaller, SetBudgetEdit, "node-b", BudgetValue(MiB, {})).status
+                == Wire::Status::Ok);
+        CHECK(fleet.cluster.proposed.back().setBy == "leader-self");
+    }
+
+    SECTION("a verified ticket is the machine whose key signed it, and it decides nothing")
+    {
+        // A voter's ticket: an operator's standing, no proof -- so no `provenNodeId` and nothing a joining verb reads.
+        auto ticketed = CallerContext { .membership = Membership::Member,
+                                        .peerId = "10.0.0.1",
+                                        .provenNodeId = std::nullopt,
+                                        .provenKey = std::nullopt,
+                                        .ticketKey = Testing::TestKeyPair("node-a").PublicKey(),
+                                        .identified = true,
+                                        .operatorStanding = true };
+        REQUIRE(fleet.Service().MemberEdit(ticketed, SetBudgetEdit, "node-b", BudgetValue(MiB, {})).status
+                == Wire::Status::Ok);
+        CHECK(fleet.cluster.proposed.back().setBy == "node-a");
+    }
+
+    SECTION("a proof outranks the address it came from")
+    {
+        auto proven = Proven("node-a", true);
+        proven.peerId = "127.0.0.1";
+        REQUIRE(fleet.Service().MemberEdit(proven, SetBudgetEdit, "node-b", BudgetValue(MiB, {})).status
+                == Wire::Status::Ok);
+        CHECK(fleet.cluster.proposed.back().setBy == "node-a");
+    }
+
+    SECTION("a caller nothing identified -- --fleet-open from another machine -- names nobody")
+    {
+        auto open = OperatorCaller;
+        open.peerId = "10.0.0.9";
+        REQUIRE(fleet.Service().MemberEdit(open, SetBudgetEdit, "node-b", BudgetValue(MiB, {})).status == Wire::Status::Ok);
+        CHECK(fleet.cluster.proposed.back().setBy.empty());
+    }
+}
 TEST_CASE("MEMBER-REPORT can only touch the caller's own member, read off the key it proved",
           "[distributed][scheduler][member-report][budget]")
 {
