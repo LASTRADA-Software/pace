@@ -66,6 +66,7 @@ namespace Pace::Node
 {
 
 class AppliedUpstreamDirectory;
+class BudgetOverrideApplier;
 class SchedulingLeaderPublisher;
 
 /// Why a consensus tier cannot start without this node's id.
@@ -1145,6 +1146,8 @@ struct SharedCacheListeners
 /// @param sharedCache Told every applied state: the directory and the host by reference, since every
 ///        node builds both and a consensus node that told them nothing would neither find nor serve
 ///        the tier the cluster named; the upstream where there is one. Each must outlive the tier.
+/// @param budgetOverrides Told every applied state: this member's cache budget overrides, recorded and handed to
+///        the applier's own thread, never applied here. Null where nothing applies them; must otherwise outlive the tier.
 /// @param metrics Where a refused peer connection is counted; must outlive the tier.
 /// @param logger Where progress and refusals are reported.
 /// @param conditions Where the tier answers its node conditions; null when nobody reads them.
@@ -1162,6 +1165,7 @@ struct SharedCacheListeners
     SchedulingLeaderPublisher& schedulingLeader,
     AppliedUpstreamDirectory* upstreamDirectory,
     SharedCacheListeners sharedCache,
+    BudgetOverrideApplier* budgetOverrides,
     IMetricsSink& metrics,
     ILogger& logger,
     NodeConditions* conditions,

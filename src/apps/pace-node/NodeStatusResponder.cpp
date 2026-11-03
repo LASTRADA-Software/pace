@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
+#include "BudgetOverrideApplier.hpp"
 #include "EffectiveConfig.hpp"
 #include "MembershipGate.hpp"
 #include "NodeIdentity.hpp"
+#include "NodeNameResolver.hpp"
 #include "NodeStatusResponder.hpp"
 #include "NodeSurfaces.hpp"
 
@@ -9,6 +11,7 @@
 #include <Pace/Cluster/FleetPin.hpp>
 #include <Pace/Core/Ed25519.hpp>
 #include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/PeerText.hpp>
 #include <Pace/Distributed/MachineStanding.hpp>
 #include <Pace/Distributed/MembershipWire.hpp>
 #include <Pace/Protocol/SurfaceRefusal.hpp>
@@ -533,7 +536,39 @@ void ConfiguredNodeStatus::DescribeDetail(CompileCacheWire::NodeRuntimeFields& r
     if (_sources.config != nullptr)
         runtime.effectiveConfig = EffectiveConfigOf(_sources.config->Current());
 
-    // `budgetOverrides` stays ABSENT: nothing sets an override yet, and absent says *does not say*.
+    // Every tier's budget as the applier last left it -- in force, from where, against which baseline -- with what
+    // is still over it read off the store NOW, and the setter's display name off the state applied NOW: one row per
+    // tier the node has or the cluster records an override for. ABSENT where nothing applies budgets.
+    if (_sources.budgets != nullptr)
+    {
+        auto const snapshot = _sources.cacheTiers != nullptr ? _sources.cacheTiers->SnapshotTiers() : TieredStorageStats {};
+        auto const state = _sources.cluster != nullptr ? _sources.cluster->AppliedState() : std::nullopt;
+        auto rows = std::vector<CompileCacheWire::NodeBudgetOverrideFields> {};
+        for (auto const& status: _sources.budgets->BudgetStatus())
+        {
+            auto const& stats = snapshot[static_cast<std::size_t>(status.tier)];
+            auto row = CompileCacheWire::NodeBudgetOverrideFields {
+                .tier = static_cast<std::uint8_t>(status.tier),
+                .bytes = status.effective,
+                .baselineBytes = status.recorded.has_value() ? status.recorded->baseline : std::nullopt,
+                .source = std::string { BudgetSourceName(status.source) },
+                .configuredBytes = status.configured,
+                .overrideBytes = status.recorded.transform([](Cluster::BudgetOverride const& o) { return o.bytes; }),
+                .setAtUnixSeconds =
+                    status.recorded.transform([](Cluster::BudgetOverride const& o) { return o.setAtUnixSeconds; }),
+                .setBy = status.recorded.has_value() ? status.recorded->setBy : std::string {},
+                .setByName = {},
+                .excessBytes = stats.has_value() && status.effective.has_value()
+                                   ? std::optional { static_cast<std::uint64_t>(IStorage::BytesOverBudget(stats)) }
+                                   : std::nullopt,
+                .note = BoundedPeerText(status.note, CompileCacheWire::MaxBudgetOverrideNoteBytes),
+            };
+            if (state.has_value() && !row.setBy.empty())
+                row.setByName = DisplayNameIn(*state, row.setBy).value_or(std::string {});
+            rows.push_back(std::move(row));
+        }
+        runtime.budgetOverrides = std::move(rows);
+    }
 }
 
 CompileCacheWire::NodeStatusFields ConfiguredNodeStatus::Describe() const

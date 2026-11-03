@@ -434,6 +434,19 @@ class CacheTier final: public ITierStatsSource
     ///         does not have ("no disk tier on this node"), in which case nothing changed.
     [[nodiscard]] std::expected<void, std::string> ApplyTierBudget(StorageTier tier, std::size_t bytes);
 
+    /// Give one tier of the running store back the budget its configuration names, as `ApplyTierBudget` does in every
+    /// other respect.
+    ///
+    /// What a cleared or dropped override, and a reloaded `--cache-memory`/`--cache-disk`, are applied through. Unlike
+    /// an override, a configured ZERO is accepted: it means what it meant when the tier was built from it -- unbounded
+    /// -- and a disk tier configured unbounded that an override shrank must be able to return there. A memory tier
+    /// configured zero was never built, so that tier is refused as absent.
+    /// @param tier Which tier.
+    /// @param bytes The configured budget; zero is unbounded.
+    /// @return Nothing, or why the budget was not applied -- a tier this node does not have, or a figure it cannot
+    ///         address; nothing changed in either case.
+    [[nodiscard]] std::expected<void, std::string> RestoreTierBudget(StorageTier tier, std::uint64_t bytes);
+
     /// Ask the eviction driver for a run: the sampler's minute calls this as a fallback, so a
     /// store left over its budget by anything (a reopen, a run that could not progress) is
     /// looked at again. Cheap when nothing is over.
@@ -489,6 +502,12 @@ class CacheTier final: public ITierStatsSource
 
     /// Tell the listener the tiers moved, under the budget mutex. The driver's convergence.
     void NotifyBudgetListener();
+
+    /// Resize @p tier to @p bytes, tell the listener and kick the driver: the one body both appliers share.
+    /// @param tier Which tier.
+    /// @param bytes The budget, already judged by the caller.
+    /// @return Nothing, or that this node has no such tier.
+    [[nodiscard]] std::expected<void, std::string> ResizeTier(StorageTier tier, std::size_t bytes);
 
     // Declaration order IS construction order, and every one of these is referenced
     // by the one below it. Reordering them is a dangling reference, which is why

@@ -12,6 +12,7 @@
 #include "AdminEndpoint.hpp"
 #include "AdmissionResponder.hpp"
 #include "AdmitForwarder.hpp"
+#include "BudgetOverrideApplier.hpp"
 #include "CacheTier.hpp"
 #include "ClusterAdminCli.hpp"
 #include "CompileCapacity.hpp"
@@ -1417,6 +1418,26 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     auto const workerRequestMax =
         workerTier != nullptr ? std::optional<std::uint64_t> { Node::CompileRequestMaxOf(cfg) } : std::nullopt;
 
+    // And the MCP surface's way to the fleet, declared before the surface and the consensus tier for the reason
+    // its class states -- and before the budget applier below, which reports to the leader through it.
+    McpForwarding mcpForwarding { cfg, prover, identityKey, nodeIo, clusterDirectory };
+
+    // The cluster's cache budget overrides for this member, applied live to the tiers it BUILT: on its own thread,
+    // never the consensus apply callback nor a reactor, coalescing bursts of applied states, comparing every override's
+    // baseline with the configuration IN FORCE (`endpointConfig`, the reloader's live snapshot). Built on every node,
+    // like the shared-cache host: one with no consensus is told no state, and reports what it is configured with.
+    // Declared after the cache tier and the upstream it reaches and before the status and the consensus tier that read
+    // and feed it, so it is destroyed after those and before these.
+    Node::CacheTierBudgets cacheTierBudgets { cacheTier.get() };
+    Node::UpstreamMemberReportClient memberReports { mcpForwarding.Upstream() };
+    Node::BudgetOverrideApplier budgetOverrides { cacheTierBudgets,
+                                                  memberReports,
+                                                  endpointConfig,
+                                                  logger,
+                                                  AddressWhen(Node::RunsConsensus(cfg), conditions),
+                                                  cfg.nodeId,
+                                                  Node::ReconcileOn::OwnThread };
+
     Node::ConfiguredNodeStatus const nodeStatus {
         cfg,
         statusClock,
@@ -1479,6 +1500,8 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
                                    .cacheTiers = cacheTier.get(),
                                    // This node's display name, read per request from the state it applied.
                                    .cluster = &clusterDirectory,
+                                   // Every tier's budget in force and the override behind it, as the applier left it.
+                                   .budgets = &budgetOverrides,
                                    // What it calls itself: the name its worker registers with.
                                    .hostName = QueryHostFacts().hostName },
     };
@@ -1617,9 +1640,6 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     // dialled (`announced`). Declared after the redirect and the queue and before the surface that routes
     // to it, so it is destroyed after that surface closes its connections.
     AdmissionRelay admissionRelay;
-    // And the MCP surface's way to the fleet, declared before the surface and the consensus tier for the reason
-    // its class states.
-    McpForwarding mcpForwarding { cfg, prover, identityKey, nodeIo, clusterDirectory };
     StartAdmissionRelay(admissionRelay,
                         AdmissionRelayParts { .cfg = cfg,
                                               .prover = prover,
@@ -1726,6 +1746,7 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
         Node::SharedCacheListeners { .directory = sharedCache.Directory(),
                                      .host = sharedCache.Host(),
                                      .upstream = cacheTier != nullptr ? &cacheTier->Upstream() : nullptr },
+        &budgetOverrides,
         metrics,
         logger,
         &conditions,
@@ -2091,7 +2112,7 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
         // this call publishes a new configuration and says so, and the next beat picks
         // it up on its own.
         if (DaemonControls::Instance().TakeReloadRequest())
-            Node::ApplyReloadRequest(reloader, membership, conditions, logger);
+            Node::ApplyReloadRequest(reloader, membership, conditions, logger, &budgetOverrides);
         std::this_thread::sleep_for(StopPollInterval);
     }
     logger.Log(LogLevel::Info, Node::DrainSentence(formation.durables.reform.Pending()));

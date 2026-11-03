@@ -375,6 +375,41 @@ namespace
         return budget.has_value() && !budget->setBy.empty() ? FleetCell::Of(budget->setBy) : FleetCell::Nothing();
     }
 
+    /// @tparam Tier A cache tier.
+    /// @param row A member row.
+    /// @return The baseline the member reported for that tier's override; absent when there is no override or it has
+    ///         not reported one yet. A present zero is a real configuration (unbounded).
+    template <StorageTier Tier>
+    [[nodiscard]] FleetCell BudgetBaselineCell(MemberRow const& row)
+    {
+        auto const& budget = Cluster::BudgetOf(row.member, Tier);
+        return budget.has_value() && budget->baseline.has_value() ? FleetCell::Of(*budget->baseline) : FleetCell::Nothing();
+    }
+
+    /// @tparam Tier A cache tier.
+    /// @param row A member row.
+    /// @return When the leader recorded that tier's override, by its own clock, as UTC text; absent with no override.
+    template <StorageTier Tier>
+    [[nodiscard]] FleetCell BudgetSetAtCell(MemberRow const& row)
+    {
+        auto const& budget = Cluster::BudgetOf(row.member, Tier);
+        if (!budget.has_value())
+            return FleetCell::Nothing();
+        return FleetCell::Of(std::format("{:%Y-%m-%dT%H:%M:%SZ}",
+                                         std::chrono::sys_seconds { std::chrono::seconds { budget->setAtUnixSeconds } }));
+    }
+
+    /// What the override baseline columns say in a header.
+    constexpr std::string_view BudgetBaselineHelp =
+        "What the member had configured for the tier when it first applied the override, reported by the member itself. "
+        "Absent until it reports one -- an override set while it was down -- or when there is no override. Once its "
+        "configuration differs from this, its own edit is the later change and the override is dropped.";
+
+    /// What the override time columns say in a header.
+    constexpr std::string_view BudgetSetAtHelp =
+        "When the leader recorded the override, by the leader's clock, in UTC: for display only -- nothing compares it "
+        "with another machine's clock. Absent when there is no override.";
+
     /// What the override setter columns say in a header.
     constexpr std::string_view BudgetSetByHelp =
         "Who recorded the override: the machine the operator acted from, never a person -- the member whose identity key "
@@ -388,7 +423,7 @@ namespace
         "the leader, applied by the member. Absent when none is recorded. Recorded is not applied: the member's "
         "status says what it runs with.";
 
-    constexpr std::array<FleetColumn<MemberRow>, 10> MemberColumns {
+    constexpr std::array<FleetColumn<MemberRow>, 14> MemberColumns {
         FleetColumn<MemberRow> { .name = "id",
                                  .help = "The member's stable identity: what consensus counts.",
                                  .format = CellFormat::Text,
@@ -456,6 +491,26 @@ namespace
                                  .format = CellFormat::Text,
                                  .keep = ColumnKeep::Detail,
                                  .project = &BudgetSetByCell<StorageTier::Disk> },
+        FleetColumn<MemberRow> { .name = "memory-override-baseline",
+                                 .help = BudgetBaselineHelp,
+                                 .format = CellFormat::Bytes,
+                                 .keep = ColumnKeep::Detail,
+                                 .project = &BudgetBaselineCell<StorageTier::Memory> },
+        FleetColumn<MemberRow> { .name = "disk-override-baseline",
+                                 .help = BudgetBaselineHelp,
+                                 .format = CellFormat::Bytes,
+                                 .keep = ColumnKeep::Detail,
+                                 .project = &BudgetBaselineCell<StorageTier::Disk> },
+        FleetColumn<MemberRow> { .name = "memory-override-set-at",
+                                 .help = BudgetSetAtHelp,
+                                 .format = CellFormat::Text,
+                                 .keep = ColumnKeep::Detail,
+                                 .project = &BudgetSetAtCell<StorageTier::Memory> },
+        FleetColumn<MemberRow> { .name = "disk-override-set-at",
+                                 .help = BudgetSetAtHelp,
+                                 .format = CellFormat::Text,
+                                 .keep = ColumnKeep::Detail,
+                                 .project = &BudgetSetAtCell<StorageTier::Disk> },
     };
 
     /// The member rows of @p snapshot: each record joined, by the identity key it holds, to what the machine proving

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include "BudgetOverrideApplier.hpp"
 #include "ConsensusTier.hpp"
 #include "DiscoveryTier.hpp"
 #include "McpUpstream.hpp"
@@ -1632,6 +1633,7 @@ std::expected<std::unique_ptr<ConsensusTier>, NodeRefusal> StartConsensusOrExpla
     SchedulingLeaderPublisher& schedulingLeader,
     AppliedUpstreamDirectory* upstreamDirectory,
     SharedCacheListeners sharedCache,
+    BudgetOverrideApplier* budgetOverrides,
     IMetricsSink& metrics,
     ILogger& logger,
     NodeConditions* conditions,
@@ -1670,7 +1672,8 @@ std::expected<std::unique_ptr<ConsensusTier>, NodeRefusal> StartConsensusOrExpla
             if (schedulerTier != nullptr)
                 schedulerTier->SetRole(role, leaderEndpoint, term);
         },
-        [&membership, &roster, &schedulers, upstreamDirectory, sharedCache](Cluster::ClusterState const& state) {
+        [&membership, &roster, &schedulers, upstreamDirectory, sharedCache, budgetOverrides](
+            Cluster::ClusterState const& state) {
             // The member set no longer joins admission; its KEYS do. A machine the cluster
             // agreed to admit is served by every surface at once by the key it proves or
             // presents, never by the address it dials from. `--fleet-open` is this node's own
@@ -1700,6 +1703,11 @@ std::expected<std::unique_ptr<ConsensusTier>, NodeRefusal> StartConsensusOrExpla
             // and this is the apply callback a voter's heartbeats wait behind. Then the private
             // tier's upstream, which re-judges what it reports from what the directory now says.
             sharedCache.Applied(state);
+
+            // And this member's cache budget overrides: recorded and handed to the applier's own thread, which resizes
+            // a tier and reports to the leader -- neither belongs on the callback a voter's heartbeats wait behind.
+            if (budgetOverrides != nullptr)
+                budgetOverrides->OnState(state);
         },
         // And how long that state has gone without a leader it counts speaking: past
         // `LeaderSilenceBound`, every grant is refused (`consensus-leader-silent`) -- and past the

@@ -590,6 +590,33 @@ TEST_CASE("absent tier refused as a live tier budget", "[node][cache-tier][resiz
     CHECK(Unwrap(At(tier->SnapshotTiers(), StorageTier::Memory)).bytesLimit == cfg.cacheMemoryBytes);
 }
 
+TEST_CASE("A disk tier configured unbounded returns there once an override is lifted", "[node][cache-tier][resize]")
+{
+    // `--cache-disk`'s default is 0, unbounded: an override shrinks it, and clearing the override must be able to give
+    // it back -- which `ApplyTierBudget` refuses, since a zero override would remove a tier. `RestoreTierBudget` is
+    // the configured value meaning what it meant at startup.
+    Testing::ScratchDirectory const scratch { "node-cache-disk-restore" };
+    Fixture fixture;
+    auto cfg = Fixture::BaseConfig();
+    cfg.cacheMemoryBytes = 0;
+    cfg.cacheDir = scratch.Path();
+    cfg.cacheDiskBytes = 0;
+    auto started = fixture.Start(cfg);
+    REQUIRE(started.has_value());
+    auto const tier = std::move(*started);
+    REQUIRE(tier != nullptr);
+    REQUIRE(Unwrap(At(tier->SnapshotTiers(), StorageTier::Disk)).bytesLimit == 0);
+
+    REQUIRE(tier->ApplyTierBudget(StorageTier::Disk, 64ULL * 1024 * 1024).has_value());
+    CHECK(Unwrap(At(tier->SnapshotTiers(), StorageTier::Disk)).bytesLimit == 64ULL * 1024 * 1024);
+    CHECK_FALSE(tier->ApplyTierBudget(StorageTier::Disk, 0).has_value());
+
+    REQUIRE(tier->RestoreTierBudget(StorageTier::Disk, 0).has_value());
+    CHECK(Unwrap(At(tier->SnapshotTiers(), StorageTier::Disk)).bytesLimit == 0);
+    // A tier this node never built is still refused, restored or not.
+    CHECK(tier->RestoreTierBudget(StorageTier::Memory, 0).error() == "no memory tier on this node");
+}
+
 TEST_CASE("capacity recomputed after shrink", "[node][cache-tier][resize][capacity]")
 {
     // What a node holds back from compiles is what its tier HOLDS (#167), so a shrink must

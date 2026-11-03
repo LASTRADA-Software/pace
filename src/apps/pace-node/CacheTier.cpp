@@ -567,12 +567,25 @@ std::expected<void, std::string> CacheTier::ApplyTierBudget(StorageTier tier, st
     auto const checked = CheckTierBudget(bytes);
     if (!checked.has_value())
         return std::unexpected(checked.error());
+    return ResizeTier(tier, *checked);
+}
 
+std::expected<void, std::string> CacheTier::RestoreTierBudget(StorageTier tier, std::uint64_t bytes)
+{
+    // Zero is not refused here: it is the configured value meaning what it meant when the tier was built from it
+    // (unbounded, `IStorage::ResizeTier`'s rule) -- not an override removing a tier, which `ApplyTierBudget` refuses.
+    if (!std::in_range<std::size_t>(bytes))
+        return std::unexpected(std::format("a budget of {} bytes is more than this process can address", bytes));
+    return ResizeTier(tier, static_cast<std::size_t>(bytes));
+}
+
+std::expected<void, std::string> CacheTier::ResizeTier(StorageTier tier, std::size_t bytes)
+{
     std::scoped_lock const lock { _budgetMutex };
     // One call that both asks and acts: every store answers nullopt for a tier it does not
     // have BEFORE touching anything, so an absent tier is refused with nothing changed and
     // there is no window between a presence check and the resize.
-    if (!_storage->ResizeTier(tier, *checked).has_value())
+    if (!_storage->ResizeTier(tier, bytes).has_value())
         return std::unexpected(std::format("no {} tier on this node", TraitsFor(tier).name));
     if (_budgetListener != nullptr)
         _budgetListener->TierBudgetApplied();

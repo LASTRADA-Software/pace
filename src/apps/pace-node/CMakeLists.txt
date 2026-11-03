@@ -50,6 +50,7 @@ add_executable(pace-node
     McpToolchainTools.cpp
     McpUpstream.cpp
     NodeNameResolver.cpp
+    BudgetOverrideApplier.cpp
     CacheProxy.cpp
     CacheTier.cpp
     ClusterAdminCli.cpp
@@ -164,6 +165,8 @@ if(PACE_BUILD_TESTS)
         NodeNameResolver_test.cpp
         McpUpstream.cpp
         McpUpstream_test.cpp
+        BudgetOverrideApplier.cpp
+        BudgetOverrideApplier_test.cpp
         CacheProxy.cpp
         CacheProxy_test.cpp
         CacheTier.cpp

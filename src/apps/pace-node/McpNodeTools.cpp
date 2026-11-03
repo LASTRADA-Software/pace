@@ -128,19 +128,28 @@ namespace
         return Arr(std::move(rows));
     }
 
-    /// @param overrides The record the node sent, or nothing.
-    /// @return The `budget_overrides` member: `null` when the node did not say.
-    [[nodiscard]] Json::Value Overrides(std::optional<std::vector<Wire::NodeBudgetOverrideFields>> const& overrides)
+    /// @param runtime The decoded record.
+    /// @return The `budget_overrides` member: `null` when the node did not say, else one row per tier through the view
+    ///         `pacectl node` renders from, every absent quantity `null` rather than zero.
+    [[nodiscard]] Json::Value Overrides(Wire::NodeRuntimeFields const& runtime)
     {
-        if (!overrides.has_value())
+        auto const views = NodeStatusView::BudgetOverridesOf(runtime);
+        if (!views.has_value())
             return Null();
         auto rows = Json::Array {};
-        for (auto const& entry: *overrides)
-            rows.push_back(Obj({ { "tier",
-                                   entry.tier < StorageTierTable.size() ? Name(StorageTierTable[entry.tier].name)
-                                                                        : Str(std::format("tier-{}", entry.tier)) },
-                                 { "bytes", Json::Unsigned(entry.bytes) },
-                                 { "baseline_bytes", NumberOrNull(entry.baselineBytes) } }));
+        for (auto const& view: *views)
+            rows.push_back(Obj({ { "tier", Str(view.tier) },
+                                 { "bytes", NumberOrNull(view.effectiveBytes) },
+                                 { "source", Str(view.source) },
+                                 { "configured_bytes", Json::Unsigned(view.configuredBytes) },
+                                 { "override_bytes", NumberOrNull(view.overrideBytes) },
+                                 { "baseline_bytes", NumberOrNull(view.baselineBytes) },
+                                 { "set_at", view.setAt.has_value() ? Str(*view.setAt) : Null() },
+                                 { "set_by", view.setBy.empty() ? Null() : Str(view.setBy) },
+                                 { "set_by_name", view.setByName.empty() ? Null() : Str(view.setByName) },
+                                 { "excess_bytes", NumberOrNull(view.excessBytes) },
+                                 { "note", view.note.empty() ? Null() : Str(view.note) },
+                                 { "text", Str(NodeStatusView::DescribeBudget(view)) } }));
         return Arr(std::move(rows));
     }
 
@@ -281,7 +290,7 @@ namespace
         result.emplace_back("tiers", Tiers(runtime));
         result.emplace_back("surfaces", Surfaces(fields));
         result.emplace_back("effective_config", Settings(runtime));
-        result.emplace_back("budget_overrides", Overrides(runtime.budgetOverrides));
+        result.emplace_back("budget_overrides", Overrides(runtime));
         return Answer(std::move(result), std::format("{}; {}", Summary(fields), Provenance(*answer)));
     }
 

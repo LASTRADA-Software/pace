@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+#include "BudgetOverrideApplier.hpp"
 #include "EnrollmentWindow.hpp"
 #include "MachineStandingTestUtils.hpp"
+#include "McpUpstreamFakes.hpp"
 #include "NodeAnnounce.hpp"
 #include "NodeConfig.hpp"
 #include "NodeFormation.hpp"
@@ -305,6 +307,8 @@ struct DirectSources
     IAppliedClusterView const* cluster { nullptr };
     /// What the machine calls itself; empty is a machine that could not read it.
     std::string hostName {};
+    /// Where the budgets come from; null is nothing applying budgets.
+    IBudgetOverrideStatusSource const* budgets { nullptr };
 };
 
 /// A `ConfiguredNodeStatus` beside the configuration it holds a reference to.
@@ -351,6 +355,7 @@ struct Fixture
                                       .config = direct.config,
                                       .cacheTiers = direct.cacheTiers,
                                       .cluster = direct.cluster,
+                                      .budgets = direct.budgets,
                                       .hostName = direct.hostName } }
     {
     }
@@ -2071,4 +2076,72 @@ TEST_CASE("FINGERPRINT-INPUTS is a verb this node implements, never one it refus
     CHECK(shape.code != std::optional { Wire::UnimplementedVerb });
     CHECK(shape.code == Wire::NoCompileWorker::Code);
     CHECK(Wire::SaysNoCompileWorker(Wire::NoCompileWorker::Code, shape.detail));
+}
+
+namespace
+{
+/// A budget applier's answer a case states.
+class StatedBudgets final: public IBudgetOverrideStatusSource
+{
+  public:
+    /// @copydoc IBudgetOverrideStatusSource::BudgetStatus
+    [[nodiscard]] std::vector<TierBudgetStatus> BudgetStatus() const override
+    {
+        return rows;
+    }
+
+    std::vector<TierBudgetStatus> rows; ///< What the applier last left.
+};
+} // namespace
+
+TEST_CASE("node_status shows a budget in force from the cluster, with its baseline, setter and the excess still over",
+          "[node][node-status][node-status-detail][budget]")
+{
+    core::platform::ManualClock clock;
+    Fixture const noApplier { {}, clock };
+    // Nothing applies budgets: ABSENT, never an empty list.
+    CHECK_FALSE(noApplier.status.Describe().runtime.budgetOverrides.has_value());
+
+    constexpr auto MiB = std::uint64_t { 1024 } * 1024;
+    StatedBudgets budgets;
+    budgets.rows.push_back(TierBudgetStatus {
+        .tier = StorageTier::Memory,
+        .configured = 512 * MiB,
+        .effective = 64 * MiB,
+        .source = BudgetSource::Cluster,
+        .recorded =
+            Cluster::BudgetOverride {
+                .bytes = 64 * MiB, .baseline = 512 * MiB, .setAtUnixSeconds = 1'767'225'600, .id = 7, .setBy = "voter-1" },
+        .note = {} });
+    StatedTiers cache;
+    auto memory = StorageStats {};
+    memory.bytesUsed = static_cast<std::size_t>(70 * MiB);
+    memory.bytesLimit = static_cast<std::size_t>(64 * MiB);
+    cache.tiers[static_cast<std::size_t>(StorageTier::Memory)] = memory;
+    auto state = Cluster::ClusterState {};
+    auto voter = Cluster::ClusterMember {};
+    voter.id = "voter-1";
+    voter.displayName = "build box";
+    state.members.push_back(voter);
+    McpFakes::FixedCluster const cluster { state };
+    Fixture const fixture {
+        {}, clock, {}, std::nullopt, DirectSources { .cacheTiers = &cache, .cluster = &cluster, .budgets = &budgets }
+    };
+
+    auto const rows = fixture.status.Describe().runtime.budgetOverrides;
+    REQUIRE(rows.has_value());
+    REQUIRE(Unwrap(rows).size() == 1);
+    auto const& row = Unwrap(rows)[0];
+    CHECK(row.tier == 0);
+    CHECK(row.source == "cluster");
+    CHECK(row.bytes == std::optional { 64 * MiB });
+    CHECK(row.configuredBytes == 512 * MiB);
+    CHECK(row.overrideBytes == std::optional { 64 * MiB });
+    CHECK(row.baselineBytes == std::optional { 512 * MiB });
+    CHECK(row.setAtUnixSeconds == std::optional<std::int64_t> { 1'767'225'600 });
+    CHECK(row.setBy == "voter-1");
+    CHECK(row.setByName == "build box");
+    // Read off the store NOW: what is still over the budget in force.
+    CHECK(row.excessBytes == std::optional { 6 * MiB });
+    CHECK(row.note.empty());
 }

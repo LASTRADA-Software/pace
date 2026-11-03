@@ -835,9 +835,10 @@ TEST_CASE("A member that never announced and one a re-admit cleared render diffe
     // both endpoint cells are the absent marker. Members sort by id, so `moved` first.
     auto const members = RenderFleetText(snapshot, NoHistory(), FleetSection::Members);
     INFO(members);
-    // The four trailing dashes are the budget override columns (figure, setter per tier) neither member has.
-    CHECK(members.contains("moved\t-\t-\t10.0.0.2:6675\t-\tcleared\t-\t-\t-\t-\n"));
-    CHECK(members.contains("quiet\t-\t-\t10.0.0.1:6675\t-\tnever-announced\t-\t-\t-\t-\n"));
+    // The eight trailing dashes are the budget override columns (figure, setter, baseline, set-at per tier) neither
+    // member has.
+    CHECK(members.contains("moved\t-\t-\t10.0.0.2:6675\t-\tcleared\t-\t-\t-\t-\t-\t-\t-\t-\n"));
+    CHECK(members.contains("quiet\t-\t-\t10.0.0.1:6675\t-\tnever-announced\t-\t-\t-\t-\t-\t-\t-\t-\n"));
 
     // And the JSON, where the endpoint stays `null` for both rather than becoming a word.
     auto const json = RenderFleetJson(snapshot, NoHistory());
@@ -878,7 +879,10 @@ TEST_CASE("A member's recorded budget override is a column of the members table,
         R"("memory-override":null,"disk-override":2147483648,"memory-override-by":null,"disk-override-by":"voter-1")"));
     auto const members = RenderFleetText(snapshot, NoHistory(), FleetSection::Members);
     INFO(members);
-    CHECK(members.contains("never-announced\t-\t2147483648\t-\tvoter-1\n")); // bytes as /fleet.txt writes them
+    // Bytes as /fleet.txt writes them; no baseline reported yet (absent, never zero), and the leader's stamp in UTC.
+    CHECK(members.contains("never-announced\t-\t2147483648\t-\tvoter-1\t-\t-\t-\t2026-11-02T10:00:00Z\n"));
+    CHECK(json.contains(R"("memory-override-baseline":null,"disk-override-baseline":null)"));
+    CHECK(json.contains(R"("memory-override-set-at":null,"disk-override-set-at":"2026-11-02T10:00:00Z")"));
     CHECK(FleetColumnFormat(FleetSection::Members, "disk-override") == std::optional { CellFormat::Bytes });
 }
 

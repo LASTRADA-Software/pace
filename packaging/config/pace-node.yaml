@@ -12,7 +12,7 @@
 #
 # reloadable-for: pace-node
 #
-# EIGHT settings are reloadable and the rest are read once at startup. A reload
+# TEN settings are reloadable and the rest are read once at startup. A reload
 # re-reads this file the way the start read it, so a change to anything else is
 # refused BY NAME rather than half-applied -- you are told which key needs the
 # restart instead of running a worker that disagrees with its own file.
@@ -35,6 +35,12 @@
 #                                       working, and is why this is reloadable
 #   raft_self                           moves the address this node's peers
 #                                       dial it at for consensus
+#   cache_memory, cache_disk            resize the live tier: a shrink evicts
+#                                       (the disk tier in slices, while serving);
+#                                       a cluster budget override set against the
+#                                       old value is dropped, since this later
+#                                       edit wins. Turning the memory tier on or
+#                                       off (to or from 0) still takes a restart
 #
 # Every key is one flag, spelled with underscores instead of dashes, and there
 # is no setting that a file can express and a command line cannot. A flag on the

@@ -107,6 +107,34 @@ struct SettingView
 /// @return The settings in the order sent; DISENGAGED from a node that did not say.
 [[nodiscard]] std::optional<std::vector<SettingView>> SettingsOf(CompileCacheWire::NodeRuntimeFields const& runtime);
 
+/// One cache tier's budget as a reader reads it: what is in force, where it came from, and the override the cluster
+/// records -- from the node's `budgetOverrides` rows.
+struct BudgetOverrideView
+{
+    std::string tier;                            ///< The tier, as this build names it, or `tier-<n>` for one it cannot.
+    std::optional<std::uint64_t> effectiveBytes; ///< The budget in force; DISENGAGED when the node lacks the tier.
+    std::string source;                          ///< `configured` or `cluster`, as the node wrote it.
+    std::uint64_t configuredBytes { 0 };         ///< The machine's own budget, in the configuration in force.
+    std::optional<std::uint64_t> overrideBytes;  ///< The override the cluster records; DISENGAGED when none is.
+    std::optional<std::uint64_t> baselineBytes;  ///< What it was set against; DISENGAGED until recorded.
+    std::optional<std::string> setAt;            ///< When the leader recorded it, `YYYY-MM-DDTHH:MM:SSZ`, leader's clock.
+    std::string setBy;                           ///< The member it is attributed to; empty when none.
+    std::string setByName;                       ///< That member's display name; empty when it has none.
+    std::optional<std::uint64_t> excessBytes;    ///< Stored bytes over the budget in force; DISENGAGED with no tier.
+    std::string note;                            ///< Why the override is not in force; empty when it is.
+};
+
+/// The budget rows a reply reports.
+/// @param runtime The decoded runtime record.
+/// @return One view per row, in the node's order; DISENGAGED from a node that does not say.
+[[nodiscard]] std::optional<std::vector<BudgetOverrideView>> BudgetOverridesOf(
+    CompileCacheWire::NodeRuntimeFields const& runtime);
+
+/// One budget row as one line of text: the ONE wording `pacectl node` and `node_status`'s text both print.
+/// @param view A row.
+/// @return E.g. `64 MiB from cluster (configured 512 MiB, baseline 512 MiB, set 2026-11-02T10:00:00Z by n1 "box")`.
+[[nodiscard]] std::string DescribeBudget(BudgetOverrideView const& view);
+
 /// What a person calls one toolchain-survey state; `pacectl node` and `node_status` share the spelling.
 /// @param state The wire tag.
 /// @return A stable lower-case name.

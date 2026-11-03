@@ -1102,21 +1102,18 @@ namespace
                 record.push_back({ .name = name, .value = TextCell(std::move(joined)) });
             }
 
-        // ABSENT from a node that does not say -- every node until overrides can be set -- and `none` from one
-        // that says it applies none.
-        if (runtime.budgetOverrides.has_value())
+        // Each tier's budget through the view `node_status` renders from -- in force, from where, the override and its
+        // baseline -- one field per tier and their line together. ABSENT from a node that does not say, and `none`
+        // from one with no tier and no override.
+        if (auto const budgets = NodeStatusView::BudgetOverridesOf(runtime); budgets.has_value())
         {
             auto described = std::string {};
-            for (auto const& entry: *runtime.budgetOverrides)
+            for (auto const& view: *budgets)
             {
-                auto const tier = entry.tier < StorageTierTable.size() ? std::string { StorageTierTable[entry.tier].name }
-                                                                       : std::format("tier-{}", entry.tier);
-                described += std::format(
-                    "{}{}={}{}",
-                    described.empty() ? "" : ", ",
-                    tier,
-                    entry.bytes,
-                    entry.baselineBytes.has_value() ? std::format(" (baseline {})", *entry.baselineBytes) : std::string {});
+                auto line = NodeStatusView::DescribeBudget(view);
+                described += std::format("{}{}: {}", described.empty() ? "" : "; ", view.tier, line);
+                record.push_back({ .name = std::format("budget-{}", view.tier), .value = TextCell(std::move(line)) });
+                record.push_back({ .name = std::format("budget-{}-source", view.tier), .value = TextCell(view.source) });
             }
             record.push_back(
                 { .name = "budget-overrides", .value = TextCell(described.empty() ? std::string { "none" } : described) });

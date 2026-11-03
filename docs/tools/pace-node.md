@@ -2065,7 +2065,29 @@ own LATER change of that flag outranks the override. A forget removes it with th
 `memory-budget=2G baseline=unset set=2026-11-02T10:00:00Z by=n1` (the leader's clock, and the machine the operator
 acted from: the member whose key the connection proved or whose key signed its ticket, or the leader itself for a
 caller on its own machine; `-` only when nothing identified the caller), and the fleet page's members table has
-`memory-override`, `disk-override` and their `-by` columns.
+`memory-override`, `disk-override` and their `-by`, `-baseline` and `-set-at` columns.
+
+#### Cache budget overrides, applied by the member
+
+The member applies its overrides **live**, on a thread of its own -- never on the consensus apply path or a
+reactor: the memory tier evicts to the new budget at once, the disk tier adopts it and evicts toward it in bounded
+slices while it serves, and the capacity it reports is re-derived from what the tiers then hold. **The later change
+wins, and no clock decides which is later.** At every start, every accepted reload and every applied state the member
+compares its configured `--cache-memory`/`--cache-disk` -- the configuration in force, so a reload counts -- with the
+override's baseline:
+
+| Baseline | What the member does |
+|---|---|
+| unset | reports its configured value as the baseline (MEMBER-REPORT `record-baseline`, under its own proof), then applies the override; while the leader cannot be reached it waits and asks again, and never applies an override no baseline was recorded for |
+| equal to the configured value | applies the override, or keeps it applied |
+| different | its own edit is the later change: it logs both values at Warn, raises the latched `cache-budget-override-dropped` condition, asks the leader to drop exactly that override (MEMBER-REPORT `drop-override`), and runs with its configured value |
+
+An override for a tier the member does not have is not applied, and says so. A budget the tier refuses is shown with
+the reason and retried only when something changes. Clearing an override gives the tier its configured budget back,
+`0` (unbounded) included. `pacectl node` (`budget-memory`, `budget-disk`, `budget-overrides`) and MCP `node_status`
+(`budget_overrides`) show each tier's budget in force, whether it comes from the `cluster` or is `configured`, the
+override and its baseline, when and by whom it was set, the excess still being evicted while it converges, and why an
+override is not in force.
 
 `--cluster-status` prints the members — each with the `seat` it was admitted into,
 `voter` or `learner` (see [admitting a learner](#a-machine-that-is-usually-away-admitting-a-learner))
@@ -3087,13 +3109,17 @@ address — so a list is written as one key with every value under it.
 
 | Reloadable | Requires a restart |
 |---|---|
-| `log_level`, `allow_compile_arg`, `requirepass`, `fleet_open`, `toolchain`, `no_toolchain_discovery`, `advertise`, `raft_self` | `slots`, `node_class`, `reserve_cores`, and every listen, cache, cluster and TLS setting |
+| `log_level`, `allow_compile_arg`, `requirepass`, `fleet_open`, `toolchain`, `no_toolchain_discovery`, `advertise`, `raft_self`, `cache_memory`, `cache_disk` | `slots`, `node_class`, `reserve_cores`, and every listen, cluster and TLS setting and every other cache setting |
 
 `log_level`, `allow_compile_arg`, `requirepass` and `fleet_open` take
 effect immediately and tell the fleet nothing; `toolchain` and `no_toolchain_discovery`
 re-register this worker, which is the section after next; `advertise` re-registers it
 too, at a new address, and retires the entry under the old one -- with the cost that
 section states. `raft_self` moves the address this node's peers dial for consensus.
+`cache_memory` and `cache_disk` resize the running tier -- a shrink evicts, the disk tier in
+bounded slices while it serves -- and a cluster budget override set against the old value is
+dropped, because the edit is the later change (see [cache budget overrides](#cache-budget-overrides-applied-by-the-member)).
+Turning the memory tier on or off, to or from `0`, still takes a restart and is refused by name.
 
 Both default to `auto`: the address this machine routes from, on the bound port while the
 listener binds the wildcard, re-derived when the network changes (this machine's fully
@@ -3580,6 +3606,7 @@ Every row says two things before anything else:
 | `fleet-split-healing` | live | warning | this fleet and another established one are one fleet split in two, by a key this fleet already held: its speaker is a VOTER recorded here under that key, which heals by itself -- the detail names which side yields and why -- or its speaker is a LEARNER here, or a machine of this fleet once asked it and it lists that machine, which are first-use trust and wait on an operator -- the detail names the machine the evidence rests on. Not evaluated, as `foreign-fleet-visible` is, until discovery has heard enough to say there is none | where it heals by itself, nothing: the yielding fleet dissolves and rejoins by itself, and a machine the survivor did not record waits on its `--enroll-list`. Where an operator decides, nothing moves until one does: ask the named machine which fleet it belongs to and check the other fleet with `--cluster-status`; if it is yours, `--cluster-forget` each machine of the fleet that does not stay and approve it on the survivor's `--enroll-list`. It clears a few minutes after the other fleet stops being heard |
 | `consensus-leader-silent` | live | warning | no leader this node's applied configuration counts has spoken to it for longer than it may trust that state (65 minutes, `LeaderSilenceBound`), so every lease grant it is handed is refused -- a voter its fleet forgot meanwhile could still be in the state it holds. The start counts as contact, so a node starting cut off has the same 65 minutes. The detail says how long it has been | restore its Raft sessions to the fleet: check the network path to its voters and `--cluster-status` on one of them. Compiles sent to it fall back to their own machines meanwhile; it clears at the first leader contact |
 | `state-directory-unsynced` | latched | warning | the filesystem holding the state directory answers a directory sync with "not supported here" (`EINVAL`, `ENOTSUP`, `EBADF` from `fsync`; `ERROR_INVALID_FUNCTION`, `ERROR_NOT_SUPPORTED`, `ERROR_INVALID_PARAMETER` from `FlushFileBuffers`), so a replaced state file is not known to survive a power loss: every replace still lands and is used. The detail names the directory and the answer; also counted in `pace_state_directory_syncs_unsupported_total` | stop the node, move the state directory **whole** to a local volume (it holds the node's identity, so a new empty directory is a new machine), point `--cluster-dir` at it and start; restarting on the same volume does not clear it |
+| `cache-budget-override-dropped` | latched | warning | a cluster cache budget override was dropped because this machine's own `--cache-memory`/`--cache-disk` changed after the override was set (its configured value no longer equals the baseline it reported); the detail names the tier, both values and the override's figure | the machine's own configuration changed after the override was set; set it again with set_cache_budget if still wanted |
 | `formation-move-refused` | live | alert | a move of this node's formation -- to the mode the detail names -- was not taken, because the startup rules refuse the shape it would give this node: a restart into it would be refused, so the node keeps the mode it is in. Every move is judged this way before its record is written, whether or not it rebuilds the node; the detail names the rule | fix the rule the detail names and restart this node; until then it keeps the mode it is in rather than serve a shape its next restart would refuse |
 
 The remedy each row carries is longer than this column, and it is the node's text: an older

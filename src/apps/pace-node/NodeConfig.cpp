@@ -1795,6 +1795,11 @@ std::span<OptionSpec<NodeConfig> const> NodeOptions() noexcept
                            "It exists so a local rebuild on a slow or bad\n"
                            "network never reaches the wire at all.",
             .yamlKey = "cache_memory",
+            // Reloadable since a tier can be resized live (`CacheTier::RestoreTierBudget`): a reload puts the new
+            // budget in force through the budget applier, which is also where it outranks a cluster override set
+            // against the old one (`BudgetOverrideApplier`). Turning the tier on or off is still a restart, refused by
+            // `MemoryTierExistenceChanged`.
+            .reloadable = Reloadable::Yes,
             .same = FieldEq<&NodeConfig::cacheMemoryBytes>(),
         },
         {
@@ -1810,6 +1815,10 @@ std::span<OptionSpec<NodeConfig> const> NodeOptions() noexcept
                            "Only means anything with --cache-dir: without a\n"
                            "path there is no disk tier for a budget to bound.",
             .yamlKey = "cache_disk",
+            // Reloadable since a tier can be resized live (`CacheTier::RestoreTierBudget`): a reload puts the new
+            // budget in force through the budget applier, which is also where it outranks a cluster override set
+            // against the old one (`BudgetOverrideApplier`).
+            .reloadable = Reloadable::Yes,
             .same = FieldEq<&NodeConfig::cacheDiskBytes>(),
         },
         {
@@ -2572,6 +2581,11 @@ std::vector<std::string_view> UnreloadableChanges(NodeConfig const& previous, No
     return changed;
 }
 
+bool MemoryTierExistenceChanged(NodeConfig const& previous, NodeConfig const& candidate) noexcept
+{
+    return (previous.cacheMemoryBytes == 0) != (candidate.cacheMemoryBytes == 0);
+}
+
 std::expected<void, ConfigError> ValidateNodeReloadable(NodeConfig const& previous, NodeConfig const& candidate)
 {
     // **A candidate is judged by the STARTUP rules as well**, which is the same
@@ -2591,6 +2605,18 @@ std::expected<void, ConfigError> ValidateNodeReloadable(NodeConfig const& previo
                                              .line = 0,
                                              .field = {},
                                              .context = std::format("not applied: {}", *rejection) });
+
+    // A memory tier exists only where `--cache-memory` is not zero, and the tier stack is built once: so its budget
+    // reloads, and its existence does not. Refused by name, as an unreloadable field is.
+    if (MemoryTierExistenceChanged(previous, candidate))
+        return std::unexpected(ConfigError {
+            .code = ConfigErrorCode::ImmutableChanged,
+            .source = {},
+            .line = 0,
+            .field = "--cache-memory",
+            .context = "not reloadable, so nothing was applied: --cache-memory may change its size live, but turning the "
+                       "memory tier on or off (to or from 0) takes a restart",
+        });
 
     // The immutability rule, asked SECOND because it is about the pair.
     auto const changed = UnreloadableChanges(previous, candidate);

@@ -55,8 +55,32 @@ namespace
         NodeSettingFields { .name = "--requirepass", .kind = WireSettingValue::Redacted, .text = {} },
         NodeSettingFields { .name = "--toolchain", .kind = WireSettingValue::Omitted, .text = "3 more" },
     };
-    runtime.budgetOverrides =
-        std::vector { NodeBudgetOverrideFields { .tier = 1, .bytes = 1024, .baselineBytes = std::uint64_t { 512 } } };
+    // One override in force with everything engaged, and one tier the node lacks, an override recorded for it, every
+    // optional absent: a decoder that read an absent figure as zero, or dropped a text, fails the round trip.
+    runtime.budgetOverrides = std::vector {
+        NodeBudgetOverrideFields { .tier = 0,
+                                   .bytes = std::uint64_t { 1024 },
+                                   .baselineBytes = std::uint64_t { 0 },
+                                   .source = "cluster",
+                                   .configuredBytes = 4096,
+                                   .overrideBytes = std::uint64_t { 1024 },
+                                   .setAtUnixSeconds = std::int64_t { 1'767'225'600 },
+                                   .setBy = "voter-1",
+                                   .setByName = "build box",
+                                   .excessBytes = std::uint64_t { 0 },
+                                   .note = {} },
+        NodeBudgetOverrideFields { .tier = 1,
+                                   .bytes = std::nullopt,
+                                   .baselineBytes = std::nullopt,
+                                   .source = "configured",
+                                   .configuredBytes = 0,
+                                   .overrideBytes = std::uint64_t { 512 },
+                                   .setAtUnixSeconds = std::nullopt,
+                                   .setBy = {},
+                                   .setByName = {},
+                                   .excessBytes = std::nullopt,
+                                   .note = "not applied: this node has no disk tier" },
+    };
     runtime.displayName = "office-pc";
     runtime.hostName = "buildhost-7";
     return runtime;
@@ -174,6 +198,39 @@ TEST_CASE("The four detail records round-trip whole, and a record with none of t
     auto const noneBack = DecodeNodeRuntime(EncodeNodeRuntime(none));
     REQUIRE(noneBack.has_value());
     CHECK(Unwrap(noneBack).budgetOverrides == std::optional { std::vector<NodeBudgetOverrideFields> {} });
+}
+
+TEST_CASE("A budget row whose note is over its ceiling, or whose figure is the wrong width, is refused",
+          "[wire][node-status][node-status-detail][budget]")
+{
+    auto const good = NodeBudgetOverrideFields { .tier = 0, .source = "configured", .configuredBytes = 1 };
+    auto parsed = std::optional<std::vector<NodeBudgetOverrideFields>> {};
+    REQUIRE(ReadNodeBudgetOverrides(EncodeNodeBudgetOverrides(std::array { good }), parsed));
+    CHECK(parsed == std::optional { std::vector { good } });
+
+    auto loud = good;
+    loud.note = std::string(MaxBudgetOverrideNoteBytes + 1, 'x');
+    parsed.reset();
+    CHECK_FALSE(ReadNodeBudgetOverrides(EncodeNodeBudgetOverrides(std::array { loud }), parsed));
+    CHECK_FALSE(parsed.has_value());
+
+    // A row whose in-force figure is three bytes wide: neither absent nor a figure.
+    auto const figure = std::array { std::byte { 1 }, std::byte { 2 }, std::byte { 3 } };
+    auto const tier = std::array { std::byte { 0 } };
+    auto const configured = WireFields::ToBigEndian<std::uint64_t>(1);
+    auto const empty = std::span<std::byte const> {};
+    auto const row = WireFields::Encode({ std::span<std::byte const> { tier },
+                                          std::span<std::byte const> { figure },
+                                          empty,
+                                          empty,
+                                          std::span<std::byte const> { configured },
+                                          empty,
+                                          empty,
+                                          empty,
+                                          empty,
+                                          empty,
+                                          empty });
+    CHECK_FALSE(ReadNodeBudgetOverrides(CompileCacheWire::Detail::EncodeCountedList({ row }), parsed));
 }
 
 TEST_CASE("A detail record this build cannot read refuses the reply, and an unnamed setting kind is skipped",

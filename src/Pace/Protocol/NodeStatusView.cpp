@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <Pace/Config/ByteSize.hpp>
 #include <Pace/Core/Utf8.hpp>
 #include <Pace/Protocol/NodeStatusView.hpp>
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <format>
 #include <utility>
@@ -243,6 +245,62 @@ std::vector<std::string> ComponentNames(std::uint32_t mask)
     if (auto const unknown = mask & ~named; unknown != 0)
         names.push_back(std::format("unknown(0x{:x})", unknown));
     return names;
+}
+
+std::optional<std::vector<BudgetOverrideView>> BudgetOverridesOf(CompileCacheWire::NodeRuntimeFields const& runtime)
+{
+    if (!runtime.budgetOverrides.has_value())
+        return std::nullopt;
+    auto views = std::vector<BudgetOverrideView> {};
+    views.reserve(runtime.budgetOverrides->size());
+    for (auto const& row: *runtime.budgetOverrides)
+    {
+        auto setAt = std::optional<std::string> {};
+        if (row.setAtUnixSeconds.has_value())
+            setAt = std::format("{:%Y-%m-%dT%H:%M:%SZ}",
+                                std::chrono::sys_seconds { std::chrono::seconds { *row.setAtUnixSeconds } });
+        views.push_back(BudgetOverrideView { .tier = row.tier < StorageTierTable.size()
+                                                         ? std::string { StorageTierTable[row.tier].name }
+                                                         : std::format("tier-{}", row.tier),
+                                             .effectiveBytes = row.bytes,
+                                             .source = ReadableText(row.source),
+                                             .configuredBytes = row.configuredBytes,
+                                             .overrideBytes = row.overrideBytes,
+                                             .baselineBytes = row.baselineBytes,
+                                             .setAt = std::move(setAt),
+                                             .setBy = ReadableText(row.setBy),
+                                             .setByName = ReadableText(row.setByName),
+                                             .excessBytes = row.excessBytes,
+                                             .note = ReadableText(row.note) });
+    }
+    return views;
+}
+
+std::string DescribeBudget(BudgetOverrideView const& view)
+{
+    auto const size = [](std::uint64_t bytes) {
+        return bytes == 0 ? std::string { "unbounded" } : FormatByteSize(static_cast<std::size_t>(bytes));
+    };
+    auto text = view.effectiveBytes.has_value() ? std::format("{} from {}", size(*view.effectiveBytes), view.source)
+                                                : std::string { "no such tier" };
+    text += std::format(" (configured {}", size(view.configuredBytes));
+    if (view.overrideBytes.has_value())
+    {
+        text += std::format(", override {}, baseline {}",
+                            size(*view.overrideBytes),
+                            view.baselineBytes.has_value() ? size(*view.baselineBytes) : std::string { "unset" });
+        if (view.setAt.has_value())
+            text += std::format(", set {}", *view.setAt);
+        if (!view.setBy.empty())
+            text += view.setByName.empty() ? std::format(" by {}", view.setBy)
+                                           : std::format(" by {} \"{}\"", view.setBy, view.setByName);
+    }
+    if (view.excessBytes.has_value() && *view.excessBytes != 0)
+        text += std::format(", converging: {} over", FormatByteSize(static_cast<std::size_t>(*view.excessBytes)));
+    text += ")";
+    if (!view.note.empty())
+        text += std::format("; {}", view.note);
+    return text;
 }
 
 } // namespace Pace::NodeStatusView

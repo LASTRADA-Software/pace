@@ -145,3 +145,48 @@ TEST_CASE("Component names follow the mask's bits and keep an unknown one by num
     CHECK(NodeStatusView::ComponentNames(NodeComponentBit::CacheTier | 0x40U)
           == std::vector<std::string> { "cache-tier", "unknown(0x40)" });
 }
+
+TEST_CASE("A budget row reads through one view: in force, from where, the override, its baseline and why",
+          "[node-status-view][node-status-detail][budget]")
+{
+    auto runtime = NodeRuntimeFields {};
+    CHECK_FALSE(NodeStatusView::BudgetOverridesOf(runtime).has_value());
+
+    constexpr auto MiB = std::uint64_t { 1024 } * 1024;
+    runtime.budgetOverrides = std::vector {
+        NodeBudgetOverrideFields { .tier = 0,
+                                   .bytes = 64 * MiB,
+                                   .baselineBytes = 512 * MiB,
+                                   .source = "cluster",
+                                   .configuredBytes = 512 * MiB,
+                                   .overrideBytes = 64 * MiB,
+                                   .setAtUnixSeconds = std::int64_t { 1'767'225'600 },
+                                   .setBy = "voter-1",
+                                   .setByName = "build box",
+                                   .excessBytes = 8 * MiB,
+                                   .note = {} },
+        NodeBudgetOverrideFields { .tier = 1,
+                                   .bytes = std::nullopt,
+                                   .baselineBytes = std::nullopt,
+                                   .source = "configured",
+                                   .configuredBytes = 0,
+                                   .overrideBytes = 2048 * MiB,
+                                   .setAtUnixSeconds = std::nullopt,
+                                   .setBy = {},
+                                   .setByName = {},
+                                   .excessBytes = std::nullopt,
+                                   .note = "not applied: this node has no disk tier" },
+    };
+    auto const views = Unwrap(NodeStatusView::BudgetOverridesOf(runtime));
+    REQUIRE(views.size() == 2);
+    CHECK(views[0].tier == "memory");
+    CHECK(views[0].setAt == std::optional<std::string> { "2026-01-01T00:00:00Z" });
+    CHECK(
+        NodeStatusView::DescribeBudget(views[0])
+        == R"(64M from cluster (configured 512M, override 64M, baseline 512M, set 2026-01-01T00:00:00Z by voter-1 "build box", converging: 8M over))");
+    // A tier the node lacks has no budget in force -- never a zero -- and says why; an unreported baseline is `unset`.
+    CHECK(views[1].tier == "disk");
+    CHECK_FALSE(views[1].effectiveBytes.has_value());
+    CHECK(NodeStatusView::DescribeBudget(views[1])
+          == "no such tier (configured unbounded, override 2G, baseline unset); not applied: this node has no disk tier");
+}

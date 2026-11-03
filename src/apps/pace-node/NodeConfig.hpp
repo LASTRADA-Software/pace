@@ -1213,6 +1213,16 @@ inline constexpr std::string_view RetiredNodeFlagsGuide =
 ///         means the candidate may be published.
 [[nodiscard]] std::vector<std::string_view> UnreloadableChanges(NodeConfig const& previous, NodeConfig const& candidate);
 
+/// Whether a reload would turn the memory tier on or off: `--cache-memory` crossing zero.
+///
+/// `--cache-memory` reloads -- a live tier takes a new budget -- but zero builds no memory tier at all, and the tier
+/// stack is built once, so a reload moving to or from zero would describe a tier that does not exist, or ignore one
+/// that does. `ValidateNodeReloadable` refuses it by name.
+/// @param previous What the worker is running with.
+/// @param candidate What the file now says.
+/// @return True when exactly one of them is zero.
+[[nodiscard]] bool MemoryTierExistenceChanged(NodeConfig const& previous, NodeConfig const& candidate) noexcept;
+
 /// The immutability rule `ConfigReloaderOf<NodeConfig>` runs, as a `ConfigError`.
 ///
 /// A thin shape over `UnreloadableChanges` because the reloader speaks errors and the
@@ -1344,9 +1354,14 @@ inline constexpr std::array<std::string_view, 2> AddressReloadableFlags { "--adv
 /// describes the TOOLCHAINS it serves rather than whom it serves them to. The scheduler
 /// has no field for it, so re-registering on a change would tell the fleet nothing it
 /// could act on -- at the price of an include-tree walk.
-inline constexpr std::array<std::string_view, 4> LocalReloadableFlags {
-    "--log-level", "--allow-compile-arg", "--requirepass", "--fleet-open"
-};
+///
+/// `--cache-memory` and `--cache-disk` are local although the fleet does see what a tier holds: the capacity this node
+/// reports is re-derived from the tier the moment a budget is applied (`CacheTier`'s budget listener), which is the
+/// one place it is derived -- so a reload resizing a tier through `BudgetOverrideApplier` needs no re-survey to tell
+/// the fleet anything.
+inline constexpr std::array<std::string_view, 6> LocalReloadableFlags { "--log-level",    "--allow-compile-arg",
+                                                                        "--requirepass",  "--fleet-open",
+                                                                        "--cache-memory", "--cache-disk" };
 
 /// Both reloadable-flag lists, so the guards walk a derived SET rather than naming
 /// each list by hand.

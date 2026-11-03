@@ -39,7 +39,9 @@
 #                                         member row and by `node_status` resolving that name;
 #                                         `set_cache_budget` of this node's memory tier, read back
 #                                         from the fleet document's member row once it commits,
-#                                         then `clear_cache_budget`, read back absent again.
+#                                         then `clear_cache_budget`, read back absent again; and
+#                                         node_status shows the override APPLIED (source=cluster,
+#                                         baseline recorded) and then configured again.
 #   2f. toolchains answers              — on that same scheduler, once its worker has
 #                                         registered what it identified: every toolchain
 #                                         served by this one machine, counted once, each
@@ -214,9 +216,9 @@ json_check "node_status tiers" "$status_body" \
     "[t['tier'] for t in ${NS}['tiers']] == ['memory', 'disk'] and ${NS}['tiers'][0]['present'] is True and isinstance(${NS}['tiers'][0]['entries'], int) and ${NS}['tiers'][1]['present'] is False and ${NS}['tiers'][1]['entries'] is None"
 # The configuration in force: the listen spec this node was started with, and the credential redacted.
 json_check "node_status effective_config" "$status_body" \
-    "{s['name']: s['values'] for s in ${NS}['effective_config']}['--listen-node'] == ['127.0.0.1:${node_port}'] and {s['name']: s['values'] for s in ${NS}['effective_config']}['--requirepass'] == ['<redacted>'] and ${NS}['budget_overrides'] is None"
+    "{s['name']: s['values'] for s in ${NS}['effective_config']}['--listen-node'] == ['127.0.0.1:${node_port}'] and {s['name']: s['values'] for s in ${NS}['effective_config']}['--requirepass'] == ['<redacted>'] and [(b['tier'], b['source'], b['override_bytes']) for b in ${NS}['budget_overrides']] == [('memory', 'configured', None)] and ${NS}['budget_overrides'][0]['bytes'] == ${NS}['budget_overrides'][0]['configured_bytes']"
 [[ "$status_body" != *"${E2E_SECRET}"* ]] || fail "node_status carried the --requirepass value: ${status_body}"
-e2e_note "node_status answered about this node: its memory tier, a disk tier absent, its listen spec, its credential redacted"
+e2e_note "node_status answered about this node: its memory tier, a disk tier absent, its listen spec, its credential redacted, its memory budget configured"
 
 # ------------------------------------------------------------- 3. legacy era
 initialized="$(mcp_post "" '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"e2e","version":"1"}}}' "")"
@@ -425,12 +427,27 @@ member_override_reads() {
 member_override_recorded() { member_override_reads 67108864; }
 member_override_cleared() { member_override_reads None; }
 wait_until member_override_recorded "the fleet document to record this member's 64 MiB memory override" "$action_pid" "${workdir}/node.log" 30
+# And APPLIED by the member itself: it reported its own configured value as the baseline (MEMBER-REPORT, under its own
+# proof, answered in-process on this leader), then put the override in force -- read back through node_status.
+node_budget_reads() {
+    local expected="$1" body
+    body="$(call_action node_status '{}')"
+    python3 -I -c "import json,sys; d=json.loads(sys.stdin.read()); r=[b for b in d['result']['structuredContent']['budget_overrides'] or [] if b['tier'] == 'memory']; sys.exit(0 if d['result']['isError'] is False and len(r) == 1 and (${expected}) else 1)" <<< "$body"
+}
+node_budget_applied() {
+    node_budget_reads "r[0]['source'] == 'cluster' and r[0]['bytes'] == 67108864 and r[0]['override_bytes'] == 67108864 and r[0]['baseline_bytes'] == r[0]['configured_bytes'] and r[0]['set_at'] is not None and r[0]['note'] is None"
+}
+node_budget_configured() {
+    node_budget_reads "r[0]['source'] == 'configured' and r[0]['bytes'] == r[0]['configured_bytes'] and r[0]['override_bytes'] is None and r[0]['baseline_bytes'] is None"
+}
+wait_until node_budget_applied "node_status to show the 64 MiB memory override in force from the cluster, its baseline recorded" "$action_pid" "${workdir}/node.log" 60
 json_check "set_cache_budget refuses a share of RAM" "$(call_action set_cache_budget "{\"node\":\"${self_id}\",\"memory\":\"25%\"}")" \
     "d['result']['isError'] is True and 'absolute size' in d['result']['content'][0]['text']"
 cleared="$(call_action clear_cache_budget "{\"node\":\"${self_id}\",\"which\":\"memory\"}")"
 json_check "clear_cache_budget" "$cleared" "${OK} and ${SC}['node_id'] == '${self_id}' and ${SC}['which'] == 'memory'"
 wait_until member_override_cleared "the fleet document to show this member's memory override cleared" "$action_pid" "${workdir}/node.log" 30
-e2e_note "set_cache_budget recorded this node's 64 MiB memory override in the fleet document, and clear_cache_budget removed it"
+wait_until node_budget_configured "node_status to show the memory budget configured again once the override is cleared" "$action_pid" "${workdir}/node.log" 60
+e2e_note "set_cache_budget recorded this node's 64 MiB memory override, the node recorded its baseline and applied it (node_status source=cluster), and clear_cache_budget gave the tier its configured budget back"
 
 # Every action left its audit line, naming the client; the read did not.
 for line in "mcp action set_display_name {\"node\":\"${self_id}\",\"name\":\"e2e-box\"} by ${ACTION_CLIENT} answered by" \

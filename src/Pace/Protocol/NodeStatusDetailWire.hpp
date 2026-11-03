@@ -398,23 +398,72 @@ namespace Detail
 /// The most budget overrides a record may carry. A decoder bound: one per tier, with room.
 inline constexpr std::size_t MaxNodeBudgetOverrides = 16;
 
-/// One cache budget this node applies from the cluster rather than from its own configuration.
+/// The longest word, member id or display name a budget row carries, in bytes. A decoder bound over a member id's and
+/// a display name's own ceilings, with room.
+inline constexpr std::size_t MaxBudgetOverrideNameBytes = 256;
+
+/// The longest note a budget row carries, in bytes: one sentence naming why an override is not in force, with the
+/// reason a tier or the leader gave. A longer one is cut by the SENDER, on a code-point boundary.
+inline constexpr std::size_t MaxBudgetOverrideNoteBytes = 1024;
+
+/// One cache tier's budget as the node runs it: what is in force, where it came from, and the override the cluster
+/// records for it -- one row per tier the node has, or that the cluster records an override for.
 ///
-/// **Declared, and filled by nothing yet**: the cluster record that carries an override lands with the verbs
-/// that set it. Until then every node sends the record ABSENT, which reads as *does not say*, never as *no
-/// overrides*.
+/// Every quantity optional where it can be ABSENT rather than zero: a tier the node lacks has no budget in force, an
+/// override not yet reported has no baseline, and a tier that fits is a present ZERO of excess, never an absent one.
 struct NodeBudgetOverrideFields
 {
-    std::uint8_t tier { 0 };                       ///< The tier overridden, by `StorageTier` ordinal.
-    std::uint64_t bytes { 0 };                     ///< The budget in force from the cluster.
-    std::optional<std::uint64_t> baselineBytes {}; ///< The configured value it was set against; absent until recorded.
+    std::uint8_t tier { 0 };                         ///< The tier, by `StorageTier` ordinal.
+    std::optional<std::uint64_t> bytes {};           ///< The budget in force; absent when the node has no such tier.
+    std::optional<std::uint64_t> baselineBytes {};   ///< The configured value the override was set against; absent until
+                                                     ///< recorded, or with no override.
+    std::string source {};                           ///< Where `bytes` came from, as a word: `configured` or `cluster`.
+    std::uint64_t configuredBytes { 0 };             ///< The machine's own budget in the configuration in force.
+    std::optional<std::uint64_t> overrideBytes {};   ///< The override the cluster records; absent when none is.
+    std::optional<std::int64_t> setAtUnixSeconds {}; ///< When the leader recorded it, by the leader's clock; display.
+    std::string setBy {};                            ///< The member it is attributed to; empty when none was.
+    std::string setByName {};                        ///< That member's display name; empty when it has none.
+    std::optional<std::uint64_t> excessBytes {};     ///< Stored bytes still over the budget in force; absent with no tier.
+    std::string note {}; ///< Why the recorded override is not in force, or a budget was refused; empty when all is.
 
     [[nodiscard]] friend bool operator==(NodeBudgetOverrideFields const&, NodeBudgetOverrideFields const&) = default;
 };
 
-/// Frame the overrides: a count, then one nested `[tier, bytes, baseline]` field each. The count is what makes
-/// an engaged EMPTY list -- *no overrides* -- encode non-empty, so it never reads back as absent.
-/// @param overrides The overrides; at most `MaxNodeBudgetOverrides` are taken.
+/// The fields a `NodeBudgetOverrideFields` row carries; a reader accepts more and ignores the surplus.
+inline constexpr std::size_t NodeBudgetOverrideFieldCount = 11;
+
+namespace Detail
+{
+    /// An optional figure as a field: eight bytes, or empty for absent.
+    /// @param value The figure.
+    /// @return Its bytes.
+    [[nodiscard]] inline std::vector<std::byte> OptionalFigure(std::optional<std::uint64_t> value)
+    {
+        if (!value.has_value())
+            return {};
+        auto const bytes = WireFields::ToBigEndian<std::uint64_t>(*value);
+        return { bytes.begin(), bytes.end() };
+    }
+
+    /// Read an optional figure: empty is absent, eight bytes a value, anything else malformed.
+    /// @param field The field.
+    /// @param out Set when the field carried a figure.
+    /// @return False when malformed.
+    [[nodiscard]] inline bool ReadOptionalFigure(std::span<std::byte const> field, std::optional<std::uint64_t>& out)
+    {
+        if (field.empty())
+            return true;
+        auto const value = WireFields::FromBigEndian<std::uint64_t>(field);
+        if (!value.has_value())
+            return false;
+        out = value;
+        return true;
+    }
+} // namespace Detail
+
+/// Frame the budget rows: a count, then one nested field each. The count is what makes an engaged EMPTY list -- a node
+/// with no tier and no override -- encode non-empty, so it never reads back as absent.
+/// @param overrides The rows; at most `MaxNodeBudgetOverrides` are taken.
 /// @return Its bytes; never empty.
 [[nodiscard]] inline std::vector<std::byte> EncodeNodeBudgetOverrides(std::span<NodeBudgetOverrideFields const> overrides)
 {
@@ -424,21 +473,34 @@ struct NodeBudgetOverrideFields
     for (auto const& entry: taken)
     {
         auto const tier = std::array { static_cast<std::byte>(entry.tier) };
-        auto const bytes = WireFields::ToBigEndian<std::uint64_t>(entry.bytes);
-        auto const baseline = WireFields::ToBigEndian<std::uint64_t>(entry.baselineBytes.value_or(0));
-        rows.push_back(WireFields::Encode(
-            { std::span<std::byte const> { tier },
-              std::span<std::byte const> { bytes },
-              entry.baselineBytes.has_value() ? std::span<std::byte const> { baseline } : std::span<std::byte const> {} }));
+        auto const bytes = Detail::OptionalFigure(entry.bytes);
+        auto const baseline = Detail::OptionalFigure(entry.baselineBytes);
+        auto const configured = WireFields::ToBigEndian<std::uint64_t>(entry.configuredBytes);
+        auto const recorded = Detail::OptionalFigure(entry.overrideBytes);
+        auto const setAt = Detail::OptionalFigure(entry.setAtUnixSeconds.has_value()
+                                                      ? std::optional { static_cast<std::uint64_t>(*entry.setAtUnixSeconds) }
+                                                      : std::nullopt);
+        auto const excess = Detail::OptionalFigure(entry.excessBytes);
+        rows.push_back(WireFields::Encode({ std::span<std::byte const> { tier },
+                                            std::span<std::byte const> { bytes },
+                                            std::span<std::byte const> { baseline },
+                                            AsBytes(entry.source),
+                                            std::span<std::byte const> { configured },
+                                            std::span<std::byte const> { recorded },
+                                            std::span<std::byte const> { setAt },
+                                            AsBytes(entry.setBy),
+                                            AsBytes(entry.setByName),
+                                            std::span<std::byte const> { excess },
+                                            AsBytes(entry.note) }));
     }
     return Detail::EncodeCountedList(rows);
 }
 
-/// Read the overrides.
+/// Read the budget rows. Every string is OWNED: the record outlives the reply it was read from.
 /// @param field The nested record's bytes; empty is ABSENT.
 /// @param out Set only when the field carried a record.
 /// @return False when the field was present and malformed: a count disagreeing with the rows, more than
-///         `MaxNodeBudgetOverrides`, or a field of the wrong width.
+///         `MaxNodeBudgetOverrides`, a row short of its fields, a figure of the wrong width, or a text over its ceiling.
 [[nodiscard]] inline bool ReadNodeBudgetOverrides(std::span<std::byte const> field,
                                                   std::optional<std::vector<NodeBudgetOverrideFields>>& out)
 {
@@ -452,22 +514,27 @@ struct NodeBudgetOverrideFields
     for (auto const& row: *parts)
     {
         auto const columns = WireFields::SplitAll(row);
-        if (!columns.has_value() || columns->size() < 3 || (*columns)[0].size() != 1)
+        if (!columns.has_value() || columns->size() < NodeBudgetOverrideFieldCount || (*columns)[0].size() != 1)
             return false;
-        auto const bytes = WireFields::FromBigEndian<std::uint64_t>((*columns)[1]);
-        if (!bytes.has_value())
+        auto const& c = *columns;
+        auto const configured = WireFields::FromBigEndian<std::uint64_t>(c[4]);
+        if (!configured.has_value() || c[3].size() > MaxBudgetOverrideNameBytes || c[7].size() > MaxBudgetOverrideNameBytes
+            || c[8].size() > MaxBudgetOverrideNameBytes || c[10].size() > MaxBudgetOverrideNoteBytes)
             return false;
-        auto entry = NodeBudgetOverrideFields { .tier = std::to_integer<std::uint8_t>((*columns)[0][0]),
-                                                .bytes = *bytes,
-                                                .baselineBytes = std::nullopt };
-        if (!(*columns)[2].empty())
-        {
-            auto const baseline = WireFields::FromBigEndian<std::uint64_t>((*columns)[2]);
-            if (!baseline.has_value())
-                return false;
-            entry.baselineBytes = baseline;
-        }
-        overrides.push_back(entry);
+        auto entry = NodeBudgetOverrideFields { .tier = std::to_integer<std::uint8_t>(c[0][0]),
+                                                .source = std::string { AsStringView(c[3]) },
+                                                .configuredBytes = *configured,
+                                                .setBy = std::string { AsStringView(c[7]) },
+                                                .setByName = std::string { AsStringView(c[8]) },
+                                                .note = std::string { AsStringView(c[10]) } };
+        auto setAt = std::optional<std::uint64_t> {};
+        if (!Detail::ReadOptionalFigure(c[1], entry.bytes) || !Detail::ReadOptionalFigure(c[2], entry.baselineBytes)
+            || !Detail::ReadOptionalFigure(c[5], entry.overrideBytes) || !Detail::ReadOptionalFigure(c[6], setAt)
+            || !Detail::ReadOptionalFigure(c[9], entry.excessBytes))
+            return false;
+        if (setAt.has_value())
+            entry.setAtUnixSeconds = static_cast<std::int64_t>(*setAt);
+        overrides.push_back(std::move(entry));
     }
     out = std::move(overrides);
     return true;

@@ -529,9 +529,13 @@ Beside them, what that worker is offering and whether anyone knows about it:
   character that would name another file. A node that admitted the asking connection by
   `--fleet-open` alone tells it no `config-*` cell: only a caller this machine, a proven key
   or a verified ticket identifies is told the configuration.
-- **`budget-overrides`** — the cache budgets this node applies from the cluster rather
-  than its own flags. Absent until a node can be given one; `none` once it says it
-  applies none.
+- **`budget-<tier>`**, **`budget-<tier>-source`**, **`budget-overrides`** — each cache tier's
+  budget in force and whether it comes from the `cluster` (an override) or is `configured`:
+  the configured value, the override and the `baseline` it was set against (`unset` until the
+  node reports it), when (the leader's clock) and by whom it was set, the bytes still being
+  evicted while a shrink converges, and why a recorded override is not in force. One row per
+  tier the node has, or that the cluster records an override for; `budget-overrides` joins
+  them, `none` from a node with neither, and is absent from a node that does not say.
 
 The MCP `node_status` tool reads the same reply and the same derivations, so it cannot
 disagree with these cells about a quantity both show.

@@ -73,7 +73,11 @@ NodeReloader::Reparse ReloadCandidateReader(std::span<char const* const> args, R
     };
 }
 
-void ApplyReloadRequest(NodeReloader* reloader, NodeMembership& membership, NodeConditions& conditions, ILogger& logger)
+void ApplyReloadRequest(NodeReloader* reloader,
+                        NodeMembership& membership,
+                        NodeConditions& conditions,
+                        ILogger& logger,
+                        IAcceptedReloadListener* budgets)
 {
     if (reloader == nullptr)
     {
@@ -113,6 +117,12 @@ void ApplyReloadRequest(NodeReloader* reloader, NodeMembership& membership, Node
     // `--advertise` is reloadable, so whether a bare host name is still what peers are told to
     // dial is asked of the configuration now in force; unconditional for `Adopt`'s reason.
     EvaluateHostNameCondition(conditions, *current);
+
+    // `--cache-memory` and `--cache-disk` reload, and a cluster override recorded against the old value is now outranked
+    // by the operator's later edit -- or, with none, the new value is what the tier must run with. Woken here and done
+    // on the applier's own thread; unconditional for `Adopt`'s reason.
+    if (budgets != nullptr)
+        budgets->ReloadAccepted();
 
     // At WARN, which is the level a credential change is logged at, and for the same
     // reason: this is the setting that decides which machines this worker will spend

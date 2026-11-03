@@ -39,6 +39,7 @@ namespace Pace::Node
 {
 
 struct NodeConfig;
+class IBudgetOverrideStatusSource;
 
 /// @file NodeStatusResponder.hpp
 /// The operator verbs: what this node IS, and what its own counters say.
@@ -631,6 +632,10 @@ struct NodeRuntimeSources
     /// The cluster state this node applied, where its display name is read per request (field 30); null where
     /// nothing was wired, which reports the name ABSENT. Read per request so a rename shows on the next answer.
     IAppliedClusterView const* cluster { nullptr };
+
+    /// Where this node's cache budgets come from, tier by tier (`BudgetOverrideApplier`), reported as
+    /// `budgetOverrides`; null where nothing applies budgets, which reports the field ABSENT. Read per request.
+    IBudgetOverrideStatusSource const* budgets { nullptr };
 
     /// What this machine calls itself -- its hostname, the name its worker registers with (field 31); empty when it
     /// could not read one, which reports the field ABSENT. A fact of the process, so a value rather than a source.
