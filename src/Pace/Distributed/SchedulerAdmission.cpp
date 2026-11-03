@@ -161,12 +161,17 @@ void SchedulerService::ReleaseAdmissionLease(AdmissionTicket& held, AdmissionLea
     // when the CLIENT resolved it: a closed connection is the case `DispatchLeasesReleased` staying
     // flat beside a climbing grant count exists to show (#1742). The sink is an atomic, so counting
     // under `_admissionMutex` takes no second lock.
-    if (_leases.Release(held.lease->token, held.lease->key).has_value())
+    // A release the table refuses is spent through the same row `Release` consults (an expired lease is
+    // `DispatchLeasesReleasedLate`), and only for a client's SETTLE: an abandon is no report at all.
+    auto const released = _leases.Release(held.lease->token, held.lease->key);
+    if (released.has_value())
     {
         _workers.JobFinished(held.lease->workerId);
         if (end == AdmissionLeaseEnd::Settled)
             _metrics.Increment(IMetricsSink::Counter::DispatchLeasesReleased);
     }
+    else if (end == AdmissionLeaseEnd::Settled)
+        CountReleaseRefusal(released.error());
     held.lease.reset();
 }
 

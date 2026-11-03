@@ -671,3 +671,48 @@ TEST_CASE("SchedulerAdmission.a-worker-refusal-settled-by-a-follower-is-a-releas
         == SettleResult::NotLeading);
     CHECK(DispatchCountsOf(fleet) == DispatchCounts { .granted = 1, .released = 1 });
 }
+
+TEST_CASE("SchedulerAdmission.a-late-queue-settle-counts-released-late-and-an-abandon-does-not",
+          "[distributed][admission][scheduler][metrics]")
+{
+    // #1742: a SETTLE past the lease's lifetime is the same evidence the `Release` verb's late refusal is
+    // (a compile outran the bound), so it spends the same `ReleaseRefusalTable` row and not `Released`.
+    auto const releasedLate = [](Fleet const& fleet) {
+        return fleet.metrics.Read(IMetricsSink::Counter::DispatchLeasesReleasedLate);
+    };
+    auto const expireLease = [](Fleet& fleet, std::chrono::milliseconds lifetime) {
+        fleet.clock.advance(lifetime + 1s);
+        fleet.wallClock.advance(lifetime + 1s);
+    };
+
+    SECTION("settled")
+    {
+        Fleet fleet;
+        (void) fleet.RegisterWorker();
+        fleet.Report(MachineOf(fleet.workerKey.PublicKey()));
+        auto const ticket = fleet.Admit("k1");
+        auto const grant = GrantOf(fleet.service.PumpAdmission().at(0));
+        REQUIRE(grant.kind == Wire::GrantKind::Worker);
+
+        expireLease(fleet, grant.lifetime);
+        REQUIRE(fleet.service.SettleAdmission(ticket, Settlement { .outcome = Wire::SettleOutcome::Stored, .peakBytes = {} })
+                == SettleResult::Settled);
+        CHECK(releasedLate(fleet) == 1);
+        CHECK(DispatchCountsOf(fleet) == DispatchCounts { .granted = 1, .released = 0 });
+    }
+
+    SECTION("abandoned")
+    {
+        Fleet fleet;
+        (void) fleet.RegisterWorker();
+        fleet.Report(MachineOf(fleet.workerKey.PublicKey()));
+        auto const ticket = fleet.Admit("k1");
+        auto const grant = GrantOf(fleet.service.PumpAdmission().at(0));
+        REQUIRE(grant.kind == Wire::GrantKind::Worker);
+
+        expireLease(fleet, grant.lifetime);
+        fleet.service.AbandonAdmission(ticket);
+        CHECK(releasedLate(fleet) == 0);
+        CHECK(DispatchCountsOf(fleet) == DispatchCounts { .granted = 1, .released = 0 });
+    }
+}

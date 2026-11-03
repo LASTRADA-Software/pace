@@ -1321,6 +1321,12 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     /// @return The refusal.
     [[nodiscard]] SchedulerReply Refuse(CompileCacheWire::ErrorCode code, std::string message = {}) const;
 
+    /// Count a lease release the table refused, when the refusal's row names a counter.
+    /// The one reader of `ReleaseRefusalTable`'s `counter` column, shared by the `Release` verb and a
+    /// queue settle so both spend it identically (#1742).
+    /// @param reason What the lease table observed.
+    void CountReleaseRefusal(LeaseTable::ReleaseRefusal reason) const;
+
     /// Offer a validated command to the cluster and render what came back.
     ///
     /// One place rather than one per verb, because the mapping from a consensus

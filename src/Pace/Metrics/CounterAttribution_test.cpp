@@ -96,7 +96,9 @@ constexpr std::array WriterFiles {
     SurfaceWriterFile { .surface = MetricsSurface::CompileScheduler, .path = "src/Pace/Distributed/SchedulerProtocol.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::CompileScheduler, .path = "src/Pace/Distributed/SchedulerService.cpp" },
     // The admission half of `SchedulerService`, in its own translation unit: the same leader, the same
-    // surface. It moves the lease path's `NoWorker` and `AllExcluded` counters for a local grant (Ruling 11).
+    // surface. It moves the lease path's `NoWorker` and `AllExcluded` counters for a local grant (Ruling 11),
+    // and the dispatch counters (`DispatchLeasesGranted`, `DispatchLeasesReleased`, `DispatchLeasesReleasedLate`)
+    // for a worker grant and its settle (#1742).
     SurfaceWriterFile { .surface = MetricsSurface::CompileScheduler, .path = "src/Pace/Distributed/SchedulerAdmission.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::SchedulerAdmission, .path = "src/apps/pace-node/AdmissionResponder.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::AdmissionForwarding, .path = "src/apps/pace-node/AdmitForwarder.cpp" },
