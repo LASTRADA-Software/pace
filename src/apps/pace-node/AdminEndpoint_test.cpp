@@ -2097,7 +2097,7 @@ TEST_CASE("A compile the admission queue placed on a worker reads as dispatched 
     // Moved BEFORE the grant, so whatever the sampler's own thread records in either bucket brackets the
     // compile.
     wall.Advance(Distributed::FleetSampleInterval);
-    Distributed::CallerContext const insider { .membership = Distributed::Membership::Member, .peerId = "127.0.0.1" };
+    Distributed::CallerContext insider { .membership = Distributed::Membership::Member, .peerId = "127.0.0.1" };
     auto const ticket = scheduler.Admit(
         insider,
         [insider] { return insider; },
