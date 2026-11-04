@@ -40,7 +40,6 @@
 #include <tests/BoundedWait.hpp>
 #include <tests/HalfClose.hpp>
 #include <tests/ScopedSignalHandler.hpp>
-#include <tests/SmallSendBufferListener.hpp>
 #include <tests/SocketDoubles.hpp>
 #include <tests/WriteWatchingListener.hpp>
 
@@ -1518,15 +1517,24 @@ static_assert(Pace::AdminHttpServer::WorstCaseStopUnder(StopCaseDeadlines) < Pac
               "the bound must sit below one send timeout, or a write that merely timed out would pass for a cancel");
 
 /// The receive buffer the slow client asks for, so what it can hold unread is this and not the host's tuning.
-constexpr std::size_t SlowClientReceiveBytes = 4096;
+constexpr std::size_t SlowClientReceiveBytes = std::size_t { 64 } * 1024;
+
+/// What the slow client takes per step, and how often: slow but MOVING, a fair part of its window each step, so every
+/// write call the server makes progresses well inside its send timeout on every platform. A trickle of a KiB into a
+/// 4 KiB window stalled a macOS send past that timeout, which ends the connection before any cancel does.
+constexpr std::size_t SlowReaderStepBytes = std::size_t { 8 } * 1024;
+constexpr auto SlowReaderStep = std::chrono::milliseconds { 50 };
+static_assert(Pace::Testing::WriteWatchingSocketChunkDrains(SlowReaderStepBytes,
+                                                            SlowReaderStep,
+                                                            Pace::AdminHttpServer::RequestTimeout),
+              "the slow reader must empty a whole write chunk well inside one send timeout");
 
 /// Large enough that a client reading it slowly is still being written to when the drain runs out: many times what
-/// the server's send buffer (`Testing::BindWithSmallSendBuffer`, refused past its grant ceiling) and the client's
-/// receive buffer can hold between them, so the case does not depend on `net.ipv4.tcp_wmem`. That is necessary and
-/// NOT sufficient -- Winsock took a 4 MiB send whole past a 64 KiB `SO_SNDBUF` -- so the case also waits to SEE the
-/// server parked in a write (`Testing::WaitUntilParkedInWrite`) before it stops anything.
+/// the accepted socket's send buffer (`ClientSocketBufferBytes`, set by every accept, doubled by Linux) and the
+/// client's receive buffer hold between them. Necessary and NOT sufficient -- Winsock took a 4 MiB send whole -- so
+/// the case also waits to SEE the server parked in a write (`Testing::WaitUntilParkedInWrite`) before it stops.
 constexpr std::size_t SlowReaderBodyBytes = std::size_t { 16 } * 1024 * 1024;
-static_assert(SlowReaderBodyBytes > 4 * (Pace::Testing::SmallSendBufferGrantCeiling + SlowClientReceiveBytes),
+static_assert(SlowReaderBodyBytes > 4 * ((2 * Pace::ClientSocketBufferBytes) + SlowClientReceiveBytes),
               "the answer must outlast every buffer under it");
 
 /// A route answering `GET /big` with @p bytes of body, after holding for @p hold.
@@ -1545,11 +1553,13 @@ static_assert(SlowReaderBodyBytes > 4 * (Pace::Testing::SmallSendBufferGrantCeil
                              } };
 }
 
-/// A loopback listener with a small send buffer, armed as `AdminEndpoint::Start` arms its own.
+/// A loopback listener, armed as `AdminEndpoint::Start` arms its own.
 /// @return The listener.
 [[nodiscard]] std::unique_ptr<Pace::BlockingListener> ArmedStopCaseListener()
 {
-    auto listener = Pace::Testing::BindWithSmallSendBuffer();
+    auto listener = Pace::BlockingListener::Bind("127.0.0.1", 0);
+    REQUIRE(listener != nullptr);
+    REQUIRE(listener->IsBound());
     listener->SetTimeouts(Pace::AdminHttpServer::AcceptPoll, Pace::AdminHttpServer::RequestTimeout);
     return listener;
 }
@@ -1727,8 +1737,9 @@ TEST_CASE("AdminHttp: a stop cancels a client that reads its answer too slowly, 
     // Nothing read yet: the server fills what is under the connection and parks in a write.
     REQUIRE(Pace::Testing::WaitUntilParkedInWrite(*fixture.listener->Watch(), 250ms, 10s));
 
-    // One KiB every 20 ms until `hurry`: far from the end of the body for the whole stop, and every write call the
-    // server makes progresses well inside `RequestTimeout`. Bounded by its count, and by `abandon` on the failure path.
+    // `SlowReaderStepBytes` every `SlowReaderStep` until `hurry`: far from the end of the body for the whole stop, and
+    // every write call the server makes progresses well inside `RequestTimeout`. Bounded by its count, and by
+    // `abandon` on the failure path.
     reader = std::jthread { [&] {
         std::vector<std::byte> chunk(std::size_t { 64 } * 1024);
         for ([[maybe_unused]] auto const step: std::views::iota(0, 20000))
@@ -1736,7 +1747,7 @@ TEST_CASE("AdminHttp: a stop cancels a client that reads its answer too slowly, 
             if (abandon.load())
                 break;
             auto const read = core::async::syncRun(ReadOnce(
-                client.get(), std::span<std::byte> { chunk.data(), hurry.load() ? chunk.size() : std::size_t { 1024 } }));
+                client.get(), std::span<std::byte> { chunk.data(), hurry.load() ? chunk.size() : SlowReaderStepBytes }));
             if (!read.has_value() || *read == 0)
             {
                 endedByServer.store(true);
@@ -1744,7 +1755,7 @@ TEST_CASE("AdminHttp: a stop cancels a client that reads its answer too slowly, 
             }
             received.fetch_add(*read);
             if (!hurry.load())
-                std::this_thread::sleep_for(20ms);
+                std::this_thread::sleep_for(SlowReaderStep);
         }
         client->close();
     } };
@@ -1780,6 +1791,17 @@ TEST_CASE("AdminHttp: a stop cancels a client that reads its answer too slowly, 
         stop.thread.join();
     reader.join();
 
+    auto const records = fixture.logger.Snapshot();
+    // Every Warn and Error the stop logged, so a red names what ended the connection rather than only that the cancel
+    // did not: a send that timed out first logs nothing here, a cancel that counted something else says its count.
+    auto const said = [&records] {
+        auto text = std::string {};
+        for (auto const& record: records)
+            if (record.level == Pace::LogLevel::Warn || record.level == Pace::LogLevel::Error)
+                text += std::format("\n  {}", record.message);
+        return text.empty() ? std::string { " (none)" } : text;
+    }();
+    INFO("the stop logged:" << said);
     CHECK(stopped);
     CHECK(stop.tookMs.load() < Bound.count());
     // The SERVER ended the connection: the client neither finished the body nor gave up first.
@@ -1787,7 +1809,6 @@ TEST_CASE("AdminHttp: a stop cancels a client that reads its answer too slowly, 
     CHECK(endedByServer.load());
     CHECK(received.load() < SlowReaderBodyBytes);
     // And the cancel is what did it, named with its count.
-    auto const records = fixture.logger.Snapshot();
     CHECK(std::ranges::any_of(records, [](Pace::CapturingLogger::Record const& record) { return NamesCancel(record, 1); }));
     CHECK(std::ranges::none_of(records, [](Pace::CapturingLogger::Record const& record) {
         return record.message.contains("did not finish within the stop ceiling");

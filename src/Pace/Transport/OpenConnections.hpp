@@ -64,7 +64,7 @@ class IConnectionCanceller
 /// handle (`CancelIoEx`), since a shutdown alone does not promise to end one there.
 ///
 /// **Only a write the kernel REFUSED is blocked.** How much of a blocking `send` the kernel takes is the platform's:
-/// Linux stops at the send buffer, while Winsock took a 4 MiB answer whole past a 64 KiB `SO_SNDBUF`. A write taken
+/// Linux stops at the send buffer, while Winsock took a 4 MiB answer whole past its 1 MiB `SO_SNDBUF`. A write taken
 /// whole has returned, holds no thread and is no cancel's business -- its connection ends with its request, and the
 /// kernel delivers the rest. So a test of the cancel must SEE a write parked before it stops anything
 /// (`tests/WriteWatchingListener.hpp`), never infer one from the answer's size.

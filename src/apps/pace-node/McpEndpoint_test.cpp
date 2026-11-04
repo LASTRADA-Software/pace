@@ -45,7 +45,6 @@
 #include <tests/HostNamingFakes.hpp>
 #include <tests/NodeFormationFakes.hpp>
 #include <tests/RelabelledPeerListener.hpp>
-#include <tests/SmallSendBufferListener.hpp>
 #include <tests/Unwrap.hpp>
 #include <tests/WriteWatchingListener.hpp>
 
@@ -630,15 +629,23 @@ TEST_CASE("an MCP stop cancels a client reading its answer too slowly, within Wo
     // A local client that reads its answer just often enough to keep every blocking write call inside its send
     // timeout would hold the serving thread -- and the stop that joins it -- for as long as it read. The drain cannot
     // wait for it, so past the drain the connection is cancelled and the stop ends inside `WorstCaseStop` regardless.
-    // Many times what the server's send buffer (`Testing::BindWithSmallSendBuffer`, refused past its grant ceiling)
-    // and the client's receive buffer hold between them, so the case does not depend on `net.ipv4.tcp_wmem` -- and no
-    // larger, since a sanitized debug build serializes the answer a code point at a time. Necessary and NOT
-    // sufficient: Winsock took a 4 MiB send whole past a 64 KiB `SO_SNDBUF`, so the case also waits to SEE the
-    // server parked in a write (`Testing::WaitUntilParkedInWrite`) before it stops anything.
-    constexpr auto ClientReceiveBytes = std::size_t { 4096 };
+    //
+    // Size does not stand in for a parked write -- Winsock took a 4 MiB send whole -- so the case SEES one
+    // (`Testing::WaitUntilParkedInWrite`) before it stops anything. The answer has only to outlast what can leave the
+    // server before the cancel: the accepted socket's send buffer (`ClientSocketBufferBytes`, which every accept sets
+    // and Linux doubles), the client's receive buffer, and what the slow reader takes for the whole of a stop.
+    //
+    // The reader is slow but MOVING, and moving often: a whole receive window every step, so every write call the
+    // server makes progresses well inside its send timeout on every platform. A trickle of a KiB into a 4 KiB window
+    // stalled a macOS send past that timeout, which ended the connection before the drain did -- and reads as a cancel
+    // that never happened.
+    constexpr auto ClientReceiveBytes = std::size_t { 64 } * 1024;
+    constexpr auto ReaderStepBytes = std::size_t { 8 } * 1024;
+    constexpr auto ReaderStep = 50ms;
+    constexpr auto ReadDuringAStop = ReaderStepBytes * static_cast<std::size_t>(McpEndpoint::WorstCaseStop / ReaderStep);
     constexpr auto AnswerBytes = std::size_t { 8 } * 1024 * 1024;
-    static_assert(AnswerBytes > 4 * (Testing::SmallSendBufferGrantCeiling + ClientReceiveBytes),
-                  "the answer must outlast every buffer under it");
+    static_assert(AnswerBytes > (2 * ClientSocketBufferBytes) + (2 * ClientReceiveBytes) + ReadDuringAStop,
+                  "the answer must outlast every buffer under it and everything the reader takes during a stop");
     auto tools = std::vector<Mcp::ToolRow> { Mcp::ToolRow {
         .name = "huge_answer",
         .title = "Huge answer",
@@ -656,7 +663,9 @@ TEST_CASE("an MCP stop cancels a client reading its answer too slowly, within Wo
     CapturingLogger logger;
     core::net::AcceptLoopHealth acceptLoops;
     McpStopFlag stopping;
-    auto bound = Testing::BindWithSmallSendBuffer();
+    auto bound = BlockingListener::Bind("127.0.0.1", 0);
+    REQUIRE(bound != nullptr);
+    REQUIRE(bound->IsBound());
     bound->SetTimeouts(AdminHttpServer::AcceptPoll, AdminHttpServer::RequestTimeout);
     auto const port = bound->boundPort();
     auto& connections = bound->Connections();
@@ -708,8 +717,11 @@ TEST_CASE("an MCP stop cancels a client reading its answer too slowly, within Wo
     // Nothing read yet: the server serializes the answer, fills what is under the connection and parks in a write.
     REQUIRE(Testing::WaitUntilParkedInWrite(*watch, 250ms, 60s));
 
-    // One KiB every 20 ms until `hurry`, so every write call makes progress inside its send timeout and the body is
-    // nowhere near done for the whole stop. Bounded by its count, and by `abandon` on the failure path.
+    // `ReaderStepBytes` every `ReaderStep` until `hurry`, so every write call -- a `WriteWatchingSocket::Chunk` -- makes
+    // progress inside its send timeout and the answer is nowhere near done for the whole stop. Bounded by its count,
+    // and by `abandon` on the failure path.
+    static_assert(Testing::WriteWatchingSocketChunkDrains(ReaderStepBytes, ReaderStep, AdminHttpServer::RequestTimeout),
+                  "the slow reader must empty a whole write chunk well inside one send timeout");
     reader = std::jthread { [&, socket = client->get()] {
         std::vector<std::byte> chunk(std::size_t { 64 } * 1024);
         for ([[maybe_unused]] auto const step: std::views::iota(0, 20000))
@@ -717,7 +729,7 @@ TEST_CASE("an MCP stop cancels a client reading its answer too slowly, within Wo
             if (abandon.load())
                 break;
             auto const read = core::async::syncRun(
-                ReadOnce(socket, std::span<std::byte> { chunk.data(), hurry.load() ? chunk.size() : std::size_t { 1024 } }));
+                ReadOnce(socket, std::span<std::byte> { chunk.data(), hurry.load() ? chunk.size() : ReaderStepBytes }));
             if (!read.has_value() || *read == 0)
             {
                 endedByServer.store(true);
@@ -725,7 +737,7 @@ TEST_CASE("an MCP stop cancels a client reading its answer too slowly, within Wo
             }
             received.fetch_add(*read);
             if (!hurry.load())
-                std::this_thread::sleep_for(20ms);
+                std::this_thread::sleep_for(ReaderStep);
         }
         socket->close();
     } };
@@ -767,13 +779,23 @@ TEST_CASE("an MCP stop cancels a client reading its answer too slowly, within Wo
     stopper.join();
     reader.join();
 
+    auto const records = logger.Snapshot();
+    // Every Warn and Error the stop logged, so a red names what ended the connection rather than only that the cancel
+    // did not: a send that timed out first logs nothing here, a cancel that counted something else says its count.
+    auto const said = [&records] {
+        auto text = std::string {};
+        for (auto const& record: records)
+            if (record.level == LogLevel::Warn || record.level == LogLevel::Error)
+                text += std::format("\n  {}", record.message);
+        return text.empty() ? std::string { " (none)" } : text;
+    }();
+    INFO("the stop logged:" << said);
     CHECK(ended);
     CHECK(stopTookMs.load() < std::chrono::duration_cast<std::chrono::milliseconds>(McpEndpoint::WorstCaseStop).count());
     // The SERVER ended the connection: the client neither finished the answer nor gave up first.
     CHECK(drained);
     CHECK(endedByServer.load());
     CHECK(received.load() < AnswerBytes);
-    auto const records = logger.Snapshot();
     CHECK(std::ranges::any_of(records, [](CapturingLogger::Record const& record) {
         return record.level == LogLevel::Warn && record.message.contains("mcp: stopping, cancelled 1 connection(s)");
     }));

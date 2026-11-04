@@ -21,7 +21,6 @@
 #include <core/net/ISocket.hpp>
 #include <core/net/IoResult.hpp>
 #include <tests/BoundedWait.hpp>
-#include <tests/SmallSendBufferListener.hpp>
 
 using namespace std::chrono_literals;
 
@@ -53,12 +52,14 @@ struct Connected
     std::unique_ptr<core::net::ISocket> served;
 };
 
-/// A listener with NO send timeout armed and a small send buffer, so a blocking write to a client that does not read
-/// fills what is under it at once and then blocks until something ends it from outside -- the arrangement a cancel
-/// exists for, with nothing else that could pass for it and nothing that depends on the host's buffer tuning.
+/// A listener with NO send timeout armed, so a blocking write to a client that does not read fills what is under it
+/// and then blocks until something ends it from outside -- the arrangement a cancel exists for, with nothing else that
+/// could pass for it. The case SEES the write parked rather than sizing for it.
 [[nodiscard]] std::unique_ptr<Pace::BlockingListener> Listening()
 {
-    auto listener = Pace::Testing::BindWithSmallSendBuffer();
+    auto listener = Pace::BlockingListener::Bind("127.0.0.1", 0);
+    REQUIRE(listener != nullptr);
+    REQUIRE(listener->IsBound());
     listener->SetTimeouts(std::chrono::milliseconds { 2000 }, std::chrono::milliseconds { 0 });
     return listener;
 }

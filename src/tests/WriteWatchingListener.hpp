@@ -36,7 +36,7 @@ struct WriteWatch
 ///
 /// **Why a slow-reader case needs one: a write the kernel ABSORBED is not blocked, and there is nothing to cancel.**
 /// A blocking `send` of a whole answer returns once the kernel has taken it, and how much it takes is the platform's:
-/// Linux bounds it by the send buffer, while Winsock took a 4 MiB send whole past a 64 KiB `SO_SNDBUF` and then
+/// Linux bounds it by the send buffer, while Winsock took a 4 MiB send whole past its 1 MiB `SO_SNDBUF` and then
 /// delivered it after the close. So a case cannot infer from the answer's size that the server is still writing; it
 /// must OBSERVE it -- a write under way that moves no byte for a stretch -- before it starts the stop. Chunks of a
 /// size no platform takes past its send buffer make that observable everywhere, and every chunk is still the real
@@ -46,8 +46,11 @@ struct WriteWatch
 class WriteWatchingSocket final: public core::net::ISocket
 {
   public:
-    /// How much one write call hands the kernel at most.
-    static constexpr std::size_t Chunk = std::size_t { 64 } * 1024;
+    /// How much one write call hands the kernel at most. Small, so a client reading a KiB at a time drains a whole
+    /// chunk well inside one send timeout (`AdminHttpServer::RequestTimeout`): a chunk a slow reader takes longer than
+    /// that to empty would end the write on a TIMEOUT -- on Windows a send that times out leaves the socket unusable --
+    /// and the case would be measuring the send timeout rather than the cancel.
+    static constexpr std::size_t Chunk = std::size_t { 8 } * 1024;
 
     /// @param inner The accepted socket (owned).
     /// @param watch Where progress is recorded; shared with the case.
@@ -150,6 +153,19 @@ class WriteWatchingSocket final: public core::net::ISocket
     std::unique_ptr<core::net::ISocket> _inner;
     std::shared_ptr<WriteWatch> _watch;
 };
+
+/// Whether a reader taking @p bytes every @p step empties one `WriteWatchingSocket::Chunk` in under half of
+/// @p sendTimeout, so every write call of a slow-reader case makes progress rather than timing out.
+/// @param bytes What the reader takes per step.
+/// @param step How long it waits between steps.
+/// @param sendTimeout The server's per-call send timeout.
+/// @return True when the chunk drains with room to spare.
+[[nodiscard]] constexpr bool WriteWatchingSocketChunkDrains(std::size_t bytes,
+                                                            std::chrono::milliseconds step,
+                                                            std::chrono::milliseconds sendTimeout) noexcept
+{
+    return bytes > 0 && step * static_cast<std::int64_t>(WriteWatchingSocket::Chunk / bytes) < sendTimeout / 2;
+}
 
 /// A bound listener whose accepted connections write in watched chunks (`WriteWatchingSocket`), all recording into
 /// one `WriteWatch` -- the stop cases serve one connection, so one record is unambiguous.
