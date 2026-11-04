@@ -4882,6 +4882,30 @@ else()
             TIMEOUT 600
         )
     endif()
+
+endif()
+
+# ---------------------------------------------------------------------------
+# Hostile input against the node's MCP surface, and what it must not disturb: `/healthz` on the
+# admin surface and a `pace-cc` FETCH from the node's cache tier answer throughout, and the node
+# stops cleanly. Registered here rather than in the node block above because it names two
+# executables, so it needs both targets. Skips 77 without curl, python3 or a C++ compiler.
+if(NOT TARGET pace-node OR NOT TARGET pace-cc)
+    message(STATUS "node-mcp-hostile-e2e: compile node or launcher not built — skipping")
+elseif(WIN32)
+    message(STATUS "node-mcp-hostile-e2e: POSIX-only fixture — skipping on Windows")
+else()
+    add_test(
+        NAME "node-mcp-hostile-e2e"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/node-mcp-hostile-e2e.sh"
+            --node "$<TARGET_FILE:pace-node>"
+            --launcher "$<TARGET_FILE:pace-cc>"
+    )
+    set_tests_properties("node-mcp-hostile-e2e" PROPERTIES
+        LABELS "smoke"
+        SKIP_RETURN_CODE 77
+        TIMEOUT 180
+    )
 endif()
 
 # ---------------------------------------------------------------------------
