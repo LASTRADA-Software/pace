@@ -287,6 +287,33 @@ TEST_CASE("A budget override and its baseline survive the machine's own snapshot
     }
 }
 
+TEST_CASE("A node upgraded from the last release recovers its own snapshot and replays its own log",
+          "[cluster][statemachine]")
+{
+    // The MSI upgrade from v0.6.0, at the machine: what that release left in the state directory is a v10 snapshot and
+    // v6 entries above it. Both are converted, so the restore hands the application the release's members and
+    // revocations, and the entry above it is APPLIED rather than skipped as another build's.
+    Watched watched;
+    REQUIRE(watched.machine.RestoreSnapshot(Testing::EncodeNamelessClusterState(), Consensus::SnapshotOrigin::Recovered)
+                .has_value());
+    {
+        auto const state = watched.machine.State();
+        REQUIRE(state.members.size() == 2);
+        CHECK(state.members[1].id == "n2");
+        CHECK(state.members[1].displayName.empty());
+        CHECK(std::ranges::contains(state.revokedKeys, "w1", &RevokedKey::id));
+    }
+
+    auto const key = Testing::TestKeyPair("w2").PublicKey();
+    auto const entry = Consensus::AppliedEntry { .index = Consensus::LogIndex { .value = 4 },
+                                                 .payload = Testing::EncodeNamelessClusterCommand("w2", key) };
+    REQUIRE(watched.machine.CanRead(entry.payload).has_value());
+    watched.machine.Apply(entry);
+    auto const state = watched.machine.State();
+    CHECK(std::ranges::contains(state.revokedKeys, "w2", &RevokedKey::id));
+    CHECK(state.members.size() == 2);
+}
+
 TEST_CASE("A snapshot replaces, and an unreadable one changes nothing", "[cluster][statemachine]")
 {
     Watched watched;
@@ -450,15 +477,12 @@ TEST_CASE("Whether a command can be applied is asked without applying it, in the
         CHECK(refused.error().context.contains("reads 7"));
     }
 
-    SECTION("the last build before display names wrote a command this build refuses to replay, by its version")
+    SECTION("the last release's command is readable, converted, and asking changes nothing")
     {
-        // This build's layout under the version the display names moved past: a store a node kept across that upgrade
-        // is another build's format, never damage.
-        auto const refused = watched.machine.CanRead(Testing::EncodeNamelessClusterCommand());
-        REQUIRE_FALSE(refused.has_value());
-        CHECK(refused.error().code == ConsensusErrorCode::UnsupportedFormatVersion);
-        CHECK(refused.error().context.contains(std::format("version {}", Testing::NamelessClusterCommandVersion)));
-        CHECK(refused.error().context.contains("reads 7"));
+        // v0.6.0 wrote v6, the first seven of this build's fields: a node upgraded from that release replays its own
+        // log rather than refusing to start over it.
+        CHECK(watched.machine.CanRead(Testing::EncodeNamelessClusterCommand()).has_value());
+        CHECK(watched.machine.State().members.empty());
         CHECK(watched.published.empty());
     }
 
@@ -488,11 +512,15 @@ TEST_CASE("Whether a snapshot can be restored is asked without restoring it, in 
         CHECK(watched.machine.CanRestore(Encode(other)).has_value());
     }
 
+    SECTION("the last release's state is restorable, converted")
+    {
+        CHECK(watched.machine.CanRestore(Testing::EncodeNamelessClusterState()).has_value());
+    }
+
     SECTION("an older build's state is another build's format, both versions named")
     {
-        // The principal era's layout (what the one installation holds) and the one before it.
+        // The principal era's layout and the one before it; the last release's is converted, above.
         auto const [older, version] = GENERATE(table<std::vector<std::byte>, std::uint8_t>({
-            { Testing::EncodeNamelessClusterState(), Testing::NamelessClusterStateVersion },
             { Testing::EncodePrincipalEraClusterState(), Testing::PrincipalEraClusterStateVersion },
             { Testing::EncodePreviousClusterState(), Testing::PreviousClusterStateVersion },
         }));

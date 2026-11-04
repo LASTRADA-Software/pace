@@ -569,14 +569,11 @@ TEST_CASE("A state the previous build wrote is refused as another build's, never
     //   six -- a decoder judging the arity first calls it damage;
     // - v8: six header fields like this build's, but a principal count and a roster version where
     //   this build has the revoked and dissolve counts -- a decoder reading fields first MISREADS it.
-    // - v10, the last build before member display names: this build's header, but SIX fields per member where this
-    //   build writes seven, so a decoder judging the arity first calls an intact snapshot damage.
-    REQUIRE(Testing::NamelessClusterStateVersion == 10);
+    // v10, the last release's, is CONVERTED -- the case below this one.
     REQUIRE(Testing::PrincipalEraClusterStateVersion == 9);
     REQUIRE(Testing::PreviousClusterStateVersion == 8);
     for (auto const& [older, version]:
-         { std::pair { Testing::EncodeNamelessClusterState(), Testing::NamelessClusterStateVersion },
-           std::pair { Testing::EncodePrincipalEraClusterState(), Testing::PrincipalEraClusterStateVersion },
+         { std::pair { Testing::EncodePrincipalEraClusterState(), Testing::PrincipalEraClusterStateVersion },
            std::pair { Testing::EncodePreviousClusterState(), Testing::PreviousClusterStateVersion } })
     {
         INFO("state version " << static_cast<unsigned>(version));
@@ -590,7 +587,62 @@ TEST_CASE("A state the previous build wrote is refused as another build's, never
         // The current version as a literal: it is private to the codec, and pinned by the
         // version case above.
         CHECK(refused.error().context.contains("reads 11"));
+        CHECK(refused.error().context.contains("converts 10"));
     }
+}
+
+TEST_CASE("The last release's state is converted: every member read at its own stride and nameless with no override",
+          "[cluster][state][wire][identity]")
+{
+    // What the MSI upgrade from v0.6.0 found: a node that ran on that release holds a v10 snapshot of its own, and a
+    // build refusing it does not start at all. v10 is this build's header and groups with each member's first SIX
+    // fields, so the conversion reads the fields it lacks -- the display name and the overrides -- as absent.
+    //
+    // TWO members and a revoked key after them, from a builder pinned as a literal: read at this build's stride, the
+    // second member's id would land in the first one's name and the revoked key's id in an override, which refuses.
+    REQUIRE(Testing::NamelessClusterStateVersion == 10);
+    auto const decoded = DecodeState(Testing::EncodeNamelessClusterState());
+    INFO((decoded.has_value() ? std::string {} : decoded.error().context));
+    REQUIRE(decoded.has_value());
+    auto const& state = Unwrap(decoded);
+
+    REQUIRE(state.members.size() == 2);
+    CHECK(state.members[0].id == "n1");
+    CHECK(state.members[0].raftEndpoint == "10.0.0.1:6675");
+    CHECK(state.members[0].publicKey == KeyOf(0x11));
+    CHECK(state.members[1].id == "n2");
+    CHECK(state.members[1].raftEndpoint == "10.0.0.2:6675");
+    CHECK(state.members[1].publicKey == KeyOf(0x22));
+    for (auto const& member: state.members)
+    {
+        INFO(member.id);
+        CHECK(member.seat == MemberSeat::Voter);
+        CHECK(member.schedulerEndpointHistory == SchedulerEndpointHistory::NeverAnnounced);
+        CHECK(member.displayName.empty());
+        for (auto const& row: BudgetSlots)
+            CHECK_FALSE(BudgetOf(member, row.tier).has_value());
+    }
+    REQUIRE(state.revokedKeys.size() == 1);
+    CHECK(state.revokedKeys[0].id == "w1");
+    CHECK(state.revokedKeys[0].publicKey == KeyOf(0x33));
+    CHECK(state.settings.empty());
+    CHECK_FALSE(state.dissolveOrder.has_value());
+    CHECK(state.rosterVersion == 1);
+
+    // And it is written back at THIS build's version, so the conversion happens once.
+    auto const reencoded = Encode(state);
+    REQUIRE(reencoded.size() > 4);
+    CHECK(reencoded[4] == std::byte { 11 });
+    CHECK(Unwrap(DecodeState(reencoded)) == state);
+
+    // A v10 state is still held to its own arity: one field short of six per member is damage, not a conversion.
+    // The bytes held by name: the split's spans point into them.
+    auto const nameless = Testing::EncodeNamelessClusterState();
+    auto split = Unwrap(WireFields::SplitAll(nameless));
+    split.pop_back();
+    auto const truncated = DecodeState(WireFields::Encode(WireFields::FieldList { split }));
+    REQUIRE_FALSE(truncated.has_value());
+    CHECK(truncated.error().code == ConsensusErrorCode::MalformedFrame);
 }
 
 TEST_CASE("A command the previous build wrote is refused by its version before its arity is judged",
@@ -612,11 +664,9 @@ TEST_CASE("A command the previous build wrote is refused by its version before i
     REQUIRE(static_cast<std::uint8_t>(CommandKind::AddMember) == 0);
     REQUIRE(static_cast<std::uint8_t>(CommandKind::Forget) == 1);
     //
-    // A v6 command is this build's seven fields, written before the display names moved the version: refused by it.
-    REQUIRE(Testing::NamelessClusterCommandVersion == 6);
+    // A v6 command, the last release's, is CONVERTED -- the case below this one.
     for (auto const& [older, version]:
-         { std::pair { Testing::EncodeNamelessClusterCommand(), Testing::NamelessClusterCommandVersion },
-           std::pair { Testing::EncodeFourFieldClusterCommand(), Testing::FourFieldClusterCommandVersion },
+         { std::pair { Testing::EncodeFourFieldClusterCommand(), Testing::FourFieldClusterCommandVersion },
            std::pair { Testing::EncodePreviousClusterCommand(), Testing::PreviousClusterCommandVersion } })
     {
         INFO("command version " << static_cast<unsigned>(version));
@@ -625,7 +675,49 @@ TEST_CASE("A command the previous build wrote is refused by its version before i
         CHECK(refused.error().code == ConsensusErrorCode::UnsupportedVersion);
         CHECK(refused.error().context.contains(std::format("version {}", version)));
         CHECK(refused.error().context.contains("reads 7"));
+        CHECK(refused.error().context.contains("converts 6"));
     }
+}
+
+TEST_CASE("The last release's command is converted: its seven fields are this build's first seven and the rest absent",
+          "[cluster][state][wire][identity]")
+{
+    // A node upgraded from v0.6.0 holds v6 entries in its own log, and refusing them keeps it from starting (#1542's
+    // refusal, met on the MSI upgrade). v6 is the first seven of this build's fields under the same verbs, so the
+    // fields it lacks -- the budget figures, the baseline, the stamp, the override id, the setter -- are absent.
+    REQUIRE(Testing::NamelessClusterCommandVersion == 6);
+    REQUIRE(static_cast<std::uint8_t>(CommandKind::Forget) == 1);
+    auto const key = KeyOf(0x44);
+    auto const decoded = DecodeCommand(Testing::EncodeNamelessClusterCommand("w2", key));
+    INFO((decoded.has_value() ? std::string {} : decoded.error().context));
+    REQUIRE(decoded.has_value());
+    CHECK(Unwrap(decoded)
+          == Command { .kind = CommandKind::Forget, .key = "w2", .value = {}, .schedulerEndpoint = {}, .publicKey = key });
+
+    // A verb the build that wrote v6 never had is no entry it wrote: refused by name rather than read as this build's.
+    REQUIRE(static_cast<std::uint8_t>(CommandKind::SetDisplayName) == 8);
+    for (auto const verb: { CommandKind::SetDisplayName, CommandKind::SetBudget, CommandKind::RecordBaseline })
+    {
+        INFO("verb " << static_cast<unsigned>(verb));
+        auto const refused = DecodeCommand(Testing::EncodeNamelessClusterCommandWithVerb(static_cast<std::uint8_t>(verb)));
+        REQUIRE_FALSE(refused.has_value());
+        CHECK(refused.error().code == ConsensusErrorCode::UnknownMessageType);
+        CHECK(refused.error().context.contains("version 6"));
+    }
+    // ...while the last verb it did have still reads: the boundary is the table's, not one past it.
+    REQUIRE(static_cast<std::uint8_t>(CommandKind::DissolveInto) + 1
+            == static_cast<std::uint8_t>(CommandKind::SetDisplayName));
+    auto const lastKnown =
+        DecodeCommand(Testing::EncodeNamelessClusterCommandWithVerb(static_cast<std::uint8_t>(CommandKind::DissolveInto)));
+    INFO((lastKnown.has_value() ? std::string {} : lastKnown.error().context));
+    CHECK(lastKnown.has_value());
+
+    // And v6 is held to its own arity: this build's twelve fields under version 6 are damage, not a conversion.
+    auto current = Encode(Cmd(CommandKind::AddMember, "n1", "10.0.0.1:6675"));
+    current[4] = std::byte { Testing::NamelessClusterCommandVersion };
+    auto const wrongArity = DecodeCommand(current);
+    REQUIRE_FALSE(wrongArity.has_value());
+    CHECK(wrongArity.error().code == ConsensusErrorCode::MalformedFrame);
 }
 
 namespace

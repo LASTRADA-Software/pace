@@ -22,12 +22,13 @@ inline constexpr std::uint8_t PreviousClusterStateVersion = 8;
 /// principal mode retired holds on disk.
 inline constexpr std::uint8_t PrincipalEraClusterStateVersion = 9;
 
-/// The `ClusterState` version the last build before member display names wrote: SIX fields per member where this
-/// build writes seven. What the one installation holds on disk before this build.
+/// The `ClusterState` version the last build before member display names wrote -- the last release, v0.6.0: SIX fields
+/// per member where this build writes nine. What a node upgraded from that release holds on disk, which this build
+/// converts.
 inline constexpr std::uint8_t NamelessClusterStateVersion = 10;
 
-/// The `Command` version the last build before member display names wrote: this build's seven-field layout under the
-/// version the state's display names moved past.
+/// The `Command` version the last build before member display names wrote -- the last release, v0.6.0: the first seven
+/// of this build's fields, under the version the state's display names moved past. Converted by this build.
 inline constexpr std::uint8_t NamelessClusterCommandVersion = 6;
 
 /// The `Command` version the build before the replicated dissolve wrote: six fields, no age.
@@ -129,14 +130,16 @@ inline constexpr std::uint8_t FourFieldClusterCommandVersion = 2;
                                 std::span<std::byte const> { workerRole } });
 }
 
-/// A one-member cluster state, encoded as the last build before member display names laid it out.
+/// A two-member cluster state, encoded as the last build before member display names laid it out -- the last release,
+/// v0.6.0.
 ///
 /// For `EncodePreviousClusterState`'s reason: version 10 wrote this build's six header fields and SIX fields per
-/// member -- no display name -- so a decoder that judged the arity before the version would call an intact snapshot
-/// damage, and one that read the fields first would take the next member's id for this one's name.
+/// member -- no display name, no budget override -- so a decoder that judged the arity before the version would call
+/// an intact snapshot damage, and one that read at this build's stride would take the second member's id for the
+/// first one's name. TWO members and a revoked key after them, so a stride read wrong cannot come back right.
 ///
-/// Member `n1` at `10.0.0.1:6675`, a voter that never announced a scheduler endpoint, keyed `0x11`; no setting, no
-/// revoked key, no dissolve order.
+/// Member `n1` at `10.0.0.1:6675` keyed `0x11` and member `n2` at `10.0.0.2:6675` keyed `0x22`, both voters that
+/// never announced a scheduler endpoint; `w1`'s key `0x33` revoked; no setting, no dissolve order.
 /// @return The encoded state.
 [[nodiscard]] inline std::vector<std::byte> EncodeNamelessClusterState()
 {
@@ -144,19 +147,26 @@ inline constexpr std::uint8_t FourFieldClusterCommandVersion = 2;
         auto const bytes = WireFields::ToBigEndian<std::uint32_t>(value);
         return std::vector<std::byte> { bytes.begin(), bytes.end() };
     };
+    auto const keyOf = [](std::uint8_t fill) {
+        auto key = std::vector<std::byte>(32);
+        std::ranges::fill(key, std::byte { fill });
+        return key;
+    };
     auto const version = std::array { std::byte { NamelessClusterStateVersion } };
+    auto const two = count(2);
     auto const one = count(1);
     auto const none = count(0);
     auto const rosterVersionBytes = WireFields::ToBigEndian<std::uint64_t>(1);
     auto const rosterVersion = std::vector<std::byte> { rosterVersionBytes.begin(), rosterVersionBytes.end() };
     auto const neverAnnounced = std::array { std::byte { 0 } };
     auto const voter = std::array { std::byte { 0 } };
-    auto memberKey = std::vector<std::byte>(32);
-    std::ranges::fill(memberKey, std::byte { 0x11 });
+    auto const firstKey = keyOf(0x11);
+    auto const secondKey = keyOf(0x22);
+    auto const revokedKey = keyOf(0x33);
     return WireFields::Encode({ std::span<std::byte const> { version },
-                                std::span<std::byte const> { one },  // members
+                                std::span<std::byte const> { two },  // members
                                 std::span<std::byte const> { none }, // settings
-                                std::span<std::byte const> { none }, // revoked keys
+                                std::span<std::byte const> { one },  // revoked keys
                                 std::span<std::byte const> { rosterVersion },
                                 std::span<std::byte const> { none }, // dissolve orders
                                 WireFields::AsBytes(std::string_view { "n1" }),
@@ -164,23 +174,52 @@ inline constexpr std::uint8_t FourFieldClusterCommandVersion = 2;
                                 WireFields::AsBytes(std::string_view {}),
                                 std::span<std::byte const> { neverAnnounced },
                                 std::span<std::byte const> { voter },
-                                std::span<std::byte const> { memberKey } }); // no display name
+                                std::span<std::byte const> { firstKey }, // no display name, no override
+                                WireFields::AsBytes(std::string_view { "n2" }),
+                                WireFields::AsBytes(std::string_view { "10.0.0.2:6675" }),
+                                WireFields::AsBytes(std::string_view {}),
+                                std::span<std::byte const> { neverAnnounced },
+                                std::span<std::byte const> { voter },
+                                std::span<std::byte const> { secondKey },
+                                WireFields::AsBytes(std::string_view { "w1" }),
+                                std::span<std::byte const> { revokedKey } });
 }
 
-/// A command forgetting member `n1`, encoded as the last build before member display names wrote it: seven fields,
-/// this build's layout, under version 6. What a node's own log holds before this build, which it refuses to start on
-/// by name (#1542).
+/// A command forgetting member @p id, encoded as the last build before member display names wrote it -- the last
+/// release, v0.6.0: SEVEN fields, the first seven of this build's layout, under version 6. What a node's own log holds
+/// when it upgrades from that release, which this build converts.
+/// @param id Whom it forgets.
+/// @param key The key it revokes: empty for none, else 32 bytes.
 /// @return The encoded command.
-[[nodiscard]] inline std::vector<std::byte> EncodeNamelessClusterCommand()
+[[nodiscard]] inline std::vector<std::byte> EncodeNamelessClusterCommand(std::string_view id, std::span<std::byte const> key)
 {
     auto const header = std::array { std::byte { NamelessClusterCommandVersion }, std::byte { 1 } };
     return WireFields::Encode({ std::span<std::byte const> { header },
-                                WireFields::AsBytes(std::string_view { "n1" }),
+                                WireFields::AsBytes(id),
                                 WireFields::AsBytes(std::string_view {}),
                                 WireFields::AsBytes(std::string_view {}),
-                                std::span<std::byte const> {},    // no key
+                                key,
                                 std::span<std::byte const> {},    // no creation time
                                 std::span<std::byte const> {} }); // no leader key
+}
+
+/// `EncodeNamelessClusterCommand` forgetting member `n1`, stating no key.
+/// @return The encoded command.
+[[nodiscard]] inline std::vector<std::byte> EncodeNamelessClusterCommand()
+{
+    return EncodeNamelessClusterCommand("n1", {});
+}
+
+/// A version 6 command carrying @p verb -- a byte the build that wrote version 6 never had once it is
+/// `CommandKind::SetDisplayName`'s or later -- with the seven fields that version laid out, every one after the header
+/// empty.
+/// @param verb The verb byte.
+/// @return The encoded command.
+[[nodiscard]] inline std::vector<std::byte> EncodeNamelessClusterCommandWithVerb(std::uint8_t verb)
+{
+    auto const header = std::array { std::byte { NamelessClusterCommandVersion }, std::byte { verb } };
+    auto const empty = std::span<std::byte const> {};
+    return WireFields::Encode({ std::span<std::byte const> { header }, empty, empty, empty, empty, empty, empty });
 }
 
 /// A command forgetting member `n1`, encoded as the build before the replicated dissolve wrote it.

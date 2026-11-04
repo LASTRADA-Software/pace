@@ -1445,6 +1445,18 @@ and it is recorded here because the question will be asked again.
     `--raft-join`, because an empty node under a bootstrap set naming only itself
     elects itself and becomes a second cluster. A recovered snapshot's log line says
     *recovered*, an installed one's *installed*.
+  - **"Cannot read" is a TABLE, and the last RELEASE's layout is a row of it.** The
+    refusal above was written while no released build had ever crossed a cluster
+    encoding change; the first one that did (display names, `StateVersion` 10 -> 11,
+    `CommandVersion` 6 -> 7) made a node upgraded from v0.6.0 exit 78 at every start,
+    and the MSI upgrade from the latest release rolled back on it. So
+    `ReadableStateLayouts` and `ReadableCommandLayouts` (`ClusterState.cpp`) name every
+    layout the decoder reads, and an older row is admitted ONLY when its fields are a
+    strict PREFIX of this build's under verbs that mean what they meant -- the fields it
+    lacks are absent, a verb its writer never had is refused by name, and its own arity
+    still holds. A layout that moved a field or changed a verb gets no row and is
+    refused as before. **Before bumping either version, ask what the latest release
+    wrote**: if this build cannot read it, an upgrade from that release does not start.
   - **And a LEADER's snapshot the application cannot read is refused before the node
     takes it on** ([#1552](https://github.com/LASTRADA-Software/pace/issues/1552)).
     Taken on, a snapshot resets the log, moves both indices past it, and is persisted

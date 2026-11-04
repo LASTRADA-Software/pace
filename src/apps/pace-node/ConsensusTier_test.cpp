@@ -1602,18 +1602,30 @@ TEST_CASE("A node whose own consensus state this build cannot read refuses to st
         CHECK(published->load() == 0);
     }
 
-    SECTION("a snapshot the last build before display names wrote refuses the start as another build's format")
+    SECTION("converted: the last release's snapshot and log start, the snapshot restored and the entry above it applied")
     {
-        PlantConsensusState(directory, Testing::EncodeNamelessClusterState(), currentCommand);
-        auto const started = start();
-        REQUIRE_FALSE(started.has_value());
-        CHECK(started.error().cause == NodeRefusalCause::ConsensusState);
-        auto const& refusal = started.error().reason;
-        CAPTURE(refusal);
-        CHECK(refusal.contains(std::format("cluster state encoding version {}", Testing::NamelessClusterStateVersion)));
-        CHECK(refusal.contains("reads 11"));
-        CHECK(refusal.contains("it is intact, and there is no conversion"));
-        CHECK(published->load() == 0);
+        // The MSI upgrade from v0.6.0: that release left a v10 snapshot and v6 entries in the node's own directory,
+        // and this build refusing them kept the upgraded service from starting at all (service-specific error 78,
+        // the installer rolled back). Both are converted, so the node starts on what the release replicated.
+        auto const w2 = Testing::TestKeyPair("w2").PublicKey();
+        PlantConsensusState(
+            directory, Testing::EncodeNamelessClusterState(), Testing::EncodeNamelessClusterCommand("w2", w2));
+        auto started = start();
+        INFO("start refused: " << RefusalOf(started));
+        REQUIRE(started.has_value());
+        auto const& tier = *started;
+
+        // Restored when the driver was built, before either loop ran: the release's members and its revocation.
+        auto const restored = tier->ClusterState();
+        CHECK(std::ranges::contains(restored.members, "n2", &Cluster::ClusterMember::id));
+        CHECK(HasRevocation(restored, "w1"));
+        CHECK(published->load() > 0);
+
+        // And the release's entry above it, once the node leads again and commits it.
+        CHECK(Testing::WaitUntil(
+            "the retained v6 forget to commit",
+            [&tier] { return HasRevocation(tier->ClusterState(), "w2"); },
+            [&tier] { return std::format("commit index {}", tier->Status().commitIndex.value); }));
     }
 
     SECTION("a retained command the build before wrote refuses the start, before the snapshot is restored")
