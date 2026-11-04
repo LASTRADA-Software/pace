@@ -297,12 +297,12 @@ namespace
         auto const* const section = root.Find("toolchain_demand");
         if (section == nullptr || section->IsNull())
             return unavailable("the answering node keeps no toolchain-demand history; a leader counts only while it leads");
-        auto const* const keys = section->Find("keys");
+        auto const* const keysMember = section->Find("keys");
+        auto const* const keys = keysMember != nullptr ? keysMember->AsArray() : nullptr;
         auto const observed = UintAt(*section, "observed_minutes");
         auto const window = UintAt(*section, "window_minutes");
         auto const total = UintAt(*section, "total");
-        if (keys == nullptr || keys->AsArray() == nullptr || !observed.has_value() || !window.has_value()
-            || !total.has_value())
+        if (keys == nullptr || !observed.has_value() || !window.has_value() || !total.has_value())
             return unavailable("the section is not one this build reads");
         if (*observed == 0)
             return unavailable("the leader counted for none of the window's minutes");
@@ -320,7 +320,7 @@ namespace
         auto reading = DemandReading {};
         auto named = std::uint64_t { 0 };
         auto rows = Json::Array {};
-        for (auto const& row: *keys->AsArray())
+        for (auto const& row: *keys)
         {
             auto fingerprint = StringAt(row, "fingerprint");
             auto const compiles = UintAt(row, "total");

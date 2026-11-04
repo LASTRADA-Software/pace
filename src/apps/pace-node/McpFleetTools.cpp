@@ -199,6 +199,16 @@ namespace
         return elements != nullptr ? *elements : none;
     }
 
+    /// @param object A projected object.
+    /// @param member The member to read.
+    /// @return The elements of @p member; empty when it is absent or not an array.
+    [[nodiscard]] Json::Array const& ElementsAt(Json::Value const& object, std::string_view member)
+    {
+        static Json::Array const none;
+        auto const* const value = object.Find(member);
+        return value != nullptr ? ElementsOf(*value) : none;
+    }
+
     /// Name every machine row of a projected array, in place, as every tool names a machine (`AppendNaming`).
     /// @param rows A projected array, or `null`.
     /// @param state The applied state the machines are placed in.
@@ -478,10 +488,11 @@ namespace
                                       Provenance(document->reply)));
         }
 
-        auto const* const totals = document->root.Find("compile-totals");
+        auto const* const totalsMember = document->root.Find("compile-totals");
+        auto const* const totals = totalsMember != nullptr ? totalsMember->AsObject() : nullptr;
         auto const* const truncatedMember = document->root.Find("compiles-truncated");
         auto const truncated = truncatedMember != nullptr ? truncatedMember->AsInt() : std::nullopt;
-        if (totals == nullptr || totals->AsObject() == nullptr || !truncated.has_value())
+        if (totals == nullptr || !truncated.has_value())
             return Unreadable(*document, "a compile list without its totals");
 
         // Each compile's requesting machine named by its member id and display name, placed by its identity key.
@@ -496,7 +507,7 @@ namespace
 
         // The totals count EVERY ticket, the unlisted ones included, keyed as the document keys them.
         auto totalsOut = Json::Object {};
-        for (auto const& [state, count]: *totals->AsObject())
+        for (auto const& [state, count]: *totals)
             totalsOut.emplace_back(SnakeCase(state), count);
         totalsOut.emplace_back("oldest_wait_s", counts.oldestWait);
         totalsOut.emplace_back("per_requester", Arr(std::move(counts.perRequester)));
@@ -504,8 +515,8 @@ namespace
         totalsOut.emplace_back("per_counts_cover_every_ticket", Bool(*truncated == 0));
 
         // `-` for a state the leader's totals do not carry, or carry as null: absent, never a zero.
-        auto const countOf = [totals](std::string_view state) {
-            auto const* const member = totals->Find(state);
+        auto const countOf = [totalsMember](std::string_view state) {
+            auto const* const member = totalsMember->Find(state);
             auto const count = member != nullptr ? member->AsInt() : std::nullopt;
             return count.has_value() ? std::format("{}", *count) : std::string { "-" };
         };
@@ -575,7 +586,8 @@ namespace
             auto const endpoint = StringAt(row, "endpoint").value_or(std::string {});
             auto& list = visit(endpoint);
             auto const* const condition = row.Find("condition");
-            if (condition == nullptr || condition->IsNull())
+            auto const* const members = row.AsObject();
+            if (condition == nullptr || condition->IsNull() || members == nullptr)
             {
                 unreported.insert(endpoint);
                 continue;
@@ -583,7 +595,7 @@ namespace
             if (StringAt(row, "state") == "raised")
                 ++raised;
             auto fields = Json::Object {};
-            for (auto const& [key, value]: *row.AsObject())
+            for (auto const& [key, value]: *members)
                 if (key != "endpoint")
                     fields.emplace_back(key, value);
             list.push_back(Obj(std::move(fields)));
@@ -844,7 +856,7 @@ namespace
                                      document->reply.answeredBy));
         // Narrowed in place, so every other member of the section stays exactly what the document wrote.
         auto const selector =
-            key.has_value() ? KeySelectorField(*listed->AsArray(), dimension, *key) : std::optional<std::string_view> {};
+            key.has_value() ? KeySelectorField(ElementsOf(*listed), dimension, *key) : std::optional<std::string_view> {};
         if (key.has_value())
             if (auto* const members = std::get_if<Json::Object>(&section.v); members != nullptr)
                 for (auto& [name, value]: *members)
@@ -852,7 +864,7 @@ namespace
                         std::erase_if(*rows, [&](Json::Value const& row) {
                             return !selector.has_value() || !RowFieldIs(row, *selector, *key);
                         });
-        auto const named = section.Find("keys")->AsArray()->size();
+        auto const named = ElementsAt(section, "keys").size();
 
         auto const numberAt = [&section](std::string_view field) {
             auto const* const value = section.Find(field);
@@ -893,7 +905,7 @@ namespace
         {
             auto granted = std::uint64_t { 0 };
             auto floor = false;
-            for (auto const& row: *section.Find("keys")->AsArray())
+            for (auto const& row: ElementsAt(section, "keys"))
             {
                 auto const* const rowTotal = row.Find("total");
                 granted = SaturatingAdd(granted, rowTotal != nullptr ? rowTotal->AsUint().value_or(0) : std::uint64_t { 0 });

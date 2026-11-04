@@ -197,10 +197,11 @@ template <typename Predicate>
 {
     if (!state.has_value())
         return MachineNaming {};
-    auto const matches = std::ranges::count_if(state->members, places);
-    if (matches != 1)
-        return MachineNaming {};
+    // The first match, and then whether it is the only one: one pointer, checked where it is read, so no
+    // optimiser has to carry "a count of one implies a find" across two walks (GCC's -Wnull-dereference does not).
     auto const* const member = core::findIfOrNull(state->members, places);
+    if (member == nullptr || std::ranges::count_if(state->members, places) != 1)
+        return MachineNaming {};
     return NamingOfMember(state, member->id);
 }
 
