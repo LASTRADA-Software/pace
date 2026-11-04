@@ -2497,8 +2497,14 @@ gives it none, so each rule below is what keeps a session's fleet controls on th
   local), answered `403` and counted (`McpRequestsRefusedNotLoopback`). The second check is not
   redundant: it is what stops a future change to the bind from widening who is answered without
   also changing this. `--mcp-listen` is `Reloadable::No`, so a reload cannot widen it either.
-- **Its own thread, never a reactor's and never the dashboard's.** Hostile or slow MCP input may
-  stall only MCP. A forwarded call is posted onto `NodeIoLoop`, which dials through the connector,
+- **Its own threads, never a reactor's and never the dashboard's.** Hostile or slow MCP input may
+  stall only MCP, and holds a SLOT, never the surface: each connection is served on one of
+  `McpEndpoint::MaxConcurrentRequests` threads of the surface's own
+  (`AdminConnectionServing::OnOwnThreads`), the next past the cap is answered `503` at once, and a
+  peer that sends nothing frees its slot in `McpEndpoint::Deadlines.firstByte` (two seconds, the
+  surface's own row and not the dashboard's thirty). Over a blocking listener `OnAcceptThread`
+  serves ONE connection at a time whatever the cap says -- twenty silent connects held MCP for
+  614 s measured before this. A forwarded call is posted onto `NodeIoLoop`, which dials through the connector,
   and the MCP thread waits on a condition variable bounded by `McpUpstream::CallDeadline`. A wait
   that runs out CANCELS what it waited for, so no frame stays parked for a reply nobody reads.
 - **No credential is added, and the node acts AS ITSELF.** A forwarded call rides the node's own

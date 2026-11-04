@@ -13,12 +13,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include <core/async/Task.hpp>
+#include <core/async/ThreadPoolExecutor.hpp>
 #include <core/net/AcceptLoopHealth.hpp>
 #include <core/net/IListener.hpp>
 #include <core/net/ISocket.hpp>
@@ -225,9 +227,43 @@ enum class AdminBuiltInRoutes : std::uint8_t
     Last
 };
 
+/// Where an accepted connection is served.
+///
+/// In-process only: never transmitted or persisted, so the values carry no contract.
+enum class AdminConnectionServing : std::uint8_t
+{
+    /// On the accept thread, to its end, before the next accept: the admin surface. Its listener
+    /// blocks, so `maxConcurrentRequests` is never reached and a connection that sends nothing holds
+    /// the surface for `AdminDeadlines::firstByte`. Right for a scrape and a probe, which are short.
+    OnAcceptThread = 0,
+    /// On a thread of the server's own, one per in-flight request up to `maxConcurrentRequests`: a
+    /// held connection holds one slot, never the surface, and the next connection past the cap is
+    /// answered `503` at once. For a surface whose requests run long (MCP: a tool asks the leader).
+    OnOwnThreads,
+    Last
+};
+
+/// The bounds one instance of this server reads and lingers under, as data: a surface states its
+/// own row rather than a branch choosing between two sets of constants.
+///
+/// The default row is the admin surface's, every figure argued at its `AdminHttpServer` constant.
+struct AdminDeadlines
+{
+    /// How long a peer may hold the connection having sent nothing (`AdminHttpServer::FirstByteTimeout`).
+    std::chrono::milliseconds firstByte { 30000 };
+    /// How long one read of a request in progress may take (`AdminHttpServer::RequestTimeout`).
+    std::chrono::milliseconds request { 2000 };
+    /// How long the whole head may take once begun (`AdminHttpServer::HeadTimeout`).
+    std::chrono::milliseconds head { 10000 };
+    /// How long the whole body may take once the head is complete (`AdminHttpServer::BodyTimeout`).
+    std::chrono::milliseconds body { 2000 };
+    /// How a served or refused connection is closed (`AdminHttpServer::Linger`).
+    LingerBounds linger { .total = std::chrono::milliseconds { 2000 }, .maxBytes = std::size_t { 64 } * 1024, .reads = 4 };
+};
+
 /// How one instance of this server is shaped, beside the routes it serves.
 ///
-/// Three facts that were constants of the one admin surface, and are columns now that a second
+/// Facts that were constants of the one admin surface, and are columns now that a second
 /// surface (MCP) runs the same hardened HTTP code: one implementation, as the design requires,
 /// rather than a sibling that shares its parsing and drifts on everything else.
 struct AdminServerProfile
@@ -237,8 +273,12 @@ struct AdminServerProfile
     std::string_view surface { "admin" };
     /// How many requests may be in flight before the next connection is answered `503`.
     std::size_t maxConcurrentRequests { 32 };
+    /// The bounds every connection is read and closed under.
+    AdminDeadlines deadlines {};
     /// Whether `/metrics` and `/healthz` are served.
     AdminBuiltInRoutes builtIns { AdminBuiltInRoutes::MetricsAndHealth };
+    /// Where an accepted connection is served.
+    AdminConnectionServing serving { AdminConnectionServing::OnAcceptThread };
 };
 
 /// Describe an admin endpoint (`/metrics`, `/healthz`) the DAEMON could not bind.
@@ -313,7 +353,7 @@ class AdminHttpServer
     /// The endpoint serves one connection at a time on its owning thread, so an
     /// idle client that never finishes its request head would otherwise wedge it
     /// for everybody (slowloris).
-    static constexpr auto RequestTimeout = std::chrono::milliseconds { 2000 };
+    static constexpr auto RequestTimeout = AdminDeadlines {}.request;
 
     /// How long a peer may hold the connection having sent **nothing**.
     ///
@@ -335,7 +375,7 @@ class AdminHttpServer
     /// `RequestTimeout` the moment a byte arrives**, so the two bounds never overlap
     /// and neither is enforced by a retry loop -- a loop would have to assume the read
     /// consumed real time, which a non-blocking or reactor-backed socket does not.
-    static constexpr auto FirstByteTimeout = std::chrono::milliseconds { 30000 };
+    static constexpr auto FirstByteTimeout = AdminDeadlines {}.firstByte;
 
     /// How long the whole request head may take once the peer has started.
     ///
@@ -343,14 +383,14 @@ class AdminHttpServer
     /// under each deadline holds a slot for `MaxRequestBytes` reads. A per-read bound
     /// cannot express a total and a total cannot express a stall, so both exist and
     /// neither is derived from the other.
-    static constexpr auto HeadTimeout = std::chrono::milliseconds { 10000 };
+    static constexpr auto HeadTimeout = AdminDeadlines {}.head;
 
     /// How long the whole body may take once the head is complete.
     ///
     /// A named bound of its own rather than `RequestTimeout` reused by accident: `RequestTimeout`
     /// is per READ, and a body of `maxBodyBytes` dribbled one byte per read would hold the slot
     /// for that many reads. Equal to it today, which is a choice and not a derivation.
-    static constexpr auto BodyTimeout = RequestTimeout;
+    static constexpr auto BodyTimeout = AdminDeadlines {}.body;
 
     /// How long a served connection listens to its client before closing, and how much.
     ///
@@ -361,7 +401,8 @@ class AdminHttpServer
     /// measurement). Short, because these sockets BLOCK the one admin thread while it
     /// listens: no longer than one `RequestTimeout`, spread over the reads -- a read
     /// that meets a quarter of it in silence ends the linger.
-    static constexpr LingerBounds Linger { .total = RequestTimeout, .maxBytes = std::size_t { 64 } * 1024, .reads = 4 };
+    static constexpr LingerBounds Linger = AdminDeadlines {}.linger;
+    static_assert(Linger.total == RequestTimeout, "the admin linger is one RequestTimeout, as argued above");
 
     /// Provider for a fresh metrics snapshot (storage stats + uptime), so
     /// `/metrics` reflects live state on each scrape rather than a stale copy.
@@ -395,7 +436,7 @@ class AdminHttpServer
                     std::vector<AdminRoute> routes = {},
                     core::net::ITlsContext* tls = nullptr,
                     std::span<MetricsSurface const> surfaces = EverySurface,
-                    AdminServerProfile profile = {}) noexcept;
+                    AdminServerProfile profile = {});
 
     /// Accept loop; returns when the listener is closed via Shutdown().
     /// @return Task that resolves when the accept loop exits.
@@ -451,6 +492,10 @@ class AdminHttpServer
     /// What this instance reports as, its request cap and its built-in routes.
     AdminServerProfile _profile;
     std::atomic<bool> _shuttingDown { false };
+    /// The threads an `AdminConnectionServing::OnOwnThreads` profile serves its connections on, one per
+    /// in-flight request; null for `OnAcceptThread`. Declared after everything a connection borrows, so it is
+    /// destroyed -- its threads joined -- first.
+    std::unique_ptr<core::async::ThreadPoolExecutor> _connections;
     /// Number of admin requests currently being served as detached tasks.
     /// Bumped in the accept loop, decremented at the end of each request.
     std::atomic<std::size_t> _inFlight { 0 };
@@ -482,6 +527,7 @@ class AdminHttpServer
 ///                 exercising another route; `AdminHttpServer` always passes its registry.
 /// @param builtIns Whether `/metrics` and `/healthz` are answered; with `None` they are a `404`
 ///                 and @p metrics, @p snapshotProvider and @p liveness are never read.
+/// @param deadlines The bounds the head and body are read under; the admin surface's by default.
 [[nodiscard]] core::async::Task<void> ServeAdminHttp(core::net::ISocket* socket,
                                                      IMetricsSink const* metrics,
                                                      AdminHttpServer::SnapshotProvider snapshotProvider,
@@ -489,6 +535,7 @@ class AdminHttpServer
                                                      std::span<AdminRoute const> routes = {},
                                                      std::span<MetricsSurface const> surfaces = EverySurface,
                                                      core::net::AcceptLoopHealth const* liveness = nullptr,
-                                                     AdminBuiltInRoutes builtIns = AdminBuiltInRoutes::MetricsAndHealth);
+                                                     AdminBuiltInRoutes builtIns = AdminBuiltInRoutes::MetricsAndHealth,
+                                                     AdminDeadlines deadlines = {});
 
 } // namespace Pace

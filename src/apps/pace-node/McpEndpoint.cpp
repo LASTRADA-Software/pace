@@ -91,7 +91,9 @@ McpEndpoint::McpEndpoint(std::unique_ptr<core::net::IListener> listener,
         EverySurface,
         AdminServerProfile { .surface = SurfaceName,
                              .maxConcurrentRequests = MaxConcurrentRequests,
-                             .builtIns = AdminBuiltInRoutes::None }) },
+                             .deadlines = Deadlines,
+                             .builtIns = AdminBuiltInRoutes::None,
+                             .serving = AdminConnectionServing::OnOwnThreads }) },
     _boundEndpoint { std::move(boundEndpoint) },
     _thread { [http = _http.get()] { core::async::syncRun(http->Run()); } }
 {

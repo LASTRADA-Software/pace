@@ -27,6 +27,7 @@
 
 #include <core/async/IExecutor.hpp>
 #include <core/async/ParkedWork.hpp>
+#include <core/async/ResumeOn.hpp>
 #include <core/async/Task.hpp>
 #include <core/net/ITlsContext.hpp>
 
@@ -434,7 +435,9 @@ namespace
     /// 60 KB head to `/healthz` are both answered `200 OK`, from a head this server
     /// only read the first 8,192 bytes of. That is the defect. A route reading no
     /// headers survives it by luck; `/fleet` reads a credential and does not.
-    core::async::Task<RequestHead> ReadRequestHead(core::net::ISocket* socket, core::platform::IClock* clock)
+    core::async::Task<RequestHead> ReadRequestHead(core::net::ISocket* socket,
+                                                   core::platform::IClock* clock,
+                                                   AdminDeadlines deadlines)
     {
         std::string buffer;
         bool sawHeadEnd = false;
@@ -449,7 +452,7 @@ namespace
         // whose reads suspend -- turns it into a CPU spin. `FailingReadSocket` made it
         // burn 10.00 s at 99% CPU. That is `waited += poll` inverted: refusing to COUNT
         // a sleep is the recorded rule; refusing to ASSUME one is the same rule.
-        socket->setReceiveDeadline(AdminHttpServer::FirstByteTimeout);
+        socket->setReceiveDeadline(deadlines.firstByte);
         auto started = clock->now();
         while (!sawHeadEnd && buffer.size() < MaxRequestBytes)
         {
@@ -490,7 +493,7 @@ namespace
                 // bound that stops a slowloris, and start the total here rather than at
                 // accept -- a peer that thought for 20 s and then asked promptly is not
                 // slow, and charging it the wait would refuse the case #828 is about.
-                socket->setReceiveDeadline(AdminHttpServer::RequestTimeout);
+                socket->setReceiveDeadline(deadlines.request);
                 started = clock->now();
             }
             // Rescan from three bytes before the freshly-appended region: the
@@ -504,7 +507,7 @@ namespace
             // byte under each `RequestTimeout` never trips it and would otherwise hold a
             // slot for `MaxRequestBytes` reads. Checked after a SUCCESSFUL read, so it
             // costs nothing on the ordinary path and cannot spin.
-            if (!sawHeadEnd && clock->now() - started >= AdminHttpServer::HeadTimeout)
+            if (!sawHeadEnd && clock->now() - started >= deadlines.head)
                 co_return RequestHead { .outcome = AdminHeadOutcome::Truncated };
         }
 
@@ -742,16 +745,18 @@ namespace
     /// @param clock What the total is measured on.
     /// @param overflow What the head read held past the blank line.
     /// @param length The declared body length, already checked against the route's ceiling.
+    /// @param total The whole body's bound (`AdminDeadlines::body`), which also bounds each read.
     /// @return The body, or the outcome that ended the read.
     core::async::Task<BodyRead> ReadBody(core::net::ISocket* socket,
                                          core::platform::IClock* clock,
                                          std::string_view overflow,
-                                         std::size_t length)
+                                         std::size_t length,
+                                         std::chrono::milliseconds total)
     {
         BodyRead result;
         result.body.assign(overflow.substr(0, length));
         if (result.body.size() < length)
-            socket->setReceiveDeadline(AdminHttpServer::BodyTimeout);
+            socket->setReceiveDeadline(total);
         auto const started = clock->now();
         while (result.body.size() < length)
         {
@@ -772,7 +777,7 @@ namespace
                 co_return result;
             }
             result.body.append(reinterpret_cast<char const*>(chunk.data()), *read);
-            if (result.body.size() < length && clock->now() - started >= AdminHttpServer::BodyTimeout)
+            if (result.body.size() < length && clock->now() - started >= total)
             {
                 result.outcome = AdminHeadOutcome::Truncated;
                 co_return result;
@@ -791,7 +796,8 @@ core::async::Task<void> ServeAdminHttp(core::net::ISocket* socket,
                                        std::span<AdminRoute const> routes,
                                        std::span<MetricsSurface const> surfaces,
                                        core::net::AcceptLoopHealth const* liveness,
-                                       AdminBuiltInRoutes builtIns)
+                                       AdminBuiltInRoutes builtIns,
+                                       AdminDeadlines deadlines)
 {
     // TLS terminates here rather than in the accept loop, so a handshake failure
     // costs the same detached task a slow request does and never the loop. A
@@ -802,7 +808,7 @@ core::async::Task<void> ServeAdminHttp(core::net::ISocket* socket,
     // reads this, never a view into anything this frame may free.
     auto peerHost = socket->peerAddress();
 
-    auto const request = co_await ReadRequestHead(socket, clock);
+    auto const request = co_await ReadRequestHead(socket, clock, deadlines);
     if (request.outcome != AdminHeadOutcome::Complete)
     {
         // The disposition is read off `AdminHeadOutcomeTable`, never decided here.
@@ -933,7 +939,7 @@ core::async::Task<void> ServeAdminHttp(core::net::ISocket* socket,
 
     // Owned by this frame, which outlives the handler call below: the handler's `body` view
     // borrows it, and nothing moves it once the view exists.
-    auto bodyRead = co_await ReadBody(socket, clock, request.overflow, length);
+    auto bodyRead = co_await ReadBody(socket, clock, request.overflow, length, deadlines.body);
     if (bodyRead.outcome != AdminHeadOutcome::Complete)
     {
         auto const& row = AdminHeadOutcomeTable[static_cast<std::size_t>(bodyRead.outcome)];
@@ -976,7 +982,7 @@ AdminHttpServer::AdminHttpServer(core::net::IListener& listener,
                                  std::vector<AdminRoute> routes,
                                  core::net::ITlsContext* tls,
                                  std::span<MetricsSurface const> surfaces,
-                                 AdminServerProfile profile) noexcept:
+                                 AdminServerProfile profile):
     _listener { listener },
     _metrics { metrics },
     _snapshotProvider { std::move(snapshotProvider) },
@@ -987,7 +993,12 @@ AdminHttpServer::AdminHttpServer(core::net::IListener& listener,
     _routes { std::move(routes) },
     _tls { tls },
     _surfaces { surfaces },
-    _profile { profile }
+    _profile { profile },
+    // One thread per request the cap admits: a connection blocks the thread it is served on (the listener and
+    // its sockets block), so fewer threads than slots would queue an admitted request behind a held one.
+    _connections { profile.serving == AdminConnectionServing::OnOwnThreads
+                       ? std::make_unique<core::async::ThreadPoolExecutor>(profile.maxConcurrentRequests)
+                       : nullptr }
 {
 }
 
@@ -1005,10 +1016,17 @@ static core::async::DetachedTask ServeAdminConnection(std::unique_ptr<core::net:
                                                       std::span<MetricsSurface const> surfaces,
                                                       core::net::AcceptLoopHealth const* liveness,
                                                       AdminBuiltInRoutes builtIns,
+                                                      AdminDeadlines deadlines,
+                                                      core::async::IExecutor* home,
                                                       std::atomic<std::size_t>* inFlight)
 {
-    co_await ServeAdminHttp(socket.get(), metrics, std::move(snapshotProvider), clock, routes, surfaces, liveness, builtIns);
-    (void) co_await CloseLingering(socket.get(), nullptr, AdminHttpServer::Linger);
+    // Off the accept thread first, when the profile serves on threads of its own: every read below blocks, and
+    // until this hop it would block the loop that accepts the next connection.
+    if (home != nullptr)
+        co_await core::async::ResumeOn { *home };
+    co_await ServeAdminHttp(
+        socket.get(), metrics, std::move(snapshotProvider), clock, routes, surfaces, liveness, builtIns, deadlines);
+    (void) co_await CloseLingering(socket.get(), nullptr, deadlines.linger);
     inFlight->fetch_sub(1, std::memory_order_acq_rel);
 }
 
@@ -1061,7 +1079,7 @@ core::async::Task<void> AdminHttpServer::Run()
             (void) co_await WriteResponse(
                 (*accepted).get(),
                 PlainRefusal("503 Service Unavailable", std::format("{}: too many concurrent reqs\n", _profile.surface)));
-            (void) co_await CloseLingering((*accepted).get(), nullptr, Linger);
+            (void) co_await CloseLingering((*accepted).get(), nullptr, _profile.deadlines.linger);
             continue;
         }
         ServeAdminConnection(core::net::wrapTls(std::move(*accepted), _tls, AdminTlsExecutor()),
@@ -1072,6 +1090,8 @@ core::async::Task<void> AdminHttpServer::Run()
                              _surfaces,
                              &_acceptLoops,
                              _profile.builtIns,
+                             _profile.deadlines,
+                             _connections.get(),
                              &_inFlight);
     }
     // Shut down between accepts: a loop that was degraded says it stopped.

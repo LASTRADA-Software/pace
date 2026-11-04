@@ -35,9 +35,12 @@ namespace Pace::Node
 /// connection's peer is on this machine (`McpAdmits`) before the envelope is parsed -- so a future
 /// bind that widened the address could not widen who is answered without also changing this.
 ///
-/// **Its own thread, never the dashboard's and never a reactor's.** Hostile or slow MCP input can
-/// then stall only MCP: the head and body deadlines bound one connection, and
-/// `MaxConcurrentRequests` bounds how many are held at once.
+/// **Its own threads, never the dashboard's and never a reactor's.** The accept loop runs on a thread of its
+/// own and hands every connection to one of `MaxConcurrentRequests` serving threads
+/// (`AdminConnectionServing::OnOwnThreads`), so a held connection holds one slot, never the surface; past the
+/// cap the next connection is answered `503` at once. `Deadlines` bounds how long a slot can be held without a
+/// request: a peer that sends nothing frees its slot in two seconds, so idle or trickling connects can make
+/// MCP refuse for about that long, never wait. Hostile or slow MCP input stalls only MCP.
 
 /// Whether a connection may be answered by the MCP surface.
 ///
@@ -64,12 +67,31 @@ namespace Pace::Node
 class McpEndpoint
 {
   public:
-    /// How many MCP requests are served at once before the next connection is answered `503`.
+    /// How many MCP requests are served at once -- each on a serving thread of its own -- before the next
+    /// connection is answered `503`.
     ///
     /// Small, because the only legitimate caller is one or two sessions on this machine, each
     /// sending one request at a time over a fresh connection; anything holding more than this is
     /// either a bug or somebody trying to tie the surface up.
     static constexpr std::size_t MaxConcurrentRequests = 4;
+
+    /// The bounds an MCP connection is read and closed under: its own row, not the dashboard's.
+    ///
+    /// `firstByte` is two seconds rather than the dashboard's thirty because the thirty exists for a
+    /// browser's speculative preconnect (#828), which no MCP client opens: a peer that connects and says
+    /// nothing is broken or hostile, and holds a slot until this frees it. `head` is two seconds in total for
+    /// the same reason, so a client dribbling its head frees the slot as fast as a silent one; `request` and
+    /// `body` keep the dashboard's figures, which already were two. The linger is short because a `503`
+    /// written past the cap lingers on the ACCEPT thread: a quarter of 400 ms of silence ends it, so sixteen
+    /// silent connects past the cap delay the next accept by under two seconds rather than eight.
+    static constexpr AdminDeadlines Deadlines {
+        .firstByte = std::chrono::milliseconds { 2000 },
+        .request = std::chrono::milliseconds { 2000 },
+        .head = std::chrono::milliseconds { 2000 },
+        .body = std::chrono::milliseconds { 2000 },
+        .linger =
+            LingerBounds { .total = std::chrono::milliseconds { 400 }, .maxBytes = std::size_t { 64 } * 1024, .reads = 4 },
+    };
 
     /// The path the endpoint answers.
     static constexpr std::string_view Path { "/mcp" };

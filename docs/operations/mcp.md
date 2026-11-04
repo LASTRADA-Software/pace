@@ -259,6 +259,6 @@ The member's side of this is described in
 |---|---|
 | The node refuses to start, naming `--mcp-listen` | The address is not loopback. Use a bare port. |
 | `403` | The request did not come from this machine, or a browser page sent it from an origin that is not a loopback page. |
-| A call that takes long to start | The surface serves one request at a time on its one thread, and a further client waits in the kernel's queue until the request ahead of it is answered. A slow request (a forwarded call waiting out its 10-second deadline) delays the next one. |
+| `503` with `mcp: too many concurrent reqs` | The surface serves four requests at once, each on a thread of its own, and refuses a fifth at once rather than queueing it. Retry; a slot frees when a request ahead is answered. A request is answered within its forwarded call's 10-second deadline. A connection that sends nothing gives its slot back after two seconds, so a local process holding connections open can make the surface refuse for about that long, not longer. |
 | A tool error naming a node that could not be reached | The leader, or the named member, did not answer within the deadline. The error says which. |
 | *"lacks operator standing (it is not a voter)"* | You asked a learner to act. Run the tool from a voter's machine, or promote this node. |

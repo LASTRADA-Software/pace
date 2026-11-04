@@ -35,6 +35,7 @@
 #include <core/net/AcceptLoopHealth.hpp>
 #include <core/net/BlockingConnector.hpp>
 #include <core/net/ISocket.hpp>
+#include <tests/BoundedWait.hpp>
 #include <tests/HostNamingFakes.hpp>
 #include <tests/NodeFormationFakes.hpp>
 #include <tests/RelabelledPeerListener.hpp>
@@ -391,4 +392,83 @@ TEST_CASE("an MCP port another listener holds refuses to start, naming the addre
     auto const started = McpEndpoint::Start(cfg, {}, metrics, logger, acceptLoops);
     REQUIRE_FALSE(started.has_value());
     CHECK(started.error().contains(std::format("127.0.0.1:{}", holder->boundPort())));
+}
+
+namespace
+{
+/// A connection to @p port that sends nothing: what a hostile or broken local client holds.
+/// @param port Where the endpoint listens.
+/// @return The connected socket.
+[[nodiscard]] std::unique_ptr<core::net::ISocket> IdleConnection(std::uint16_t port)
+{
+    core::net::BlockingConnector connector;
+    auto client =
+        core::async::syncRun(connector.connect("127.0.0.1", port, core::net::DialOptions { .connectTimeout = 5s }));
+    REQUIRE(client.has_value());
+    return std::move(*client);
+}
+} // namespace
+
+TEST_CASE("mcp answers a request while an idle connection holds a slot", "[node][mcp][hostile]")
+{
+    // The surface serves each connection on a thread of its own: a peer that connected and said nothing holds one
+    // slot, never the surface. Served on the accept thread, this request would wait out the idle one's whole
+    // first-byte bound before it was even read -- which is what the elapsed bound tells apart.
+    RunningEndpoint const local;
+    auto const idle = IdleConnection(local.port);
+    auto const started = std::chrono::steady_clock::now();
+    auto const response = PostMcp(local.port, DiscoverHeaders, DiscoverBody);
+    auto const elapsed = std::chrono::steady_clock::now() - started;
+    CHECK(StatusLineOf(response) == "HTTP/1.1 200 OK");
+    CHECK(elapsed < McpEndpoint::Deadlines.firstByte);
+}
+
+TEST_CASE("mcp answers 503 at once past its concurrency cap", "[node][mcp][hostile]")
+{
+    // `MaxConcurrentRequests` idle connections fill every slot, and the next is refused rather than queued. The
+    // accept order is the connect order, so the slots are taken before the refused one is accepted; and well inside
+    // the idle ones' first-byte bound, so none has been freed yet.
+    RunningEndpoint const local;
+    std::vector<std::unique_ptr<core::net::ISocket>> held;
+    for ([[maybe_unused]] auto const index: std::views::iota(std::size_t { 0 }, McpEndpoint::MaxConcurrentRequests))
+        held.push_back(IdleConnection(local.port));
+    auto const started = std::chrono::steady_clock::now();
+    auto const refused = PostMcp(local.port, DiscoverHeaders, DiscoverBody);
+    auto const elapsed = std::chrono::steady_clock::now() - started;
+    CHECK(StatusLineOf(refused) == "HTTP/1.1 503 Service Unavailable");
+    CHECK(elapsed < McpEndpoint::Deadlines.firstByte);
+
+    SECTION("and answers again once the held connections go")
+    {
+        held.clear();
+        // Each held connection's thread reads the close at once and frees its slot; the wait is bounded.
+        auto last = std::string {};
+        CHECK(Testing::WaitUntil(
+            "a slot freed by the closed connections to answer server/discover 200",
+            [&] {
+                last = std::string { StatusLineOf(PostMcp(local.port, DiscoverHeaders, DiscoverBody)) };
+                return last == "HTTP/1.1 200 OK";
+            },
+            [&] { return std::format("last answer: {}", last); },
+            Testing::WaitOptions { .step = {}, .context = {}, .bound = McpEndpoint::Deadlines.firstByte * 2 }));
+    }
+}
+
+TEST_CASE("mcp closes a connection that sends nothing after its own first-byte bound", "[node][mcp][hostile]")
+{
+    // A silent peer frees its slot in `Deadlines.firstByte`, not the admin surface's thirty seconds: the bound that
+    // decides how long four idle connects can keep MCP refusing. Closed without an answer -- it asked nothing.
+    static_assert(McpEndpoint::Deadlines.firstByte < AdminHttpServer::FirstByteTimeout,
+                  "MCP's first-byte bound is its own, and shorter than the dashboard's preconnect allowance");
+    RunningEndpoint const local;
+    auto const idle = IdleConnection(local.port);
+    idle->setReceiveDeadline(McpEndpoint::Deadlines.firstByte * 5);
+    auto const started = std::chrono::steady_clock::now();
+    auto const said = core::async::syncRun(ReadToClose(idle.get()));
+    auto const elapsed = std::chrono::steady_clock::now() - started;
+    CHECK(said.empty());
+    // Not sooner than the bound, less the time between the connect and this read starting...
+    CHECK(elapsed >= McpEndpoint::Deadlines.firstByte - 500ms);
+    // ...and closed by the server, well before this read's own deadline would have ended it.
+    CHECK(elapsed < McpEndpoint::Deadlines.firstByte * 3);
 }

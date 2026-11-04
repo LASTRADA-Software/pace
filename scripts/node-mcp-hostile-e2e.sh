@@ -14,21 +14,21 @@
 #   4. A body that stops         — `Content-Length: 100`, ten bytes sent, then silence: answered
 #                                  `408` and closed once `BodyTimeout` (2 s) passes, measured from
 #                                  the client's own monotonic clock -- not sooner, and not never.
-#   5. Twenty idle connects      — twenty sockets that send nothing, held open: the other surfaces
-#                                  answer while they are held, and once the client lets go the MCP
-#                                  surface answers again within a bound derived below.
+#   5. Twenty idle connects      — twenty sockets that send nothing, held open by the client: an MCP
+#                                  request made at once is ANSWERED -- `503` past the four slots, or
+#                                  `200` on a freed one -- inside `ProbeBound`, MCP answers `200`
+#                                  inside `RecoveryBound` while the twenty are STILL held, the server
+#                                  has ended all twenty itself (a `503` past the cap, or a silent
+#                                  close after MCP's two-second first-byte bound), and the other
+#                                  surfaces answer throughout.
 #
 # Throughout -- after every case, and DURING the two that hold a connection -- `/healthz` on
 # `--admin-listen` answers `200` inside `HealthzBound`, and a `pace-cc` compile through the node's
 # cache tier is a HIT: the FETCH reached the node and was answered, since a starved tier would have
 # timed out into a local compile. The node is alive at the end and stops cleanly.
 #
-# **What 5 deliberately does NOT assert: that MCP answers WHILE the twenty are held.** It does not.
-# The surface serves one connection at a time on one blocking thread, and a peer that sends nothing
-# holds it for `AdminHttpServer::FirstByteTimeout` (30 s), so twenty hold it for about ten minutes
-# -- measured, and reported to the owner for a ruling rather than written down here as the expected
-# behaviour (Task 21 report). The case asserts the half that is settled: nothing ELSE starves, and
-# MCP recovers as soon as the connections go.
+# Case 5 is the one that was red in fact before MCP served its connections on threads of its own:
+# one blocking thread, thirty seconds per silent peer, and 614 s measured for twenty (Task 21).
 #
 # Registered in `src/tests/CMakeLists.txt`: it names two executables (`pace-node`, `pace-cc`).
 #
@@ -101,11 +101,16 @@ readonly HealthzBound=1.0
 # scheduling -- far below the 30 s a never-armed deadline would show as.
 readonly TruncatedAtLeast=1.5
 readonly TruncatedAtMost=10.0
-# Twenty idle sockets, closed by the client: the connection being read sees FIN at once, and every
-# one still queued is accepted and read to EOF at once -- a peer that sent nothing is closed with no
-# answer and no linger. Measured at 2 ms; ten seconds holds five `RequestTimeout`s of slack, and is
-# still a third of the one `FirstByteTimeout` a missed FIN would cost.
+# Twenty idle sockets against `McpEndpoint::MaxConcurrentRequests` (4) slots. Four take a slot each
+# and hold it for MCP's first-byte bound (`McpEndpoint::Deadlines.firstByte`, 2 s); the other sixteen
+# are answered `503` on the accept thread, each lingering at most a quarter of the 400 ms linger in
+# silence -- 1.6 s for all of them. So a request made at once is answered by about 2 s, `503` or `200`
+# by which came first: `ProbeBound` is that with three seconds of scheduling. A `200` follows once the
+# four held slots are freed by their own bound, at about 2 s: `RecoveryBound` adds eight. Served one at
+# a time instead, twenty silent peers cost twenty first-byte bounds -- forty seconds at 2 s each, and
+# the 614 s measured at the dashboard's 30 s -- so either bound tells the two apart.
 readonly IdleConnects=20
+readonly ProbeBound=5
 readonly RecoveryBound=10
 
 node_port="$(free_port)"
@@ -302,9 +307,8 @@ mcp_answers || fail "the MCP surface did not answer once the truncated body was 
 
 # ------------------------------------------------------------- 5. twenty idle connects
 # The holder opens the sockets, says so, and holds them until the release file appears (60 s at
-# most, so a failed run cannot leave it holding). On release it reports how many the SERVER had
-# already ended -- the first is the one being read, so fewer than all means the hold was real while
-# the checks below ran -- and then closes every one.
+# most, so a failed run cannot leave it holding). On release it reports what the SERVER did with each
+# -- answered `503`, closed silently, or still holding it -- and then closes every one.
 idle_opened="${workdir}/idle.opened"
 idle_release="${workdir}/idle.release"
 idle_result="${workdir}/idle.result"
@@ -316,32 +320,56 @@ open(opened, 'w').write('%d\n' % n)
 deadline = time.monotonic() + 60
 while not os.path.exists(release) and time.monotonic() < deadline:
     time.sleep(0.05)
-ended = 0
+refused = silent = held = 0
 for s in socks:
     s.setblocking(False)
     try:
-        ended += 1 if s.recv(1) == b'' else 0
+        said = s.recv(64)
+        if said.startswith(b'HTTP/1.1 503'):
+            refused += 1
+        elif said == b'':
+            silent += 1
+        else:
+            held += 1
     except BlockingIOError:
-        pass
+        held += 1
     except OSError:
-        ended += 1
+        silent += 1
 for s in socks:
     s.close()
-open(result + '.tmp', 'w').write('%d %s\n' % (ended, 'released' if os.path.exists(release) else 'expired'))
+open(result + '.tmp', 'w').write('%d %d %d %s\n' % (refused, silent, held, 'released' if os.path.exists(release) else 'expired'))
 os.rename(result + '.tmp', result)
 " "$mcp_port" "$IdleConnects" "$idle_opened" "$idle_release" "$idle_result" &
 idle_holding() { [[ -s "$idle_opened" ]]; }
 wait_until idle_holding "the holder to open ${IdleConnects} idle connections" "$node_pid" "${workdir}/node.log" 30
+# At once, while every slot can still be held: answered, by curl's own clock, and which answer is said.
+probe="$(curl -s -o /dev/null -m 20 -w '%{http_code} %{time_total}' -X POST -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" -H "MCP-Protocol-Version: ${MODERN}" \
+    -H "Mcp-Method: server/discover" \
+    --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"server/discover\",\"params\":{${META}}}" \
+    "http://127.0.0.1:${mcp_port}/mcp")" || fail "an MCP request made while ${IdleConnects} idle connections were held was not answered (curl status $?)"
+probe_status="${probe%% *}"
+probe_took="${probe#* }"
+case "$probe_status" in
+    200 | 503) ;;
+    *) fail "an MCP request made while ${IdleConnects} idle connections were held was answered ${probe_status}, neither 200 nor 503" ;;
+esac
+below "$probe_took" "$ProbeBound" \
+    || fail "an MCP request made while ${IdleConnects} idle connections were held took ${probe_took}s to be answered (${probe_status}), against a ${ProbeBound}s bound"
+e2e_note "an MCP request made while ${IdleConnects} idle connections were held was answered ${probe_status} in ${probe_took}s"
 surfaces_answer "while ${IdleConnects} idle connections are held"
+# And 200, with every one of the twenty still open on the client's side: their slots are freed by the server.
+wait_until mcp_answers "the MCP surface to answer 200 while ${IdleConnects} idle connections are still held" "$node_pid" "${workdir}/node.log" "$RecoveryBound"
 : > "$idle_release"
 idle_reported() { [[ -s "$idle_result" ]]; }
 wait_until idle_reported "the holder to release its ${IdleConnects} connections" "$node_pid" "${workdir}/node.log" 30
-read -r idle_ended idle_how < "$idle_result"
+read -r idle_refused idle_silent idle_held idle_how < "$idle_result"
 [[ "$idle_how" == released ]] || fail "the idle holder expired before the checks released it"
-[[ "$idle_ended" -lt "$IdleConnects" ]] \
-    || fail "the server had ended all ${IdleConnects} idle connections before they were released, so the checks above ran against no hold"
-e2e_note "the server had ended ${idle_ended} of ${IdleConnects} idle connections when the client let go"
-wait_until mcp_answers "the MCP surface to answer again once ${IdleConnects} idle connections were closed" "$node_pid" "${workdir}/node.log" "$RecoveryBound"
+[[ "$idle_held" -eq 0 ]] \
+    || fail "the server still held ${idle_held} of ${IdleConnects} idle connections once MCP answered again (${idle_refused} answered 503, ${idle_silent} closed silently)"
+[[ "$idle_refused" -ge 1 ]] \
+    || fail "none of ${IdleConnects} idle connections was answered 503, so the cap of four refused nothing (${idle_silent} closed silently)"
+e2e_note "of ${IdleConnects} idle connections the server answered ${idle_refused} with 503 and closed ${idle_silent} silently; it held none"
 surfaces_answer "after the idle connections"
 
 kill -0 "$node_pid" 2>/dev/null || fail "the node is not running after the hostile input"
