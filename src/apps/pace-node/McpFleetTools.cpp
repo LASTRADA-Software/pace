@@ -10,6 +10,7 @@
 #include <Pace/Core/SaturatingAdd.hpp>
 #include <Pace/Distributed/FleetChart.hpp>
 #include <Pace/Distributed/FleetHistory.hpp>
+#include <Pace/Distributed/ShownName.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <algorithm>
@@ -253,7 +254,10 @@ namespace
         auto id = StringAt(row, "node_id");
         if (!id.has_value() || id->empty())
             return MachineNaming {};
-        auto const replicated = StringAt(row, "name_source") == std::optional<std::string> { "replicated" };
+        // The word the leader's renderer spells the source with, so a renamed word cannot silently null every name.
+        auto const replicated =
+            StringAt(row, "name_source")
+            == std::optional { std::string { Distributed::NameSourceWord(Distributed::NameSource::Replicated) } };
         return MachineNaming { .nodeId = std::move(id), .displayName = replicated ? StringAt(row, "name") : std::nullopt };
     }
 

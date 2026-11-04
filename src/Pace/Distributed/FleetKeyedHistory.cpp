@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/SaturatingAdd.hpp>
 #include <Pace/Core/Utf8.hpp>
 #include <Pace/Distributed/FleetKeyedHistory.hpp>
 #include <Pace/Distributed/HistoryEnvelope.hpp>
 
 #include <algorithm>
 #include <chrono>
-#include <limits>
 #include <ranges>
 #include <utility>
 
@@ -40,14 +40,6 @@ namespace
     [[nodiscard]] constexpr std::int64_t RingSlots(FleetRing ring) noexcept
     {
         return static_cast<std::int64_t>(FleetRingTable[static_cast<std::size_t>(ring)].slots);
-    }
-
-    /// A sum that stops at the ceiling rather than wrapping: a damaged file's counts are bounded by nothing, and a
-    /// total that wrapped would read as a quiet fleet.
-    [[nodiscard]] constexpr std::uint64_t SaturatingAdd(std::uint64_t left, std::uint64_t right) noexcept
-    {
-        return right > std::numeric_limits<std::uint64_t>::max() - left ? std::numeric_limits<std::uint64_t>::max()
-                                                                        : left + right;
     }
 
     /// Whether @p key is text every document can carry and short enough to keep.
