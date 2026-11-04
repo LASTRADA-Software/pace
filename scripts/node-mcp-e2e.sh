@@ -305,10 +305,48 @@ readonly ACTION_META="\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"$
 action_node_port="$(free_port)"
 action_raft_port="$(free_port)"
 action_mcp_port="$(free_port)"
+# Whether this host has a compiler the worker can discover: without one it registers no toolchain, and 2f and 2g
+# have nothing to read.
+host_has_compiler() {
+    command -v cc >/dev/null 2>&1 || command -v c++ >/dev/null 2>&1 || command -v gcc >/dev/null 2>&1 \
+        || command -v clang >/dev/null 2>&1
+}
 # The capture walk is HELD until this file exists (the node's test seam, read only when the variable is set), so 2g
 # can assert that the worker registers while the walk has not run -- by state, never by a timing threshold.
 capture_release="${workdir}/capture-release"
-PACE_NODE_TEST_CAPTURE_HOLD="$capture_release" "$node" \
+# The toolchain-fingerprint cache the acting node reads, this run's own and WARM before it starts. 2g's held diff is a
+# property of a WARM start only: on a cache miss the registering survey walks the tree itself and keeps what it
+# walked, so the toolchain is recorded before the capture walk runs and the diff answers -- correctly. That is what
+# arm64 CI met with the caller's cache cold for the fingerprint 2g picked, while x86-64 and a developer machine had it
+# warm from earlier runs. So the cache is not the caller's (`$XDG_STATE_HOME`, else `~/.local/state`), whose
+# temperature this fixture can neither know nor change honestly, but a directory this run fills: a first node's
+# registering survey walks every discovered toolchain into it and stops, its own capture held and never released.
+toolchain_state="${workdir}/toolchain-state"
+mkdir -p "$toolchain_state"
+if host_has_compiler; then
+    warm_node_port="$(free_port)"
+    warm_raft_port="$(free_port)"
+    XDG_STATE_HOME="$toolchain_state" PACE_NODE_TEST_CAPTURE_HOLD="${workdir}/warm-never-released" "$node" \
+        --slots=1 \
+        --advertise "127.0.0.1:${warm_node_port}" \
+        --listen-node "127.0.0.1:${warm_node_port}" \
+        --listen-raft "127.0.0.1:${warm_raft_port}" \
+        --raft-self 127.0.0.1 \
+        --discovery= \
+        --cluster-dir "${workdir}/warm" \
+        > "${workdir}/warm.log" 2>&1 &
+    warm_pid=$!
+    node_pid="$warm_pid"
+    # Logged once the registering survey has served its map, so every fingerprint it computed is in the cache.
+    wait_for_log "the toolchain capture walk is held until" "$warm_pid" "the cache-warming node" "${workdir}/warm.log" 300
+    stop_and_require_clean_exit "$warm_pid" "the cache-warming node" 30 "${workdir}/warm.log"
+    node_pid=""
+    # The positive control: the warming node wrote HERE, so the variable reaches the cache the acting node reads.
+    [[ -n "$(ls -A "${toolchain_state}/pace-cc" 2>/dev/null)" ]] \
+        || fail "the cache-warming node left no toolchain-fingerprint cache under ${toolchain_state}/pace-cc"
+    e2e_note "warmed this run's toolchain-fingerprint cache: $(grep -c 'computed the toolchain fingerprint for' "${workdir}/warm.log") fingerprint(s)"
+fi
+XDG_STATE_HOME="$toolchain_state" PACE_NODE_TEST_CAPTURE_HOLD="$capture_release" "$node" \
     --slots=1 \
     --advertise "127.0.0.1:${action_node_port}" \
     --listen-node "127.0.0.1:${action_node_port}" \
@@ -469,8 +507,7 @@ e2e_note "each action left its audit line naming ${ACTION_CLIENT}; the read left
 # include trees on the heartbeat thread), so wait on that STATE. A host with no compiler on PATH registers
 # none, and the content check below has nothing to read: said, never passed as if it had been checked.
 action_endpoint="127.0.0.1:${action_node_port}"
-if command -v cc >/dev/null 2>&1 || command -v c++ >/dev/null 2>&1 || command -v gcc >/dev/null 2>&1 \
-    || command -v clang >/dev/null 2>&1; then
+if host_has_compiler; then
     toolchains_registered() {
         local body
         body="$(call_action toolchains '{}')"
@@ -510,6 +547,11 @@ if command -v cc >/dev/null 2>&1 || command -v c++ >/dev/null 2>&1 || command -v
     # exist), the worker registered above anyway, the node answers the diff with the transient "not yet captured"
     # refusal, and its log has no capture line yet. A worker that walked before registering could not have got here.
     [[ ! -e "$capture_release" ]] || fail "the capture release file exists before the test released it"
+    # And the start was WARM: the registering survey took every fingerprint from the cache and walked no tree, so
+    # nothing but the held capture can record inputs. A walk here would make the refusal below unreachable.
+    if grep -q "hashing [0-9]* toolchain file(s)" "${workdir}/node.log"; then
+        fail "the acting node's registering survey walked a toolchain tree although this run warmed its fingerprint cache, so its held diff cannot be told from a recorded one"
+    fi
     held_body="$(call_action toolchain_diff "{\"a\":{\"fingerprint\":\"${diff_fingerprint}\"},\"b\":{\"fingerprint\":\"${diff_fingerprint}\"}}")"
     json_check "toolchain_diff while the capture walk is held" "$held_body" \
         "d['result']['isError'] is True and 'has not yet finished the one walk per start' in d['result']['content'][0]['text']"
