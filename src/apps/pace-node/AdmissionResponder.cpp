@@ -252,8 +252,10 @@ namespace
         /// The machine-own charge goes FIRST, in the body rather than with the member: `Abandon` counts
         /// `AdmissionAbandoned` and pumps, and the count is what an observer on another thread acts on.
         /// Left to the member, the charge was released after the count announced it, so a reader that saw
-        /// the abandonment still found the slot held. (The pump is not that reader: the queue learns of
-        /// this record only through the machine's next budget report.)
+        /// the abandonment still found the slot held. The pump inside `Abandon` is not such a reader:
+        /// neither `Abandon` nor `PumpAndDeliver` reads `HeldChargeRegistry`, and no file under
+        /// `src/Pace` names it -- the queue learns of this record only through the machine's next
+        /// budget report (`MachineBudget.hpp`), so the order changes what is observed, not what is decided.
         ~AdmissionHold() override
         {
             ReleaseCharge();
