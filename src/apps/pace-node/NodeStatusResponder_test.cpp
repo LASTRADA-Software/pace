@@ -1670,6 +1670,25 @@ TEST_CASE("A node reports where it keeps its identity, and why there", "[node][n
     CHECK(Unwrap(decoded).stateDirectoryReason == runtime.stateDirectoryReason);
 }
 
+TEST_CASE("A state directory that is not text is reported as its bytes and never throws", "[node][node-status][defaults]")
+{
+    // On Windows `path.string()` THROWS for a path holding a lone surrogate, which would turn NODE-STATUS -- and the
+    // MCP `node_status` tool reading it -- into a failure. The path travels as its WTF-8 bytes (`PathBytes`) for the
+    // reader to mark, exactly as a POSIX directory's stray bytes do.
+    core::platform::ManualClock clock;
+    Fixture named { {}, clock };
+#if defined(_WIN32)
+    named.cfg.clusterDir = std::filesystem::path { std::wstring { L"C:\\state\\pace-" } + static_cast<wchar_t>(0xD800) };
+    auto const expected = std::string { "C:\\state\\pace-\xED\xA0\x80" };
+#else
+    named.cfg.clusterDir = std::filesystem::path { std::string { "/srv/pace-\xff" } };
+    auto const expected = std::string { "/srv/pace-\xff" };
+#endif
+    auto const runtime = named.status.Describe().runtime;
+    CHECK(runtime.stateDirectory == std::optional { expected });
+    CHECK(runtime.stateDirectoryReason.has_value());
+}
+
 TEST_CASE("A leader with an armed window reports auto-approve and the seconds left, and a manual one reports none",
           "[node][node-status][enrollment][auto-approve]")
 {

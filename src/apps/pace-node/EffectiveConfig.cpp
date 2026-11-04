@@ -5,10 +5,10 @@
 #include <Pace/Cluster/FleetPin.hpp>
 #include <Pace/Core/Compression.hpp>
 #include <Pace/Distributed/NodePolicy.hpp>
+#include <Pace/Platform/NarrowText.hpp>
 
 #include <algorithm>
 #include <array>
-#include <cstdint>
 #include <filesystem>
 #include <format>
 #include <iterator>
@@ -36,74 +36,6 @@ namespace
         if (text.empty())
             return {};
         return { std::string { text } };
-    }
-
-    /// The bytes a path holds, as text the wire carries -- never throwing, and never substituting.
-    ///
-    /// `path.string()` is the obvious spelling and the wrong one on Windows: it converts the UTF-16 the path holds
-    /// to the narrow encoding and THROWS for a sequence that does not convert (a lone surrogate, which a name read
-    /// through a wide API can carry), turning a status request into a 500. On POSIX the path IS its bytes. On
-    /// Windows each code unit is written as WTF-8 -- UTF-8 for every valid sequence, and a lone surrogate as the
-    /// three bytes UTF-8 would give it -- so a name that is not text travels as bytes that are not UTF-8, which
-    /// is what the reader marks (`NodeStatusView::ReadableText`), exactly as a POSIX path's stray bytes do.
-    /// @param path A path.
-    /// @return Its bytes.
-    [[nodiscard]] std::string PathBytes(std::filesystem::path const& path)
-    {
-#if defined(_WIN32)
-        constexpr auto HighFirst = std::uint32_t { 0xD800 };
-        constexpr auto HighLast = std::uint32_t { 0xDBFF };
-        constexpr auto LowFirst = std::uint32_t { 0xDC00 };
-        constexpr auto LowLast = std::uint32_t { 0xDFFF };
-        constexpr auto Supplementary = std::uint32_t { 0x10000 };
-        auto const& units = path.native();
-        auto text = std::string {};
-        auto const append = [&text](std::uint32_t codePoint) {
-            auto const byte = [](std::uint32_t value) {
-                return static_cast<char>(static_cast<unsigned char>(value));
-            };
-            if (codePoint < 0x80U)
-                text += byte(codePoint);
-            else if (codePoint < 0x800U)
-            {
-                text += byte(0xC0U | (codePoint >> 6U));
-                text += byte(0x80U | (codePoint & 0x3FU));
-            }
-            else if (codePoint < Supplementary)
-            {
-                text += byte(0xE0U | (codePoint >> 12U));
-                text += byte(0x80U | ((codePoint >> 6U) & 0x3FU));
-                text += byte(0x80U | (codePoint & 0x3FU));
-            }
-            else
-            {
-                text += byte(0xF0U | (codePoint >> 18U));
-                text += byte(0x80U | ((codePoint >> 12U) & 0x3FU));
-                text += byte(0x80U | ((codePoint >> 6U) & 0x3FU));
-                text += byte(0x80U | (codePoint & 0x3FU));
-            }
-        };
-        // A `while`: a surrogate pair consumes two units and anything else one, which no `for` head states.
-        auto index = std::size_t { 0 };
-        while (index < units.size())
-        {
-            auto codePoint = static_cast<std::uint32_t>(units[index]);
-            ++index;
-            if (codePoint >= HighFirst && codePoint <= HighLast && index < units.size())
-            {
-                auto const low = static_cast<std::uint32_t>(units[index]);
-                if (low >= LowFirst && low <= LowLast)
-                {
-                    codePoint = Supplementary + ((codePoint - HighFirst) << 10U) + (low - LowFirst);
-                    ++index;
-                }
-            }
-            append(codePoint);
-        }
-        return text;
-#else
-        return path.native();
-#endif
     }
 
     /// A path setting; an empty path names no file.

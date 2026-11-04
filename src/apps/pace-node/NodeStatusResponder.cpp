@@ -14,6 +14,7 @@
 #include <Pace/Core/PeerText.hpp>
 #include <Pace/Distributed/MachineStanding.hpp>
 #include <Pace/Distributed/MembershipWire.hpp>
+#include <Pace/Platform/NarrowText.hpp>
 #include <Pace/Protocol/SurfaceRefusal.hpp>
 
 #include <algorithm>
@@ -740,10 +741,12 @@ CompileCacheWire::NodeStatusFields ConfiguredNodeStatus::Describe() const
     // Where this node keeps its identity, and why there. One machine can hold two identities --
     // the service's in the machine-wide directory and a hand-started node's in the account's
     // own -- and an operator who finds both needs the reason beside each path to tell them
-    // apart. Both or neither, like the fields say.
+    // apart. Both or neither, like the fields say. Through `PathBytes`, never `path.string()`, which on Windows
+    // throws for a path that does not convert and would turn this answer into a failure: the bytes travel, and
+    // the reader marks what is not text.
     if (auto chosen = ChosenStateDirectory(_cfg); chosen.has_value())
     {
-        fields.runtime.stateDirectory = chosen->path.string();
+        fields.runtime.stateDirectory = PathBytes(chosen->path);
         fields.runtime.stateDirectoryReason = std::string { DescribeStateDirectoryOrigin(chosen->origin) };
     }
 

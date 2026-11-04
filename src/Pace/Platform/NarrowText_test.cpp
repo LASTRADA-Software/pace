@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <filesystem>
 #include <format>
 #include <optional>
 #include <string>
@@ -144,6 +145,62 @@ TEST_CASE("UTF-16 a Windows API wrote converts to UTF-8 and back, and malformed 
     CHECK_FALSE(WideTextFromUtf8(UmlautCp1252).has_value());
 }
 #endif
+
+TEST_CASE("UTF-16 units become WTF-8: well-formed sequences as UTF-8 and a lone surrogate as its own three bytes",
+          "[platform][narrowtext]")
+{
+    // Built unit by unit rather than from `u"..."` escapes: a hex escape is greedy, so `\xD800A` would read as one
+    // unit, and the cases are exactly the ones where the unit after a surrogate matters.
+    struct Case
+    {
+        std::string_view name;
+        std::u16string units;
+        std::string_view wtf8;
+    };
+    auto const cases = std::array {
+        Case { .name = "ASCII", .units = u"abc", .wtf8 = "abc"sv },
+        Case { .name = "two bytes: e-acute", .units = u"caf\u00E9", .wtf8 = "caf\xC3\xA9"sv },
+        Case {
+            .name = "three bytes: the last BMP unit before the surrogates", .units = u"\uD7FF", .wtf8 = "\xED\x9F\xBF"sv },
+        Case { .name = "a surrogate pair: U+1F600",
+               .units = { char16_t { 0xD83D }, char16_t { 0xDE00 } },
+               .wtf8 = "\xF0\x9F\x98\x80"sv },
+        Case { .name = "a high surrogate before a non-low unit, which it does not consume",
+               .units = { char16_t { 0xD800 }, u'A' },
+               .wtf8 = "\xED\xA0\x80"
+                       "A"sv },
+        Case { .name = "a lone low surrogate", .units = { char16_t { 0xDC00 } }, .wtf8 = "\xED\xB0\x80"sv },
+        Case { .name = "a reversed pair: low then high, neither paired",
+               .units = { char16_t { 0xDE00 }, char16_t { 0xD83D } },
+               .wtf8 = "\xED\xB8\x80\xED\xA0\xBD"sv },
+        Case { .name = "a trailing high surrogate", .units = { u'a', char16_t { 0xD800 } }, .wtf8 = "a\xED\xA0\x80"sv },
+        Case { .name = "a lone high surrogate between text",
+               .units = { u'a', char16_t { 0xD800 }, u'b' },
+               .wtf8 = "a\xED\xA0\x80"
+                       "b"sv },
+        Case { .name = "empty", .units = {}, .wtf8 = ""sv },
+    };
+    for (auto const& [name, units, wtf8]: cases)
+    {
+        INFO(name);
+        CHECK(Wtf8FromUtf16(units) == std::string { wtf8 });
+    }
+}
+
+TEST_CASE("A path's bytes are rendered without throwing and a POSIX path's bytes are returned as they stand",
+          "[platform][narrowtext]")
+{
+#if defined(_WIN32)
+    // The case `path.string()` throws for: a lone surrogate, which a name read through a wide API can carry.
+    auto const path = std::filesystem::path { std::wstring { L"C:\\state\\pace-" } + static_cast<wchar_t>(0xD800) };
+    CHECK(PathBytes(path) == "C:\\state\\pace-\xED\xA0\x80");
+    auto const text = std::filesystem::path { std::wstring { L"C:\\state\\caf\u00E9" } };
+    CHECK(PathBytes(text) == "C:\\state\\caf\xC3\xA9");
+#else
+    auto const path = std::filesystem::path { std::string { "/var/lib/pace-\xff" } };
+    CHECK(PathBytes(path) == "/var/lib/pace-\xff");
+#endif
+}
 
 TEST_CASE("The host policy separates this process from a tool it runs", "[platform][narrowtext]")
 {

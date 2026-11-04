@@ -2,7 +2,11 @@
 #include <Pace/Core/Utf8.hpp>
 #include <Pace/Platform/NarrowText.hpp>
 
+#include <cstddef>
+#include <cstdint>
 #include <limits>
+#include <string>
+#include <string_view>
 
 #if defined(_WIN32)
     #include <windows.h>
@@ -21,6 +25,66 @@ static_assert(Utf8CodePage == CP_UTF8);
 
 namespace
 {
+    /// `Wtf8FromUtf16`'s arithmetic, over any 16-bit code unit: `char16_t` for the portable entry point, a
+    /// Windows path's `wchar_t` for `PathBytes`. One body, so the two cannot drift.
+    /// @param units UTF-16 code units, not necessarily well-formed.
+    /// @return Their WTF-8 bytes.
+    template <typename CodeUnit>
+    [[nodiscard]] std::string Wtf8FromCodeUnits(std::basic_string_view<CodeUnit> units)
+    {
+        static_assert(sizeof(CodeUnit) == 2, "WTF-8 is defined over 16-bit code units");
+        constexpr auto HighFirst = std::uint32_t { 0xD800 };
+        constexpr auto HighLast = std::uint32_t { 0xDBFF };
+        constexpr auto LowFirst = std::uint32_t { 0xDC00 };
+        constexpr auto LowLast = std::uint32_t { 0xDFFF };
+        constexpr auto Supplementary = std::uint32_t { 0x10000 };
+        auto text = std::string {};
+        text.reserve(units.size());
+        auto const append = [&text](std::uint32_t codePoint) {
+            auto const byte = [](std::uint32_t value) {
+                return static_cast<char>(static_cast<unsigned char>(value));
+            };
+            if (codePoint < 0x80U)
+                text += byte(codePoint);
+            else if (codePoint < 0x800U)
+            {
+                text += byte(0xC0U | (codePoint >> 6U));
+                text += byte(0x80U | (codePoint & 0x3FU));
+            }
+            else if (codePoint < Supplementary)
+            {
+                text += byte(0xE0U | (codePoint >> 12U));
+                text += byte(0x80U | ((codePoint >> 6U) & 0x3FU));
+                text += byte(0x80U | (codePoint & 0x3FU));
+            }
+            else
+            {
+                text += byte(0xF0U | (codePoint >> 18U));
+                text += byte(0x80U | ((codePoint >> 12U) & 0x3FU));
+                text += byte(0x80U | ((codePoint >> 6U) & 0x3FU));
+                text += byte(0x80U | (codePoint & 0x3FU));
+            }
+        };
+        // A `while`: a surrogate pair consumes two units and anything else one, which no `for` head states.
+        auto index = std::size_t { 0 };
+        while (index < units.size())
+        {
+            auto codePoint = static_cast<std::uint32_t>(units[index]);
+            ++index;
+            if (codePoint >= HighFirst && codePoint <= HighLast && index < units.size())
+            {
+                auto const low = static_cast<std::uint32_t>(units[index]);
+                if (low >= LowFirst && low <= LowLast)
+                {
+                    codePoint = Supplementary + ((codePoint - HighFirst) << 10U) + (low - LowFirst);
+                    ++index;
+                }
+            }
+            append(codePoint);
+        }
+        return text;
+    }
+
     /// The code page a tool this process ran writes its narrow text in.
     ///
     /// Not exported: it is one half of `NarrowTextPolicy` and has no caller that
@@ -190,6 +254,20 @@ std::optional<std::wstring> WideTextFromUtf8(std::string_view text)
     return WideFromCodePage(text, CP_UTF8);
 }
 #endif
+
+std::string Wtf8FromUtf16(std::u16string_view units)
+{
+    return Wtf8FromCodeUnits(units);
+}
+
+std::string PathBytes(std::filesystem::path const& path)
+{
+#if defined(_WIN32)
+    return Wtf8FromCodeUnits(std::wstring_view { path.native() });
+#else
+    return path.native();
+#endif
+}
 
 std::optional<std::filesystem::path> PathFromNarrowText(std::string_view text) noexcept
 {

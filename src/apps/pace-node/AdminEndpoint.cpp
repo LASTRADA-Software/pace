@@ -19,6 +19,7 @@
 #include <Pace/Distributed/FleetChart.hpp>
 #include <Pace/Distributed/FleetText.hpp>
 #include <Pace/Distributed/FleetView.hpp>
+#include <Pace/Platform/NarrowText.hpp>
 
 #include <algorithm>
 #include <array>
@@ -1046,7 +1047,7 @@ FleetSampler::FleetSampler(std::optional<Distributed::FleetSources> sources,
                                                "store written before keys were recorded); dropped, since each would be "
                                                "counted twice beside the series its machine now files under its key. "
                                                "This leader's own fleet history is unaffected",
-                                               at.string(),
+                                               PathBytes(at),
                                                dropped);
                               return restored;
                           },
