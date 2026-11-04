@@ -593,11 +593,15 @@ class SharedCacheFleet
         auto const valid = Cluster::ValidateAgainst(_state, command);
         INFO("a fleet change production would refuse: " << (valid.has_value() ? std::string {} : valid.error().context));
         REQUIRE(valid.has_value());
-        Cluster::Apply(_state, command);
+        // The index-carrying overload, as `ClusterStateMachine::Apply` calls it: the index-free one drops a `SetBudget`,
+        // so an override committed through this fleet would be recorded nowhere.
+        Cluster::Apply(_state, command, ++_appliedIndex);
     }
 
     Cluster::ClusterState _state;
     std::size_t _admitted { 0 };
+    /// The log index the next committed change is applied at: every change is one entry, as on a replica.
+    std::uint64_t _appliedIndex { 0 };
     /// Declared BEFORE the nodes, so destroyed AFTER them: a node's kept session is a socket into a
     /// machine's loop, and it must close while that loop still turns (`FrameEndpoint_test.cpp`'s
     /// `Fleet`). A PRECAUTION for a loop-driven node, which this fleet does not build: `AddNode`'s

@@ -265,6 +265,16 @@ void WriteErrorReportingStorage::Resize(std::size_t newMaxBytes)
     _inner.Resize(newMaxBytes);
 }
 
+std::optional<std::size_t> WriteErrorReportingStorage::ResizeTier(StorageTier tier, std::size_t newMaxBytes)
+{
+    return _inner.ResizeTier(tier, newMaxBytes);
+}
+
+IStorage::EvictStepOutcome WriteErrorReportingStorage::EvictStep()
+{
+    return _inner.EvictStep();
+}
+
 StorageStats WriteErrorReportingStorage::Snapshot() const noexcept
 {
     auto stats = _inner.Snapshot();

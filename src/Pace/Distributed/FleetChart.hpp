@@ -4,6 +4,7 @@
 #include <Pace/Core/EnumTable.hpp>
 #include <Pace/Distributed/FleetHistory.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <optional>
@@ -53,6 +54,10 @@ struct FleetSeriesRow
     FleetSeriesKind kind;     ///< How to derive it.
     FleetMetric numerator;    ///< The slot it reads.
     FleetMetric denominator;  ///< The second slot, for `Share`; ignored otherwise.
+    /// What one value is measured in, as a reader of the series is told: `per-minute` for a rate, `percent`
+    /// for a share, and for a level whatever its slot counts. A column rather than derived from `kind`,
+    /// because two levels need not count the same thing -- slots are a count, CPU busy is permille.
+    std::string_view unit;
 };
 
 /// Which chart a series belongs to, and how that chart is drawn.
@@ -97,64 +102,113 @@ struct FleetChartRow
 /// logic: red is a configuration mistake, cobalt is our own saturation, amber is
 /// somebody else's work, grey is a duplicate and not a shortage at all. Collapsing
 /// them into one line is what hides which of four different problems a fleet has.
-inline constexpr std::array<FleetSeriesRow, 8> FleetSeriesTable {
+inline constexpr std::array<FleetSeriesRow, 9> FleetSeriesTable {
     FleetSeriesRow { .key = "dispatched",
                      .label = "dispatched",
                      .colour = "accent",
                      .stroke = FleetSeriesStroke::Solid,
                      .kind = FleetSeriesKind::Rate,
                      .numerator = FleetMetric::DispatchGranted,
-                     .denominator = FleetMetric::DispatchGranted },
+                     .denominator = FleetMetric::DispatchGranted,
+                     .unit = "per-minute" },
     FleetSeriesRow { .key = "no-worker",
                      .label = "no worker",
                      .colour = "crit",
                      .stroke = FleetSeriesStroke::Solid,
                      .kind = FleetSeriesKind::Rate,
                      .numerator = FleetMetric::DispatchNoWorker,
-                     .denominator = FleetMetric::DispatchNoWorker },
+                     .denominator = FleetMetric::DispatchNoWorker,
+                     .unit = "per-minute" },
     FleetSeriesRow { .key = "no-capacity",
                      .label = "no capacity",
                      .colour = "accent",
                      .stroke = FleetSeriesStroke::Solid,
                      .kind = FleetSeriesKind::Rate,
                      .numerator = FleetMetric::DispatchNoCapacity,
-                     .denominator = FleetMetric::DispatchNoCapacity },
+                     .denominator = FleetMetric::DispatchNoCapacity,
+                     .unit = "per-minute" },
     FleetSeriesRow { .key = "withdrawn",
                      .label = "withdrawn",
                      .colour = "warn",
                      .stroke = FleetSeriesStroke::Solid,
                      .kind = FleetSeriesKind::Rate,
                      .numerator = FleetMetric::DispatchWithdrawn,
-                     .denominator = FleetMetric::DispatchWithdrawn },
+                     .denominator = FleetMetric::DispatchWithdrawn,
+                     .unit = "per-minute" },
     FleetSeriesRow { .key = "duplicate",
                      .label = "duplicate",
                      .colour = "inert",
                      .stroke = FleetSeriesStroke::Solid,
                      .kind = FleetSeriesKind::Rate,
                      .numerator = FleetMetric::DispatchDuplicate,
-                     .denominator = FleetMetric::DispatchDuplicate },
+                     .denominator = FleetMetric::DispatchDuplicate,
+                     .unit = "per-minute" },
     FleetSeriesRow { .key = "offerable",
                      .label = "offerable slots",
                      .colour = "inert",
                      .stroke = FleetSeriesStroke::Dashed,
                      .kind = FleetSeriesKind::Level,
                      .numerator = FleetMetric::OfferableSlots,
-                     .denominator = FleetMetric::OfferableSlots },
+                     .denominator = FleetMetric::OfferableSlots,
+                     .unit = "count" },
     FleetSeriesRow { .key = "in-flight",
                      .label = "in flight",
                      .colour = "accent",
                      .stroke = FleetSeriesStroke::Solid,
                      .kind = FleetSeriesKind::Level,
                      .numerator = FleetMetric::JobsInFlight,
-                     .denominator = FleetMetric::JobsInFlight },
+                     .denominator = FleetMetric::JobsInFlight,
+                     .unit = "count" },
     FleetSeriesRow { .key = "hit-rate",
                      .label = "hit rate",
                      .colour = "ok",
                      .stroke = FleetSeriesStroke::Solid,
                      .kind = FleetSeriesKind::Share,
                      .numerator = FleetMetric::CacheHits,
-                     .denominator = FleetMetric::CacheMisses },
+                     .denominator = FleetMetric::CacheMisses,
+                     .unit = "percent" },
+    // In no chart: a machine's own load, which the fleet's series leaves absent (`FleetTotal::None`). It is a
+    // row so a machine's series -- the `history` tool's, FLEET-TEXT's node selector -- carries it under the one
+    // spelling every renderer walks.
+    FleetSeriesRow { .key = "cpu-busy",
+                     .label = "cpu busy",
+                     .colour = "inert",
+                     .stroke = FleetSeriesStroke::Solid,
+                     .kind = FleetSeriesKind::Level,
+                     .numerator = FleetMetric::CpuBusyPermille,
+                     .denominator = FleetMetric::CpuBusyPermille,
+                     .unit = "permille" },
 };
+
+/// Whether a series has a fleet-wide value: every slot it reads has a fleet total (`FleetTotal::Summed`).
+///
+/// A series that does not is answered only for one machine; asked of the fleet it is refused by name rather
+/// than answered with the absence every fleet bucket holds for it.
+/// @param series A series.
+/// @return True when the fleet's series carries it.
+[[nodiscard]] constexpr bool HasFleetValue(FleetSeriesRow const& series) noexcept
+{
+    return FleetMetricTable[static_cast<std::size_t>(series.numerator)].fleetTotal == FleetTotal::Summed
+           && FleetMetricTable[static_cast<std::size_t>(series.denominator)].fleetTotal == FleetTotal::Summed;
+}
+
+/// Whether a series has a value for one machine: every slot it reads is node-scoped (`FleetMetricScope::Node`).
+///
+/// A dispatch outcome is only a scheduler's; asked of one machine it is refused by name, for the reason a
+/// machine's own series records it absent.
+/// @param series A series.
+/// @return True when a machine's own series carries it.
+[[nodiscard]] constexpr bool HasMachineValue(FleetSeriesRow const& series) noexcept
+{
+    return FleetMetricTable[static_cast<std::size_t>(series.numerator)].scope == FleetMetricScope::Node
+           && FleetMetricTable[static_cast<std::size_t>(series.denominator)].scope == FleetMetricScope::Node;
+}
+
+static_assert(std::ranges::all_of(FleetSeriesTable,
+                                  [](FleetSeriesRow const& series) {
+                                      return HasFleetValue(series) || HasMachineValue(series);
+                                  }),
+              "a series neither the fleet nor a machine answers for is one nothing can serve");
 
 /// Every chart, in enumerator order. Titles and captions are the mockup's.
 inline constexpr EnumTable<FleetChartId, FleetChartRow> FleetChartTable {

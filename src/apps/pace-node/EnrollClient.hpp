@@ -191,6 +191,18 @@ struct JoinerIdentity
                                                                         std::span<std::byte const> roster,
                                                                         std::filesystem::path const& stateDirectory);
 
+/// What an enrollment decision is called, wherever this binary names one: the operator's list and the
+/// MCP `enrollment_status` tool, so the two cannot spell one decision two ways.
+/// @param decision The decision.
+/// @return Its word (`pending`, `approved`, `rejected`); empty only for a value no row names, which a
+///         compile-time check over `KnownEnrollmentDecisions` makes unreachable for a decoded reply.
+[[nodiscard]] std::string_view DescribeEnrollmentDecision(CompileCacheWire::EnrollmentDecision decision) noexcept;
+
+/// What an enrollment-window state is called, wherever this binary names one.
+/// @param state The state.
+/// @return Its word (`manual`, `auto-approve`); empty only for a value no row names.
+[[nodiscard]] std::string_view EnrollmentStateName(CompileCacheWire::WireEnrollmentState state) noexcept;
+
 /// Render an enrollment report the way an operator reads it before deciding.
 ///
 /// **Both hosts on every row, and a disagreement MARKED rather than refused.** #242

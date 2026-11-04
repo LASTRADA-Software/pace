@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <format>
 #include <utility>
 
 namespace Pace::Node
@@ -51,6 +52,13 @@ namespace
         .code = Wire::ErrorCode::UnknownFleetSelector,
         .rationale = "a typo or a client of another build, seen by whoever typed it in the keys the refusal lists; a "
                      "rise is nothing an operator acts on",
+    };
+
+    /// A request framed at a version this build does not read.
+    constexpr Cc::UncountedRefusal VersionNotSupported {
+        .code = Wire::ErrorCode::UnsupportedVersion,
+        .rationale = "a client of another build, told the range this one speaks and seen by whoever ran it; a rise "
+                     "is a fleet mid-upgrade, which is not a condition an operator acts on",
     };
 
     /// A verb routed here that this component does not own.
@@ -174,24 +182,38 @@ core::async::Task<FrameReply> FleetTextResponder::Answer(std::span<std::byte con
         // Not this protocol at all; empty is CLOSE.
         co_return std::vector<std::byte> {};
 
+    // The version is judged HERE, before the payload is read, because this verb's field count is part
+    // of its grammar: nothing earlier on the Fleet family's path asks `IsSupported`, and a version-16
+    // three-field request would otherwise be answered as a malformed frame, a confident wrong diagnosis.
+    if (!Wire::IsSupported(header->version))
+        co_return Cc::RefuseWithoutCounter(VersionNotSupported,
+                                           std::format("supported versions {}..{}",
+                                                       static_cast<unsigned>(Wire::MinSupportedVersion),
+                                                       static_cast<unsigned>(Wire::CurrentVersion)));
+
     if (header->opRaw != static_cast<std::uint8_t>(Wire::Op::FleetText))
         co_return Cc::RefuseWithoutCounter(NotThisComponentsVerb, "this node serves no component for that verb");
 
     auto const request = Wire::DecodeFleetTextRequest(frame.subspan(Wire::RequestHeaderSize));
     if (!request.has_value())
-        co_return Cc::Refuse(_metrics, RefusedMalformed, "a fleet-text request is a section, a range and a token");
+        co_return Cc::Refuse(_metrics, RefusedMalformed, "a fleet-text request is a section, a range, a token and a format");
 
-    // The HOST: the dashboard credential and leadership are what `Read` decides from, and
-    // neither is a membership question -- the proof has already been folded into the one that
-    // is, at `RefusePeer` above.
-    co_return Read(*request, peer.host);
+    // The HOST, and whether the connection PROVED a member's live key: the dashboard credential, or a proof in
+    // its place, and leadership are what `Read` decides from. The proof is read off the same fold that
+    // admitted the connection at `RefusePeer` above, never asked a second way.
+    auto const reader = Distributed::RestsOnProvenIdentity(Distributed::ExplainConnection(_membership, peer))
+                            ? FleetReader::ProvenMember
+                            : FleetReader::ByAddress;
+    co_return Read(*request, peer.host, reader);
 }
 
-std::vector<std::byte> FleetTextResponder::Read(Wire::FleetTextRequest const& request, std::string_view peer) const
+std::vector<std::byte> FleetTextResponder::Read(Wire::FleetTextRequest const& request,
+                                                std::string_view peer,
+                                                FleetReader reader) const
 {
     // The decision the fleet subscription answers from too; what is this surface's is which
     // counter each refusal moves.
-    auto const verdict = DecideFleetRead(_sources.Leadership(), _dashboard, request.dashboardToken, peer);
+    auto const verdict = DecideFleetRead(_sources.Leadership(), _dashboard, request.dashboardToken, peer, reader);
     switch (verdict.decision)
     {
         case FleetReadDecision::Admitted:
@@ -210,7 +232,7 @@ std::vector<std::byte> FleetTextResponder::Read(Wire::FleetTextRequest const& re
 
 std::vector<std::byte> FleetTextResponder::Render(Wire::FleetTextRequest const& request) const
 {
-    auto document = _sources.FleetText(request.section, request.range);
+    auto document = _sources.FleetText(request.section, request.range, request.format, request.node);
     if (!document.has_value())
     {
         if (document.error().refusal == FleetTextRefusal::UnknownSelector)

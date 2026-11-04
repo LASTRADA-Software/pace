@@ -11,7 +11,10 @@ cmake_minimum_required(VERSION 3.28)
 # `catch_discover_tests` registers each case as
 # `add_test(NAME <case> COMMAND <exe> <case>)`, so the name is handed to Catch2
 # as a command-line ARGUMENT. Catch2 parses its arguments before it parses test
-# specs, so a name beginning with `-` is read as an option:
+# specs, so a name beginning with `-` is read as an option -- and on Windows, a
+# name beginning with `/` too, since Catch2 accepts `/`-led options there
+# (`/fleet.json refuses ...` failed as `Unrecognised token: /fleet.json` on the
+# Windows legs alone, so the case never ran):
 #
 #   * `--help wins over whatever follows it` — Catch2 recognises `--help`,
 #     prints its usage and exits 0. CTest reports a PASS for a case that never
@@ -397,7 +400,7 @@ foreach(source IN LISTS testSources)
         # a site is reported as; `lineNo` is where the file is.
         set(caseName "${CMAKE_MATCH_1}")
         math(EXPR caseCount "${caseCount} + 1")
-        if(caseName MATCHES "^-")
+        if(caseName MATCHES "^[-/]")
             list(APPEND violations "  ${relative}: \"${caseName}\"")
         endif()
 
@@ -569,15 +572,17 @@ list(LENGTH PaceDuplicateNameExemptions exemptionCount)
 if(NOT violations STREQUAL "")
     list(JOIN violations "\n" report)
     message(FATAL_ERROR
-        "Catch2 case name(s) begin with '-':\n${report}\n\n"
+        "Catch2 case name(s) begin with '-' or '/':\n${report}\n\n"
         "catch_discover_tests passes the name to the runner as an argument, and "
-        "Catch2 reads a leading dash as an option rather than as a test spec. A "
-        "recognised one (--help) makes CTest report a pass for a case that never "
-        "ran; an unrecognised one makes it report a failure the case does not "
-        "have.\n"
-        "Rename the case so the flag is not the first thing in it -- "
+        "Catch2 reads a leading dash as an option rather than as a test spec -- and "
+        "on Windows a leading slash as well, so a '/'-led name fails there and "
+        "nowhere else. A recognised option (--help) makes CTest report a pass for a "
+        "case that never ran; an unrecognised one makes it report a failure the "
+        "case does not have.\n"
+        "Rename the case so the flag or path is not the first thing in it -- "
         "\"Naming --cache-dir gives the node an on-disk tier\" rather than "
-        "\"--cache-dir gives the node an on-disk tier\".\n"
+        "\"--cache-dir gives the node an on-disk tier\", \"fleet.json refuses ...\" "
+        "rather than \"/fleet.json refuses ...\".\n"
         "The rule lives in ${CMAKE_CURRENT_LIST_FILE}.")
 endif()
 

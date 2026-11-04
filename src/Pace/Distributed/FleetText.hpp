@@ -18,9 +18,6 @@
 namespace Pace::Distributed
 {
 
-/// How JSON spells a code point the bytes did not encode.
-inline constexpr std::string_view JsonReplacement = "\\ufffd";
-
 /// How a tab-separated document spells it.
 ///
 /// U+FFFD itself, where the other two spell it in an escape syntax: plain text has
@@ -105,30 +102,21 @@ inline constexpr std::array DelimitedEscapes {
 
 /// How the formats this header owns spell what they cannot carry.
 ///
-/// Namespaced because nothing outside this header reaches this table BY NAME --
-/// which is a statement about spelling and **not** a claim that no other file
-/// implements the same convention. It is not: `CliFormat.cpp` hand-rolls the JSON
-/// convention as a `switch` and has drifted from `JsonEscapes` in both directions
-/// (#1356), and `pace-cc/Stats.cpp` hand-rolls the markup one. Said the other
-/// way round, this comment previously read as *nobody else does this*, which is
-/// the sentence a future reader uses to decide not to look.
+/// Namespaced because nothing outside this header reaches these BY NAME -- which is
+/// a statement about spelling and **not** a claim that no other file implements the
+/// same convention: `pace-cc/Stats.cpp` hand-rolls the markup one. Said the other way
+/// round, this comment previously read as *nobody else does this*, which is the
+/// sentence a future reader uses to decide not to look.
+///
+/// JSON is no longer this header's: a string literal is written by `Json::AppendString`
+/// (`Core/Json.hpp`), the tree's ONE JSON escaper, which the fleet documents, the
+/// charts, `pacectl` and the MCP surface all call.
 ///
 /// `DelimitedEscapes` sits OUTSIDE it because a second binary shares it; the
 /// replacement constants stay outside for the older reason, so a test can assert
 /// against the one spelling rather than against a second copy of it.
 namespace Detail
 {
-
-    /// The bytes JSON spells with a short escape rather than with `\uXXXX`.
-    ///
-    /// Not the whole of what JSON forbids -- every byte below 0x20 is also illegal
-    /// and is written as `\u00xx` below, because listing thirty-two of them here
-    /// would be a table nobody reads standing in for one comparison.
-    inline constexpr std::array JsonEscapes {
-        TextEscape { .byte = '"', .spelling = "\\\"" }, TextEscape { .byte = '\\', .spelling = "\\\\" },
-        TextEscape { .byte = '\n', .spelling = "\\n" }, TextEscape { .byte = '\r', .spelling = "\\r" },
-        TextEscape { .byte = '\t', .spelling = "\\t" },
-    };
 
     /// The lowest byte a text format may carry literally; everything below is a
     /// control character.
@@ -139,47 +127,6 @@ namespace Detail
     inline constexpr unsigned char DeleteByte = 0x7F;
 
 } // namespace Detail
-
-/// Append one JSON string literal, quotes included.
-/// @param out Where to append.
-/// @param text The string's contents; need not be valid UTF-8, and what is
-///         appended always is.
-inline void AppendJsonText(std::string& out, std::string_view text)
-{
-    out += '"';
-    while (!text.empty())
-    {
-        auto const ch = text.front();
-        if (auto const escape = EscapeFor(Detail::JsonEscapes, ch); !escape.empty())
-        {
-            out += escape;
-            text.remove_prefix(1);
-        }
-        else if (static_cast<unsigned char>(ch) < Detail::FirstPrintableByte)
-        {
-            out += std::format("\\u{:04x}", static_cast<unsigned>(static_cast<unsigned char>(ch)));
-            text.remove_prefix(1);
-        }
-        else if (auto const decoded = DecodeUtf8(text); decoded.has_value())
-        {
-            out += text.substr(0, decoded->length);
-            text.remove_prefix(decoded->length);
-        }
-        else
-        {
-            // The other half of what JSON requires of a byte, and the half this
-            // function used not to do: RFC 8259 section 8.1 requires UTF-8 of JSON
-            // exchanged between systems, so a byte belonging to no valid sequence is
-            // as illegal in a string literal as an unescaped quote is.
-            //
-            // One replacement per BYTE here, unlike markup's: there is no sequence
-            // to consume, because nothing decoded.
-            out += JsonReplacement;
-            text.remove_prefix(1);
-        }
-    }
-    out += '"';
-}
 
 /// Escape one field of a tab-separated document.
 ///

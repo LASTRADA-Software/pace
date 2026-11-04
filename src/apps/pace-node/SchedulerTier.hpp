@@ -172,6 +172,13 @@ class SchedulerTier
         _service.SetHistorySink(sink);
     }
 
+    /// Report each compile the admission queue grants somewhere, or nowhere: `SetHistorySink`'s wiring door.
+    /// @param sink Where to report; must outlive this tier or be unwired first.
+    void SetDemandSink(Distributed::ICompileDemandSink* sink) noexcept
+    {
+        _service.SetDemandSink(sink);
+    }
+
     /// What answers the scheduler verbs on this node's `0xFC` listener.
     ///
     /// Handed to `MergedResponder`, which routes each frame to the component owning

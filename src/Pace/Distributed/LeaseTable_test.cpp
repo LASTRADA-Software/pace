@@ -442,3 +442,32 @@ TEST_CASE("A caller that names no lifetime gets the table's own, which is the on
     fix.clock.advance(200ms);
     CHECK_FALSE(fix.leases.Find(Unwrap(lease).token).has_value());
 }
+
+TEST_CASE("A lease granted for a ticket carries the ticket, and only such leases are listed by ticket",
+          "[distributed][lease]")
+{
+    // The exact join a fleet report makes between a running compile and its lease: the ticket rides on
+    // the lease, so nobody has to guess it from the cache key or parse it back out of the table's key.
+    Fixture fix;
+    auto const ticketed = fix.leases.Acquire("admission ticket 7", "w1", std::chrono::milliseconds { 900 }, Ticket { 7 });
+    REQUIRE(ticketed.has_value());
+    CHECK(Unwrap(ticketed).ticket == std::optional<Ticket> { 7 });
+    CHECK(Unwrap(fix.leases.Find(Unwrap(ticketed).token)).ticket == std::optional<Ticket> { 7 });
+
+    // A `Lease` verb's grant names no ticket, and is not one a ticket can join to.
+    auto const plain = fix.leases.Acquire("objkey-1", "w2");
+    REQUIRE(plain.has_value());
+    CHECK_FALSE(Unwrap(plain).ticket.has_value());
+
+    fix.clock.advance(std::chrono::milliseconds { 250 });
+    auto const listed = fix.leases.LiveTicketLeases();
+    REQUIRE(listed.size() == 1);
+    CHECK(listed.front().ticket == 7);
+    CHECK(listed.front().workerId == "w1");
+    // What is left of its OWN lifetime, at the one reading.
+    CHECK(listed.front().expiresIn == std::chrono::milliseconds { 650 });
+
+    // Past its lifetime it is no longer listed, exactly as `LiveLeases` drops it.
+    fix.clock.advance(std::chrono::milliseconds { 700 });
+    CHECK(fix.leases.LiveTicketLeases().empty());
+}

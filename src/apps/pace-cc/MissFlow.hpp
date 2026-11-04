@@ -62,7 +62,11 @@ struct MissSeams
     ///        after the worker a grant named FAILED the compile in a way no queue answers: the request
     ///        is then `LocalOnly`, with that worker added to its exclusions, so the compile this machine
     ///        now runs is charged here rather than to a worker that is not running it.
-    std::function<std::unique_ptr<IAdmitSession>(std::optional<std::string_view> failedWorker)> open;
+    /// @param origin `AfterGrant` once the leader granted this compile in this invocation -- always for the
+    ///        re-admission after a failed worker -- which the request carries so the leader counts it once.
+    std::function<std::unique_ptr<IAdmitSession>(std::optional<std::string_view> failedWorker,
+                                                 CompileCacheWire::AskOrigin origin)>
+        open;
     /// FETCH the key again after a `Stored` grant, and serve the hit if there is one.
     /// @return How the FETCH ended.
     std::function<StoredFetch()> serveStored;
@@ -74,8 +78,10 @@ struct MissSeams
     /// Dispatch to the worker an admission granted.
     std::function<AdmittedDispatch(AdmitTicket const&)> dispatchAdmitted;
     /// Today's dispatch with no admission: a `LEASE` at the scheduler, when one is configured.
+    /// @param origin `AfterGrant` when an admission of this invocation broke past its grant, so the lease asks again
+    ///        for a compile the leader already counted; the request carries it.
     /// @return The compile, or disengaged to compile here.
-    std::function<std::optional<CompileRun>()> dispatchUnadmitted;
+    std::function<std::optional<CompileRun>(CompileCacheWire::AskOrigin origin)> dispatchUnadmitted;
     /// Run the compiler here.
     std::function<CompileRun()> compileLocal;
     /// Everything after the compile: replay its output, decide the exit code and STORE.

@@ -47,6 +47,7 @@ target_sources(Pace
         Core/Ed25519.cpp
         Core/FigureText.cpp
         Core/Hkdf.cpp
+        Core/Json.cpp
         Core/PathKind.cpp
         Core/SecureBytes.cpp
         Core/SecureRandom.cpp
@@ -55,6 +56,7 @@ target_sources(Pace
         Core/X25519.cpp
         Cluster/AnnouncedEndpoints.cpp
         Cluster/BeaconDestinations.cpp
+        Cluster/BudgetOverride.cpp
         Cluster/ClusterState.cpp
         Cluster/ClusterStateMachine.cpp
         Cluster/ChallengeCookies.cpp
@@ -74,6 +76,8 @@ target_sources(Pace
         Distributed/AdmissionQueue.cpp
         Distributed/WorkerRegistry.cpp
         Distributed/UnservedToolchains.cpp
+        Distributed/CompilerVersion.cpp
+        Distributed/FingerprintDiff.cpp
         Distributed/FleetVersions.cpp
         Distributed/NodeProof.cpp
         Distributed/StateLeaseRoster.cpp
@@ -81,7 +85,9 @@ target_sources(Pace
         Distributed/SchedulerAdmission.cpp
         Distributed/SchedulerService.cpp
         Distributed/SchedulerProtocol.cpp
+        Distributed/HistoryEnvelope.cpp
         Distributed/FleetHistory.cpp
+        Distributed/FleetKeyedHistory.cpp
         Distributed/FleetChart.cpp
         Distributed/FleetView.cpp
         Core/BufferPool.cpp
@@ -125,6 +131,8 @@ target_sources(Pace
         Protocol/MemcachedBinary.cpp
         Protocol/MemcachedMeta.cpp
         Protocol/MemcachedText.cpp
+        Protocol/NodeStatusView.cpp
+        Protocol/Mcp/McpServer.cpp
         Protocol/ProtocolAutodetect.cpp
         Protocol/KeyspaceNotifier.cpp
         Protocol/PubSubRegistry.cpp
@@ -231,14 +239,17 @@ target_sources(Pace
             Core/Errors/ProtocolError.hpp
             Core/Errors/StorageError.hpp
             Core/Errors/ConfigError.hpp
+            Core/AsciiFold.hpp
             Core/Bytes.hpp
             Core/SecureBytes.hpp
             Core/Compression.hpp
             Core/Endian.hpp
             Core/FigureText.hpp
+            Core/Json.hpp
             Core/Markup.hpp
             Core/StringHash.hpp
             Core/Utf8.hpp
             Core/Logger.hpp
             Core/BufferPool.hpp
+            Protocol/Mcp/McpTool.hpp
 )

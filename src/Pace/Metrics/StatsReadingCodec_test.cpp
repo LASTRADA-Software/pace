@@ -638,7 +638,13 @@ TEST_CASE("This build's live-stats layout is the pinned one", "[metrics][livesta
     // Moved again when the admission wait became a `_sum`/`_count` pair (`admission_wait_count_total`
     // after the sum) and the admission block carried each machine's budget (grammar 8, #1728). Read
     // off the built test, never computed by hand.
-    CHECK(StatsReadingLayout == 0x22d953d117d377a2ULL);
+    //
+    // Moved again when the MCP surface added `mcp_requests_refused_not_loopback_total` at the end of the
+    // catalogue.
+    //
+    // Moved again when FINGERPRINT-INPUTS added `node_fingerprint_inputs_refused_malformed_total` at the end of the
+    // catalogue. Clients and nodes upgrade together. Read off the built test, never computed by hand.
+    CHECK(StatsReadingLayout == 0x3ac69106c0ce143aULL);
 }
 
 TEST_CASE("A truncated or padded reading is refused and never half-read", "[metrics][livestats]")

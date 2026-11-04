@@ -85,6 +85,22 @@ struct ReloadBasis
 /// @return The reader to hand the reloader.
 [[nodiscard]] NodeReloader::Reparse ReloadCandidateReader(std::span<char const* const> args, ReloadBasis basis);
 
+/// Told when a reload was ACCEPTED: whatever must act on the configuration now in force, beyond what this function
+/// does itself, reads it then -- the cache budget overrides compare their baseline with it (`BudgetOverrideApplier`).
+class IAcceptedReloadListener
+{
+  public:
+    IAcceptedReloadListener() = default;
+    IAcceptedReloadListener(IAcceptedReloadListener const&) = delete;
+    IAcceptedReloadListener(IAcceptedReloadListener&&) = delete;
+    IAcceptedReloadListener& operator=(IAcceptedReloadListener const&) = delete;
+    IAcceptedReloadListener& operator=(IAcceptedReloadListener&&) = delete;
+    virtual ~IAcceptedReloadListener() = default;
+
+    /// The reloader's snapshot is the configuration in force now. Called on the reloading thread: wake and return.
+    virtual void ReloadAccepted() = 0;
+};
+
 /// Act on one SIGHUP, and say what happened either way.
 ///
 /// **Both outcomes are logged, and that is the whole point of the ticket.** A reload
@@ -105,6 +121,9 @@ struct ReloadBasis
 /// @param membership Who this node admits, updated from the accepted snapshot.
 /// @param conditions Where `unqualified-host-name` is answered again, since `--advertise` reloads.
 /// @param logger Where the outcome is reported.
+/// @param budgets Told after every ACCEPTED reload, never after a declined one: the budget overrides re-judged against
+///        the configuration now in force. Required, so a caller cannot leave a reloaded `--cache-memory` unapplied by
+///        omission; null only where nothing applies budgets.
 ///
 /// Returns nothing: the heartbeat thread notices a reload by comparing snapshots, so
 /// there is no signal to hand it. A `ConfigReloaderOf::Subscribe` callback would be the
@@ -120,6 +139,10 @@ struct ReloadBasis
 /// ([#868](https://github.com/LASTRADA-Software/pace/issues/868)). Read as "the
 /// worker cannot subscribe at all" the rule is one frame too wide, and it would leave
 /// the secret-file check startup-only on the binary that holds five such files.
-void ApplyReloadRequest(NodeReloader* reloader, NodeMembership& membership, NodeConditions& conditions, ILogger& logger);
+void ApplyReloadRequest(NodeReloader* reloader,
+                        NodeMembership& membership,
+                        NodeConditions& conditions,
+                        ILogger& logger,
+                        IAcceptedReloadListener* budgets);
 
 } // namespace Pace::Node

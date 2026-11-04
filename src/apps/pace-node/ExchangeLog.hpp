@@ -119,6 +119,12 @@ inline constexpr std::array ExchangeLogTable {
     VerbLogRow { .code = CompileCacheWire::Op::ClusterSet,
                  .level = LogLevel::Info,
                  .rationale = "changes what every node in the fleet believes; an unlogged one is unauditable" },
+    VerbLogRow { .code = CompileCacheWire::Op::MemberEdit,
+                 .level = LogLevel::Info,
+                 .rationale = "edits a member's replicated record; same audit argument as cluster-set" },
+    VerbLogRow { .code = CompileCacheWire::Op::MemberReport,
+                 .level = LogLevel::Info,
+                 .rationale = "a member changing its own replicated record; rare, and auditable like an edit" },
     VerbLogRow { .code = CompileCacheWire::Op::ClusterForget,
                  .level = LogLevel::Info,
                  .rationale = "removes a member; same audit argument as cluster-set" },
@@ -168,6 +174,10 @@ inline constexpr std::array ExchangeLogTable {
     VerbLogRow { .code = CompileCacheWire::Op::NodeMetrics,
                  .level = LogLevel::Debug,
                  .rationale = "same shape as node-status, and a scrape is by construction periodic" },
+    VerbLogRow { .code = CompileCacheWire::Op::FingerprintInputs,
+                 .level = LogLevel::Debug,
+                 .rationale = "a diagnostic read like node-status, asked once per page by toolchain_diff; a diff of a "
+                              "large tree is a run of pages, which at Info would read as traffic" },
     VerbLogRow { .code = CompileCacheWire::Op::Enroll,
                  .level = LogLevel::Info,
                  .rationale = "the only verb on this wire an UNAUTHENTICATED stranger can reach, and the only "

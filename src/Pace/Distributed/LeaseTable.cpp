@@ -29,7 +29,10 @@ bool LeaseTable::IsLive(Entry const& entry, core::platform::SteadyTimePoint now)
     return std::chrono::duration_cast<std::chrono::milliseconds>(now - entry.issuedAt) <= entry.lease.lifetime;
 }
 
-std::optional<Lease> LeaseTable::Acquire(std::string_view key, std::string_view workerId, std::chrono::milliseconds lifetime)
+std::optional<Lease> LeaseTable::Acquire(std::string_view key,
+                                         std::string_view workerId,
+                                         std::chrono::milliseconds lifetime,
+                                         std::optional<Ticket> ticket)
 {
     std::scoped_lock const guard { _mutex };
     auto const now = _clock.now();
@@ -49,9 +52,11 @@ std::optional<Lease> LeaseTable::Acquire(std::string_view key, std::string_view 
         _tokenByKey.erase(existing);
     }
 
-    Lease lease {
-        .token = std::format("l{}", _nextToken++), .workerId = std::string { workerId }, .key = keyStr, .lifetime = lifetime
-    };
+    Lease lease { .token = std::format("l{}", _nextToken++),
+                  .workerId = std::string { workerId },
+                  .key = keyStr,
+                  .lifetime = lifetime,
+                  .ticket = ticket };
     _tokenByKey.emplace(keyStr, lease.token);
     _byToken.emplace(lease.token, Entry { .lease = lease, .issuedAt = now });
     return lease;
@@ -210,6 +215,26 @@ LeaseListing LeaseTable::LiveLeases(std::size_t limit) const
         listing.oldest.push_back(LeaseReport {
             .key = candidate.entry->lease.key, .workerId = candidate.entry->lease.workerId, .age = candidate.age });
     return listing;
+}
+
+std::vector<TicketLease> LeaseTable::LiveTicketLeases() const
+{
+    std::scoped_lock const guard { _mutex };
+    // One reading for the whole answer, as `LiveLeases` takes: every remainder is measured
+    // against the same instant.
+    auto const now = _clock.now();
+    std::vector<TicketLease> out;
+    for (auto const& [token, entry]: _byToken)
+    {
+        if (!entry.lease.ticket.has_value() || !IsLive(entry, now))
+            continue;
+        // A clock read before the stamp (a test moving it backwards) is no time spent, as `IsLive` reads it.
+        auto const age = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now < entry.issuedAt ? core::platform::SteadyDuration::zero() : now - entry.issuedAt);
+        out.push_back(TicketLease {
+            .ticket = *entry.lease.ticket, .workerId = entry.lease.workerId, .expiresIn = entry.lease.lifetime - age });
+    }
+    return out;
 }
 
 } // namespace Pace::Distributed

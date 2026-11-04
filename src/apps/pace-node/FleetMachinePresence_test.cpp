@@ -156,9 +156,11 @@ TEST_CASE("A machine hands its history to whoever leads now", "[node][fleet][pre
     std::vector<Distributed::FleetBucket> const handover { Distributed::FleetBucket {
         .startMillis = 60'000, .sampleMillis = 120'000, .present = true } };
 
+    // Each machine proves its OWN key: a received history is filed under the key a machine proved, so two endpoints
+    // announcing under one key would be one machine that moved.
     fleet.ElectLeader(SchedulerA);
-    fleet.AnnounceMachine(SchedulerA, MachineA, handover);
-    fleet.AnnounceMachine(SchedulerA, MachineB, handover);
+    fleet.AnnounceMachineProvingItself(SchedulerA, MachineA, handover);
+    fleet.AnnounceMachineProvingItself(SchedulerA, MachineB, handover);
 
     // The premise, asserted rather than assumed: while A leads, A is where the buckets are.
     REQUIRE(atA.Count() == 2);
@@ -168,8 +170,8 @@ TEST_CASE("A machine hands its history to whoever leads now", "[node][fleet][pre
     // Leadership moves. Nothing replicates a history store, so the only route by which the new
     // leader can learn what the old one was handed is the machines announcing themselves again.
     fleet.ElectLeader(SchedulerB);
-    fleet.AnnounceMachine(SchedulerB, MachineA, handover);
-    fleet.AnnounceMachine(SchedulerB, MachineB, handover);
+    fleet.AnnounceMachineProvingItself(SchedulerB, MachineA, handover);
+    fleet.AnnounceMachineProvingItself(SchedulerB, MachineB, handover);
 
     // **Filed under the MACHINE, never under a worker id**, which is what makes this work for a
     // machine that has no worker to have an id.

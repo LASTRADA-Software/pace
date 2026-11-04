@@ -79,6 +79,16 @@ std::vector<std::byte> EncodeClusterRequest(ClusterRequest const& request)
             return Wire::EncodeClusterStatus();
         case ClusterAction::Set:
             return Wire::EncodeClusterSet(Wire::ClusterSetRequest { .name = request.key, .value = request.value });
+        case ClusterAction::Name:
+            return Wire::EncodeMemberEdit(Wire::MemberEditRequest {
+                .verb = Wire::MemberEditVerb::SetDisplayName, .memberId = request.key, .value = request.value });
+        // The value is the edit's record as it travels, encoded by the flag's applier from the one grammar.
+        case ClusterAction::Budget:
+            return Wire::EncodeMemberEdit(Wire::MemberEditRequest {
+                .verb = Wire::MemberEditVerb::SetBudget, .memberId = request.key, .value = request.value });
+        case ClusterAction::BudgetClear:
+            return Wire::EncodeMemberEdit(Wire::MemberEditRequest {
+                .verb = Wire::MemberEditVerb::ClearBudget, .memberId = request.key, .value = request.value });
         case ClusterAction::Forget:
             return Wire::EncodeClusterForget(request.key);
         case ClusterAction::Admit:
@@ -120,13 +130,27 @@ std::string RenderClusterState(Cluster::ClusterState const& state)
         //
         // The key WHOLE (#178), in the one spelling `--node-status` prints on the member, so
         // an operator compares two identical strings from two machines.
-        out += std::format("  {:<{}} seat={} raft={} scheduler={} key={}\n",
+        //
+        // The display name, a dash when nobody named it -- a label that decides nothing, last so every column an
+        // operator compares across machines keeps its place.
+        out += std::format("  {:<{}} seat={} raft={} scheduler={} key={} name={}\n",
                            member.id,
                            IdColumn,
                            Cluster::MemberSeatName(member.seat),
                            member.raftEndpoint.empty() ? std::string { Absent } : member.raftEndpoint,
                            scheduler,
-                           FormatEd25519PublicKey(member.publicKey));
+                           FormatEd25519PublicKey(member.publicKey),
+                           member.displayName.empty() ? std::string { Absent } : member.displayName);
+        // Each tier's override on a line of its own beneath, only where one is recorded: the figure, the baseline the
+        // member reported or that it has not, and when the leader recorded it -- one rendering, `pacectl
+        // cluster-members` prints the same cell.
+        for (auto const& row: Cluster::BudgetSlots)
+            if (auto const& budget = member.*row.slot; budget.has_value())
+                out += std::format("  {:<{}} {}-budget={}\n",
+                                   "",
+                                   IdColumn,
+                                   Cluster::TierName(row.tier),
+                                   Cluster::FormatBudgetOverride(*budget));
     }
 
     out += std::format("revoked keys ({}):\n", state.revokedKeys.size());
@@ -173,6 +197,9 @@ std::expected<std::string, std::string> InterpretClusterReply(ClusterAction acti
 
         case ClusterAction::Set:
         case ClusterAction::Forget:
+        case ClusterAction::Name:
+        case ClusterAction::Budget:
+        case ClusterAction::BudgetClear:
             // Appended, not committed, and the wording says so: the leader cannot know
             // the difference until a majority answers, and claiming otherwise would be
             // the one thing a report like this must not do.

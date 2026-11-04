@@ -1,19 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <Pace/Cli/Duration.hpp>
 #include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Core/AsciiFold.hpp>
 #include <Pace/Core/Ed25519.hpp>
 #include <Pace/Core/EnumTable.hpp>
 #include <Pace/Core/HostPort.hpp>
+#include <Pace/Core/Markup.hpp>
 #include <Pace/Core/Utf8.hpp>
 #include <Pace/Core/WireFields.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <charconv>
 #include <chrono>
 #include <cstdint>
 #include <format>
+#include <functional>
+#include <iterator>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -22,6 +27,8 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+
+#include <core/Ranges.hpp>
 
 namespace Pace::Cluster
 {
@@ -107,7 +114,8 @@ namespace
     /// than read as something else, and the layout did not move.
     ///
     /// What a move costs is a node whose OWN log holds an older entry: it refuses to start,
-    /// by name, rather than replay entries it would read differently (#1542). This used to
+    /// by name, rather than replay entries it would read differently (#1542) -- unless the
+    /// older layout is a row of `ReadableCommandLayouts`, which is read rather than refused. This used to
     /// say such a node SKIPPED every entry, which was true before #1542 and was the reason
     /// the rule above stopped at the layout. A committed entry from a PEER on another
     /// command version is still skipped (`ClusterStateMachine::Apply`), which is what a
@@ -128,11 +136,66 @@ namespace
     /// 6 removed the sixth field, the principal's role, with `AdmitPrincipal` (principal mode is
     /// retired): a v5 entry is a different arrangement, and reading it as this one would take its
     /// creation time for a leader key.
-    constexpr std::uint8_t CommandVersion = 6;
+    ///
+    /// 7 left the layout alone and moved with the state's 11, which gave each member a display name
+    /// (`SetDisplayName`). The new verb alone would not have moved it -- an older build refuses its byte by name -- and
+    /// the move is taken here, once, so the member-record changes this branch lands on top (the per-node budget
+    /// overrides) extend 7 rather than spending a second bump: the version marks one release's arrangement. 6 is the
+    /// last RELEASE's (v0.6.0), so unlike every earlier move it is CONVERTED (`ReadableCommandLayouts`) rather than
+    /// refused: a refusal kept a node upgraded from that release from starting at all. And they did: the budget
+    /// verbs (`SetBudget`, `ClearBudget`, `RecordBaseline`) added five fields -- the per-tier budgets, the member's
+    /// baseline, the leader's stamp, the override a report names and who set it -- within 7, which no build outside
+    /// this branch ever wrote.
+    constexpr std::uint8_t CommandVersion = 7;
 
     /// Fields in an encoded command: the header, then key, value, scheduler endpoint,
-    /// public key, creation time and leader key.
-    constexpr std::size_t CommandFields = 7;
+    /// public key, creation time, leader key, the per-tier budgets (one nested field), the baseline, the leader's
+    /// stamp, the override a report names, and who set it.
+    constexpr std::size_t CommandFields = 12;
+
+    /// Whether a table of layouts names each version once, oldest first.
+    ///
+    /// The tables are searched for the FIRST row naming a version, so a repeated version would silently shadow its
+    /// second row; and "the current one last" is asserted of the last row only, which an older version placed after
+    /// it would not trip. One strictly increasing walk answers both.
+    /// @param layouts A table of layouts, each with a `version`.
+    /// @return true when every version is greater than the one before it.
+    template <typename Layout, std::size_t N>
+    [[nodiscard]] constexpr bool VersionsStrictlyAscend(std::array<Layout, N> const& layouts)
+    {
+        return std::ranges::adjacent_find(layouts, std::ranges::greater_equal {}, &Layout::version) == layouts.end();
+    }
+
+    /// One command layout this build reads: the version that names it, how many fields it carries, and the first
+    /// verb its writer did not have.
+    struct CommandLayout
+    {
+        /// The version byte in the header.
+        std::uint8_t version;
+        /// Fields in an entry of this layout, the header included -- a PREFIX of this build's, in its order.
+        std::size_t fields;
+        /// The first verb the build that wrote this layout lacked: a byte at or past it is no entry that build wrote.
+        CommandKind firstUnknownVerb;
+    };
+
+    /// Every command layout this build reads, the current one last.
+    ///
+    /// **A row here is a conversion, and the only kind there is: an older layout whose fields are a strict prefix of
+    /// this build's, whose verbs MEAN what they meant.** The fields it lacks are read as absent, which is how every
+    /// optional on this wire travels. 6 is the last released build's (v0.6.0): this build's first seven fields, and no
+    /// verb past `DissolveInto`. Kept because a node upgraded from that release holds 6 in its own log, and refusing it
+    /// keeps the upgraded node from starting at all -- which is what the MSI upgrade from the latest release found.
+    /// A layout that MOVED a field or changed a verb's meaning gets no row, and is refused by name as before.
+    constexpr auto ReadableCommandLayouts = std::array {
+        CommandLayout { .version = 6, .fields = 7, .firstUnknownVerb = CommandKind::SetDisplayName },
+        CommandLayout { .version = CommandVersion, .fields = CommandFields, .firstUnknownVerb = CommandKind::Last },
+    };
+    static_assert(ReadableCommandLayouts.back().version == CommandVersion,
+                  "the current command layout is the table's last row");
+    static_assert(std::ranges::all_of(ReadableCommandLayouts, [](auto const& row) { return row.fields <= CommandFields; }),
+                  "an older command layout is a prefix of this build's, never longer");
+    static_assert(VersionsStrictlyAscend(ReadableCommandLayouts),
+                  "each command layout version is named once, oldest first, so the current one is the newest");
 
     /// Wire tag in front of every encoded state: a snapshot, and a `ClusterStatus` body.
     ///
@@ -145,17 +208,70 @@ namespace
     /// 8 removed the client and forgotten-host groups (spec §7): a machine is admitted and
     /// forgotten by its key alone. 9 added the dissolve order a healing split replicates, as a
     /// group of zero or one. 10 removed the principals group and its count (principal mode is
-    /// retired: every machine that joins is a learner member).
-    constexpr std::uint8_t StateVersion = 10;
+    /// retired: every machine that joins is a learner member). 11 added each member's display name, a
+    /// seventh member field, and -- within 11, which no build outside this branch wrote -- its two budget overrides,
+    /// the eighth and ninth. 10 is the last release's, and is converted (`ReadableStateLayouts`).
+    constexpr std::uint8_t StateVersion = 11;
 
     /// Fields one member occupies in an encoded state: id, Raft, scheduler, the
-    /// scheduler endpoint's history, the seat, and the public key.
+    /// scheduler endpoint's history, the seat, the public key, the display name, and one budget override per tier
+    /// (`BudgetSlots`, positionally).
     ///
-    /// Named because the decoder's arithmetic is otherwise six unexplained sixes,
+    /// Named because the decoder's arithmetic is otherwise nine unexplained nines,
     /// and getting one of them wrong reads every member's scheduler endpoint as the
     /// next member's id -- which decodes, and produces a state nothing would report as
     /// wrong.
-    constexpr std::size_t MemberFields = 6;
+    constexpr std::size_t MemberFields = 7 + EnumeratorCount<StorageTier>;
+
+    /// One state layout this build reads: the version that names it and how many fields each member carries.
+    struct StateLayout
+    {
+        /// The version byte.
+        std::uint8_t version;
+        /// Fields per member -- a PREFIX of this build's, in its order. The header and every other group are this
+        /// build's in each row.
+        std::size_t memberFields;
+    };
+
+    /// Every state layout this build reads, the current one last.
+    ///
+    /// For `ReadableCommandLayouts`' reason: 10 is the last released build's (v0.6.0), this build's header and groups
+    /// with each member's first six fields -- no display name, no budget override, both read as absent. A snapshot an
+    /// upgraded node holds of its own is that, and refusing it keeps the node from starting.
+    constexpr auto ReadableStateLayouts = std::array {
+        StateLayout { .version = 10, .memberFields = 6 },
+        StateLayout { .version = StateVersion, .memberFields = MemberFields },
+    };
+    static_assert(ReadableStateLayouts.back().version == StateVersion, "the current state layout is the table's last row");
+    static_assert(std::ranges::all_of(ReadableStateLayouts,
+                                      [](auto const& row) { return row.memberFields <= MemberFields; }),
+                  "an older member layout is a prefix of this build's, never longer");
+    static_assert(VersionsStrictlyAscend(ReadableStateLayouts),
+                  "each state layout version is named once, oldest first, so the current one is the newest");
+
+    /// The versions a table of layouts names, for a refusal: "11, and converts 10".
+    /// @param layouts The table, the current layout last.
+    /// @return The current version, then the older ones it converts.
+    template <typename Layout, std::size_t N>
+    [[nodiscard]] std::string ReadableVersionsText(std::array<Layout, N> const& layouts)
+    {
+        static_assert(N > 0);
+        auto text = std::format("{}", layouts.back().version);
+        if constexpr (N > 1)
+        {
+            text += ", and converts ";
+            for (auto const index: std::views::iota(std::size_t { 0 }, N - 1))
+                text += std::format("{}{}", index == 0 ? "" : ", ", layouts[index].version);
+        }
+        return text;
+    }
+
+    /// Where a member's first budget override sits among its fields.
+    constexpr std::size_t FirstBudgetField = 7;
+
+    /// Fields in one override's nested record: bytes, id, the leader's stamp, the baseline (empty when unset), and who
+    /// set it.
+    constexpr std::size_t BudgetRecordFields = 5;
 
     /// Fields one setting occupies: name, value.
     constexpr std::size_t SettingFields = 2;
@@ -201,6 +317,142 @@ namespace
     [[nodiscard]] std::span<std::byte const> OptionalKeyBytes(std::optional<Ed25519PublicKey> const& key) noexcept
     {
         return key.has_value() ? std::span<std::byte const> { *key } : std::span<std::byte const> {};
+    }
+
+    /// An optional eight-byte figure's bytes: empty when absent, big-endian when present.
+    /// @param value The figure, or nothing.
+    /// @return Its encoding.
+    [[nodiscard]] std::vector<std::byte> OptionalU64Bytes(std::optional<std::uint64_t> value)
+    {
+        if (!value.has_value())
+            return {};
+        auto const bytes = WireFields::ToBigEndian<std::uint64_t>(*value);
+        return { bytes.begin(), bytes.end() };
+    }
+
+    /// Read an optional eight-byte figure: empty is absent, eight bytes is one, anything else is refused.
+    /// @param field The field.
+    /// @return Absent, a figure, or nullopt-of-the-outer when the width is wrong.
+    [[nodiscard]] std::optional<std::optional<std::uint64_t>> ReadU64Field(std::span<std::byte const> field)
+    {
+        if (field.empty())
+            return std::optional<std::uint64_t> {};
+        auto const value = WireFields::FromBigEndian<std::uint64_t>(field);
+        if (!value.has_value())
+            return std::nullopt;
+        return std::optional<std::optional<std::uint64_t>> { value };
+    }
+
+    /// A command's per-tier budgets as one field: empty when every tier is absent, else one nested field per tier,
+    /// each empty or eight bytes.
+    /// @param budgets The figures.
+    /// @return Its encoding.
+    [[nodiscard]] std::vector<std::byte> EncodeBudgetFigures(
+        std::array<std::optional<std::uint64_t>, EnumeratorCount<StorageTier>> const& budgets)
+    {
+        if (std::ranges::none_of(budgets, [](auto const& tier) { return tier.has_value(); }))
+            return {};
+        auto owned = std::array<std::vector<std::byte>, EnumeratorCount<StorageTier>> {};
+        auto fields = std::vector<std::span<std::byte const>> {};
+        for (auto const tier: std::views::iota(std::size_t { 0 }, budgets.size()))
+        {
+            owned[tier] = OptionalU64Bytes(budgets[tier]);
+            fields.emplace_back(owned[tier]);
+        }
+        return WireFields::Encode(WireFields::FieldList { fields });
+    }
+
+    /// Read a command's per-tier budgets back.
+    /// @param field The field.
+    /// @return The figures (every tier absent for an empty field), or nullopt when it is not one field per tier, each
+    ///         empty or eight bytes.
+    [[nodiscard]] std::optional<std::array<std::optional<std::uint64_t>, EnumeratorCount<StorageTier>>> DecodeBudgetFigures(
+        std::span<std::byte const> field)
+    {
+        auto out = std::array<std::optional<std::uint64_t>, EnumeratorCount<StorageTier>> {};
+        if (field.empty())
+            return out;
+        auto const parts = WireFields::SplitExactly(field, out.size());
+        if (!parts.has_value())
+            return std::nullopt;
+        for (auto const tier: std::views::iota(std::size_t { 0 }, out.size()))
+        {
+            auto const figure = ReadU64Field((*parts)[tier]);
+            if (!figure.has_value())
+                return std::nullopt;
+            out[tier] = *figure;
+        }
+        return out;
+    }
+
+    /// A stamp's eight bytes, two's complement: the one signed figure these wires carry.
+    /// @param value The figure, or nothing.
+    /// @return Its encoding.
+    [[nodiscard]] std::vector<std::byte> OptionalI64Bytes(std::optional<std::int64_t> value)
+    {
+        return OptionalU64Bytes(value.transform([](std::int64_t v) { return std::bit_cast<std::uint64_t>(v); }));
+    }
+
+    /// One override as its field: empty when there is none; else a nested record of its bytes, its id, the leader's
+    /// stamp, its baseline (empty when unset) and who set it.
+    /// @param budget The override, or nothing.
+    /// @return Its encoding.
+    [[nodiscard]] std::vector<std::byte> EncodeBudgetField(std::optional<BudgetOverride> const& budget)
+    {
+        if (!budget.has_value())
+            return {};
+        auto const bytes = WireFields::ToBigEndian<std::uint64_t>(budget->bytes);
+        auto const id = WireFields::ToBigEndian<std::uint64_t>(budget->id);
+        auto const setAt = WireFields::ToBigEndian<std::uint64_t>(std::bit_cast<std::uint64_t>(budget->setAtUnixSeconds));
+        auto const baseline = OptionalU64Bytes(budget->baseline);
+        return WireFields::Encode({ std::span<std::byte const> { bytes },
+                                    std::span<std::byte const> { id },
+                                    std::span<std::byte const> { setAt },
+                                    std::span<std::byte const> { baseline },
+                                    WireFields::AsBytes(budget->setBy) });
+    }
+
+    /// Why a recorded `setBy` is not one `Apply` could have recorded, or nothing: a member id, so within the one id
+    /// bound and text every renderer can carry.
+    /// @param setBy The label.
+    /// @return The reason, or nullopt.
+    [[nodiscard]] std::optional<std::string> RefuseSetBy(std::string_view setBy)
+    {
+        if (setBy.size() > CompileCacheWire::MaxIdBytes)
+            return std::format("names a member id past the {} bytes every id is held to", CompileCacheWire::MaxIdBytes);
+        if (FirstUncarriableByte(setBy).has_value())
+            return std::string { "names its setter in bytes a page cannot carry" };
+        return std::nullopt;
+    }
+
+    /// Read one override back: absent, or an override `Apply` could have recorded.
+    /// @param field The field.
+    /// @return Absent, the override, or why it is not one -- a record of the wrong shape, a zero budget, which
+    ///         `Apply` never records (`TierOverrideCannotRemoveTier`), or a setter that is no member id.
+    [[nodiscard]] std::expected<std::optional<BudgetOverride>, std::string> DecodeBudgetField(
+        std::span<std::byte const> field)
+    {
+        if (field.empty())
+            return std::optional<BudgetOverride> {};
+        auto const parts = WireFields::SplitExactly(field, BudgetRecordFields);
+        if (!parts.has_value())
+            return std::unexpected(std::format("a budget override is not a record of {} fields", BudgetRecordFields));
+        auto const bytes = WireFields::FromBigEndian<std::uint64_t>((*parts)[0]);
+        auto const id = WireFields::FromBigEndian<std::uint64_t>((*parts)[1]);
+        auto const setAt = WireFields::FromBigEndian<std::uint64_t>((*parts)[2]);
+        auto const baseline = ReadU64Field((*parts)[3]);
+        if (!bytes.has_value() || !id.has_value() || !setAt.has_value() || !baseline.has_value())
+            return std::unexpected(std::string { "a budget override's figures are not eight bytes each" });
+        auto budget = BudgetOverride { .bytes = *bytes,
+                                       .baseline = *baseline,
+                                       .setAtUnixSeconds = std::bit_cast<std::int64_t>(*setAt),
+                                       .id = *id,
+                                       .setBy = std::string { WireFields::AsStringView((*parts)[4]) } };
+        if (budget.bytes == 0)
+            return std::unexpected(std::string { "a budget override of zero bytes, which removes no tier" });
+        if (auto const refused = RefuseSetBy(budget.setBy); refused.has_value())
+            return std::unexpected(std::format("a budget override {}", *refused));
+        return std::optional { std::move(budget) };
     }
 
     /// Read a key field: empty is no key, exactly 32 bytes is one, anything else is refused.
@@ -372,6 +624,69 @@ std::optional<Ed25519PublicKey> LiveKeyOf(ClusterState const& state, std::string
     return member->publicKey;
 }
 
+std::optional<std::string> RefuseDisplayName(std::string_view name)
+{
+    if (name.size() > MaxDisplayNameBytes)
+        return std::format(
+            "a display name is at most {} bytes, and this one is {}; a shorter label still tells the machine apart",
+            MaxDisplayNameBytes,
+            name.size());
+    // Where, never the bytes themselves: what follows is not text a terminal can be trusted with.
+    if (auto const at = FirstUncarriableByte(name); at.has_value())
+        return std::format("a display name must be UTF-8 text the fleet page can carry, and byte {} of this one is not",
+                           *at);
+    // The `Char` production admits a tab and a line break; a table row and a log line do not.
+    auto const* const control = core::findIfOrNull(name, [](char ch) {
+        auto const byte = static_cast<unsigned char>(ch);
+        return byte < 0x20U || byte == 0x7FU;
+    });
+    if (control != nullptr)
+        return std::format("a display name carries no control character, and byte {} of this one is one",
+                           control - name.data());
+    return std::nullopt;
+}
+
+namespace
+{
+    /// Which OTHER member carries a display name equal to @p name under ASCII folding -- names alone, never ids.
+    ///
+    /// The half of `DisplayNameHolder` that only `SetDisplayName` can create, which is why it is also the one rule a
+    /// decoded state is held to: an admission never gives a member a name, so no apply path but the guarded rename can
+    /// produce two members answering to one name.
+    /// @param state The state.
+    /// @param name A non-empty display name.
+    /// @param except The member being named.
+    /// @return The holder's id, or nullopt.
+    [[nodiscard]] std::optional<std::string> FoldedNameHolder(ClusterState const& state,
+                                                              std::string_view name,
+                                                              std::string_view except)
+    {
+        auto const* const holder = core::findIfOrNull(state.members, [&](ClusterMember const& member) {
+            return member.id != except && AsciiFoldEquals(member.displayName, name);
+        });
+        return holder != nullptr ? std::optional { holder->id } : std::nullopt;
+    }
+} // namespace
+
+std::optional<std::string> DisplayNameHolder(ClusterState const& state, std::string_view name, std::string_view except)
+{
+    auto const* const byId = core::findIfOrNull(
+        state.members, [&](ClusterMember const& member) { return member.id != except && member.id == name; });
+    if (byId != nullptr)
+        return byId->id;
+    return FoldedNameHolder(state, name, except);
+}
+
+std::optional<std::string> DisplayNameYieldingTo(ClusterState const& state, Command const& command)
+{
+    if (!SeatAdmittedBy(command.kind).has_value())
+        return std::nullopt;
+    auto const* const holder = core::findIfOrNull(state.members, [&command](ClusterMember const& member) {
+        return member.id != command.key && !member.displayName.empty() && member.displayName == command.key;
+    });
+    return holder != nullptr ? std::optional { holder->id } : std::nullopt;
+}
+
 std::vector<std::byte> Encode(Command const& command)
 {
     auto const header = std::array { static_cast<std::byte>(CommandVersion), static_cast<std::byte>(command.kind) };
@@ -384,13 +699,22 @@ std::vector<std::byte> Encode(Command const& command)
         auto const bytes = WireFields::ToBigEndian<std::uint64_t>(*command.createdAtUnixSeconds);
         created.assign(bytes.begin(), bytes.end());
     }
+    auto const budget = EncodeBudgetFigures(command.budgetBytes);
+    auto const baseline = OptionalU64Bytes(command.baselineBytes);
+    auto const setAt = OptionalI64Bytes(command.setAtUnixSeconds);
+    auto const overrideId = OptionalU64Bytes(command.overrideId);
     return WireFields::Encode({ std::span<std::byte const> { header },
                                 WireFields::AsBytes(command.key),
                                 WireFields::AsBytes(command.value),
                                 WireFields::AsBytes(command.schedulerEndpoint),
                                 OptionalKeyBytes(command.publicKey),
                                 std::span<std::byte const> { created },
-                                OptionalKeyBytes(command.leaderKey) });
+                                OptionalKeyBytes(command.leaderKey),
+                                std::span<std::byte const> { budget },
+                                std::span<std::byte const> { baseline },
+                                std::span<std::byte const> { setAt },
+                                std::span<std::byte const> { overrideId },
+                                WireFields::AsBytes(command.setBy) });
 }
 
 std::expected<Command, ConsensusError> DecodeCommand(std::span<std::byte const> payload)
@@ -398,23 +722,30 @@ std::expected<Command, ConsensusError> DecodeCommand(std::span<std::byte const> 
     // The version is read before the arity is judged, so a command another build laid out
     // is refused by NAME rather than as a malformed frame: a v2 command is four fields, and
     // counting them first would report an intact entry as damage.
+    // And the layout is chosen BY that version: an older one this build reads is a prefix of its own, whose missing
+    // fields are absent (`ReadableCommandLayouts`).
     auto const all = WireFields::SplitAll(payload);
-    if (all.has_value() && !all->empty() && !(*all)[0].empty() && static_cast<std::uint8_t>((*all)[0][0]) != CommandVersion)
+    if (!all.has_value() || all->empty())
+        return std::unexpected(MalformedWireFrame(std::format("a cluster command is not {} fields", CommandFields)));
+    if ((*all)[0].empty())
+        return std::unexpected(MalformedWireFrame("a cluster command's header is empty"));
+    auto const version = static_cast<std::uint8_t>((*all)[0][0]);
+    auto const* const layout =
+        core::findIfOrNull(ReadableCommandLayouts, [version](CommandLayout const& row) { return row.version == version; });
+    if (layout == nullptr)
         return std::unexpected(
             UnsupportedWireVersion(std::format("cluster command encoding version {} (this build reads {})",
-                                               static_cast<std::uint8_t>((*all)[0][0]),
-                                               CommandVersion)));
+                                               version,
+                                               ReadableVersionsText(ReadableCommandLayouts))));
+    if (all->size() != layout->fields)
+        return std::unexpected(
+            MalformedWireFrame(std::format("a version {} cluster command is not {} fields", version, layout->fields)));
 
-    auto const fields = WireFields::SplitExactly(payload, CommandFields);
-    if (!fields.has_value())
-        return std::unexpected(MalformedWireFrame("a cluster command is not seven fields"));
+    // Every field this build has, the ones the layout lacks read as the empty field absence travels as.
+    auto fields = std::array<std::span<std::byte const>, CommandFields> {};
+    std::ranges::copy(*all, fields.begin());
 
-    auto const header = (*fields)[0];
-    if (header.empty())
-        return std::unexpected(MalformedWireFrame("a cluster command's header is empty"));
-    if (auto const version = static_cast<std::uint8_t>(header[0]); version != CommandVersion)
-        return std::unexpected(UnsupportedWireVersion(
-            std::format("cluster command encoding version {} (this build reads {})", version, CommandVersion)));
+    auto const header = fields[0];
     if (header.size() != 2)
         return std::unexpected(MalformedWireFrame("a cluster command's header is not two bytes"));
 
@@ -430,6 +761,15 @@ std::expected<Command, ConsensusError> DecodeCommand(std::span<std::byte const> 
     if (!kind.has_value())
         return std::unexpected(UnknownWireMessage(
             std::format("cluster command verb {} this build does not know", static_cast<unsigned>(header[1]))));
+    // A verb the layout's writer did not have is no entry that build wrote: read as this build's verb it would be a
+    // claim nobody made. And it is DAMAGE, not another build's layout -- the byte past `Last` above is a build this one
+    // has not met, while this one names a build it HAS met, which never wrote the pair. So the malformed code, which a
+    // held entry reports as a damaged store rather than an intact one with no conversion (storage.md).
+    if (static_cast<std::uint8_t>(*kind) >= static_cast<std::uint8_t>(layout->firstUnknownVerb))
+        return std::unexpected(MalformedWireFrame(std::format("cluster command verb {} under encoding version {}, "
+                                                              "which had no such verb",
+                                                              static_cast<unsigned>(header[1]),
+                                                              version)));
 
     // A RETIRED verb's byte is a known enumerator, reserved so it is never read as another
     // verb -- and refused here, where every entry is read, rather than only where a proposal
@@ -441,30 +781,42 @@ std::expected<Command, ConsensusError> DecodeCommand(std::span<std::byte const> 
                                                               static_cast<unsigned>(header[1]),
                                                               retired->context)));
 
-    auto const publicKey = ReadKeyField((*fields)[4]);
+    auto const publicKey = ReadKeyField(fields[4]);
     if (!publicKey.has_value())
         return std::unexpected(MalformedWireFrame("a cluster command's key is neither absent nor 32 bytes"));
 
     // Empty is absent, eight bytes is a time, anything else is damage.
     auto created = std::optional<std::uint64_t> {};
-    if (auto const createdField = (*fields)[5]; !createdField.empty())
+    if (auto const createdField = fields[5]; !createdField.empty())
     {
         created = WireFields::FromBigEndian<std::uint64_t>(createdField);
         if (!created.has_value())
             return std::unexpected(MalformedWireFrame("a cluster command's creation time is not eight bytes"));
     }
 
-    auto const leaderKey = ReadKeyField((*fields)[6]);
+    auto const leaderKey = ReadKeyField(fields[6]);
     if (!leaderKey.has_value())
         return std::unexpected(MalformedWireFrame("a cluster command's leader key is neither absent nor 32 bytes"));
 
+    auto const budget = DecodeBudgetFigures(fields[7]);
+    auto const baseline = ReadU64Field(fields[8]);
+    auto const setAt = ReadU64Field(fields[9]);
+    auto const overrideId = ReadU64Field(fields[10]);
+    if (!budget.has_value() || !baseline.has_value() || !setAt.has_value() || !overrideId.has_value())
+        return std::unexpected(MalformedWireFrame("a cluster command's budget figures are neither absent nor eight bytes"));
+
     return Command { .kind = *kind,
-                     .key = std::string { WireFields::AsStringView((*fields)[1]) },
-                     .value = std::string { WireFields::AsStringView((*fields)[2]) },
-                     .schedulerEndpoint = std::string { WireFields::AsStringView((*fields)[3]) },
+                     .key = std::string { WireFields::AsStringView(fields[1]) },
+                     .value = std::string { WireFields::AsStringView(fields[2]) },
+                     .schedulerEndpoint = std::string { WireFields::AsStringView(fields[3]) },
                      .publicKey = *publicKey,
                      .createdAtUnixSeconds = created,
-                     .leaderKey = *leaderKey };
+                     .leaderKey = *leaderKey,
+                     .budgetBytes = *budget,
+                     .baselineBytes = *baseline,
+                     .setAtUnixSeconds = setAt->transform([](std::uint64_t v) { return std::bit_cast<std::int64_t>(v); }),
+                     .overrideId = *overrideId,
+                     .setBy = std::string { WireFields::AsStringView(fields[11]) } };
 }
 
 std::vector<std::byte> Encode(ClusterState const& state)
@@ -492,10 +844,15 @@ std::vector<std::byte> Encode(ClusterState const& state)
     // walks both.
     std::vector<std::byte> memberBytes;
     memberBytes.reserve(state.members.size() * 2);
+    // And every override's field, one per member per tier, built whole before any span is taken for the same reason.
+    std::vector<std::vector<std::byte>> budgetBytes;
+    budgetBytes.reserve(state.members.size() * BudgetSlots.size());
     for (auto const& member: state.members)
     {
         memberBytes.push_back(static_cast<std::byte>(member.schedulerEndpointHistory));
         memberBytes.push_back(static_cast<std::byte>(member.seat));
+        for (auto const& row: BudgetSlots)
+            budgetBytes.push_back(EncodeBudgetField(member.*row.slot));
     }
 
     fields.emplace_back(header);
@@ -505,6 +862,7 @@ std::vector<std::byte> Encode(ClusterState const& state)
     fields.emplace_back(rosterVersion);
     fields.emplace_back(dissolveCount);
     auto cursor = std::span<std::byte const> { memberBytes };
+    auto budget = budgetBytes.cbegin();
     for (auto const& member: state.members)
     {
         fields.push_back(WireFields::AsBytes(member.id));
@@ -513,6 +871,9 @@ std::vector<std::byte> Encode(ClusterState const& state)
         fields.push_back(cursor.first(1));
         fields.push_back(cursor.subspan(1, 1));
         fields.emplace_back(member.publicKey);
+        fields.push_back(WireFields::AsBytes(member.displayName));
+        for ([[maybe_unused]] auto const& row: BudgetSlots)
+            fields.emplace_back(*budget++);
         cursor = cursor.subspan(2);
     }
     for (auto const& setting: state.settings)
@@ -538,48 +899,67 @@ std::vector<std::byte> Encode(ClusterState const& state)
 
 std::expected<ClusterState, ConsensusError> DecodeState(std::span<std::byte const> bytes)
 {
-    auto const fields = WireFields::SplitAll(bytes);
-    if (!fields.has_value() || fields->empty() || (*fields)[0].size() != 1)
+    auto const split = WireFields::SplitAll(bytes);
+    if (!split.has_value() || split->empty() || (*split)[0].size() != 1)
         return std::unexpected(MalformedWireFrame("the bytes are not a cluster state"));
 
-    // By name, before anything else about the bytes is judged: a layout this build did
-    // not write is intact, and reading it as this build's would report damage that is
-    // not there.
-    if (auto const version = static_cast<std::uint8_t>((*fields)[0][0]); version != StateVersion)
-        return std::unexpected(UnsupportedWireVersion(
-            std::format("cluster state encoding version {} (this build reads {})", version, StateVersion)));
+    // By name, before anything else about the bytes is judged: a layout this build does
+    // not read is intact, and reading it as this build's would report damage that is
+    // not there. One it does read chooses the member stride (`ReadableStateLayouts`).
+    auto const version = static_cast<std::uint8_t>((*split)[0][0]);
+    auto const* const layout =
+        core::findIfOrNull(ReadableStateLayouts, [version](StateLayout const& row) { return row.version == version; });
+    if (layout == nullptr)
+        return std::unexpected(UnsupportedWireVersion(std::format("cluster state encoding version {} (this build reads {})",
+                                                                  version,
+                                                                  ReadableVersionsText(ReadableStateLayouts))));
 
-    if (fields->size() < StateHeaderFields)
+    if (split->size() < StateHeaderFields)
         return std::unexpected(MalformedWireFrame(
             "a cluster state does not state its three counts, its roster version and its dissolve count"));
-    auto const memberCount = WireFields::FromBigEndian<std::uint32_t>((*fields)[1]);
-    auto const settingCount = WireFields::FromBigEndian<std::uint32_t>((*fields)[2]);
-    auto const revokedCount = WireFields::FromBigEndian<std::uint32_t>((*fields)[3]);
+    auto const memberCount = WireFields::FromBigEndian<std::uint32_t>((*split)[1]);
+    auto const settingCount = WireFields::FromBigEndian<std::uint32_t>((*split)[2]);
+    auto const revokedCount = WireFields::FromBigEndian<std::uint32_t>((*split)[3]);
     if (!memberCount.has_value() || !settingCount.has_value() || !revokedCount.has_value())
         return std::unexpected(MalformedWireFrame("a cluster state's counts are not four bytes each"));
-    auto const rosterVersion = WireFields::FromBigEndian<std::uint64_t>((*fields)[RosterVersionField]);
+    auto const rosterVersion = WireFields::FromBigEndian<std::uint64_t>((*split)[RosterVersionField]);
     if (!rosterVersion.has_value())
         return std::unexpected(MalformedWireFrame("a cluster state's roster version is not eight bytes"));
-    auto const dissolveCount = WireFields::FromBigEndian<std::uint32_t>((*fields)[DissolveOrderCountField]);
+    auto const dissolveCount = WireFields::FromBigEndian<std::uint32_t>((*split)[DissolveOrderCountField]);
     if (!dissolveCount.has_value() || *dissolveCount > 1)
         return std::unexpected(MalformedWireFrame("a cluster state carries more than one dissolve order"));
 
-    // Members as sextuples, settings as pairs and revoked keys as pairs -- and the TOTAL is
-    // checked against what actually arrived. A truncated snapshot
-    // must be refused rather than read as a member with an empty endpoint -- that member
-    // would be replicated onward as an address nobody can dial -- and a declared count
-    // larger than the fields present is the same fault stated by the other end. 64-bit
-    // arithmetic, so counts near `UINT32_MAX` cannot wrap into agreement.
-    auto const memberSpan = std::uint64_t { *memberCount } * MemberFields;
+    // Members, settings as pairs and revoked keys as pairs -- and the TOTAL is checked
+    // against what actually arrived, at the stride the layout's members were written with.
+    // A truncated snapshot must be refused rather than read as a member with an empty
+    // endpoint -- that member would be replicated onward as an address nobody can dial --
+    // and a declared count larger than the fields present is the same fault stated by the
+    // other end. 64-bit arithmetic, so counts near `UINT32_MAX` cannot wrap into agreement.
+    auto const writtenMemberSpan = std::uint64_t { *memberCount } * layout->memberFields;
     auto const settingSpan = std::uint64_t { *settingCount } * SettingFields;
     auto const revokedSpan = std::uint64_t { *revokedCount } * RevokedKeyFields;
     auto const dissolveSpan = std::uint64_t { *dissolveCount } * DissolveOrderFields;
-    auto const expected = StateHeaderFields + memberSpan + settingSpan + revokedSpan + dissolveSpan;
-    if (expected != fields->size())
+    auto const expected = StateHeaderFields + writtenMemberSpan + settingSpan + revokedSpan + dissolveSpan;
+    if (expected != split->size())
         return std::unexpected(MalformedWireFrame("a cluster state's fields do not match its counts"));
 
+    // Every member at this build's stride, each field an older layout lacks read as the empty field absence travels
+    // as; everything after the members is copied as it stands. For this build's layout that is the split unchanged.
+    auto fields = std::vector<std::span<std::byte const>> {};
+    fields.reserve(split->size() + (std::size_t { *memberCount } * (MemberFields - layout->memberFields)));
+    auto const written = std::span { *split };
+    std::ranges::copy(written.first(StateHeaderFields), std::back_inserter(fields));
+    for (auto const ordinal: std::views::iota(std::size_t { 0 }, std::size_t { *memberCount }))
+    {
+        std::ranges::copy(written.subspan(StateHeaderFields + (ordinal * layout->memberFields), layout->memberFields),
+                          std::back_inserter(fields));
+        fields.resize(fields.size() + (MemberFields - layout->memberFields));
+    }
+    std::ranges::copy(written.subspan(StateHeaderFields + writtenMemberSpan), std::back_inserter(fields));
+    auto const memberSpan = std::uint64_t { *memberCount } * MemberFields;
+
     auto const at = [&](std::size_t index) {
-        return std::string { WireFields::AsStringView((*fields)[StateHeaderFields + index]) };
+        return std::string { WireFields::AsStringView(fields[StateHeaderFields + index]) };
     };
 
     ClusterState state;
@@ -593,7 +973,7 @@ std::expected<ClusterState, ConsensusError> DecodeState(std::span<std::byte cons
     for (auto const ordinal: std::views::iota(std::size_t { 0 }, std::size_t { *memberCount }))
     {
         auto const index = ordinal * MemberFields;
-        auto const historyField = (*fields)[StateHeaderFields + index + 3];
+        auto const historyField = fields[StateHeaderFields + index + 3];
         auto const history =
             historyField.size() == 1
                 ? Consensus::DecodeWireEnum<SchedulerEndpointHistory>(static_cast<std::uint8_t>(historyField[0]))
@@ -601,7 +981,7 @@ std::expected<ClusterState, ConsensusError> DecodeState(std::span<std::byte cons
         if (!history.has_value())
             return std::unexpected(MalformedWireFrame("a member's scheduler endpoint history names none this build knows"));
 
-        auto const seatField = (*fields)[StateHeaderFields + index + 4];
+        auto const seatField = fields[StateHeaderFields + index + 4];
         auto const seat = seatField.size() == 1
                               ? Consensus::DecodeWireEnum<MemberSeat>(static_cast<std::uint8_t>(seatField[0]))
                               : std::nullopt;
@@ -611,7 +991,7 @@ std::expected<ClusterState, ConsensusError> DecodeState(std::span<std::byte cons
         // REQUIRED. An empty field, or the all-zero key, is the member
         // `Apply` drops (`KeyToRecord`) -- a machine is forgotten by its key, so such a record
         // is one no forget could remove from every address -- and is refused by name.
-        auto const publicKey = ReadKeyField((*fields)[StateHeaderFields + index + 5]);
+        auto const publicKey = ReadKeyField(fields[StateHeaderFields + index + 5]);
         if (!publicKey.has_value())
             return std::unexpected(MalformedWireFrame("a member's key is neither absent nor 32 bytes"));
         if (!publicKey->has_value() || IsZeroEd25519PublicKey(**publicKey))
@@ -622,7 +1002,26 @@ std::expected<ClusterState, ConsensusError> DecodeState(std::span<std::byte cons
                                       .schedulerEndpoint = at(index + 2),
                                       .schedulerEndpointHistory = *history,
                                       .seat = *seat,
-                                      .publicKey = **publicKey };
+                                      .publicKey = **publicKey,
+                                      .displayName = at(index + 6) };
+
+        // Each tier's override, positionally: a width neither form has, or a zero budget `Apply` never records, is
+        // refused by name. Per record only -- whether the member's machine HAS that tier is its own question, which
+        // no state can answer and the member reports.
+        for (auto const& row: BudgetSlots)
+        {
+            auto const ordinalOfTier = static_cast<std::size_t>(row.tier);
+            auto budget = DecodeBudgetField(fields[StateHeaderFields + index + FirstBudgetField + ordinalOfTier]);
+            if (!budget.has_value())
+                return std::unexpected(MalformedWireFrame(
+                    std::format("member {}'s {} override: {}", member.id, TierName(row.tier), budget.error())));
+            member.*row.slot = *budget;
+        }
+
+        // A name `Apply` would never have recorded -- not text a page can carry, too long, a control byte -- is read
+        // as it stands by every renderer, so it is refused here rather than half-believed, as the roster's rules are.
+        if (auto const refused = RefuseDisplayName(member.displayName); refused.has_value())
+            return std::unexpected(MalformedWireFrame(std::format("member {}'s display name: {}", member.id, *refused)));
 
         // The one combination `Apply` never produces. Read as it stands it would be a
         // member holding an endpoint it reports never having announced, and every
@@ -639,7 +1038,7 @@ std::expected<ClusterState, ConsensusError> DecodeState(std::span<std::byte cons
     }
 
     auto const field = [&](std::size_t index) {
-        return (*fields)[StateHeaderFields + index];
+        return fields[StateHeaderFields + index];
     };
     for (auto const ordinal: std::views::iota(std::size_t { 0 }, std::size_t { *revokedCount }))
     {
@@ -668,8 +1067,93 @@ std::expected<ClusterState, ConsensusError> DecodeState(std::span<std::byte cons
 
     if (auto const broken = BrokenRosterRule(state); broken.has_value())
         return std::unexpected(MalformedWireFrame(*broken));
+    // And two members answering to one name under ASCII folding, which only the guarded rename could create and
+    // `Apply` drops (`FoldedNameHolder`): a resolver would have to pick which machine a person meant. NOT a name
+    // spelled like another member's id: an admission may bring that id in after the name was given, and `Apply` then
+    // clears the name (`DisplayNameYieldingTo`) -- but a state another build or an older path wrote with the pair in
+    // it is well formed, and refusing it here would keep a node from restoring or starting over a label.
+    for (auto const& member: state.members)
+        if (!member.displayName.empty())
+            if (auto const holder = FoldedNameHolder(state, member.displayName, member.id); holder.has_value())
+                return std::unexpected(
+                    MalformedWireFrame(std::format("members {} and {} answer to one display name", member.id, *holder)));
     return state;
 }
+
+namespace
+{
+    /// Why a budget command no longer applies to @p state, or nothing when it does.
+    ///
+    /// **The one author of the rule** `ValidateAgainst` refuses by and `Apply` drops by: the member must be recorded;
+    /// a clear must find an override, and a member's conditional one the very override it names; a baseline must answer
+    /// the very override still recorded -- by its id, the log index of the entry that set it -- which carries no other
+    /// baseline yet. So a baseline measured against an override that has since been replaced or cleared is never
+    /// attached to its successor, on any replica, whatever figure or second the successor was set with.
+    /// @param state The state the command applies to.
+    /// @param command A `SetBudget`, `ClearBudget` or `RecordBaseline` that `Validate` accepted.
+    /// @return Why it does not apply, or nullopt.
+    [[nodiscard]] std::optional<ConsensusError> BudgetRefusal(ClusterState const& state, Command const& command)
+    {
+        auto const member = std::ranges::find(state.members, command.key, &ClusterMember::id);
+        if (member == state.members.end())
+            return InvalidConfiguration(std::format("{} is no member of this cluster, so there is no budget of its to "
+                                                    "override; the members are listed by --cluster-status",
+                                                    command.key));
+        // A set replaces whatever is recorded for each tier it names, so only the member had to exist.
+        if (command.kind == CommandKind::SetBudget)
+            return std::nullopt;
+        auto const tier = TierNamed(command.value);
+        if (!tier.has_value())
+            return InvalidConfiguration(std::format("{} is no cache tier", command.value));
+        auto const& recorded = BudgetOf(*member, *tier);
+        if (!recorded.has_value())
+            return InvalidConfiguration(std::format("no {} override is recorded for {}{}",
+                                                    command.value,
+                                                    command.key,
+                                                    command.kind == CommandKind::ClearBudget
+                                                        ? ", so there is nothing to clear"
+                                                        : ": it was cleared since, so nothing is recorded"));
+        if (command.overrideId.has_value() && *command.overrideId != recorded->id)
+            return InvalidConfiguration(std::format("the {} override recorded for {} is not the one named (entry {}, "
+                                                    "recorded {}): another was set since, and it stands",
+                                                    command.value,
+                                                    command.key,
+                                                    *command.overrideId,
+                                                    recorded->id));
+        if (command.kind == CommandKind::RecordBaseline && recorded->baseline.has_value()
+            && recorded->baseline != command.baselineBytes)
+            return InvalidConfiguration(
+                std::format("{}'s {} override already records the baseline {}; the first report stands",
+                            command.key,
+                            command.value,
+                            *recorded->baseline));
+        return std::nullopt;
+    }
+
+    /// The member a budget command changes, when it still applies (`Validate`, then `BudgetRefusal`).
+    ///
+    /// `Validate` first, for the reason `DissolveInto`'s arm checks its fields: a committed entry reaches `Apply`
+    /// decoded and unjudged, so a figure `Validate` requires -- or a zero it refuses -- is dropped here too.
+    /// @param state The state.
+    /// @param command A budget command.
+    /// @return The member, or null when the command is dropped.
+    [[nodiscard]] ClusterMember* AppliedBudgetMember(ClusterState& state, Command const& command)
+    {
+        if (!Validate(command).has_value() || BudgetRefusal(state, command).has_value())
+            return nullptr;
+        auto const it = std::ranges::find(state.members, command.key, &ClusterMember::id);
+        return it != state.members.end() ? &*it : nullptr;
+    }
+
+    /// @param member A member.
+    /// @param tierName A tier's name, as a command carries it.
+    /// @return That tier's override slot, or null for a name no tier has.
+    [[nodiscard]] std::optional<BudgetOverride>* SlotNamed(ClusterMember& member, std::string_view tierName)
+    {
+        auto const tier = TierNamed(tierName);
+        return tier.has_value() ? &(member.*(BudgetSlots[static_cast<std::size_t>(*tier)].slot)) : nullptr;
+    }
+} // namespace
 
 namespace
 {
@@ -694,7 +1178,8 @@ namespace
     /// Apply @p command to @p state, as `Apply` does before it asks whether the roster moved.
     /// @param state The state.
     /// @param command The committed command.
-    void ApplyChange(ClusterState& state, Command const& command)
+    /// @param entryIndex The log index of the entry carrying it, or nothing for a command in no log.
+    void ApplyChange(ClusterState& state, Command const& command, std::optional<std::uint64_t> entryIndex)
     {
         switch (command.kind)
         {
@@ -721,6 +1206,14 @@ namespace
                 // Update in place when the id is already known. One verb for "join" and
                 // "moved" because they are one intention, and removing first would leave a
                 // window in which the cluster has agreed the node does not exist.
+                // A label yields to an identity: a member whose display name is spelled like the id this admission
+                // brings in loses the name, deterministically and here, so no resolver ever has to choose between
+                // the two. Never the reverse -- an admission is never refused over a label, which decides nothing.
+                if (auto const yielding = DisplayNameYieldingTo(state, command); yielding.has_value())
+                    if (auto const holder = std::ranges::find(state.members, *yielding, &ClusterMember::id);
+                        holder != state.members.end())
+                        holder->displayName.clear();
+
                 auto const it = std::ranges::find(state.members, command.key, &ClusterMember::id);
 
                 // The endpoint is replaced wholesale and its HISTORY is not, which is what
@@ -740,7 +1233,13 @@ namespace
                                     .seat = SeatAdmittedBy(command.kind).value_or(MemberSeat::Voter),
                                     // No opinion keeps what is recorded: a machine that moves
                                     // keeps its identity, and only `Forget` takes one away.
-                                    .publicKey = *key };
+                                    .publicKey = *key,
+                                    // Kept, never restated: no admission carries a name, and the
+                                    // next announced endpoint would otherwise wipe one an operator set.
+                                    .displayName = it != state.members.end() ? it->displayName : std::string {},
+                                    // Kept for the display name's reason: no admission states a budget.
+                                    .memoryOverride = it != state.members.end() ? it->memoryOverride : std::nullopt,
+                                    .diskOverride = it != state.members.end() ? it->diskOverride : std::nullopt };
                 if (it != state.members.end())
                 {
                     // Wholesale, both endpoints. A record is re-proposed only when it has
@@ -808,6 +1307,47 @@ namespace
                                                       .leaderKey = *command.leaderKey };
                 return;
 
+            case CommandKind::SetDisplayName: {
+                // Dropped when the member is gone, or the name was taken since the command was judged --
+                // `ValidateAgainst`'s rule, through the same function, for two renames judged against one state.
+                auto const it = std::ranges::find(state.members, command.key, &ClusterMember::id);
+                if (it == state.members.end())
+                    return;
+                if (!command.value.empty() && DisplayNameHolder(state, command.value, command.key).has_value())
+                    return;
+                it->displayName = command.value;
+                return;
+            }
+
+            // The budget verbs: each through `BudgetRefusal`, the one function `ValidateAgainst` refuses by too, so the
+            // courtesy and the guarantee cannot disagree about which override a command still names.
+            // Every tier it names, in the one entry, so a two-tier edit is recorded whole; each override is identified
+            // by that entry's index, which a command in no log does not have -- so it records nothing.
+            case CommandKind::SetBudget:
+                if (auto* const member = AppliedBudgetMember(state, command);
+                    member != nullptr && entryIndex.has_value() && command.setAtUnixSeconds.has_value())
+                    for (auto const& row: BudgetSlots)
+                        if (auto const& bytes = command.budgetBytes[static_cast<std::size_t>(row.tier)]; bytes.has_value())
+                            member->*row.slot = BudgetOverride { .bytes = *bytes,
+                                                                 .baseline = std::nullopt,
+                                                                 .setAtUnixSeconds = *command.setAtUnixSeconds,
+                                                                 .id = *entryIndex,
+                                                                 .setBy = command.setBy };
+                return;
+            case CommandKind::ClearBudget:
+                if (auto* const member = AppliedBudgetMember(state, command); member != nullptr)
+                    if (auto* const slot = SlotNamed(*member, command.value); slot != nullptr)
+                        slot->reset();
+                return;
+            case CommandKind::RecordBaseline:
+                // The first report wins: a baseline already recorded stays, so a member reporting twice -- a restart
+                // before the first report replicated back -- cannot move it.
+                if (auto* const member = AppliedBudgetMember(state, command); member != nullptr)
+                    if (auto* const slot = SlotNamed(*member, command.value);
+                        slot != nullptr && slot->has_value() && !(*slot)->baseline.has_value())
+                        (*slot)->baseline = command.baselineBytes;
+                return;
+
             case CommandKind::SetSetting: {
                 auto const it = std::ranges::find(state.settings, command.key, &Setting::name);
                 if (it != state.settings.end())
@@ -830,18 +1370,35 @@ namespace
     }
 } // namespace
 
+namespace
+{
+    /// `Apply`, with or without the entry's log index: the one body both overloads share.
+    /// @param state The state to change.
+    /// @param command The change.
+    /// @param entryIndex The entry's log index, or nothing for a command in no log.
+    void ApplyAt(ClusterState& state, Command const& command, std::optional<std::uint64_t> entryIndex)
+    {
+        // The roster version is DERIVED here rather than carried, so every voter applying the
+        // same log reaches the same number for the same roster (`ClusterState::rosterVersion`).
+        // Asked of the projection after the fact rather than of each verb, because a verb that
+        // changes the roster only sometimes -- a re-admission restating what is recorded, a
+        // revocation of a key nobody holds -- must not move it, and a per-arm bump is one arm
+        // away from moving it on a no-op.
+        auto const before = state;
+        ApplyChange(state, command, entryIndex);
+        if (RosterDiffers(before, state))
+            ++state.rosterVersion;
+    }
+} // namespace
+
+void Apply(ClusterState& state, Command const& command, std::uint64_t entryIndex)
+{
+    ApplyAt(state, command, entryIndex);
+}
+
 void Apply(ClusterState& state, Command const& command)
 {
-    // The roster version is DERIVED here rather than carried, so every voter applying the
-    // same log reaches the same number for the same roster (`ClusterState::rosterVersion`).
-    // Asked of the projection after the fact rather than of each verb, because a verb that
-    // changes the roster only sometimes -- a re-admission restating what is recorded, a
-    // revocation of a key nobody holds -- must not move it, and a per-arm bump is one arm
-    // away from moving it on a no-op.
-    auto const before = state;
-    ApplyChange(state, command);
-    if (RosterDiffers(before, state))
-        ++state.rosterVersion;
+    ApplyAt(state, command, std::nullopt);
 }
 
 std::expected<std::chrono::milliseconds, std::string> ParseLeaseLifetime(std::string_view value)
@@ -945,6 +1502,26 @@ namespace
         { .name = "a cluster setting's value", .project = [](Command const& c) -> std::string_view { return c.value; } },
     } };
 
+    /// What `SetDisplayName` records: the member it names, and the name -- which `Validate` then holds to
+    /// `RefuseDisplayName`'s stricter rule.
+    constexpr std::array<TextField<Command>, 2> DisplayNameText { {
+        { .name = "a member id", .project = [](Command const& c) -> std::string_view { return c.key; } },
+        { .name = "a member's display name", .project = [](Command const& c) -> std::string_view { return c.value; } },
+    } };
+
+    /// What `SetBudget` records as text: the member it names, and who set it.
+    constexpr std::array<TextField<Command>, 2> SetBudgetText { {
+        { .name = "a member id", .project = [](Command const& c) -> std::string_view { return c.key; } },
+        { .name = "the member that set a budget", .project = [](Command const& c) -> std::string_view { return c.setBy; } },
+    } };
+
+    /// What a clear and a baseline record: the member they name and the tier's name, which `Validate` then holds to
+    /// `TierNamed`.
+    constexpr std::array<TextField<Command>, 2> BudgetText { {
+        { .name = "a member id", .project = [](Command const& c) -> std::string_view { return c.key; } },
+        { .name = "a cache tier's name", .project = [](Command const& c) -> std::string_view { return c.value; } },
+    } };
+
     /// What `DissolveInto` records: the survivor's id and its leader's endpoint, which every member
     /// then dials and every renderer of the state prints.
     constexpr std::array<TextField<Command>, 2> DissolveText { {
@@ -975,6 +1552,10 @@ namespace
         FieldUse publicKey;                         ///< Whether it takes `Command::publicKey`.
         FieldUse createdAt;                         ///< Whether it takes `Command::createdAtUnixSeconds`.
         FieldUse leaderKey;                         ///< Whether it takes `Command::leaderKey`.
+        FieldUse budgetBytes;                       ///< Whether it takes `Command::budgetBytes`.
+        FieldUse baselineBytes;                     ///< Whether it takes `Command::baselineBytes`.
+        FieldUse setAt;                             ///< Whether it takes `Command::setAtUnixSeconds`.
+        FieldUse overrideId;                        ///< Whether it takes `Command::overrideId`.
     };
 
     /// One row per `CommandKind`, in enumerator order.
@@ -988,49 +1569,122 @@ namespace
           .fields = AddMemberText,
           .publicKey = FieldUse::Optional,
           .createdAt = FieldUse::Refused,
-          .leaderKey = FieldUse::Refused },
+          .leaderKey = FieldUse::Refused,
+          .budgetBytes = FieldUse::Refused,
+          .baselineBytes = FieldUse::Refused,
+          .setAt = FieldUse::Refused,
+          .overrideId = FieldUse::Refused },
         { .kind = CommandKind::Forget,
           .noun = "a forget",
           .fields = {},
           .publicKey = FieldUse::Optional,
           .createdAt = FieldUse::Refused,
-          .leaderKey = FieldUse::Refused },
+          .leaderKey = FieldUse::Refused,
+          .budgetBytes = FieldUse::Refused,
+          .baselineBytes = FieldUse::Refused,
+          .setAt = FieldUse::Refused,
+          .overrideId = FieldUse::Refused },
         { .kind = CommandKind::SetSetting,
           .noun = "a setting",
           .fields = SetSettingText,
           .publicKey = FieldUse::Refused,
           .createdAt = FieldUse::Refused,
-          .leaderKey = FieldUse::Refused },
+          .leaderKey = FieldUse::Refused,
+          .budgetBytes = FieldUse::Refused,
+          .baselineBytes = FieldUse::Refused,
+          .setAt = FieldUse::Refused,
+          .overrideId = FieldUse::Refused },
         { .kind = CommandKind::RetiredAdmitClient,
           .noun = "a retired verb",
           .fields = {},
           .publicKey = FieldUse::Refused,
           .createdAt = FieldUse::Refused,
-          .leaderKey = FieldUse::Refused },
+          .leaderKey = FieldUse::Refused,
+          .budgetBytes = FieldUse::Refused,
+          .baselineBytes = FieldUse::Refused,
+          .setAt = FieldUse::Refused,
+          .overrideId = FieldUse::Refused },
         { .kind = CommandKind::RetiredForgetClient,
           .noun = "a retired verb",
           .fields = {},
           .publicKey = FieldUse::Refused,
           .createdAt = FieldUse::Refused,
-          .leaderKey = FieldUse::Refused },
+          .leaderKey = FieldUse::Refused,
+          .budgetBytes = FieldUse::Refused,
+          .baselineBytes = FieldUse::Refused,
+          .setAt = FieldUse::Refused,
+          .overrideId = FieldUse::Refused },
         { .kind = CommandKind::AddLearner,
           .noun = "a member admission",
           .fields = AddMemberText,
           .publicKey = FieldUse::Optional,
           .createdAt = FieldUse::Refused,
-          .leaderKey = FieldUse::Refused },
+          .leaderKey = FieldUse::Refused,
+          .budgetBytes = FieldUse::Refused,
+          .baselineBytes = FieldUse::Refused,
+          .setAt = FieldUse::Refused,
+          .overrideId = FieldUse::Refused },
         { .kind = CommandKind::RetiredAdmitPrincipal,
           .noun = "a retired verb",
           .fields = {},
           .publicKey = FieldUse::Refused,
           .createdAt = FieldUse::Refused,
-          .leaderKey = FieldUse::Refused },
+          .leaderKey = FieldUse::Refused,
+          .budgetBytes = FieldUse::Refused,
+          .baselineBytes = FieldUse::Refused,
+          .setAt = FieldUse::Refused,
+          .overrideId = FieldUse::Refused },
         { .kind = CommandKind::DissolveInto,
           .noun = "a dissolve",
           .fields = DissolveText,
           .publicKey = FieldUse::Required,
           .createdAt = FieldUse::Required,
-          .leaderKey = FieldUse::Required },
+          .leaderKey = FieldUse::Required,
+          .budgetBytes = FieldUse::Refused,
+          .baselineBytes = FieldUse::Refused,
+          .setAt = FieldUse::Refused,
+          .overrideId = FieldUse::Refused },
+        { .kind = CommandKind::SetDisplayName,
+          .noun = "a display name",
+          .fields = DisplayNameText,
+          .publicKey = FieldUse::Refused,
+          .createdAt = FieldUse::Refused,
+          .leaderKey = FieldUse::Refused,
+          .budgetBytes = FieldUse::Refused,
+          .baselineBytes = FieldUse::Refused,
+          .setAt = FieldUse::Refused,
+          .overrideId = FieldUse::Refused },
+        { .kind = CommandKind::SetBudget,
+          .noun = "a budget override",
+          .fields = SetBudgetText,
+          .publicKey = FieldUse::Refused,
+          .createdAt = FieldUse::Refused,
+          .leaderKey = FieldUse::Refused,
+          .budgetBytes = FieldUse::Required,
+          .baselineBytes = FieldUse::Refused,
+          .setAt = FieldUse::Required,
+          .overrideId = FieldUse::Refused },
+        // An operator's clear names no override; a member's drop names exactly the one it drops.
+        { .kind = CommandKind::ClearBudget,
+          .noun = "a budget clear",
+          .fields = BudgetText,
+          .publicKey = FieldUse::Refused,
+          .createdAt = FieldUse::Refused,
+          .leaderKey = FieldUse::Refused,
+          .budgetBytes = FieldUse::Refused,
+          .baselineBytes = FieldUse::Refused,
+          .setAt = FieldUse::Refused,
+          .overrideId = FieldUse::Optional },
+        { .kind = CommandKind::RecordBaseline,
+          .noun = "a budget baseline",
+          .fields = BudgetText,
+          .publicKey = FieldUse::Refused,
+          .createdAt = FieldUse::Refused,
+          .leaderKey = FieldUse::Refused,
+          .budgetBytes = FieldUse::Refused,
+          .baselineBytes = FieldUse::Required,
+          .setAt = FieldUse::Refused,
+          .overrideId = FieldUse::Required },
     } };
 
     static_assert(RowsInEnumeratorOrder(CommandShapes, &CommandShapeRow::kind),
@@ -1093,6 +1747,21 @@ std::expected<void, ConsensusError> Validate(Command const& command)
     if (auto refused = RefuseFieldUse(shape, shape.leaderKey, command.leaderKey.has_value(), "leader key");
         !refused.has_value())
         return refused;
+    auto const anyBudget = std::ranges::any_of(command.budgetBytes, [](auto const& tier) { return tier.has_value(); });
+    if (auto refused = RefuseFieldUse(shape, shape.budgetBytes, anyBudget, "budget"); !refused.has_value())
+        return refused;
+    if (auto refused = RefuseFieldUse(shape, shape.baselineBytes, command.baselineBytes.has_value(), "baseline");
+        !refused.has_value())
+        return refused;
+    if (auto refused = RefuseFieldUse(shape, shape.setAt, command.setAtUnixSeconds.has_value(), "leader's stamp");
+        !refused.has_value())
+        return refused;
+    if (auto refused = RefuseFieldUse(shape, shape.overrideId, command.overrideId.has_value(), "override id");
+        !refused.has_value())
+        return refused;
+    // Who set an override is `SetBudget`'s alone: a text field of that row, and empty on every other verb.
+    if (command.kind != CommandKind::SetBudget && !command.setBy.empty())
+        return std::unexpected(InvalidConfiguration(std::format("{} carries no setter", shape.noun)));
 
     switch (command.kind)
     {
@@ -1176,6 +1845,40 @@ std::expected<void, ConsensusError> Validate(Command const& command)
                     "a dissolve names a fleet id past the {} bytes every id is held to", CompileCacheWire::MaxIdBytes)));
             if (!ParseDialEndpoint(command.value).has_value())
                 return std::unexpected(InvalidConfiguration("a dissolve names a leader endpoint nobody can dial"));
+            return {};
+
+        // The name a person reads on every surface, so held to the rule every surface can render
+        // (`RefuseDisplayName`), and the id to the one id bound.
+        case CommandKind::SetDisplayName:
+            if (!command.schedulerEndpoint.empty())
+                return std::unexpected(InvalidConfiguration("a display name carries no scheduler endpoint"));
+            if (command.key.size() > CompileCacheWire::MaxIdBytes)
+                return std::unexpected(InvalidConfiguration(
+                    std::format("a display name names a member id past the {} bytes every id is held to",
+                                CompileCacheWire::MaxIdBytes)));
+            if (auto reason = RefuseDisplayName(command.value); reason.has_value())
+                return std::unexpected(InvalidConfiguration(*std::move(reason)));
+            return {};
+
+        // A figure for a tier of a member: the id to the one id bound, the tier to a name this build knows, and a
+        // budget to the rule every client holds it to before it sends -- zero removes no tier. Whether the member's
+        // machine HAS the tier is the member's question, which no state answers: the leader records, the member reports.
+        case CommandKind::SetBudget:
+        case CommandKind::ClearBudget:
+        case CommandKind::RecordBaseline:
+            if (!command.schedulerEndpoint.empty())
+                return std::unexpected(InvalidConfiguration("a budget override carries no scheduler endpoint"));
+            if (command.key.size() > CompileCacheWire::MaxIdBytes)
+                return std::unexpected(InvalidConfiguration(
+                    std::format("a budget override names a member id past the {} bytes every id is held to",
+                                CompileCacheWire::MaxIdBytes)));
+            // A set names its tiers positionally and no tier by name; a clear and a baseline name exactly one.
+            if (command.kind == CommandKind::SetBudget ? !command.value.empty() : !TierNamed(command.value).has_value())
+                return std::unexpected(InvalidConfiguration(std::format("{} is no cache tier", command.value)));
+            if (std::ranges::contains(command.budgetBytes, std::optional<std::uint64_t> { 0 }))
+                return std::unexpected(InvalidConfiguration(std::string { TierOverrideCannotRemoveTier }));
+            if (auto const refused = RefuseSetBy(command.setBy); refused.has_value())
+                return std::unexpected(InvalidConfiguration(std::format("a budget override {}", *refused)));
             return {};
 
         // The count rather than a verb; falls out to the refusal below.
@@ -1279,6 +1982,36 @@ std::expected<void, ConsensusError> ValidateAgainst(ClusterState const& state, C
         }
 
         case CommandKind::DissolveInto:
+            return {};
+
+        case CommandKind::SetDisplayName: {
+            // A member the state does not record has nothing to name: `Apply` would drop it, so it is refused where an
+            // operator reads the answer.
+            if (std::ranges::find(state.members, command.key, &ClusterMember::id) == state.members.end())
+                return std::unexpected(InvalidConfiguration(
+                    std::format("{} is no member of this cluster, so there is nothing to name; the members are listed by "
+                                "--cluster-status",
+                                command.key)));
+            if (command.value.empty())
+                return {};
+            if (auto const holder = DisplayNameHolder(state, command.value, command.key); holder.has_value())
+                return std::unexpected(DisplayNameTaken(std::format(
+                    "{} already answers to \"{}\"{} -- names are compared with ASCII letters folded to one case -- so it "
+                    "cannot also be {}'s; rename {} first, or choose another name",
+                    *holder,
+                    command.value,
+                    *holder == command.value ? " as its id" : "",
+                    command.key,
+                    *holder)));
+            return {};
+        }
+
+        // The courtesy for `Apply`'s guarantee, through the same function (`BudgetRefusal`).
+        case CommandKind::SetBudget:
+        case CommandKind::ClearBudget:
+        case CommandKind::RecordBaseline:
+            if (auto refusal = BudgetRefusal(state, command); refusal.has_value())
+                return std::unexpected(*std::move(refusal));
             return {};
 
         // `Validate` refused them above; named rather than swept up by a `default`, for the

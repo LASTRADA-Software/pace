@@ -1286,6 +1286,41 @@ TEST_CASE("A forced refresh ignores a cached value", "[toolchain-probe]")
     CHECK(forced != before);
 }
 
+TEST_CASE("A walk hands back the inputs it digested, and a cache hit hands back none",
+          "[toolchain-probe][fingerprint-inputs]")
+{
+    // The record a node explains a fingerprint with (`toolchain_diff`) is the digest's own argument list, so it
+    // recomputes to exactly the fingerprint returned beside it. A cache hit walked nothing and digested nothing,
+    // so it has no argument list to hand back -- and must not invent one by walking again.
+    Pace::Testing::ScratchDirectory tree { "pace-tcp-inputs" };
+    tree.Write("inc/a.hpp", "alpha");
+    tree.Write("inc/sub/b.hpp", "beta");
+    tree.Write("cc", "#!/bin/sh\n");
+    auto const compiler = (tree / "cc").string();
+    auto const root = (std::filesystem::path { tree.Path().string() } / "inc").string();
+
+    Pace::Testing::ScratchDirectory state { "pace-tcp-inputs-state" };
+    Pace::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
+
+    CountingRunner runner { VerboseNaming(root) };
+    ScriptedToolchainHost host;
+    auto const walked = CachedFingerprintSerially(runner, host, compiler, "cc 1.0", DriverOf(Flavor::Clang));
+    REQUIRE(walked.inputs.has_value());
+    CHECK(ComputeToolchainFingerprint(Pace::Testing::Unwrap(walked.inputs)) == walked.fingerprint);
+    CHECK(Pace::Testing::Unwrap(walked.inputs).banner == "cc 1.0");
+    CHECK(Pace::Testing::Unwrap(walked.inputs).schema == FingerprintSchema);
+    CHECK(Pace::Testing::Unwrap(walked.inputs).files.size() == 2);
+
+    auto const hit = CachedFingerprintSerially(runner, host, compiler, "cc 1.0", DriverOf(Flavor::Clang));
+    CHECK(hit.fingerprint == walked.fingerprint);
+    CHECK_FALSE(hit.inputs.has_value());
+
+    // A forced walk -- what a node's first survey asks for -- captures them again, whatever the cache holds.
+    auto const forced = CachedFingerprintSerially(runner, host, compiler, "cc 1.0", DriverOf(Flavor::Clang), true);
+    REQUIRE(forced.inputs.has_value());
+    CHECK(ComputeToolchainFingerprint(Pace::Testing::Unwrap(forced.inputs)) == forced.fingerprint);
+}
+
 TEST_CASE("No state directory still yields a fingerprint", "[toolchain-probe]")
 {
     // A machine with nowhere to persist must still be able to dispatch. Caching
@@ -2112,6 +2147,42 @@ TEST_CASE("A toolchain label says what the compiler is, where a fingerprint cann
 
     // Empty only when there is no compiler to name.
     CHECK(ToolchainLabel("", "Version 1.2.3").empty());
+}
+
+TEST_CASE("A toolchain family is what the banner says answered, not what was invoked", "[cc][toolchain][family]")
+{
+    using Pace::Cc::ToolchainFamily;
+
+    constexpr std::string_view AppleBanner = "Apple clang version 17.0.0 (clang-1700.0.13.5)";
+    constexpr std::string_view LlvmBanner = "clang version 18.1.8";
+    constexpr std::string_view GnuBanner = "gcc (GCC) 13.2.0";
+
+    // Apple's version numbers are not LLVM's, so the two are different families however they are invoked.
+    CHECK(ToolchainFamily("/usr/bin/clang", AppleBanner) == "apple-clang");
+    CHECK(ToolchainFamily("/usr/bin/clang", LlvmBanner) == "clang");
+    CHECK(ToolchainFamily("/usr/bin/clang++", AppleBanner) == "apple-clang++");
+    CHECK(ToolchainFamily("/usr/bin/clang++", "Ubuntu clang version 20.1.2 (0ubuntu1)") == "clang++");
+
+    // Apple clang installed as `gcc` -- what macOS ships -- is Apple clang, never GNU gcc.
+    CHECK(ToolchainFamily("/usr/bin/gcc", AppleBanner) == "apple-clang");
+    CHECK(ToolchainFamily("/usr/bin/g++", AppleBanner) == "apple-clang++");
+    CHECK(ToolchainFamily("/usr/bin/gcc", GnuBanner) == "gcc");
+    CHECK(ToolchainFamily("/usr/bin/g++-13", "g++-13 (Ubuntu 13.3.0-6ubuntu2) 13.3.0") == "g++");
+
+    // `cc` and `c++` name a policy; the banner names the product.
+    CHECK(ToolchainFamily("/usr/bin/cc", "cc (GCC) 16.2.1 20260101") == "gcc");
+    CHECK(ToolchainFamily("/usr/bin/c++", "c++ (GCC) 16.2.1 20260101") == "g++");
+    CHECK(ToolchainFamily("/usr/bin/cc", AppleBanner) == "apple-clang");
+    CHECK(ToolchainFamily("/usr/bin/c++", LlvmBanner) == "clang++");
+
+    // clang-cl prints plain clang's banner; its NAME is what separates it, and the banner must not undo that.
+    CHECK(ToolchainFamily("clang-cl.exe", LlvmBanner) == "clang-cl");
+    CHECK(ToolchainFamily("CL.EXE", "Microsoft (R) C/C++ Optimizing Compiler Version 19.44.35207 for x64") == "cl");
+
+    // Nothing read, nothing said: the unrun-driver fallback, an empty banner, and a cross driver no row knows.
+    CHECK(ToolchainFamily("/usr/bin/cc", "cc").empty());
+    CHECK(ToolchainFamily("/usr/bin/gcc", "").empty());
+    CHECK(ToolchainFamily("/opt/cross/bin/aarch64-none-elf-gcc", "aarch64-none-elf-gcc (GCC) 12.2.0").empty());
 }
 
 TEST_CASE("A real toolchain's label is one a scheduler records", "[cc][toolchain][label]")

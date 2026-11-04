@@ -6,6 +6,8 @@
 #include <atomic>
 #include <cstddef>
 #include <functional>
+#include <map>
+#include <memory>
 #include <optional>
 #include <ranges>
 #include <string>
@@ -80,7 +82,8 @@ namespace
     struct SurveyedToolchain
     {
         Cc::ToolchainIdentity identity;
-        std::string label; ///< Empty when there was no banner to derive one from.
+        std::string label;  ///< Empty when there was no banner to derive one from.
+        std::string family; ///< `Cc::ToolchainFamily` of the banner; empty when there was none.
 
         /// What that identity was computed from, so it can be rechecked without
         /// paying for it again. Disengaged for an operator's override, which is
@@ -88,6 +91,10 @@ namespace
         /// because a probed toolchain that cannot be stamped is ALSO empty and is a
         /// different fact. It is `identity.evidence` verbatim.
         std::optional<Cc::ToolchainEvidence> witness;
+
+        /// What the digest was computed from in this survey; null for a cache hit or an override. It is
+        /// `identity.inputs`, moved.
+        std::shared_ptr<Cc::FingerprintInputs const> inputs;
     };
 
     /// Compute every entry's identity, several at a time.
@@ -117,7 +124,8 @@ namespace
                                                                 Cc::IToolchainHost& host,
                                                                 core::platform::IClock const& clock,
                                                                 ILogger& logger,
-                                                                SurveyVoice voice)
+                                                                SurveyVoice voice,
+                                                                FingerprintWalk walk)
     {
         std::vector<SurveyedToolchain> fingerprints(entries.size());
         std::atomic<std::size_t> next { 0 };
@@ -228,7 +236,8 @@ namespace
                     // is why one disengaged `optional` carries both.
                     fingerprints[index].identity = Cc::ToolchainIdentity { .fingerprint = entry.fingerprint,
                                                                            .defect = Cc::IdentityDefect::None,
-                                                                           .evidence = std::nullopt };
+                                                                           .evidence = std::nullopt,
+                                                                           .inputs = std::nullopt };
                     continue;
                 }
 
@@ -273,8 +282,8 @@ namespace
                                 "cannot classify {} as any known driver, so every compile dispatched to it will be "
                                 "refused (worker-compiler-unclassified); check this node's --toolchain",
                                 entry.compiler);
-                fingerprints[index].identity =
-                    Cc::CachedToolchainFingerprint(runner, host, entry.compiler, banner, spec, announcing);
+                fingerprints[index].identity = Cc::CachedToolchainFingerprint(
+                    runner, host, entry.compiler, banner, spec, announcing, walk == FingerprintWalk::Always);
                 logger.Logf(NarrationLevel(voice), "computed the toolchain fingerprint for {}", entry.compiler);
 
                 // The evidence this identity rests on, kept so that noticing it has
@@ -305,11 +314,22 @@ namespace
                 // Copied rather than moved: the identity is read again below.
                 fingerprints[index].witness = fingerprints[index].identity.evidence;
 
+                // The digest's own argument list, kept beside the identity it produced -- moved, because nothing
+                // reads it from the identity again, and a record runs to thousands of files.
+                if (auto& inputs = fingerprints[index].identity.inputs; inputs.has_value())
+                {
+                    fingerprints[index].inputs = std::make_shared<Cc::FingerprintInputs const>(*std::move(inputs));
+                    inputs.reset();
+                }
+
                 // Derived from the banner that was just computed, rather than by
                 // asking the compiler a second time: the digest is a hash OF this
                 // string, so the readable name was already in hand and was being
                 // thrown away (#194).
                 fingerprints[index].label = Cc::ToolchainLabel(entry.compiler, banner);
+                // The same banner, read for the family it names rather than the name it was invoked by: Apple clang
+                // installed as `gcc` is `apple-clang`, never GNU gcc.
+                fingerprints[index].family = Cc::ToolchainFamily(entry.compiler, banner);
             }
         };
 
@@ -452,7 +472,8 @@ SurveyResult FingerprintToolchains(DiscoveredToolchains const& discovered,
                                    core::platform::IClock const& clock,
                                    ILogger& logger,
                                    std::stop_token const& stop,
-                                   SurveyVoice voice)
+                                   SurveyVoice voice,
+                                   FingerprintWalk walk)
 {
     auto const& entries = discovered.entries;
 
@@ -489,7 +510,7 @@ SurveyResult FingerprintToolchains(DiscoveredToolchains const& discovered,
     // Warm starts read the cache and are instant, so this buys nothing on any boot
     // after the first; it is the first one that decides whether the feature looks
     // like it works.
-    auto fingerprints = FingerprintAll(stop, entries, runner, host, clock, logger, voice);
+    auto fingerprints = FingerprintAll(stop, entries, runner, host, clock, logger, voice, walk);
 
     // Asked after the walk rather than instead of it: the check inside skips the work
     // per file, so a cancelled survey returns promptly carrying entries that were
@@ -566,7 +587,9 @@ SurveyResult FingerprintToolchains(DiscoveredToolchains const& discovered,
             toolchains.emplace(fingerprint,
                                ServedToolchain { .compiler = entry.compiler,
                                                  .label = std::move(fingerprints[index].label),
-                                                 .witness = std::move(fingerprints[index].witness) });
+                                                 .family = std::move(fingerprints[index].family),
+                                                 .witness = std::move(fingerprints[index].witness),
+                                                 .inputs = std::move(fingerprints[index].inputs) });
         if (inserted)
             logger.Logf(NarrationLevel(voice), "serving {} as {}", entry.compiler, fingerprint);
         else
@@ -707,6 +730,83 @@ std::vector<std::string> StaleToolchains(std::map<std::string, ServedToolchain> 
     return stale;
 }
 
+std::shared_ptr<ServedInputs const> ServedInputsOf(std::map<std::string, ServedToolchain> const& served,
+                                                   InputsCaptureState capture)
+{
+    using State = CompileCacheWire::FingerprintInputsState;
+    auto const stateOf = [capture](ServedToolchain const& toolchain) {
+        if (toolchain.inputs != nullptr)
+            return State::Recorded;
+        if (!toolchain.witness.has_value())
+            return State::Pinned;
+        return capture == InputsCaptureState::Pending ? State::NotYetCaptured : State::NotCaptured;
+    };
+    auto rows = ServedInputs {};
+    rows.reserve(served.size());
+    for (auto const& [fingerprint, toolchain]: served)
+        rows.push_back(ServedToolchainInputs { .fingerprint = fingerprint,
+                                               .label = toolchain.label,
+                                               .compiler = toolchain.compiler,
+                                               .inputs = toolchain.inputs,
+                                               .state = stateOf(toolchain) });
+    return std::make_shared<ServedInputs const>(std::move(rows));
+}
+
+CaptureAdoption AdoptCapture(std::map<std::string, ServedToolchain> const& current, SurveyResult captured)
+{
+    auto adoption = CaptureAdoption { .served = current, .refreshFromLiveConfig = false, .captured = {} };
+    if (captured.outcome != SurveyOutcome::Served)
+        return adoption;
+
+    for (auto& [fingerprint, toolchain]: adoption.served)
+    {
+        // A pin is the operator's decision and is never probed: nothing a walk found can make it stale.
+        if (!toolchain.witness.has_value())
+            continue;
+        auto const same = captured.served.find(fingerprint);
+        if (same != captured.served.end() && InputsBelongTo(same->second, toolchain))
+        {
+            // The pair match is the whole guarantee: the record is the digest of THIS key for THIS compiler, so it is
+            // right for whatever map holds that pair now -- the one the capture started against or one a reload
+            // re-derived since. What toolchain_diff later reads is recomputed against the key before it is believed.
+            if (toolchain.inputs == nullptr)
+                toolchain.inputs = same->second.inputs;
+            continue;
+        }
+        // The capture filed THIS compiler under another fingerprint: the cached one no longer digests to it. A refresh
+        // from the LIVE configuration is asked for -- it serves nothing the configuration in force would not, and the
+        // capture just rewrote the cache, so it costs no walk. An entry the capture lacks
+        // altogether (a probe that timed out, a toolchain a reload added) is left alone: absence is not staleness.
+        auto const moved = std::ranges::any_of(captured.served, [&toolchain](auto const& entry) {
+            return entry.second.compiler == toolchain.compiler && entry.second.witness.has_value();
+        });
+        if (moved)
+            adoption.refreshFromLiveConfig = true;
+    }
+    adoption.captured = std::move(captured.served);
+    return adoption;
+}
+
+bool InputsBelongTo(ServedToolchain const& holder, ServedToolchain const& receiver) noexcept
+{
+    // Both probed -- a pin is never probed, so it neither gives a record nor takes one -- and one compiler: the key
+    // the caller looked both up under is the fingerprint, so this makes the match the whole (fingerprint, compiler)
+    // pair.
+    return holder.witness.has_value() && receiver.witness.has_value() && holder.compiler == receiver.compiler;
+}
+
+void CarryInputsForward(std::map<std::string, ServedToolchain> const& previous, std::map<std::string, ServedToolchain>& next)
+{
+    for (auto& [fingerprint, toolchain]: next)
+    {
+        if (toolchain.inputs != nullptr)
+            continue;
+        auto const held = previous.find(fingerprint);
+        if (held != previous.end() && InputsBelongTo(held->second, toolchain))
+            toolchain.inputs = held->second.inputs;
+    }
+}
+
 ToolchainRefresh RefreshToolchains(std::map<std::string, ServedToolchain> const& served,
                                    NodeConfig const& cfg,
                                    Cc::IToolchainDiscovery* discovery,
@@ -739,6 +839,10 @@ ToolchainRefresh RefreshToolchains(std::map<std::string, ServedToolchain> const&
     // nothing is the correct answer -- every lease is then refused and every client
     // compiles locally -- and it is the one answer that is never a wrong object.
     auto next = std::move(refreshed).value_or(std::map<std::string, ServedToolchain> {});
+
+    // A toolchain this survey took from the cache walked nothing, so it brought no inputs; the walk that first
+    // fingerprinted it did, under the same key.
+    CarryInputsForward(served, next);
 
     // Only the REMOVALS are announced here. `ResolveToolchains` has just logged a
     // "serving {} as {}" line for everything it kept, so naming the additions again

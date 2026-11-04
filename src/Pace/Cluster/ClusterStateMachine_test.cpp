@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include <core/Ranges.hpp>
 #include <tests/PreviousClusterState.hpp>
 #include <tests/RaftPeerKeyFakes.hpp>
 #include <tests/Unwrap.hpp>
@@ -251,6 +252,68 @@ TEST_CASE("A snapshot round-trips through the machine", "[cluster][statemachine]
     CHECK(restored.published.back().members.size() == 1);
 }
 
+TEST_CASE("A budget override and its baseline survive the machine's own snapshot, recovered and installed alike",
+          "[cluster][statemachine][snapshot][budget]")
+{
+    // The production snapshot path, through `ClusterState`'s encoding: what the harness's restart case cannot see, since
+    // its snapshot is consensus-generic.
+    Watched source;
+    source.machine.Apply(Entry(1, Cmd(CommandKind::AddLearner, "n2", {})));
+    auto budget = Cmd(CommandKind::SetBudget, "n2");
+    budget.budgetBytes = { 64ULL << 20, std::nullopt };
+    budget.setAtUnixSeconds = 1793613600;
+    budget.setBy = "n1";
+    source.machine.Apply(Entry(2, budget));
+    auto baseline = Cmd(CommandKind::RecordBaseline, "n2", "memory");
+    baseline.overrideId = 2; // the entry that set it
+    baseline.baselineBytes = 256ULL << 20;
+    source.machine.Apply(Entry(3, baseline));
+    REQUIRE(source.machine.State().members.size() == 1);
+    REQUIRE(source.machine.State().members[0].memoryOverride.has_value());
+
+    for (auto const origin: { Consensus::SnapshotOrigin::Recovered, Consensus::SnapshotOrigin::Installed })
+    {
+        Watched restored;
+        REQUIRE(restored.machine.RestoreSnapshot(source.machine.TakeSnapshot(), origin).has_value());
+        CHECK(restored.machine.State() == source.machine.State());
+        // A copy, never a reference into the temporary `State()` returns.
+        auto const state = restored.machine.State();
+        auto const recorded = Unwrap(state.members.at(0).memoryOverride);
+        CHECK(recorded.bytes == 64ULL << 20);
+        CHECK(recorded.baseline == std::optional<std::uint64_t> { 256ULL << 20 });
+        CHECK(recorded.setAtUnixSeconds == 1793613600);
+        CHECK(recorded.id == 2); // the machine handed the entry's index down to `Apply`
+        CHECK(recorded.setBy == "n1");
+    }
+}
+
+TEST_CASE("A node upgraded from the last release recovers its own snapshot and replays its own log",
+          "[cluster][statemachine]")
+{
+    // The MSI upgrade from v0.6.0, at the machine: what that release left in the state directory is a v10 snapshot and
+    // v6 entries above it. Both are converted, so the restore hands the application the release's members and
+    // revocations, and the entry above it is APPLIED rather than skipped as another build's.
+    Watched watched;
+    REQUIRE(watched.machine.RestoreSnapshot(Testing::EncodeNamelessClusterState(), Consensus::SnapshotOrigin::Recovered)
+                .has_value());
+    {
+        auto const state = watched.machine.State();
+        REQUIRE(state.members.size() == 2);
+        CHECK(state.members[1].id == "n2");
+        CHECK(state.members[1].displayName.empty());
+        CHECK(std::ranges::contains(state.revokedKeys, "w1", &RevokedKey::id));
+    }
+
+    auto const key = Testing::TestKeyPair("w2").PublicKey();
+    auto const entry = Consensus::AppliedEntry { .index = Consensus::LogIndex { .value = 4 },
+                                                 .payload = Testing::EncodeNamelessClusterCommand("w2", key) };
+    REQUIRE(watched.machine.CanRead(entry.payload).has_value());
+    watched.machine.Apply(entry);
+    auto const state = watched.machine.State();
+    CHECK(std::ranges::contains(state.revokedKeys, "w2", &RevokedKey::id));
+    CHECK(state.members.size() == 2);
+}
+
 TEST_CASE("A snapshot replaces, and an unreadable one changes nothing", "[cluster][statemachine]")
 {
     Watched watched;
@@ -342,7 +405,7 @@ TEST_CASE("A snapshot the previous build wrote, in its own layout, is refused by
     CHECK(std::ranges::any_of(records, [](auto const& record) {
         return record.message.contains("cannot decode")
                && record.message.contains(std::format("version {}", Testing::PreviousClusterStateVersion))
-               && record.message.contains("reads 10");
+               && record.message.contains("reads 11");
     }));
 }
 
@@ -411,7 +474,16 @@ TEST_CASE("Whether a command can be applied is asked without applying it, in the
         REQUIRE_FALSE(refused.has_value());
         CHECK(refused.error().code == ConsensusErrorCode::UnsupportedFormatVersion);
         CHECK(refused.error().context.contains(std::format("version {}", Testing::PreviousClusterCommandVersion)));
-        CHECK(refused.error().context.contains("reads 6"));
+        CHECK(refused.error().context.contains("reads 7"));
+    }
+
+    SECTION("the last release's command is readable, converted, and asking changes nothing")
+    {
+        // v0.6.0 wrote v6, the first seven of this build's fields: a node upgraded from that release replays its own
+        // log rather than refusing to start over it.
+        CHECK(watched.machine.CanRead(Testing::EncodeNamelessClusterCommand()).has_value());
+        CHECK(watched.machine.State().members.empty());
+        CHECK(watched.published.empty());
     }
 
     SECTION("bytes that are no command at all are damage")
@@ -440,9 +512,14 @@ TEST_CASE("Whether a snapshot can be restored is asked without restoring it, in 
         CHECK(watched.machine.CanRestore(Encode(other)).has_value());
     }
 
+    SECTION("the last release's state is restorable, converted")
+    {
+        CHECK(watched.machine.CanRestore(Testing::EncodeNamelessClusterState()).has_value());
+    }
+
     SECTION("an older build's state is another build's format, both versions named")
     {
-        // The principal era's layout (what the one installation holds) and the one before it.
+        // The principal era's layout and the one before it; the last release's is converted, above.
         auto const [older, version] = GENERATE(table<std::vector<std::byte>, std::uint8_t>({
             { Testing::EncodePrincipalEraClusterState(), Testing::PrincipalEraClusterStateVersion },
             { Testing::EncodePreviousClusterState(), Testing::PreviousClusterStateVersion },
@@ -452,7 +529,7 @@ TEST_CASE("Whether a snapshot can be restored is asked without restoring it, in 
         REQUIRE_FALSE(refused.has_value());
         CHECK(refused.error().code == ConsensusErrorCode::UnsupportedFormatVersion);
         CHECK(refused.error().context.contains(std::format("version {}", version)));
-        CHECK(refused.error().context.contains("reads 10"));
+        CHECK(refused.error().context.contains("reads 11"));
     }
 
     SECTION("bytes that are no state at all are damage")
@@ -464,4 +541,35 @@ TEST_CASE("Whether a snapshot can be restored is asked without restoring it, in 
 
     CHECK(watched.machine.State() == before);
     CHECK(watched.published.size() == published);
+}
+
+TEST_CASE("An admission that clears a display name says so at Warn, naming both", "[cluster][statemachine][display-name]")
+{
+    // The operator who chose the name is about to find it gone, so the clearing is said once -- and only when it
+    // happened, never for an admission that shadowed nothing.
+    CapturingLogger logger;
+    ClusterStateMachine machine { logger, {} };
+    machine.Apply(Entry(1, Cmd(CommandKind::AddMember, "a3f5", "10.0.0.1:6675")));
+    machine.Apply(Entry(2,
+                        Command { .kind = CommandKind::SetDisplayName,
+                                  .key = "a3f5",
+                                  .value = "office-pc",
+                                  .schedulerEndpoint = {},
+                                  .publicKey = std::nullopt }));
+    machine.Apply(Entry(3, Cmd(CommandKind::AddMember, "n2", "10.0.0.2:6675")));
+    auto const warnings = [&logger] {
+        return std::ranges::count_if(logger.Snapshot(), [](auto const& record) { return record.level == LogLevel::Warn; });
+    };
+    CHECK(warnings() == 0);
+
+    machine.Apply(Entry(4, Cmd(CommandKind::AddLearner, "office-pc")));
+    // Held: a pointer into the copy `State()` returns would dangle the moment that temporary went.
+    auto const state = machine.State();
+    auto const* const holder = core::findOrNull(state.members, std::string_view { "a3f5" }, &ClusterMember::id);
+    REQUIRE(holder != nullptr);
+    CHECK(holder->displayName.empty());
+    REQUIRE(warnings() == 1);
+    CHECK(std::ranges::any_of(logger.Snapshot(), [](auto const& record) {
+        return record.level == LogLevel::Warn && record.message.contains("office-pc") && record.message.contains("a3f5");
+    }));
 }

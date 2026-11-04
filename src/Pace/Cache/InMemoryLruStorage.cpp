@@ -674,6 +674,16 @@ void InMemoryLruStorage::Resize(std::size_t newMaxBytes)
     EvictToFit();
 }
 
+std::optional<std::size_t> InMemoryLruStorage::ResizeTier(StorageTier tier, std::size_t newMaxBytes)
+{
+    if (tier != StorageTier::Memory)
+        return std::nullopt;
+    Resize(newMaxBytes);
+    // Read off the two figures rather than through `Snapshot()`, which rewrites the
+    // statistics it returns: this is a question about the budget, not a stats read.
+    return _maxBytes != 0 && _bytesUsed > _maxBytes ? _bytesUsed - _maxBytes : 0;
+}
+
 void InMemoryLruStorage::InsertVerbatim(std::string_view key, CacheEntry entry)
 {
     // Bypass the CAS / generation machinery and store the entry as the

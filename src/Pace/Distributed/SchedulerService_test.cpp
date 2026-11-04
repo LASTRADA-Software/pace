@@ -2,6 +2,8 @@
 #include <Pace/Cluster/ClusterState.hpp>
 #include <Pace/Cluster/Roster.hpp>
 #include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/Json.hpp>
+#include <Pace/Core/WireFields.hpp>
 #include <Pace/Distributed/DialHint.hpp>
 #include <Pace/Distributed/FleetHistory.hpp>
 #include <Pace/Distributed/FleetView.hpp>
@@ -1236,6 +1238,60 @@ TEST_CASE("A worker that cannot name itself in UTF-8 is refused", "[distributed]
         registration.toolchainLabel = "cl 19.44\xC3"; // a lead byte with nothing after it
         refused(registration, "toolchain label");
     }
+
+    SECTION("the compiler family the upgrade report groups by")
+    {
+        // Composed by the node from a table rather than read off a banner, and refused all the same: it is what a
+        // PEER sent, and the peer is whichever build it is.
+        auto registration = OneSlot("gcc-14", "10.0.0.2:7100");
+        registration.toolchainFamily = "g\xFF+";
+        refused(registration, "toolchain family");
+    }
+}
+
+TEST_CASE("A registration's toolchain family reaches the fleet document's workers, and an absent one stays absent",
+          "[distributed][scheduler][fleetview]")
+{
+    // The family is what the MCP upgrade report groups versions by, and it reads it from `/fleet.json`'s `workers`
+    // rows -- so a family the registry dropped, or a column that rendered an absence as "", would group every
+    // toolchain into no family, or one called "", with nothing failing anywhere else.
+    Leading fleet;
+    auto labelled = OneSlot("fp-gnu", "10.0.0.2:7100");
+    labelled.toolchainLabel = "gcc 17.0.0";
+    labelled.toolchainFamily = "apple-clang";
+    REQUIRE(fleet.service.Register(Insider, labelled).status == Wire::Status::Ok);
+    REQUIRE(fleet.service.Register(Insider, OneSlot("fp-pinned", "10.0.0.3:7100")).status == Wire::Status::Ok);
+
+    auto const snapshot =
+        CollectFleet(FleetSources { .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics });
+    auto const document = Json::Parse(RenderFleetJson(snapshot, FleetHistoryView {}));
+    REQUIRE(document.has_value());
+    auto const* const workers = Unwrap(document).Find("workers");
+    REQUIRE(workers != nullptr);
+    REQUIRE(workers->AsArray() != nullptr);
+    auto const familyOf = [&](std::string_view fingerprint) -> Json::Value const* {
+        for (auto const& row: Unwrap(workers->AsArray()))
+            if (auto const* const toolchain = row.Find("toolchain");
+                toolchain != nullptr && toolchain->AsString() != nullptr && *toolchain->AsString() == fingerprint)
+                return row.Find("family");
+        return nullptr;
+    };
+    auto const* const gnu = familyOf("fp-gnu");
+    REQUIRE(gnu != nullptr);
+    REQUIRE(gnu->AsString() != nullptr);
+    CHECK(Unwrap(Unwrap(gnu).AsString()) == "apple-clang");
+    auto const* const pinned = familyOf("fp-pinned");
+    REQUIRE(pinned != nullptr);
+    CHECK(Unwrap(pinned).IsNull());
+
+    // A re-registration states the family afresh: a toolchain upgraded under a pinned fingerprint names what is
+    // there now.
+    labelled.toolchainFamily = "gcc";
+    REQUIRE(fleet.service.Register(Insider, labelled).status == Wire::Status::Ok);
+    auto const again = fleet.service.Workers().LiveWorkers();
+    auto const entry = std::ranges::find(again, std::string_view { "fp-gnu" }, &WorkerInfo::fingerprint);
+    REQUIRE(entry != again.end());
+    CHECK(entry->toolchainFamily == "gcc");
 }
 
 TEST_CASE("A machine's display name reaches the fleet page and decides nothing", "[distributed][scheduler][fleetview]")
@@ -2384,6 +2440,298 @@ TEST_CASE("The two verbs that share Offer answer exactly as they did", "[distrib
                                                     Cluster::MemberSeat::Voter);
     REQUIRE(admit.status == Wire::Status::Ok);
     CHECK_FALSE(admit.payload.empty());
+}
+
+namespace
+{
+/// A caller with an operator's standing that proved no key: this machine, as `SelfCaller` spells it.
+CallerContext const OperatorCaller = SelfCaller();
+
+/// A machine proving its own key on the connection, with or without an operator's standing.
+/// @param id The member id whose test key it proves.
+/// @param standing Whether its seat gives it an operator's standing (a voter's) or not (a learner's).
+/// @return The context its connection folds to.
+[[nodiscard]] CallerContext Proven(std::string const& id, bool standing)
+{
+    return CallerContext { .membership = Membership::Member,
+                           .peerId = "10.0.0.7",
+                           .provenNodeId = id,
+                           .provenKey = Testing::TestKeyPair(id).PublicKey(),
+                           .identified = true,
+                           .operatorStanding = standing };
+}
+
+/// A fleet with voter `node-a` and learner `node-b` recorded, each under its test key; `node-b` never announced an
+/// endpoint, which is all the leader knows of a machine that is down.
+/// @param fleet The fleet to record them in.
+void RecordTwoMembers(Admitting& fleet)
+{
+    Cluster::Apply(fleet.cluster.state,
+                   Cluster::Command { .kind = Cluster::CommandKind::AddMember,
+                                      .key = "node-a",
+                                      .value = "10.0.0.1:6675",
+                                      .schedulerEndpoint = {},
+                                      .publicKey = Testing::TestKeyPair("node-a").PublicKey() });
+    Cluster::Apply(fleet.cluster.state,
+                   Cluster::Command { .kind = Cluster::CommandKind::AddLearner,
+                                      .key = "node-b",
+                                      .value = {},
+                                      .schedulerEndpoint = {},
+                                      .publicKey = Testing::TestKeyPair("node-b").PublicKey() });
+}
+
+/// @param bytes The span a value record was encoded into.
+/// @return It, as the `std::string_view` the service takes.
+[[nodiscard]] std::string AsValue(std::vector<std::byte> const& bytes)
+{
+    return std::string { Wire::AsStringView(bytes) };
+}
+
+/// @param memory The memory budget, or nothing.
+/// @param disk The disk budget, or nothing.
+/// @return A `SetBudget` value as it travels.
+[[nodiscard]] std::string BudgetValue(std::optional<std::uint64_t> memory, std::optional<std::uint64_t> disk)
+{
+    return AsValue(Wire::EncodeBudgetSetValue(Wire::BudgetSetValue { .bytes = { memory, disk } }));
+}
+
+auto constexpr SetBudgetEdit = static_cast<std::uint8_t>(Wire::MemberEditVerb::SetBudget);
+auto constexpr RecordBaselineReport = static_cast<std::uint8_t>(Wire::MemberReportVerb::RecordBaseline);
+auto constexpr DropOverrideReport = static_cast<std::uint8_t>(Wire::MemberReportVerb::DropOverride);
+} // namespace
+
+TEST_CASE("A budget edit is ONE proposal for every tier it names, stamped with the leader's clock and its setter",
+          "[distributed][scheduler][member-edit][budget]")
+{
+    Admitting fleet;
+    RecordTwoMembers(fleet);
+    fleet.leading.wallClock.setNow(Noon);
+    constexpr auto MiB = std::uint64_t { 1024 * 1024 };
+
+    // node-b is down -- it never announced -- and the override is proposed all the same, with no baseline. Asked over
+    // node-a's proven connection (a voter's machine, or the node an MCP call was forwarded through): node-a set it.
+    auto const reply =
+        fleet.Service().MemberEdit(Proven("node-a", true), SetBudgetEdit, "node-b", BudgetValue(64 * MiB, 2048 * MiB));
+    REQUIRE(reply.status == Wire::Status::Ok);
+    REQUIRE(fleet.cluster.proposed.size() == 1);
+    auto const& command = fleet.cluster.proposed[0];
+    auto const noonSeconds = std::chrono::duration_cast<std::chrono::seconds>(Noon.time_since_epoch()).count();
+    CHECK(command.kind == Cluster::CommandKind::SetBudget);
+    CHECK(command.key == "node-b");
+    CHECK(command.budgetBytes == std::array<std::optional<std::uint64_t>, 2> { 64 * MiB, 2048 * MiB });
+    CHECK(command.setAtUnixSeconds == std::optional<std::int64_t> { noonSeconds });
+    CHECK(command.setBy == "node-a");
+    CHECK_FALSE(command.baselineBytes.has_value());
+    CHECK_FALSE(command.overrideId.has_value());
+
+    // This machine over loopback proved no key, and the leader's own key is recorded under no member yet: nobody is
+    // named, rather than a guess.
+    REQUIRE(fleet.Service().MemberEdit(OperatorCaller, SetBudgetEdit, "node-b", BudgetValue(MiB, {})).status
+            == Wire::Status::Ok);
+    CHECK(fleet.cluster.proposed.back().setBy.empty());
+
+    // Judged whole: a zero for one tier refuses the edit, and nothing is proposed.
+    auto const zero = fleet.Service().MemberEdit(OperatorCaller, SetBudgetEdit, "node-b", BudgetValue(64 * MiB, 0));
+    REQUIRE(zero.status == Wire::Status::Error);
+    CHECK(zero.error == Wire::ErrorCode::InvalidClusterChange);
+    CHECK(zero.message.contains(Cluster::TierOverrideCannotRemoveTier));
+
+    // A member the state does not record, a tier past the ones carried, and a value naming no tier: refused by name.
+    CHECK(fleet.Service()
+              .MemberEdit(OperatorCaller, SetBudgetEdit, "node-z", BudgetValue(MiB, {}))
+              .message.contains("no member"));
+    auto const figure = std::array<std::byte, 8> {};
+    auto const thirdTier = AsValue(WireFields::Encode(
+        { std::span<std::byte const> {}, std::span<std::byte const> {}, std::span<std::byte const> { figure } }));
+    CHECK(fleet.Service().MemberEdit(OperatorCaller, SetBudgetEdit, "node-b", thirdTier).message.contains("tier"));
+    CHECK(fleet.Service()
+              .MemberEdit(OperatorCaller, SetBudgetEdit, "node-b", BudgetValue({}, {}))
+              .message.contains("names no tier"));
+    CHECK(fleet.cluster.proposed.size() == 2);
+}
+
+TEST_CASE("A budget edit names its setter by the machine a route identified, and loopback names the leader's own",
+          "[distributed][scheduler][member-edit][budget]")
+{
+    Admitting fleet;
+    RecordTwoMembers(fleet);
+    // The leader's own machine, recorded under its own key: what `AttributedMemberOf` reads a loopback caller as.
+    Cluster::Apply(fleet.cluster.state,
+                   Cluster::Command { .kind = Cluster::CommandKind::AddMember,
+                                      .key = "leader-self",
+                                      .value = "10.0.0.3:6675",
+                                      .schedulerEndpoint = {},
+                                      .publicKey = fleet.leading.signer.PublicKey() });
+    constexpr auto MiB = std::uint64_t { 1024 * 1024 };
+
+    SECTION("an unproven caller on this machine is the leader's own machine")
+    {
+        REQUIRE(fleet.Service().MemberEdit(OperatorCaller, SetBudgetEdit, "node-b", BudgetValue(MiB, {})).status
+                == Wire::Status::Ok);
+        CHECK(fleet.cluster.proposed.back().setBy == "leader-self");
+    }
+
+    SECTION("a verified ticket is the machine whose key signed it, and it decides nothing")
+    {
+        // A voter's ticket: an operator's standing, no proof -- so no `provenNodeId` and nothing a joining verb reads.
+        auto ticketed = CallerContext { .membership = Membership::Member,
+                                        .peerId = "10.0.0.1",
+                                        .provenNodeId = std::nullopt,
+                                        .provenKey = std::nullopt,
+                                        .ticketKey = Testing::TestKeyPair("node-a").PublicKey(),
+                                        .identified = true,
+                                        .operatorStanding = true };
+        REQUIRE(fleet.Service().MemberEdit(ticketed, SetBudgetEdit, "node-b", BudgetValue(MiB, {})).status
+                == Wire::Status::Ok);
+        CHECK(fleet.cluster.proposed.back().setBy == "node-a");
+    }
+
+    SECTION("a proof outranks the address it came from")
+    {
+        auto proven = Proven("node-a", true);
+        proven.peerId = "127.0.0.1";
+        REQUIRE(fleet.Service().MemberEdit(proven, SetBudgetEdit, "node-b", BudgetValue(MiB, {})).status
+                == Wire::Status::Ok);
+        CHECK(fleet.cluster.proposed.back().setBy == "node-a");
+    }
+
+    SECTION("a caller on this machine that proved a key no member holds is still this machine")
+    {
+        auto stranger = Proven("stranger", true);
+        stranger.peerId = "127.0.0.1";
+        REQUIRE(fleet.Service().MemberEdit(stranger, SetBudgetEdit, "node-b", BudgetValue(MiB, {})).status
+                == Wire::Status::Ok);
+        CHECK(fleet.cluster.proposed.back().setBy == "leader-self");
+    }
+
+    SECTION("a caller nothing identified -- --fleet-open from another machine -- names nobody")
+    {
+        auto open = OperatorCaller;
+        open.peerId = "10.0.0.9";
+        REQUIRE(fleet.Service().MemberEdit(open, SetBudgetEdit, "node-b", BudgetValue(MiB, {})).status == Wire::Status::Ok);
+        CHECK(fleet.cluster.proposed.back().setBy.empty());
+    }
+}
+TEST_CASE("MEMBER-REPORT can only touch the caller's own member, read off the key it proved",
+          "[distributed][scheduler][member-report][budget]")
+{
+    Admitting fleet;
+    RecordTwoMembers(fleet);
+    // Overrides recorded for both members: node-b's at entry 7, node-a's at entry 8 -- which `Offer` judges each
+    // report against.
+    for (auto const& [member, entry]: { std::pair { "node-b", 7U }, std::pair { "node-a", 8U } })
+        Cluster::Apply(fleet.cluster.state,
+                       Cluster::Command { .kind = Cluster::CommandKind::SetBudget,
+                                          .key = member,
+                                          .value = {},
+                                          .schedulerEndpoint = {},
+                                          .publicKey = std::nullopt,
+                                          .budgetBytes = { 4096, 4096 },
+                                          .setAtUnixSeconds = 1793613600 },
+                       entry);
+    auto const baseline =
+        AsValue(Wire::EncodeBudgetBaselineValue(Wire::BudgetBaselineValue { .tier = 0, .baseline = 8192, .overrideId = 7 }));
+    auto const baselineOfA =
+        AsValue(Wire::EncodeBudgetBaselineValue(Wire::BudgetBaselineValue { .tier = 0, .baseline = 8192, .overrideId = 8 }));
+
+    // node-b, a learner proving its own key: the report is about node-b, whatever it would like to name.
+    auto const own = fleet.Service().MemberReport(Proven("node-b", false), RecordBaselineReport, baseline);
+    REQUIRE(own.status == Wire::Status::Ok);
+    REQUIRE(fleet.cluster.proposed.size() == 1);
+    CHECK(fleet.cluster.proposed[0].kind == Cluster::CommandKind::RecordBaseline);
+    CHECK(fleet.cluster.proposed[0].key == "node-b");
+    CHECK(fleet.cluster.proposed[0].value == "memory");
+    CHECK(fleet.cluster.proposed[0].baselineBytes == std::optional<std::uint64_t> { 8192 });
+    CHECK(fleet.cluster.proposed[0].overrideId == std::optional<std::uint64_t> { 7 });
+
+    // node-a's proof makes it a report about node-a -- never about node-b.
+    REQUIRE(fleet.Service().MemberReport(Proven("node-a", true), RecordBaselineReport, baselineOfA).status
+            == Wire::Status::Ok);
+    CHECK(fleet.cluster.proposed.back().key == "node-a");
+    // node-b's override id, reported from node-a's connection, is judged against node-a's own record: refused.
+    CHECK(fleet.Service().MemberReport(Proven("node-a", true), RecordBaselineReport, baseline).status
+          == Wire::Status::Error);
+
+    // A connection that proved no key -- an operator on loopback, however much standing -- and one proving a key no
+    // member holds: refused, nothing proposed.
+    for (auto const& caller: { OperatorCaller, Proven("somebody-else", true) })
+    {
+        auto const refused = fleet.Service().MemberReport(caller, RecordBaselineReport, baseline);
+        REQUIRE(refused.status == Wire::Status::Error);
+        CHECK(refused.error == Wire::ErrorCode::NodeIdentityRequired);
+    }
+    CHECK(fleet.cluster.proposed.size() == 2);
+
+    // A drop is ALWAYS a conditional clear, naming the exact override.
+    auto const drop = AsValue(Wire::EncodeBudgetDropValue(Wire::BudgetDropValue { .tier = 1, .overrideId = 7 }));
+    REQUIRE(fleet.Service().MemberReport(Proven("node-b", false), DropOverrideReport, drop).status == Wire::Status::Ok);
+    CHECK(fleet.cluster.proposed.back().kind == Cluster::CommandKind::ClearBudget);
+    CHECK(fleet.cluster.proposed.back().key == "node-b");
+    CHECK(fleet.cluster.proposed.back().value == "disk");
+    CHECK(fleet.cluster.proposed.back().overrideId == std::optional<std::uint64_t> { 7 });
+
+    // A report byte this build does not know is refused by name.
+    auto const unknown = fleet.Service().MemberReport(
+        Proven("node-b", false), static_cast<std::uint8_t>(Wire::MemberReportVerb::Last), baseline);
+    CHECK(unknown.error == Wire::ErrorCode::InvalidClusterChange);
+    CHECK(unknown.message.contains("member-report verb 2"));
+}
+
+TEST_CASE("A member edit proposes the command its verb names, and is refused as the state refuses it",
+          "[distributed][scheduler][member-edit][display-name]")
+{
+    // MEMBER-EDIT through `Offer`, the door every cluster control verb shares: the leader proposes the replicated
+    // command, and `ValidateAgainst` is the refusal the operator reads -- a taken name included, by name.
+    Admitting fleet;
+    Cluster::Apply(fleet.cluster.state,
+                   Cluster::Command { .kind = Cluster::CommandKind::AddMember,
+                                      .key = "node-a",
+                                      .value = "10.0.0.1:6675",
+                                      .schedulerEndpoint = {},
+                                      .publicKey = Testing::TestKeyPair("node-a").PublicKey() });
+    Cluster::Apply(fleet.cluster.state,
+                   Cluster::Command { .kind = Cluster::CommandKind::AddMember,
+                                      .key = "node-b",
+                                      .value = "10.0.0.2:6675",
+                                      .schedulerEndpoint = {},
+                                      .publicKey = Testing::TestKeyPair("node-b").PublicKey() });
+    Cluster::Apply(fleet.cluster.state,
+                   Cluster::Command { .kind = Cluster::CommandKind::SetDisplayName,
+                                      .key = "node-a",
+                                      .value = "Office",
+                                      .schedulerEndpoint = {},
+                                      .publicKey = std::nullopt });
+    auto constexpr SetName = static_cast<std::uint8_t>(Wire::MemberEditVerb::SetDisplayName);
+
+    auto const named = fleet.Service().MemberEdit(OperatorCaller, SetName, "node-b", "build-box");
+    REQUIRE(named.status == Wire::Status::Ok);
+    CHECK(named.payload.empty());
+    REQUIRE(fleet.cluster.proposed.size() == 1);
+    CHECK(fleet.cluster.proposed[0].kind == Cluster::CommandKind::SetDisplayName);
+    CHECK(fleet.cluster.proposed[0].key == "node-b");
+    CHECK(fleet.cluster.proposed[0].value == "build-box");
+
+    // Taken, compared with ASCII letters folded: refused before anything is proposed, naming the holder.
+    auto const taken = fleet.Service().MemberEdit(OperatorCaller, SetName, "node-b", "office");
+    REQUIRE(taken.status == Wire::Status::Error);
+    CHECK(taken.error == Wire::ErrorCode::InvalidClusterChange);
+    CHECK(taken.message.contains("node-a already answers to"));
+    CHECK(fleet.cluster.proposed.size() == 1);
+
+    // An edit this build does not know is refused by name, never read as the edit its byte aliases.
+    auto const unknown =
+        fleet.Service().MemberEdit(OperatorCaller, static_cast<std::uint8_t>(Wire::MemberEditVerb::Last), "node-b", "x");
+    REQUIRE(unknown.status == Wire::Status::Error);
+    CHECK(unknown.error == Wire::ErrorCode::InvalidClusterChange);
+    CHECK(unknown.message.contains("member-edit verb 3"));
+    CHECK(fleet.cluster.proposed.size() == 1);
+
+    // A follower answers as it does for every control verb: `NotLeader`, naming the leader to redirect to.
+    fleet.cluster.refusal = Pace::NotLeader(std::string { "10.0.0.1:6674" });
+    auto const follower = fleet.Service().MemberEdit(OperatorCaller, SetName, "node-b", "lab");
+    REQUIRE(follower.status == Wire::Status::Error);
+    CHECK(follower.error == Wire::ErrorCode::NotLeader);
+    CHECK(follower.message == "10.0.0.1:6674");
 }
 
 TEST_CASE("An admission proposes the verb its seat names, and no opinion keeps the recorded seat",

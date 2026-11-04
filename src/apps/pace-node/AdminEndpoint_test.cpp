@@ -2,7 +2,9 @@
 #include "AdminEndpoint.hpp"
 #include "NodeConditions.hpp"
 #include "NodeIdentity.hpp"
+#include "NodeNameResolver.hpp"
 
+#include <Pace/Core/Json.hpp>
 #include <Pace/Core/Logger.hpp>
 #include <Pace/Distributed/FleetChart.hpp>
 #include <Pace/Distributed/FleetText.hpp>
@@ -26,6 +28,7 @@
 #include <fstream>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -38,6 +41,7 @@
 #include <core/Ranges.hpp>
 #include <core/net/BlockingSocket.hpp>
 #include <core/platform/Clock.hpp>
+#include <tests/BoundedWait.hpp>
 #include <tests/FleetHistoryFakes.hpp>
 #include <tests/LeaseRosterFakes.hpp>
 #include <tests/RaftPeerKeyFakes.hpp>
@@ -1148,7 +1152,11 @@ TEST_CASE("A sampler with a path writes its history and reads it back", "[node][
     auto const file = scratch.Path() / "history.bin";
     auto const nodeFile = scratch.Path() / "node-history.bin";
     auto const receivedFile = scratch.Path() / "received-history.bin";
-    HistoryPaths const paths { .fleet = file, .node = nodeFile, .received = receivedFile };
+    HistoryPaths const paths { .fleet = file,
+                               .node = nodeFile,
+                               .received = receivedFile,
+                               .requesters = scratch.Path() / "requester-history.bin",
+                               .toolchains = scratch.Path() / "toolchain-history.bin" };
 
     core::platform::ManualClock clock;
     AtomicMetricsSink metrics;
@@ -1184,7 +1192,11 @@ TEST_CASE("What the other machines handed over survives a leader restart", "[nod
     auto const file = scratch.Path() / "history.bin";
     auto const nodeFile = scratch.Path() / "node-history.bin";
     auto const receivedFile = scratch.Path() / "received-history.bin";
-    HistoryPaths const paths { .fleet = file, .node = nodeFile, .received = receivedFile };
+    HistoryPaths const paths { .fleet = file,
+                               .node = nodeFile,
+                               .received = receivedFile,
+                               .requesters = scratch.Path() / "requester-history.bin",
+                               .toolchains = scratch.Path() / "toolchain-history.bin" };
 
     core::platform::ManualClock clock;
     AtomicMetricsSink metrics;
@@ -1207,7 +1219,7 @@ TEST_CASE("What the other machines handed over survives a leader restart", "[nod
 
     {
         FleetSampler sampler { sources, metrics, NodeFacts(), wall, paths, logger };
-        CHECK(sampler.Received().AcceptHistory("10.0.0.4:6676", std::span { &bucket, 1 }) == 1);
+        CHECK(sampler.Received().AcceptHistory("10.0.0.4:6676", "key-of-10.0.0.4:6676", std::span { &bucket, 1 }) == 1);
     }
     REQUIRE(std::filesystem::exists(receivedFile));
 
@@ -1216,7 +1228,7 @@ TEST_CASE("What the other machines handed over survives a leader restart", "[nod
     // The mark as well as the readings: without it the batch a node resends after a
     // reply it never saw would be counted a second time.
     CHECK(restored.Received().HighWaterFor("10.0.0.4:6676") == minute);
-    CHECK(restored.Received().AcceptHistory("10.0.0.4:6676", std::span { &bucket, 1 }) == 0);
+    CHECK(restored.Received().AcceptHistory("10.0.0.4:6676", "key-of-10.0.0.4:6676", std::span { &bucket, 1 }) == 0);
 
     // And it reaches the view the page draws, which is the only reason it is kept.
     auto const merged = restored.Buckets(Distributed::FleetRange::OneHour);
@@ -1559,7 +1571,8 @@ TEST_CASE("The page draws what the other machines handed over", "[node][admin][c
     auto const missed = Testing::MinuteBucketStart(fixture.wall.now()) - (3 * 60'000);
     auto bucket = Testing::ClosedBucket(missed);
     bucket.values[static_cast<std::size_t>(Distributed::FleetMetric::JobsInFlight)] = 4242;
-    REQUIRE(fixture.sampler->Received().AcceptHistory("10.0.0.7:6676", std::span { &bucket, 1 }) == 1);
+    REQUIRE(fixture.sampler->Received().AcceptHistory("10.0.0.7:6676", "key-of-10.0.0.7:6676", std::span { &bucket, 1 })
+            == 1);
 
     auto const response = fixture.Get("/fleet/series.json", "range=1h");
     CHECK(response.status == "200 OK");
@@ -1735,7 +1748,7 @@ TEST_CASE("The fleet document for a selection refuses an unknown key by name and
 
     SECTION("an unknown section is refused with every section this build serves")
     {
-        auto const refused = AnswerFleetText(snapshot, nullptr, "nonesuch", {});
+        auto const refused = AnswerFleetText(snapshot, nullptr, "nonesuch", {}, CompileCacheWire::FleetTextFormat::Text);
         REQUIRE_FALSE(refused.has_value());
         CHECK(refused.error().refusal == FleetTextRefusal::UnknownSelector);
         CHECK(refused.error().detail.starts_with("unknown section"));
@@ -1745,7 +1758,8 @@ TEST_CASE("The fleet document for a selection refuses an unknown key by name and
 
     SECTION("an unknown range is refused even for a section that draws no history")
     {
-        auto const refused = AnswerFleetText(snapshot, nullptr, "members", "1fortnight");
+        auto const refused =
+            AnswerFleetText(snapshot, nullptr, "members", "1fortnight", CompileCacheWire::FleetTextFormat::Text);
         REQUIRE_FALSE(refused.has_value());
         CHECK(refused.error().refusal == FleetTextRefusal::UnknownSelector);
         CHECK(refused.error().detail.starts_with("unknown range"));
@@ -1755,7 +1769,7 @@ TEST_CASE("The fleet document for a selection refuses an unknown key by name and
 
     SECTION("a document says whose view it is, from the snapshot it was rendered from")
     {
-        auto const following = AnswerFleetText(snapshot, nullptr, "series", "1h");
+        auto const following = AnswerFleetText(snapshot, nullptr, "series", "1h", CompileCacheWire::FleetTextFormat::Text);
         REQUIRE(following.has_value());
         CHECK_FALSE(following->leads);
         CHECK(following->leaderEndpoint == "10.0.0.2:6674");
@@ -1763,10 +1777,61 @@ TEST_CASE("The fleet document for a selection refuses an unknown key by name and
         CHECK(following->body.starts_with("# this node does not lead the fleet"));
 
         snapshot.role = Distributed::SchedulerRole::Leader;
-        auto const leading = AnswerFleetText(snapshot, nullptr, "series", "1h");
+        auto const leading = AnswerFleetText(snapshot, nullptr, "series", "1h", CompileCacheWire::FleetTextFormat::Text);
         REQUIRE(leading.has_value());
         CHECK(leading->leads);
         CHECK(leading->body.starts_with("start\tcoverage\tbackfilled\t"));
+    }
+}
+
+TEST_CASE("FleetText Json reply equals /fleet.json body", "[node][admin][fleettext]")
+{
+    // The same snapshot and the same history view through both doors. `AnswerFleetText` is what the
+    // `fleet-text` verb answers from, the route is what a browser gets, and the claim is that they
+    // are one derivation: byte for byte, for every range the table serves.
+    ChartFixture const fixture;
+    Distributed::FleetSources const sources { .scheduler = &fixture.scheduler,
+                                              .cluster = nullptr,
+                                              .metrics = &fixture.metrics };
+
+    for (auto const& row: Distributed::FleetRangeTable)
+    {
+        INFO("range " << row.key);
+        auto const route = fixture.Get("/fleet.json", std::format("range={}", row.key));
+        REQUIRE(route.status == "200 OK");
+        auto const verb = AnswerFleetText(
+            Distributed::CollectFleet(sources), fixture.sampler.get(), {}, row.key, CompileCacheWire::FleetTextFormat::Json);
+        REQUIRE(verb.has_value());
+        CHECK(verb->body == route.body);
+        CHECK_FALSE(verb->body.empty());
+    }
+
+    SECTION("an empty range is the day, as on the route")
+    {
+        auto const verb = AnswerFleetText(
+            Distributed::CollectFleet(sources), fixture.sampler.get(), {}, {}, CompileCacheWire::FleetTextFormat::Json);
+        REQUIRE(verb.has_value());
+        CHECK(verb->body == fixture.Get("/fleet.json", "range=24h").body);
+        CHECK(verb->leads);
+    }
+
+    SECTION("a section is refused for json rather than silently dropped")
+    {
+        auto const verb = AnswerFleetText(Distributed::CollectFleet(sources),
+                                          fixture.sampler.get(),
+                                          "members",
+                                          {},
+                                          CompileCacheWire::FleetTextFormat::Json);
+        REQUIRE_FALSE(verb.has_value());
+        CHECK(verb.error().refusal == FleetTextRefusal::UnknownSelector);
+    }
+
+    SECTION("text format is unchanged by the new parameter")
+    {
+        auto const text = AnswerFleetText(
+            Distributed::CollectFleet(sources), fixture.sampler.get(), {}, {}, CompileCacheWire::FleetTextFormat::Text);
+        REQUIRE(text.has_value());
+        CHECK(text->body == fixture.Get("/fleet.txt").body);
     }
 }
 
@@ -1841,7 +1906,11 @@ TEST_CASE("A history a newer build wrote stops the sampler promising durability"
     auto const file = scratch.Path() / "history.bin";
     auto const nodeFile = scratch.Path() / "node-history.bin";
     auto const receivedFile = scratch.Path() / "received-history.bin";
-    HistoryPaths const paths { .fleet = file, .node = nodeFile, .received = receivedFile };
+    HistoryPaths const paths { .fleet = file,
+                               .node = nodeFile,
+                               .received = receivedFile,
+                               .requesters = scratch.Path() / "requester-history.bin",
+                               .toolchains = scratch.Path() / "toolchain-history.bin" };
 
     core::platform::ManualClock clock;
     AtomicMetricsSink metrics;
@@ -2128,4 +2197,404 @@ TEST_CASE("A compile the admission queue placed on a worker reads as dispatched 
     REQUIRE(json.status == "200 OK");
     // Exactly one: the compile the queue placed, and neither the absent `null` nor the `0` it read before.
     CHECK(json.body.contains(R"("dispatched":{"value":1,)"));
+}
+
+TEST_CASE("fleet.json refuses an unknown range in JSON and still ignores a section", "[node][admin][fleettext]")
+{
+    // The route answers through `AnswerFleetText`, whose refusal is a sentence: the route carries it as
+    // a JSON string, so a scraper reading the 400 still reads JSON, and it names every range served.
+    ChartFixture const fixture;
+    auto const refused = fixture.Get("/fleet.json", "range=30d");
+    REQUIRE(refused.status == "400 Bad Request");
+    auto const document = Json::Parse(refused.body);
+    REQUIRE(document.has_value());
+    auto const* const error = Testing::Unwrap(document).Find("error");
+    REQUIRE(error != nullptr);
+    REQUIRE(error->AsString() != nullptr);
+    auto const& message = Testing::Unwrap(Testing::Unwrap(error).AsString());
+    for (auto const& row: Distributed::FleetRangeTable)
+    {
+        INFO("range " << row.key);
+        CHECK(message.contains(row.key));
+    }
+
+    // The route never read `section`, and routing it through the verb's derivation does not start to:
+    // the JSON is one document, so a stray parameter is not a refusal here.
+    CHECK(fixture.Get("/fleet.json", "section=machines").status == "200 OK");
+}
+
+namespace
+{
+
+/// A load sampler answering a script, one reading per call, then the last one again.
+///
+/// Locked: `FleetSampler` samples on its own thread from construction while a case calls `SampleOnce` on its own, so
+/// two threads advance the script -- which order they take the readings in is the case's business, a race on the
+/// cursor is not.
+class ScriptedLoadSampler final: public IHostLoadSampler
+{
+  public:
+    /// @param readings What successive calls answer for the CPU; nullopt is a reading it could not take.
+    explicit ScriptedLoadSampler(std::vector<std::optional<std::uint32_t>> readings):
+        _readings { std::move(readings) }
+    {
+    }
+
+    [[nodiscard]] HostLoad Sample() override
+    {
+        auto const guard = std::scoped_lock { _mutex };
+        auto const index = std::min(_next, _readings.size() - 1);
+        ++_next;
+        return HostLoad { .cpuBusyPermille = _readings[index], .availableMemoryBytes = {}, .freeScratchBytes = {} };
+    }
+
+  private:
+    std::mutex _mutex;
+    std::vector<std::optional<std::uint32_t>> _readings;
+    std::size_t _next { 0 };
+};
+
+/// The raw text a key travels as between the registry, the history and the member record.
+[[nodiscard]] std::string RawKeyText(Ed25519PublicKey const& key)
+{
+    return { reinterpret_cast<char const*>(key.data()), key.size() };
+}
+
+} // namespace
+
+TEST_CASE("A CPU reading lands in the node series' CPU slot, and one the sampler could not take is absent",
+          "[node][admin][fleethistory]")
+{
+    auto values = EnumTable<Distributed::FleetMetric, std::uint64_t> {};
+    CHECK(ApplyCpuReading(values, HostLoad { .cpuBusyPermille = 375, .availableMemoryBytes = {}, .freeScratchBytes = {} })
+          == 0);
+    CHECK(values[static_cast<std::size_t>(Distributed::FleetMetric::CpuBusyPermille)] == 375);
+
+    auto none = EnumTable<Distributed::FleetMetric, std::uint64_t> {};
+    CHECK(ApplyCpuReading(none, HostLoad {}) == Distributed::SlotBit(Distributed::FleetMetric::CpuBusyPermille));
+    CHECK(none[static_cast<std::size_t>(Distributed::FleetMetric::CpuBusyPermille)] == 0);
+}
+
+TEST_CASE("The node series records this machine's CPU from its own sampler and leaves it absent until it can say",
+          "[node][admin][fleethistory]")
+{
+    AtomicMetricsSink metrics;
+    NullLogger logger;
+    Testing::PlacedWallClock wall;
+    // The first reading after construction has nothing to difference against: absent, never zero.
+    FleetSampler sampler { std::nullopt,
+                           metrics,
+                           NodeFacts(),
+                           wall,
+                           HistoryPaths {},
+                           logger,
+                           std::make_unique<ScriptedLoadSampler>(
+                               std::vector<std::optional<std::uint32_t>> { std::nullopt, 420 }) };
+    // The sampler thread takes its own first sample at construction, at a moment this case does not choose -- under
+    // TSan it landed AFTER the advance below, so the unanswerable reading and 420 shared one minute and the absent
+    // slot was overwritten. Waited for, so the scripted readings are consumed in one order: the construction sample
+    // takes the absent one into this minute, and the two below each own a later minute.
+    REQUIRE(Testing::WaitUntil(
+        "the sampler thread's construction sample to land in the node series",
+        [&sampler] {
+            auto const buckets = sampler.NodeHistory().Buckets(Distributed::FleetRange::OneHour);
+            return std::ranges::any_of(buckets, [](Distributed::FleetBucket const& bucket) { return bucket.present; });
+        },
+        [] { return std::string { "no present bucket yet" }; },
+        Testing::WaitOptions { .step = {}, .context = {}, .bound = std::chrono::seconds { 10 } }));
+    wall.Advance(std::chrono::minutes { 1 });
+    REQUIRE_FALSE(sampler.SampleOnce());
+    wall.Advance(std::chrono::minutes { 1 });
+    REQUIRE_FALSE(sampler.SampleOnce());
+
+    auto const hour = sampler.NodeHistory().Buckets(Distributed::FleetRange::OneHour);
+    REQUIRE(hour.back().present);
+    CHECK_FALSE(Distributed::IsAbsent(hour.back(), Distributed::FleetMetric::CpuBusyPermille));
+    CHECK(hour.back().values[static_cast<std::size_t>(Distributed::FleetMetric::CpuBusyPermille)] == 420);
+    // Somewhere before it the first, unanswerable reading left its bucket's CPU slot absent rather than zero.
+    CHECK(std::ranges::any_of(hour, [](Distributed::FleetBucket const& bucket) {
+        return bucket.present && Distributed::IsAbsent(bucket, Distributed::FleetMetric::CpuBusyPermille);
+    }));
+}
+
+TEST_CASE("A node without a load sampler records its CPU absent, and the fleet series never carries it",
+          "[node][admin][fleethistory]")
+{
+    ChartFixture const fixture;
+    // The fleet series: CPU has no fleet total, so every sampled bucket carries it absent.
+    auto const fleet = fixture.sampler->History().Buckets(Distributed::FleetRange::Day);
+    auto const sampled = std::ranges::count_if(fleet, [](Distributed::FleetBucket const& bucket) { return bucket.present; });
+    REQUIRE(sampled > 0);
+    CHECK(std::ranges::all_of(fleet, [](Distributed::FleetBucket const& bucket) {
+        return !bucket.present || Distributed::IsAbsent(bucket, Distributed::FleetMetric::CpuBusyPermille);
+    }));
+    // And the node series, with no sampler injected, records it absent too.
+    auto const node = fixture.sampler->NodeHistory().Buckets(Distributed::FleetRange::Day);
+    CHECK(std::ranges::all_of(node, [](Distributed::FleetBucket const& bucket) {
+        return !bucket.present || Distributed::IsAbsent(bucket, Distributed::FleetMetric::CpuBusyPermille);
+    }));
+}
+
+TEST_CASE("A node selector draws one machine's series, found by the key its member record holds", "[node][admin][fleettext]")
+{
+    ChartFixture fixture;
+    auto const keyA = Testing::TestKeyPair("machine-a").PublicKey();
+    auto const keyB = Testing::TestKeyPair("machine-b").PublicKey();
+
+    // Two closed minutes from machine A: one with its CPU, one where it could not say.
+    auto const minute = Testing::MinuteBucketStart(fixture.wall.now());
+    auto read = Testing::ClosedBucket(minute - (3 * 60'000));
+    read.values[static_cast<std::size_t>(Distributed::FleetMetric::CpuBusyPermille)] = 640;
+    auto unread = Testing::ClosedBucket(minute - (2 * 60'000));
+    unread.absent = Distributed::SlotBit(Distributed::FleetMetric::CpuBusyPermille);
+    auto const batch = std::array { read, unread };
+    REQUIRE(fixture.sampler->Received().AcceptHistory("10.0.0.7:6676", RawKeyText(keyA), batch) == 2);
+
+    Distributed::FleetSources const sources { .scheduler = &fixture.scheduler,
+                                              .cluster = nullptr,
+                                              .metrics = &fixture.metrics };
+    auto snapshot = Distributed::CollectFleet(sources);
+    snapshot.cluster = Cluster::ClusterState {};
+    auto memberA = Cluster::ClusterMember {};
+    memberA.id = "machine-a";
+    memberA.publicKey = keyA;
+    auto memberB = Cluster::ClusterMember {};
+    memberB.id = "machine-b";
+    memberB.publicKey = keyB;
+    snapshot.cluster->members = { memberA, memberB };
+
+    auto const ask = [&](std::string_view section, CompileCacheWire::FleetTextFormat format, std::string_view node) {
+        return AnswerFleetText(snapshot, fixture.sampler.get(), section, "1h", format, node);
+    };
+
+    SECTION("the series table for that machine: its CPU where it read one, a gap where it could not")
+    {
+        auto const answer = ask("series", CompileCacheWire::FleetTextFormat::Text, "machine-a");
+        REQUIRE(answer.has_value());
+        CHECK(answer->leads);
+        auto const& body = answer->body;
+        REQUIRE(body.starts_with("start\tcoverage\tbackfilled\t"));
+        // The header names cpu-busy; the bucket that read 640 says so, and the one that could not reads `-`.
+        auto lines = std::vector<std::string> {};
+        for (auto const line: body | std::views::split('\n'))
+            if (!std::ranges::empty(line))
+                lines.emplace_back(line.begin(), line.end());
+        auto const header = lines.front();
+        auto columns = std::vector<std::string> {};
+        for (auto const field: header | std::views::split('\t'))
+            columns.emplace_back(field.begin(), field.end());
+        auto const cpuAt =
+            static_cast<std::size_t>(std::ranges::distance(columns.begin(), std::ranges::find(columns, "cpu-busy")));
+        auto const dispatchedAt =
+            static_cast<std::size_t>(std::ranges::distance(columns.begin(), std::ranges::find(columns, "dispatched")));
+        REQUIRE(cpuAt < columns.size());
+        REQUIRE(dispatchedAt < columns.size());
+        auto const cellsOf = [](std::string const& line) {
+            auto cells = std::vector<std::string> {};
+            for (auto const field: line | std::views::split('\t'))
+                cells.emplace_back(field.begin(), field.end());
+            return cells;
+        };
+        // 60 one-minute buckets after the header; the read one is three back from the open minute, the unread two.
+        REQUIRE(lines.size() == 61);
+        auto const readCells = cellsOf(lines[lines.size() - 4]);
+        auto const unreadCells = cellsOf(lines[lines.size() - 3]);
+        CHECK(readCells[cpuAt] == "640");
+        CHECK(unreadCells[cpuAt] == "-");
+        // A machine answers for no dispatch outcome: absent in its own series, never a rate of zero.
+        CHECK(readCells[dispatchedAt] == "-");
+    }
+
+    SECTION("a member nobody delivered under is refused, saying so")
+    {
+        auto const answer = ask("series", CompileCacheWire::FleetTextFormat::Text, "machine-b");
+        REQUIRE_FALSE(answer.has_value());
+        CHECK(answer.error().refusal == FleetTextRefusal::UnknownSelector);
+        // The true reason: nothing filed under that member's key.
+        CHECK(answer.error().detail
+              == "this leader holds no history filed under the key member \"machine-b\"'s record holds\n");
+    }
+
+    SECTION("a selector holding a control character is described, so a newline cannot forge a line")
+    {
+        auto const forged = ask("series", CompileCacheWire::FleetTextFormat::Text, "x\nthe members are: machine-z");
+        REQUIRE_FALSE(forged.has_value());
+        CHECK(forged.error().refusal == FleetTextRefusal::UnknownSelector);
+        CHECK(forged.error().detail.starts_with("no member is named a selector of 28 bytes holding a control character;"));
+        // One line, and the forged text appears nowhere.
+        CHECK(std::ranges::count(forged.error().detail, '\n') == 1);
+        CHECK_FALSE(forged.error().detail.contains("machine-z"));
+
+        auto const deleted = ask("series",
+                                 CompileCacheWire::FleetTextFormat::Text,
+                                 std::string_view { "a\x7f"
+                                                    "b",
+                                                    3 });
+        REQUIRE_FALSE(deleted.has_value());
+        CHECK(deleted.error().detail.starts_with("no member is named a selector of 3 bytes holding a control character;"));
+    }
+
+    SECTION("a selector that is not text, or too long, is described rather than echoed")
+    {
+        auto const binary = ask("series", CompileCacheWire::FleetTextFormat::Text, std::string_view { "\xff\xfe", 2 });
+        REQUIRE_FALSE(binary.has_value());
+        CHECK(binary.error().refusal == FleetTextRefusal::UnknownSelector);
+        CHECK(binary.error().detail.starts_with("no member is named a selector of 2 bytes that are not UTF-8 text;"));
+
+        auto const longName = std::string(MaxQuotedNameBytes + 1, 'x');
+        auto const tooLong = ask("series", CompileCacheWire::FleetTextFormat::Text, longName);
+        REQUIRE_FALSE(tooLong.has_value());
+        CHECK(
+            tooLong.error().detail.starts_with(std::format("no member is named a selector of {} bytes;", longName.size())));
+        CHECK_FALSE(tooLong.error().detail.contains(longName));
+    }
+
+    SECTION("an id no member holds is refused, listing the members")
+    {
+        auto const answer = ask("series", CompileCacheWire::FleetTextFormat::Text, "machine-c");
+        REQUIRE_FALSE(answer.has_value());
+        CHECK(answer.error().refusal == FleetTextRefusal::UnknownSelector);
+        CHECK(answer.error().detail.starts_with("no member is named \"machine-c\"; the members are: "));
+        CHECK(answer.error().detail.contains("machine-a"));
+        CHECK(answer.error().detail.contains("machine-b"));
+    }
+
+    SECTION("any selection but the series table refuses a node rather than dropping it")
+    {
+        for (auto const& [section, format]:
+             std::array { std::pair { std::string_view { "members" }, CompileCacheWire::FleetTextFormat::Text },
+                          std::pair { std::string_view {}, CompileCacheWire::FleetTextFormat::Text },
+                          std::pair { std::string_view {}, CompileCacheWire::FleetTextFormat::Json } })
+        {
+            INFO("section '" << section << "', format " << static_cast<int>(format));
+            auto const answer = ask(section, format, "machine-a");
+            REQUIRE_FALSE(answer.has_value());
+            // WHICH refusal: the selector's own, not an unknown section or range.
+            CHECK(answer.error().refusal == FleetTextRefusal::UnknownSelector);
+            CHECK(answer.error().detail
+                  == "a node selects a machine's own history, served by the series section of the tables alone\n");
+        }
+    }
+
+    SECTION("a follower answers a node read as it answers the fleet's: no table, naming the leader")
+    {
+        snapshot.role = Distributed::SchedulerRole::Follower;
+        snapshot.leaderEndpoint = "10.0.0.2:6674";
+        auto const answer = ask("series", CompileCacheWire::FleetTextFormat::Text, "machine-a");
+        REQUIRE(answer.has_value());
+        CHECK_FALSE(answer->leads);
+        CHECK(answer->body.starts_with("# this node does not lead the fleet"));
+    }
+
+    SECTION("a machine that moved endpoint answers with every minute it handed over, from both addresses")
+    {
+        auto later = Testing::ClosedBucket(Testing::MinuteBucketStart(fixture.wall.now()) - 60'000);
+        later.values[static_cast<std::size_t>(Distributed::FleetMetric::CpuBusyPermille)] = 710;
+        REQUIRE(fixture.sampler->Received().AcceptHistory("192.168.4.7:6676", RawKeyText(keyA), std::span { &later, 1 })
+                == 1);
+        auto const answer = ask("series", CompileCacheWire::FleetTextFormat::Text, "machine-a");
+        REQUIRE(answer.has_value());
+        // Both the 640 reported from the old address and the 710 from the new one.
+        CHECK(answer->body.contains("\t640\n"));
+        CHECK(answer->body.contains("\t710\n"));
+    }
+
+    SECTION("a machine that has left is still answered from what it handed over")
+    {
+        // No registry row names machine A -- it never registered here at all -- and its series still answers, because
+        // history is filed under the machine's key, not under its presence.
+        REQUIRE(std::ranges::none_of(snapshot.nodes,
+                                     [](Distributed::NodeReport const& node) { return node.memberId == "machine-a"; }));
+        CHECK(ask("series", CompileCacheWire::FleetTextFormat::Text, "machine-a").has_value());
+    }
+}
+
+TEST_CASE("The keyed compile histories fold only while leading and reach /fleet.json through the one door",
+          "[node][admin][fleethistory][fleet-keyed-history]")
+{
+    core::platform::ManualClock clock;
+    AtomicMetricsSink metrics;
+    NullLogger logger;
+    Testing::PlacedWallClock wall;
+    core::platform::ManualWallClock wallClock;
+    auto const signer = Testing::TestLeaseSigner();
+    Distributed::SchedulerService scheduler { clock, wallClock, metrics, logger, signer, {} };
+    Distributed::FleetSources const sources { .scheduler = &scheduler, .cluster = nullptr, .metrics = &metrics };
+    // A follower before the sampler exists, so its thread's first sample folds nothing either.
+    scheduler.SetRole(Distributed::SchedulerRole::Follower, "10.0.0.9:6676", Distributed::StandaloneSchedulerTerm);
+    FleetSampler sampler { sources, metrics, NodeFacts(), wall, {}, logger };
+    auto const& requesters = sampler.Demand().Of(Distributed::KeyedDimension::Requesters);
+
+    auto const document = [&] {
+        auto const answer =
+            AnswerFleetText(Distributed::CollectFleet(sources), &sampler, {}, "1h", CompileCacheWire::FleetTextFormat::Json);
+        REQUIRE(answer.has_value());
+        return Unwrap(Json::Parse(answer->body, Json::ParseLimits { .maxBytes = 1U << 20U }));
+    };
+
+    // A follower folds nothing and answers no keyed history: what it holds is no fleet's answer.
+    CHECK_FALSE(sampler.SampleOnce());
+    CHECK(requesters.Empty());
+    CHECK(document().Find("requesters")->IsNull());
+    CHECK(document().Find("toolchain_demand")->IsNull());
+
+    // A leader folds its minute, so a minute it granted nothing in reads zero rather than absent.
+    scheduler.SetRole(Distributed::SchedulerRole::Leader, {}, Distributed::StandaloneSchedulerTerm);
+    REQUIRE(sampler.SampleOnce());
+    CHECK_FALSE(requesters.Empty());
+    auto const key = Testing::TestKeyPair("requester").PublicKey();
+    sampler.Demand().CompileGranted(std::string { reinterpret_cast<char const*>(key.data()), key.size() }, "gcc-14");
+
+    auto const led = document();
+    REQUIRE(led.Find("requesters") != nullptr);
+    auto const& section = Unwrap(led.Find("requesters"));
+    REQUIRE_FALSE(section.IsNull());
+    CHECK(Unwrap(section.Find("total")).AsInt() == std::optional<std::int64_t> { 1 });
+    CHECK(Unwrap(Unwrap(section.Find("range")).AsString()) == "1h");
+    CHECK_FALSE(Unwrap(section.Find("coverage_since_ms")).IsNull());
+    CHECK(Unwrap(Unwrap(led.Find("toolchain_demand")).Find("total")).AsInt() == std::optional<std::int64_t> { 1 });
+    // The text tables carry no keyed history: it rides the JSON document alone.
+    auto const text =
+        AnswerFleetText(Distributed::CollectFleet(sources), &sampler, {}, "1h", CompileCacheWire::FleetTextFormat::Text);
+    REQUIRE(text.has_value());
+    CHECK_FALSE(text->body.contains("toolchain_demand"));
+
+    // Demoted, it answers null again -- the store keeps what it counted, and serves it as nobody's fleet answer.
+    scheduler.SetRole(Distributed::SchedulerRole::Follower, "10.0.0.9:6676", Distributed::StandaloneSchedulerTerm);
+    CHECK(document().Find("requesters")->IsNull());
+    CHECK_FALSE(requesters.Empty());
+}
+
+TEST_CASE("A sampler with paths writes its keyed histories and reads them back",
+          "[node][admin][fleethistory][fleet-keyed-history]")
+{
+    Testing::ScratchDirectory const scratch { "fleet-sampler-keyed" };
+    HistoryPaths const paths { .fleet = {},
+                               .node = {},
+                               .received = {},
+                               .requesters = scratch.Path() / "requester-history.bin",
+                               .toolchains = scratch.Path() / "toolchain-history.bin" };
+    core::platform::ManualClock clock;
+    AtomicMetricsSink metrics;
+    NullLogger logger;
+    Testing::PlacedWallClock wall;
+    core::platform::ManualWallClock wallClock;
+    auto const signer = Testing::TestLeaseSigner();
+    Distributed::SchedulerService scheduler { clock, wallClock, metrics, logger, signer, {} };
+    scheduler.SetRole(Distributed::SchedulerRole::Leader, {}, Distributed::StandaloneSchedulerTerm);
+    Distributed::FleetSources const sources { .scheduler = &scheduler, .cluster = nullptr, .metrics = &metrics };
+    auto const key = Testing::TestKeyPair("requester").PublicKey();
+    {
+        FleetSampler sampler { sources, metrics, NodeFacts(), wall, paths, logger, nullptr, 4 };
+        sampler.Demand().CompileGranted(std::string { reinterpret_cast<char const*>(key.data()), key.size() }, "gcc-14");
+    }
+    CHECK(std::filesystem::exists(paths.requesters));
+    CHECK(std::filesystem::exists(paths.toolchains));
+
+    FleetSampler restored { sources, metrics, NodeFacts(), wall, paths, logger, nullptr, 4 };
+    auto const view = restored.Demand().Of(Distributed::KeyedDimension::Requesters).View(Distributed::FleetRange::OneHour);
+    REQUIRE(view.keys.size() == 1);
+    CHECK(view.keys.front().key == FormatEd25519PublicKey(key));
+    CHECK(restored.Demand().Of(Distributed::KeyedDimension::ToolchainDemand).View(Distributed::FleetRange::OneHour).total
+          == 1);
 }

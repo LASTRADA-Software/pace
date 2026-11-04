@@ -4,6 +4,7 @@
 #include "EnrollmentResponder.hpp"
 #include "EnrollmentWindow.hpp"
 #include "LocalCache.hpp"
+#include "McpUpstream.hpp"
 #include "NodeAnnounce.hpp"
 #include "NodeFormation.hpp"
 #include "NodeIdentity.hpp"
@@ -419,7 +420,9 @@ TEST_CASE("A consensus tier is built exactly when RunsConsensus says so", "[node
             *Unwrap(roster),
             schedulers,
             schedulingLeader,
+            nullptr,
             SharedCacheListeners { .directory = directory, .host = sharedCache, .upstream = nullptr },
+            nullptr,
             metrics,
             logger,
             nullptr,
@@ -451,7 +454,9 @@ TEST_CASE("A consensus tier is built exactly when RunsConsensus says so", "[node
             *Unwrap(roster),
             schedulers,
             schedulingLeader,
+            nullptr,
             SharedCacheListeners { .directory = directory, .host = sharedCache, .upstream = nullptr },
+            nullptr,
             metrics,
             logger,
             nullptr,
@@ -481,7 +486,9 @@ TEST_CASE("A consensus tier is built exactly when RunsConsensus says so", "[node
             *Unwrap(roster),
             schedulers,
             schedulingLeader,
+            nullptr,
             SharedCacheListeners { .directory = directory, .host = sharedCache, .upstream = nullptr },
+            nullptr,
             metrics,
             logger,
             nullptr,
@@ -532,7 +539,9 @@ TEST_CASE("A consensus tier refuses to start without an identity key", "[node][c
                                 *Unwrap(roster),
                                 schedulers,
                                 schedulingLeader,
+                                nullptr,
                                 SharedCacheListeners { .directory = directory, .host = sharedCache, .upstream = nullptr },
+                                nullptr,
                                 metrics,
                                 logger,
                                 nullptr,
@@ -1036,6 +1045,9 @@ TEST_CASE("Every state a consensus tier applies reaches the shared-cache directo
     AppliedSchedulers schedulers { cfg, AsConfigured };
     KnownSchedulingLeader knownLeader;
     SchedulingLeaderPublisher schedulingLeader { knownLeader };
+    // And the MCP surface's directory, told by the same two observers: where members answer and the term.
+    AppliedUpstreamDirectory upstreamDirectory { "n1", knownLeader, TestAdvertised() };
+    REQUIRE_FALSE(upstreamDirectory.Term().has_value());
 
     auto started =
         StartConsensusOrExplain(cfg,
@@ -1047,7 +1059,9 @@ TEST_CASE("Every state a consensus tier applies reaches the shared-cache directo
                                 *Unwrap(roster),
                                 schedulers,
                                 schedulingLeader,
+                                &upstreamDirectory,
                                 SharedCacheListeners { .directory = directory, .host = sharedCache, .upstream = &upstream },
+                                nullptr,
                                 metrics,
                                 logger,
                                 nullptr,
@@ -1066,6 +1080,18 @@ TEST_CASE("Every state a consensus tier applies reaches the shared-cache directo
                           != state.members.end();
         },
         [&tier] { return std::format("commit index {}", tier->Status().commitIndex.value); }));
+    // The MCP directory heard the apply that recorded this member, and the term the role observer reported.
+    REQUIRE(Testing::WaitUntil(
+        "the MCP upstream directory to be told the member and the term",
+        [&upstreamDirectory] {
+            return upstreamDirectory.EndpointOf("n1").has_value() && upstreamDirectory.Term().has_value();
+        },
+        [&upstreamDirectory] { return std::format("term told: {}", upstreamDirectory.Term().has_value()); }));
+    CHECK(upstreamDirectory.Term() == std::optional<std::uint64_t> { tier->Status().term.value });
+    // And that it leads: a one-voter tier's directory names this node's own endpoint as the leader's, although
+    // the scheduling leader a redirect reads is empty while it leads.
+    CHECK(knownLeader.LeaderSchedulingEndpoint().empty());
+    CHECK(upstreamDirectory.LeaderEndpoint() == TestAdvertised().Current());
     // Nothing named yet: the host has opened nothing.
     sharedCache.Reconcile();
     CHECK(sharedCache.Current() == nullptr);
@@ -1147,7 +1173,9 @@ TEST_CASE("Every applied state reaches where this node registers, so a voter's r
                                 *Unwrap(roster),
                                 schedulers,
                                 schedulingLeader,
+                                nullptr,
                                 SharedCacheListeners { .directory = directory, .host = sharedCache, .upstream = nullptr },
+                                nullptr,
                                 metrics,
                                 logger,
                                 nullptr,
@@ -1568,10 +1596,36 @@ TEST_CASE("A node whose own consensus state this build cannot read refuses to st
         CHECK(refusal.contains(directory.string()));
         CHECK(refusal.contains("the snapshot as of log entry 3"));
         CHECK(refusal.contains(std::format("cluster state encoding version {}", Testing::PreviousClusterStateVersion)));
-        CHECK(refusal.contains("reads 10"));
-        CHECK(refusal.contains("it is intact, and there is no conversion"));
+        CHECK(refusal.contains("reads 11"));
+        CHECK(refusal.contains("it is intact, and this build has no conversion from its version"));
         CHECK(refusal.contains(Consensus::UnreadableStateRemedy));
         CHECK(published->load() == 0);
+    }
+
+    SECTION("converted: the last release's snapshot and log start, the snapshot restored and the entry above it applied")
+    {
+        // The MSI upgrade from v0.6.0: that release left a v10 snapshot and v6 entries in the node's own directory,
+        // and this build refusing them kept the upgraded service from starting at all (service-specific error 78,
+        // the installer rolled back). Both are converted, so the node starts on what the release replicated.
+        auto const w2 = Testing::TestKeyPair("w2").PublicKey();
+        PlantConsensusState(
+            directory, Testing::EncodeNamelessClusterState(), Testing::EncodeNamelessClusterCommand("w2", w2));
+        auto started = start();
+        INFO("start refused: " << RefusalOf(started));
+        REQUIRE(started.has_value());
+        auto const& tier = *started;
+
+        // Restored when the driver was built, before either loop ran: the release's members and its revocation.
+        auto const restored = tier->ClusterState();
+        CHECK(std::ranges::contains(restored.members, "n2", &Cluster::ClusterMember::id));
+        CHECK(HasRevocation(restored, "w1"));
+        CHECK(published->load() > 0);
+
+        // And the release's entry above it, once the node leads again and commits it.
+        CHECK(Testing::WaitUntil(
+            "the retained v6 forget to commit",
+            [&tier] { return HasRevocation(tier->ClusterState(), "w2"); },
+            [&tier] { return std::format("commit index {}", tier->Status().commitIndex.value); }));
     }
 
     SECTION("a retained command the build before wrote refuses the start, before the snapshot is restored")
@@ -1587,7 +1641,30 @@ TEST_CASE("A node whose own consensus state this build cannot read refuses to st
         CHECK(refusal.contains(directory.string()));
         CHECK(refusal.contains("log entry 4"));
         CHECK(refusal.contains(std::format("cluster command encoding version {}", Testing::PreviousClusterCommandVersion)));
-        CHECK(refusal.contains("reads 6"));
+        CHECK(refusal.contains("reads 7"));
+        CHECK(refusal.contains("it is intact, and this build has no conversion from its version"));
+        CHECK(refusal.contains(Consensus::UnreadableStateRemedy));
+        CHECK(published->load() == 0);
+    }
+
+    SECTION("a retained last-release command carrying a verb that release never had refuses the start as damage")
+    {
+        // v6 is a layout this build converts, and its writer had no verb past `DissolveInto`: the pair is bytes no
+        // build wrote. Damage, then -- never "intact, and this build has no conversion from its version", which would send
+        // an operator to move a healthy-looking store aside instead of looking at the disk.
+        PlantConsensusState(
+            directory,
+            currentSnapshot,
+            Testing::EncodeNamelessClusterCommandWithVerb(static_cast<std::uint8_t>(Cluster::CommandKind::SetDisplayName)));
+        auto const started = start();
+        REQUIRE_FALSE(started.has_value());
+        CHECK(started.error().cause == NodeRefusalCause::ConsensusState);
+        auto const& refusal = started.error().reason;
+        CAPTURE(refusal);
+        CHECK(refusal.contains("log entry 4"));
+        CHECK(refusal.contains("under encoding version 6"));
+        CHECK(refusal.contains("it is damaged, which is a disk or a crash to investigate first"));
+        CHECK_FALSE(refusal.contains("it is intact"));
         CHECK(refusal.contains(Consensus::UnreadableStateRemedy));
         CHECK(published->load() == 0);
     }
@@ -1921,7 +1998,7 @@ TEST_CASE("A running tier offered a snapshot it cannot read raises unreadable-le
         CHECK(row->detail.contains("leader n1"));
         CHECK(row->detail.contains("log entry 3"));
         CHECK(row->detail.contains(std::format("version {}", Testing::PreviousClusterStateVersion)));
-        CHECK(row->detail.contains("reads 10"));
+        CHECK(row->detail.contains("reads 11"));
 
         // Nothing taken on: not the previous build's member, not a moved commit index.
         CHECK_FALSE(tier->ClusterState().RaftEndpointOf("n1").has_value());
@@ -2852,7 +2929,9 @@ TEST_CASE("A learner started as main starts it names its leader's scheduling end
                                 *Unwrap(roster),
                                 schedulers,
                                 schedulingLeader,
+                                nullptr,
                                 SharedCacheListeners { .directory = directory, .host = sharedCache, .upstream = nullptr },
+                                nullptr,
                                 metrics,
                                 logger,
                                 nullptr,

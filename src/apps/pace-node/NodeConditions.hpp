@@ -63,7 +63,8 @@ enum class NodeCondition : std::uint8_t
                             ///< grants.
     StateDirectoryUnsynced, ///< The state directory's filesystem cannot sync a directory, so its replaces may not survive
                             ///< a power loss.
-    Last,                   ///< Not a condition.
+    CacheBudgetOverrideDropped, ///< A cluster cache budget override was dropped: this machine's own later edit wins.
+    Last,                       ///< Not a condition.
 };
 
 /// Which of this node's components evaluates a row.
@@ -368,6 +369,16 @@ inline constexpr EnumTable<NodeCondition, NodeConditionRow> NodeConditionTable {
                 "Raft term and vote, the formation record) is not known to survive a power loss: one a power cut "
                 "takes back is read as the file before it. The node serves meanwhile; a restart on the same "
                 "volume will not clear this." },
+    // Latched: the drop is an EVENT this process acted on -- the override is gone from the cluster's record -- and
+    // nothing it does later can undo that, so the row stays until somebody has seen it. Consensus scope: an override
+    // reaches a node only through the state its consensus applies. The remedy is the plan's sentence, verbatim.
+    { .condition = NodeCondition::CacheBudgetOverrideDropped,
+      .id = "cache-budget-override-dropped",
+      .persistence = CompileCacheWire::ConditionPersistence::Latched,
+      .severity = CompileCacheWire::ConditionSeverity::Warning,
+      .scope = ConditionScope::Consensus,
+      .remedy = "the machine's own configuration changed after the override was set; set it again with "
+                "set_cache_budget if still wanted" },
 } };
 static_assert(RowsInEnumeratorOrder(NodeConditionTable, &NodeConditionRow::condition),
               "NodeConditionTable must hold one row per NodeCondition, in enumerator order");

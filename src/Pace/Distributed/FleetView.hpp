@@ -7,6 +7,7 @@
 #include <Pace/Core/FigureText.hpp>
 #include <Pace/Core/MachineName.hpp>
 #include <Pace/Distributed/FleetHistory.hpp>
+#include <Pace/Distributed/FleetKeyedHistory.hpp>
 #include <Pace/Distributed/SchedulerService.hpp>
 #include <Pace/Distributed/WorkerRegistry.hpp>
 #include <Pace/Metrics/IMetricsSink.hpp>
@@ -109,13 +110,63 @@ struct LeaseHolding
     std::chrono::milliseconds age {}; ///< Since the lease was taken.
 };
 
-/// How many outstanding leases a report lists.
+/// How many outstanding leases the PAGE and `/fleet.txt` list.
 ///
 /// A bound rather than the whole set, because a fleet at full tilt holds thousands
-/// and a page that renders all of them is one nobody can read -- and a JSON
-/// document that grows without limit. The total travels beside it, so the
-/// truncation is visible rather than silent.
+/// and a page that renders all of them is one nobody can read. The total travels
+/// beside it, so the truncation is visible rather than silent. `/fleet.json` lists
+/// up to `FleetJsonLeaseCeiling` instead: a program reading it wants every lease.
 inline constexpr std::size_t OutstandingLeaseRows = 50;
+
+/// How many outstanding leases `/fleet.json` lists: every one, up to this generous ceiling.
+///
+/// A ceiling rather than none, because a document that grows without limit is one nothing can
+/// consume; the count past it travels as `leases-outstanding-truncated`, so a cut-short list
+/// says so. `FleetSnapshot::outstandingLeases` holds this many at most.
+inline constexpr std::size_t FleetJsonLeaseCeiling = 10'000;
+
+/// How many compile tickets `/fleet.json` lists, oldest first; the rest are counted as truncated.
+inline constexpr std::size_t FleetJsonCompileCeiling = 10'000;
+
+/// How many compile tickets the page lists, oldest first. The JSON lists up to `FleetJsonCompileCeiling`.
+inline constexpr std::size_t DashboardCompileRows = 50;
+
+/// How a fleet document names each `TicketView::State`: a compile row's `state` cell, and a key of
+/// the totals beside the list.
+struct TicketStateRow
+{
+    TicketView::State state; ///< The state this row describes.
+    std::string_view key;    ///< Its machine spelling.
+};
+
+/// One row per `TicketView::State`, in enumerator order.
+inline constexpr EnumTable<TicketView::State, TicketStateRow> TicketStateTable { {
+    { .state = TicketView::State::Queued, .key = "queued" },
+    { .state = TicketView::State::Waiting, .key = "waiting" },
+    { .state = TicketView::State::Running, .key = "running" },
+} };
+static_assert(RowsInEnumeratorOrder(TicketStateTable, &TicketStateRow::state));
+
+/// One compile in progress, as a report shows it: the joined ticket, and its requester named for a person.
+struct FleetCompile
+{
+    CompileRow compile;    ///< The ticket and its lease, joined by ticket id.
+    std::string requester; ///< The requesting machine's display name; never empty (a short form of its key when unnamed).
+};
+
+/// Every compile in progress on the leader, as one sample (#1728).
+///
+/// Defined over admission TICKETS rather than leases: a ticket exists from enqueue until it is settled,
+/// for a compile run on its own caller as much as for a dispatched one, so this is the complete set of
+/// cache misses in progress. The totals count EVERY ticket, the ones past the ceiling included, so a
+/// reader never sums a truncated list.
+struct CompileSection
+{
+    std::vector<FleetCompile> rows; ///< Oldest first, at most `FleetJsonCompileCeiling`.
+    std::size_t truncated {};       ///< Tickets past the ceiling, not listed.
+    /// How many tickets stand in each state, the unlisted ones included; indexed by `TicketView::State`.
+    EnumTable<TicketView::State, std::size_t> totals {};
+};
 
 /// One client of the compile queue: a machine and the build tree it compiles for.
 struct AdmissionClientRow
@@ -172,7 +223,8 @@ struct FleetSnapshot
     std::vector<std::uint64_t> leases;
     /// Leases outstanding right now.
     std::size_t liveLeases { 0 };
-    /// The oldest of those, at most `OutstandingLeaseRows` of them.
+    /// The oldest of those, at most `FleetJsonLeaseCeiling` of them; the page and the text
+    /// document show the first `OutstandingLeaseRows`.
     ///
     /// Beside `liveLeases` rather than replacing it: the count is the total and
     /// this is a window onto it, and a reader that could not tell them apart would
@@ -182,6 +234,9 @@ struct FleetSnapshot
     std::uint64_t registrations { 0 };
     /// The leader's compile queue, or ABSENT when this node leads none (#1728).
     std::optional<AdmissionSection> admission;
+    /// Every compile ticket in progress, joined to its lease, or ABSENT when this node leads no queue:
+    /// a follower's tickets are not the fleet's, which is not the same claim as no compiles.
+    std::optional<CompileSection> compiles;
     /// Which cache tiers any member reports.
     ///
     /// A table cannot omit one cell the way a scrape omits a line, so this is how
@@ -531,6 +586,16 @@ static_assert(RowsInEnumeratorOrder(CellFormatTable, &CellFormatRow::format));
 /// @return The scale, or absent for a name that section does not render.
 [[nodiscard]] std::optional<CellFormat> FleetColumnFormat(FleetSection section, std::string_view name);
 
+/// The scale of the column @p name of `/fleet.json`'s `compiles` rows, looked up in the table the renderer walks.
+///
+/// Its own door because the compile list is no `FleetSection` (#1728): the page and the JSON carry it, and
+/// `/fleet.txt` does not, so `FleetColumnFormat` has no section to name it by. A consumer of the JSON that must
+/// tell a duration from a count -- the MCP tools convert every `Millis` column to seconds -- asks here rather than
+/// listing which compile columns are milliseconds, a list that would go stale the moment a column was added.
+/// @param name The column's name, as the JSON spells its key.
+/// @return The scale, or absent for a name the compile rows do not carry.
+[[nodiscard]] std::optional<CellFormat> FleetCompileColumnFormat(std::string_view name);
+
 /// The two columns of a section whose scale is a property of the ROW rather than the column.
 struct FleetRowUnitColumns
 {
@@ -642,7 +707,12 @@ enum class CellTone : std::uint8_t
 /// Bumped when the MEANING of a value changes, not when a key is added: a reader that meets
 /// a key it does not know ignores it, exactly as a `0xFC` surface steps over a verb it has
 /// no row for, and bumping for an addition would refuse readers that are still correct.
-inline constexpr unsigned FleetJsonSchema = 2;
+///
+/// Generation 3: `leases-outstanding-oldest` stopped being the page's window of
+/// `OutstandingLeaseRows` and became every lease up to `FleetJsonLeaseCeiling`, with the rest
+/// counted in `leases-outstanding-truncated` -- a reader of generation 2 that took its length
+/// for the page's bound now reads a different set. The `compiles` list arrived with it.
+inline constexpr unsigned FleetJsonSchema = 3;
 
 /// One machine-written cell, as a PERSON reads it.
 ///
@@ -807,6 +877,12 @@ struct FleetHistoryView
     /// and it is not the same promise as a durable one -- so the page says so
     /// rather than letting an operator find out at the next restart.
     bool durable { false };
+    /// The leader's keyed compile histories over `range`, one per `KeyedDimension` (`/fleet.json`'s `requesters` and
+    /// `toolchain_demand`).
+    ///
+    /// Absent -- rendered `null` -- on a node that keeps none or does not LEAD: the stores count what a leader's queue
+    /// granted, and a follower's, or a demoted leader's, holds only the windows it led, which is no fleet's answer now.
+    EnumTable<KeyedDimension, std::optional<KeyedView>> keyed {};
 };
 
 /// Render a fleet snapshot as one self-contained HTML page.

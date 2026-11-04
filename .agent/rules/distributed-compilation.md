@@ -3811,9 +3811,12 @@ caller could approve its own enrollment or arm an auto-approve window. Two colum
 never an `if` at a handler:
 - `OpDescriptor::identity` names the verbs: `IdentityRequirement::OperatorStanding` on
   `ClusterSet`, `ClusterForget`, `ClusterAdmit`, `ClusterAdmitLearner` and `EnrollControl`
-  (`ClusterAdmitWorker`, 0x1D, is retired), pinned by `ControlVerbsNeedOperatorStanding`; `IdentifiedCaller` is only its
-  PREREQUISITE (`IdentityRequirementRow::prerequisite`, walked by `UnmetRequirement`) and no verb
-  names it.
+  `MemberEdit` (`ClusterAdmitWorker`, 0x1D, is retired), pinned by `ControlVerbsNeedOperatorStanding`; `IdentifiedCaller`
+  is only its PREREQUISITE (`IdentityRequirementRow::prerequisite`, walked by `UnmetRequirement`) and no verb names it.
+  **The door is the rule, so one verb carries one requirement**: what a member reports about ITSELF (an override's
+  baseline, an override its own configuration outranks) is `MemberReport` (0x27), `ProvenNodeOnly`, whose member is
+  the one holding the proven key and never a field of the frame -- not a per-edit authority column behind a weakened
+  door, which let a learner, and an MCP action tool on it, clear its own override with no operator's standing.
 - `Distributed::MembershipRoutes`' `standing` column names the routes: loopback is an `Operator`
   at the node being asked, a proven key and a verified ticket identify a `MachineSeat`, and
   `OpenPolicy` is `Anonymous`.
@@ -3967,11 +3970,19 @@ another machine claiming a member's id look the same, and "forget it" would remo
 
 **What it does not cover, stated rather than left to be found.** The cache tier is unaffected and
 that is the fix rather than an omission: locality is a property of the VERB, and a machine that
-proved its identity is still not this one (#287). `FleetText` and a live-stats subscription
-are BOTH behind the dashboard credential as well as membership, and that credential is untouched
--- it answers a different question and is its own file by rule, so a proof is not a substitute
-for the token. And a REGISTER's endpoint is still not bound to the machine that proved: the proof
-says WHICH machine, never that the address it registers is its own.
+proved its identity is still not this one (#287). The fleet's two `0xFC` readers part here, and
+the split is deliberate. **`FleetText` admits a caller PROVING a live roster key in place of the
+dashboard credential** (`FleetReader::ProvenMember`, decided by `RestsOnProvenIdentity` off the
+same fold `RefusePeer` asks, LEARNERS included): an MCP session on a node that does not lead must
+read the leader's fleet model, the node holds no dashboard credential, and the design makes read
+tools work on any member. A machine TICKET, `--fleet-open` and loopback without a proof earn
+nothing there -- the token still decides for them, or, with no token file, loopback alone -- and a
+REVOKED key is `Forgotten` and refused at the door before the read is asked. **The live-stats
+fleet subscription is unchanged**: by ADDRESS only (`FleetReader::ByAddress`), dashboard credential
+or, with none, this machine -- a proof is not a substitute for the token on the stream, which is
+the dashboard's panel rather than a read a member makes. And a REGISTER's endpoint is still not
+bound to the machine that proved: the proof says WHICH machine, never that the address it
+registers is its own.
 
 **Every membership gate on this surface folds the proof, and that is a census rather than a
 description**: `CompileResponder`, `EnrollmentResponder`, `FleetTextResponder`,
@@ -4132,6 +4143,71 @@ Each rule below is a shape a plausible simpler design gets wrong, and none of th
     interface default, `Unsupported` -- `SetReceiveDeadline`'s defect class, one rule higher. The two
     production wrappers each have a case asserting the request reaches the socket under them; the fake's
     is the proven-leader forwarding case, whose ledger sits UNDER it.
+
+## Fingerprint inputs: captured, never re-gathered
+
+<!-- agent-tripwire: Fingerprint inputs are CAPTURED, never re-gathered -->
+
+`toolchain_diff` explains why two fingerprints differ from what each was COMPUTED from:
+the schema, the banner, the driver grammar and every include-tree file with its content digest
+(`Cc::FingerprintInputs`, `FINGERPRINT-INPUTS` 0x25).
+
+- **The record is the survey's.** The heartbeat thread publishes what its survey digested
+  (`ServedToolchain::inputs`) and `FingerprintInputsResponder` reads only what was published.
+  Asking never walks a tree, for two reasons that are independent: a request a peer can send
+  must not buy a multi-second walk, and a walk taken NOW describes the tree as it is now rather
+  than what the fingerprint was computed from -- a confident wrong explanation.
+- **A warm start registers from the fingerprint cache and does not wait for the inputs.** The
+  walk that captures them is ONE per process, on a thread of its own (`InputsCapture`), started by
+  the heartbeat thread after its first survey and never by a peer; the heartbeat only asks whether
+  it has finished, a question that never waits. Run on the heartbeat thread it would hold every
+  heartbeat for the length of a walk (#1157), and the registration would expire.
+- **A capture is adopted PER ENTRY**, matched on the (fingerprint, compiler) pair through one
+  predicate (`InputsBelongTo`): a pin is never replaced, an entry the capture missed is never
+  dropped, and a capture that did not reproduce a served fingerprint refreshes the toolchains from
+  the live configuration rather than replacing the map. Replacing the whole map served a reverted
+  pin's objects under the wrong toolchain.
+- **Why there are no inputs is FOUR states, never a null pointer** (`FingerprintInputsState`):
+  recorded, pinned (never probed), not yet captured (the walk is running) and not captured (it did
+  not reproduce this fingerprint, or did not run). Only the first can be compared.
+- **The comparing node RECOMPUTES both fingerprints before it compares**, and refuses a side that
+  alone fails as stale. Identical inputs reproducing NEITHER fingerprint, or a side digested
+  under another schema, is reported as a version skew naming both builds -- concluded only when a
+  recompute ran, never from the fingerprints differing.
+
+## Cache budget overrides: the later edit wins, by baseline
+
+<!-- agent-tripwire: A cache budget override is applied OFF the consensus apply path and off every reactor -->
+
+An override is recorded by the leader in the member's replicated record and applied by the
+member, because only the member knows what it configured (`Cluster::BudgetOverride`,
+`BudgetOverrideApplier`; operator page `docs/operations/mcp.md`).
+
+- **"Later" is decided by a recorded BASELINE, never by a clock.** The member reports the value
+  its own flag had when it first applied the override (MEMBER-REPORT `RecordBaseline`) and
+  compares its configuration IN FORCE with it at every start, accepted reload and applied state:
+  equal, the override stands; different, the local edit is the later change, so it logs both
+  values at Warn, raises the latched `cache-budget-override-dropped` and asks the leader to drop
+  EXACTLY that override (`DropOverride`). `DecideOverride` is a pure function of the record, the
+  configuration and what is applied. `setAt` is the leader's clock and display only: two
+  machines' timestamps decide nothing.
+- **An override is named by the Raft log INDEX of the entry that recorded it**, exact and the same
+  on every replica and never reused, so a baseline or a drop can never land on an override set
+  again since -- even with the same figure in the same second, even by a leader whose clock is
+  behind.
+- **Applied off the consensus apply path and off every reactor.** `OnState` records the newest
+  state and wakes the applier's own thread, which coalesces a burst to the newest. That thread
+  shrinks tiers -- a memory shrink holds the shard lock for its whole one-shot eviction -- and
+  sends MEMBER-REPORT, a blocking round trip: on the apply callback either is a voter missing
+  heartbeats, on a reactor every `0xFC` surface stalling. `Stop()` is called as the serve loop
+  ends, BEFORE any surface its reports reach is torn down: on the leader a report is answered
+  through the node's own router, which dies first.
+- **Never a share of RAM and never zero.** A `25%` would be resolved by whichever machine read it,
+  the leader included, so it is refused at the one grammar every door shares
+  (`Cluster::ParseOverrideBudget`, which `ParseBudgetSpec` wraps for the CLI's `<node>:memory=...`); zero is *unbounded* or *no tier* at startup, and a live tier stack
+  cannot remove a tier (`TierOverrideCannotRemoveTier`).
+- **What a member reports about ITSELF is `MemberReport`, never a weaker `MemberEdit` door** --
+  the node-proof section above has that rule.
 
 ## Open work
 

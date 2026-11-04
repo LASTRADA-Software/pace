@@ -161,6 +161,15 @@ class NotifyingStorage final: public IStorage
     /// @param log Sink for reclaimed keys, or nullptr to stop reporting.
     void SetReclaimLog(IReclaimLog* log) override;
     void Resize(std::size_t newMaxBytes) override;
+    /// Forwarded: a decorator is no tier, and the default would reach the inner store
+    /// through `Resize`, which a `LayeredStorage` reads as its memory half's.
+    /// @param tier Which tier's budget to change.
+    /// @param newMaxBytes The new budget.
+    /// @return The inner store's answer.
+    std::optional<std::size_t> ResizeTier(StorageTier tier, std::size_t newMaxBytes) override;
+    /// Forwarded, for the same reason.
+    /// @return The inner store's answer.
+    EvictStepOutcome EvictStep() override;
     [[nodiscard]] StorageStats Snapshot() const noexcept override;
     [[nodiscard]] TieredStorageStats SnapshotTiers() const noexcept override;
     [[nodiscard]] bool SupportsSharedRead() const noexcept override;

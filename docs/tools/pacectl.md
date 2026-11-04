@@ -142,7 +142,7 @@ the help renders `Verbs()` grouped by `WireSpec::heading`, and
 | Read (memcached) | `gat`, `gats`, `inspect`, `mc-stats` |
 | Write (memcached) | `touch`, `add`, `replace`, `append`, `prepend`, `cas`, `cache-memlimit` |
 | Node (`0xFC`) | `node`, `node-conditions`, `node-metrics`, `fleet`, `cordon`, `uncordon`, `explain-admission` |
-| Cluster (`0xFC`) | `cluster-members`, `cluster-settings`, `cluster-set`, `cluster-forget`, `cluster-admit`, `cluster-admit-learner` |
+| Cluster (`0xFC`) | `cluster-members`, `cluster-settings`, `cluster-set`, `cluster-name`, `cluster-budget`, `cluster-budget-clear`, `cluster-forget`, `cluster-admit`, `cluster-admit-learner` |
 
 ### The fleet verb
 
@@ -260,6 +260,20 @@ says which: `announced`, `never-announced` (a member that has announced none, su
 as a bootstrap peer before its first announcement), or `cleared` (a record re-proposed
 with none wiped the endpoint it had; it returns when that member next announces).
 
+`name` is the member's **display name**, absent when nobody named it: a label an operator chose with
+`cluster-name <member-id> [<name>]` (no name clears it), replicated so every node, the fleet page and every MCP
+answer show the same one, and deciding nothing -- no admission, route or key reads it. It is unique across the
+members, compared with ASCII letters folded to one case; the leader refuses a taken one, naming who holds it.
+
+`memory-budget` and `disk-budget` are the **cache budget overrides** the cluster records for the member, absent where
+none is: the figure, the `baseline` the member reported its own flag had (`unset` until it does), and when the leader
+recorded it, by the leader's clock, and `by=` the machine the operator acted from -- the member whose key the
+connection proved or whose key signed the ticket it presented, or the leader itself for a caller on the leader's own
+machine (`-` only when nothing identified the caller, `--fleet-open` alone). `cluster-budget <member-id>:memory=<size>[,disk=<size>]` records one (sizes as
+`--cache-memory` and `--cache-disk` take them, never `0` or a share of RAM), settable while the member is down, and
+`cluster-budget-clear <member-id>:<memory|disk>` removes one. Recorded is not applied: the member applies the override
+and may refuse a tier it does not have.
+
 `seat` is `voter` or `learner`: the set the member was **admitted into**, which is
 the record the leader moves consensus towards one change at a time. A learner is
 replicated to and counted by no quorum, and never stands for election, so a machine
@@ -279,7 +293,7 @@ scheduler endpoint — every member's record carries the endpoint its join state
 moves when it announces a new one — so that cell reads as absent rather than as an
 address nothing answers at.
 
-Two of the three changing verbs report **accepted**, never committed. The leader
+Every changing verb but `cluster-admit` reports **accepted**, never committed. The leader
 cannot know the difference until a majority answers.
 
 `cluster-admit` reports more, and the extra is deliberate rather than a courtesy.
@@ -320,7 +334,8 @@ settles — so the symptom points at consensus rather than at the character that
 mistyped, and one address costs an afternoon.
 
 The same verbs are also spelled `pace-node --cluster-status`,
-`--cluster-set`, `--cluster-forget`, `--cluster-admit` and `--cluster-admit-learner`. Either works:
+`--cluster-set`, `--cluster-name`, `--cluster-budget`, `--cluster-budget-clear`, `--cluster-forget`, `--cluster-admit`
+and `--cluster-admit-learner`. Either works:
 the node's verbs ask this machine's own node unless `--scheduler` names another, and a node
 that serves is refused `--scheduler`, so it never ends up in a unit file.
 
@@ -352,6 +367,8 @@ it as a length.
 $ pacectl node
 version                        0.2.0-125-g6ba32b30
 node-id                        -
+name                           buildhost-7
+name-source                    self-reported
 uptime-seconds                 15
 components                     cache-tier, worker
 conditions                     raised: scratch-root-unmappable (latched), enrollment-window-open (live)
@@ -369,6 +386,13 @@ admin-port                     36742
 admin-tls                      false
 ```
 
+`name` is what a person knows the machine by, by the fleet page's own rule: the display name the cluster records
+for it (`name-source` reads `replicated`), else the hostname it reports for itself (`self-reported`); both are
+absent when neither says.
+
+Each surface the node opened is one `<surface>-port` field — `admin-port`, `raft-port`,
+`discovery-port` and `mcp-port` (the [MCP surface](../operations/mcp.md), `--mcp-listen`) —
+and `admin-tls` says the admin surface's scheme.
 A surface the node does not run gets **no field at all** rather than a zero port —
 a `0` renders as a dialable-looking number in every format, and an operator who
 tries it reaches nothing and reports the surface as down. The `0xFC` port is
@@ -405,7 +429,12 @@ Beside them, what that worker is offering and whether anyone knows about it:
 - **`compile-slots`** and **`compiles-in-flight`** — how many concurrent compiles this
   node offers and how many are running. Both or neither: a slot count with no in-flight
   figure invites the reading that the node is idle. A node running no worker tier
-  reports neither, which is **not** the same as reporting none free.
+  reports neither, which is **not** the same as reporting none free. The slot count is
+  the **startup** figure: it sizes the worker's thread pool once, and a live cluster
+  cache-budget override does not change it -- not even when `--slots` is unset and the
+  count was derived from the cache reserve at startup. What such an override does move
+  is the capacity the worker registers (its reserved memory and tier budgets) and the
+  machine budget compiles are admitted against.
 - **`compile-inflight-max`** and **`compile-request-max`** — the worker's other two
   ceilings, in bytes, as resolved (`--compile-inflight-max`, `--compile-request-max`):
   what every running compile may hold together, and what one request may cost. A
@@ -478,6 +507,41 @@ Beside them, what that worker is offering and whether anyone knows about it:
   in the detail. A node with no shared cache says `none`; only a node too old to report
   it leaves `shared-cache` absent. A machine, endpoint or detail the node did not name
   is absent rather than blank.
+- **`slots-available`, `slots-bound-by`, `slot-ceiling-<limit>`,
+  `slot-ceilings-sampled-seconds-ago`** — every ceiling on the worker's slots as of its
+  last heartbeat, and which one binds: `registered`, `external-cpu`, `memory`, `scratch`,
+  `compile-budget`, `cordoned`. The worker computes them with the scheduler's own
+  arithmetic over the load that heartbeat sent and the capacity its registrations carry,
+  so the two name the same limit — after a live cache-budget override too, since the
+  worker re-registers with the new capacity on its next heartbeat. A limit
+  that did not apply — a CPU figure the host could not read, a cordon nobody set — is an
+  absent cell, never a zero, which would be a limit that takes everything. A node with no
+  worker, or one whose first heartbeat has not sampled the host, reports none of them.
+- **`cache-<tier>-entries`, `-bytes`, `-budget`, `-hits`, `-misses`, `-hit-ratio`** — each
+  tier the node's cache has, by `memory` and `disk`. A budget of zero reads `unbounded`;
+  a hit ratio with no lookups behind it is absent. A tier the cache does **not** have is
+  one absent `cache-<tier>` cell, never a tier of zeroes, and a node with no cache reports
+  no tier at all.
+- **`config-<flag>`** — the configuration in force, **after** every accepted reload, one
+  cell per setting a configuration file can carry: a list setting's values joined, an
+  unset setting absent rather than empty. `--requirepass` reads `<redacted>` when set:
+  the node replaces it before its reply exists, so its value never leaves the machine. A
+  path to a secret file (`--tls-key`, `--dashboard-token-file`, `--cluster-dir`) is shown,
+  because the path is not the secret and the file is. A value that is not UTF-8 -- a path with
+  such a byte -- reads `<non-utf8: ...>` with each such byte as `\xHH`, never a replacement
+  character that would name another file. A node that admitted the asking connection by
+  `--fleet-open` alone tells it no `config-*` cell: only a caller this machine, a proven key
+  or a verified ticket identifies is told the configuration.
+- **`budget-<tier>`**, **`budget-<tier>-source`**, **`budget-overrides`** — each cache tier's
+  budget in force and whether it comes from the `cluster` (an override) or is `configured`:
+  the configured value, the override and the `baseline` it was set against (`unset` until the
+  node reports it), when (the leader's clock) and by whom it was set, the bytes still being
+  evicted while a shrink converges, and why a recorded override is not in force. One row per
+  tier the node has, or that the cluster records an override for; `budget-overrides` joins
+  them, `none` from a node with neither, and is absent from a node that does not say.
+
+The MCP `node_status` tool reads the same reply and the same derivations, so it cannot
+disagree with these cells about a quantity both show.
 
 **`conditions`** is what this node has detected that an operator must act on — each
 condition it raised, by its stable id, with **`latched`** or **`live`** beside it:

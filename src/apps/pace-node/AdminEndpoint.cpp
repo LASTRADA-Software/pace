@@ -2,10 +2,13 @@
 #include "AdminEndpoint.hpp"
 #include "CacheTier.hpp"
 #include "NodeIdentity.hpp"
+#include "NodeNameResolver.hpp"
 
 #include <Pace/Core/HostPort.hpp>
+#include <Pace/Core/Json.hpp>
 #include <Pace/Core/StateFiles.hpp>
 #include <Pace/Core/StopAwareWait.hpp>
+#include <Pace/Core/Utf8.hpp>
 
 #include <core/Ranges.hpp>
 #include <core/async/SyncRun.hpp>
@@ -16,6 +19,7 @@
 #include <Pace/Distributed/FleetChart.hpp>
 #include <Pace/Distributed/FleetText.hpp>
 #include <Pace/Distributed/FleetView.hpp>
+#include <Pace/Platform/NarrowText.hpp>
 
 #include <algorithm>
 #include <array>
@@ -348,12 +352,112 @@ namespace
     [[nodiscard]] Distributed::FleetHistoryView HistoryViewFor(IFleetHistoryView const* history,
                                                                Distributed::FleetRange range)
     {
-        Distributed::FleetHistoryView view { .range = range,
-                                             .buckets = {},
-                                             .durable = history != nullptr && history->Durable() };
+        Distributed::FleetHistoryView view {
+            .range = range, .buckets = {}, .durable = history != nullptr && history->Durable(), .keyed = {}
+        };
         if (history != nullptr)
             view.buckets = history->Buckets(range);
         return view;
+    }
+
+    /// The member ids a refusal lists as the ones a node selector could name.
+    /// @param snapshot The fleet, with the applied state it read.
+    /// @return The ids, comma-separated; `(none)` when the state names nobody or there is none.
+    [[nodiscard]] std::string KnownMemberIds(Distributed::FleetSnapshot const& snapshot)
+    {
+        auto out = std::string {};
+        if (snapshot.cluster.has_value())
+            for (auto const& member: snapshot.cluster->members)
+                out += std::format("{}{}", out.empty() ? "" : ", ", member.id);
+        return out.empty() ? std::string { "(none)" } : out;
+    }
+
+    /// A node selector as a refusal may quote it: only text, and only so much of it.
+    ///
+    /// The selector arrives over raw `0xFC` as any bytes up to the control payload, and a refusal is read by a person
+    /// and relayed to an MCP client verbatim -- so bytes that are not UTF-8, a control character, or more than a name's
+    /// worth, are described rather than echoed.
+    /// @param nodeId The selector as received.
+    /// @return It quoted, or a description of it.
+    [[nodiscard]] std::string QuotedSelector(std::string_view nodeId)
+    {
+        if (!IsValidUtf8(nodeId))
+            return std::format("a selector of {} bytes that are not UTF-8 text", nodeId.size());
+        // Valid UTF-8 can still carry a C0 control or DEL -- a newline would forge a second line of the refusal a
+        // person reads.
+        if (std::ranges::any_of(nodeId, [](char const each) {
+                auto const byte = static_cast<unsigned char>(each);
+                return byte < 0x20 || byte == 0x7F;
+            }))
+            return std::format("a selector of {} bytes holding a control character", nodeId.size());
+        if (nodeId.size() > MaxQuotedNameBytes)
+            return std::format("a selector of {} bytes", nodeId.size());
+        return std::format("\"{}\"", nodeId);
+    }
+
+    /// One machine's own `series` table: `AnswerFleetText` with a node selector.
+    ///
+    /// The member is found by its id, exactly, and its series by the key its record holds -- never by an
+    /// endpoint, which is a machine's own claim. Refused rather than answered for anything but the series
+    /// section of the tables: a selector accepted and silently dropped on another section would answer about the
+    /// fleet while the reader believed it was about a machine.
+    /// @param snapshot The fleet, and the applied state it read.
+    /// @param history The record, or null.
+    /// @param section The section asked for.
+    /// @param format The document asked for.
+    /// @param nodeId The member id named.
+    /// @param range The window.
+    /// @return The document, or `UnknownSelector` saying what was wrong.
+    [[nodiscard]] std::expected<FleetTextDocument, FleetTextDeclined> AnswerMachineSeries(
+        Distributed::FleetSnapshot const& snapshot,
+        IFleetHistoryView const* history,
+        std::optional<Distributed::FleetSection> section,
+        CompileCacheWire::FleetTextFormat format,
+        std::string_view nodeId,
+        Distributed::FleetRange range)
+    {
+        auto const seriesKey =
+            Distributed::FleetSectionTable[static_cast<std::size_t>(Distributed::FleetSection::Series)].key;
+        if (format != CompileCacheWire::FleetTextFormat::Text || section != Distributed::FleetSection::Series)
+            return std::unexpected(FleetTextDeclined {
+                .refusal = FleetTextRefusal::UnknownSelector,
+                .detail = std::format("a node selects a machine's own history, served by the {} section of the tables "
+                                      "alone\n",
+                                      seriesKey) });
+
+        auto const* const member =
+            snapshot.cluster.has_value()
+                ? core::findIfOrNull(snapshot.cluster->members,
+                                     [nodeId](Cluster::ClusterMember const& each) { return each.id == nodeId; })
+                : nullptr;
+        if (member == nullptr)
+            return std::unexpected(FleetTextDeclined { .refusal = FleetTextRefusal::UnknownSelector,
+                                                       .detail = std::format("no member is named {}; the members are: {}\n",
+                                                                             QuotedSelector(nodeId),
+                                                                             KnownMemberIds(snapshot)) });
+
+        // A follower answers as it answers for the fleet -- comment lines naming the leader, no table -- since
+        // what it was handed is a fraction of the fleet's handover, rendered by the same renderer below.
+        auto const leads = Distributed::LeadsTheFleet(snapshot);
+        Distributed::FleetHistoryView view {
+            .range = range, .buckets = {}, .durable = history != nullptr && history->Durable(), .keyed = {}
+        };
+        if (leads)
+        {
+            if (history == nullptr)
+                return std::unexpected(FleetTextDeclined { .refusal = FleetTextRefusal::UnknownSelector,
+                                                           .detail = "this leader keeps no history at all\n" });
+            auto buckets = history->MachineBuckets(AsStringView(std::span<std::byte const> { member->publicKey }), range);
+            if (!buckets.has_value())
+                return std::unexpected(FleetTextDeclined {
+                    .refusal = FleetTextRefusal::UnknownSelector,
+                    .detail = std::format("this leader holds no history filed under the key member {}'s record holds\n",
+                                          QuotedSelector(nodeId)) });
+            view.buckets = std::move(*buckets);
+        }
+        return FleetTextDocument { .leads = leads,
+                                   .leaderEndpoint = snapshot.leaderEndpoint,
+                                   .body = Distributed::RenderFleetText(snapshot, view, section) };
     }
 
     /// A chart tail that names nothing in the table.
@@ -420,8 +524,14 @@ namespace
 std::expected<FleetTextDocument, FleetTextDeclined> AnswerFleetText(Distributed::FleetSnapshot const& snapshot,
                                                                     IFleetHistoryView const* history,
                                                                     std::string_view sectionKey,
-                                                                    std::string_view rangeKey)
+                                                                    std::string_view rangeKey,
+                                                                    CompileCacheWire::FleetTextFormat format,
+                                                                    std::string_view nodeId)
 {
+    if (format == CompileCacheWire::FleetTextFormat::Json && !sectionKey.empty())
+        return std::unexpected(FleetTextDeclined { .refusal = FleetTextRefusal::UnknownSelector,
+                                                   .detail = "the json format is one document and takes no section\n" });
+
     auto const section = sectionKey.empty() ? std::optional<Distributed::FleetSection> { std::nullopt }
                                             : Distributed::FleetSectionFromKey(sectionKey);
     if (!sectionKey.empty() && !section.has_value())
@@ -437,9 +547,21 @@ std::expected<FleetTextDocument, FleetTextDeclined> AnswerFleetText(Distributed:
             FleetTextDeclined { .refusal = FleetTextRefusal::UnknownSelector,
                                 .detail = std::format("unknown range; this build serves: {}\n", KnownRangeKeys()) });
 
+    if (!nodeId.empty())
+        return AnswerMachineSeries(snapshot, history, section, format, nodeId, *range);
+
+    auto view = HistoryViewFor(history, *range);
+    // The keyed compile histories ride the JSON document alone, and only from a LEADER: they count what its queue
+    // granted, and a follower's -- or a demoted leader's -- store holds only the windows it led, which is no fleet's
+    // answer now. Rendered `null` otherwise, never an empty history.
+    if (format == CompileCacheWire::FleetTextFormat::Json && history != nullptr && Distributed::LeadsTheFleet(snapshot))
+        for (auto const& row: Distributed::KeyedDimensionTable)
+            view.keyed[static_cast<std::size_t>(row.dimension)] = history->Keyed(row.dimension, *range);
     return FleetTextDocument { .leads = Distributed::LeadsTheFleet(snapshot),
                                .leaderEndpoint = snapshot.leaderEndpoint,
-                               .body = Distributed::RenderFleetText(snapshot, HistoryViewFor(history, *range), section) };
+                               .body = format == CompileCacheWire::FleetTextFormat::Json
+                                           ? Distributed::RenderFleetJson(snapshot, view)
+                                           : Distributed::RenderFleetText(snapshot, view, section) };
 }
 
 std::vector<AdminRoute> MakeFleetRoutes(Distributed::FleetSources sources,
@@ -554,20 +676,33 @@ std::vector<AdminRoute> MakeFleetRoutes(Distributed::FleetSources sources,
     // REFUSED when it names nothing, never defaulted, exactly as on `/fleet`: a window
     // quietly substituted hands a reader figures for a period they did not ask about,
     // with nothing in the document to say so.
+    //
+    // The document is `AnswerFleetText`'s, the derivation the `fleet-text` verb's JSON format answers
+    // from, so the HTTP and the 0xFC paths share one by construction rather than by two call sites
+    // agreeing. No section is passed: the JSON is one document, and this route never read `section`.
     routes.push_back(AdminRoute {
         .path = "/fleet.json",
-        .handler = gated([] { return Unauthorised("application/json", R"({"error":"credential required"})"); },
-                         [statusFor, rangeAsked, viewFor](Distributed::FleetSnapshot const& snapshot,
-                                                          AdminRequest const& request) -> AdminResponse {
-                             auto const range = rangeAsked(request.query);
-                             if (!range.has_value())
-                                 return RefusedParameter(
-                                     "application/json",
-                                     std::format(R"({{"error":"unknown range","accepted":"{}"}})", KnownRangeKeys()));
-                             return AdminResponse { .status = statusFor(snapshot),
-                                                    .contentType = "application/json",
-                                                    .body = Distributed::RenderFleetJson(snapshot, viewFor(*range)) };
-                         }),
+        .handler = gated(
+            [] { return Unauthorised("application/json", R"({"error":"credential required"})"); },
+            [history, statusFor](Distributed::FleetSnapshot const& snapshot, AdminRequest const& request) -> AdminResponse {
+                auto answer = AnswerFleetText(
+                    snapshot, history, {}, QueryValue(request.query, "range"), CompileCacheWire::FleetTextFormat::Json);
+                if (!answer.has_value())
+                {
+                    // The refusal names what it would accept, as a JSON string: the decline's own
+                    // sentence, so the accepted keys come from the one place that lists them.
+                    auto detail = std::string_view { answer.error().detail };
+                    while (detail.ends_with('\n'))
+                        detail.remove_suffix(1);
+                    auto body = std::string { R"({"error":)" };
+                    Json::AppendString(body, detail);
+                    body += '}';
+                    return RefusedParameter("application/json", std::move(body));
+                }
+                return AdminResponse { .status = statusFor(snapshot),
+                                       .contentType = "application/json",
+                                       .body = std::move(answer->body) };
+            }),
     });
 
     // The same tables again, for a reader with no JSON parser (#1300). `jq` is not on
@@ -589,8 +724,11 @@ std::vector<AdminRoute> MakeFleetRoutes(Distributed::FleetSources sources,
         .handler = gated(
             [] { return Unauthorised("text/plain; charset=utf-8", "credential required\n"); },
             [history, statusFor](Distributed::FleetSnapshot const& snapshot, AdminRequest const& request) -> AdminResponse {
-                auto answer = AnswerFleetText(
-                    snapshot, history, QueryValue(request.query, "section"), QueryValue(request.query, "range"));
+                auto answer = AnswerFleetText(snapshot,
+                                              history,
+                                              QueryValue(request.query, "section"),
+                                              QueryValue(request.query, "range"),
+                                              CompileCacheWire::FleetTextFormat::Text);
                 if (!answer.has_value())
                     return RefusedParameter("text/plain; charset=utf-8", std::move(answer.error().detail));
                 return AdminResponse { .status = statusFor(snapshot),
@@ -799,6 +937,15 @@ EnumTable<Distributed::FleetMetric, std::uint64_t> NodeSampleFrom(IMetricsSink c
     return values;
 }
 
+Distributed::FleetSlotMask ApplyCpuReading(EnumTable<Distributed::FleetMetric, std::uint64_t>& values, HostLoad const& load)
+{
+    auto const slot = Distributed::FleetMetric::CpuBusyPermille;
+    if (!load.cpuBusyPermille.has_value())
+        return Distributed::SlotBit(slot);
+    values[static_cast<std::size_t>(slot)] = *load.cpuBusyPermille;
+    return 0;
+}
+
 std::string_view HistoryFileNameOf(HistoryFile which) noexcept
 {
     // One row per file, in enumerator order, so a fourth file is a row rather than a
@@ -819,6 +966,8 @@ std::string_view HistoryFileNameOf(HistoryFile which) noexcept
         FileNameRow { .which = HistoryFile::Node, .name = StateFileName(StateFile::NodeHistory) },
         FileNameRow { .which = HistoryFile::Fleet, .name = StateFileName(StateFile::FleetHistory) },
         FileNameRow { .which = HistoryFile::Received, .name = StateFileName(StateFile::ReceivedHistory) },
+        FileNameRow { .which = HistoryFile::Requesters, .name = StateFileName(StateFile::RequesterHistory) },
+        FileNameRow { .which = HistoryFile::Toolchains, .name = StateFileName(StateFile::ToolchainHistory) },
     };
     static_assert(RowsInEnumeratorOrder(fileNames, &FileNameRow::which));
     return fileNames[static_cast<std::size_t>(which)].name;
@@ -841,7 +990,9 @@ HistoryPaths HistoryPaths::For(NodeConfig const& cfg)
 {
     return HistoryPaths { .fleet = HistoryPathFor(cfg, HistoryFile::Fleet),
                           .node = HistoryPathFor(cfg, HistoryFile::Node),
-                          .received = HistoryPathFor(cfg, HistoryFile::Received) };
+                          .received = HistoryPathFor(cfg, HistoryFile::Received),
+                          .requesters = HistoryPathFor(cfg, HistoryFile::Requesters),
+                          .toolchains = HistoryPathFor(cfg, HistoryFile::Toolchains) };
 }
 
 std::filesystem::path FleetHistoryPath(NodeConfig const& cfg)
@@ -854,13 +1005,18 @@ FleetSampler::FleetSampler(std::optional<Distributed::FleetSources> sources,
                            AdminHttpServer::SnapshotProvider node,
                            core::platform::WallClockRef wall,
                            HistoryPaths paths,
-                           ILogger& logger):
+                           ILogger& logger,
+                           std::unique_ptr<IHostLoadSampler> load,
+                           std::size_t historyKeys,
+                           std::function<void()> afterSample):
     _sources { sources },
     _metrics { metrics },
     _nodeFacts { std::move(node) },
+    _load { std::move(load) },
     _fleet { wall },
     _node { wall },
     _received { wall },
+    _demand { historyKeys, wall },
     // Every store is a row, so restoring and saving are one loop each. The received
     // store is here rather than beside the loop because a store restored and never
     // saved is a year of readings discovered missing at the next restart -- and what
@@ -880,11 +1036,28 @@ FleetSampler::FleetSampler(std::optional<Distributed::FleetSources> sources,
                       .worthWriting = [this] { return !_node.Empty(); } },
               Store { .path = std::move(paths.received),
                       .what = "received",
-                      .load = [this](auto const& at) { return _received.Load(at); },
+                      .load =
+                          [this](auto const& at) {
+                              auto const restored = _received.Load(at);
+                              // Said once, at the start: what a store written before keys were recorded held under
+                              // no key is dropped, since keeping it would sum those machines twice into fleet windows.
+                              if (auto const dropped = _received.DroppedOnLoad(); dropped > 0)
+                                  _logger.Logf(LogLevel::Warn,
+                                               "received history at {} held {} series filed under no identity key (a "
+                                               "store written before keys were recorded); dropped, since each would be "
+                                               "counted twice beside the series its machine now files under its key. "
+                                               "This leader's own fleet history is unaffected",
+                                               PathBytes(at),
+                                               dropped);
+                              return restored;
+                          },
                       .save = [this](auto const& at) { return _received.Save(at, StateFile::ReceivedHistory); },
                       .readOnly = [this] { return _received.ReadOnly(); },
-                      .worthWriting = [this] { return _received.Count() > 0; } } },
-    _logger { logger }
+                      .worthWriting = [this] { return _received.Count() > 0; } },
+              KeyedStore(std::move(paths.requesters), Distributed::KeyedDimension::Requesters),
+              KeyedStore(std::move(paths.toolchains), Distributed::KeyedDimension::ToolchainDemand) },
+    _logger { logger },
+    _afterSample { std::move(afterSample) }
 {
     // Every failure to read starts empty and says so once. History is a
     // convenience, and no state of any of these files may keep a node from starting.
@@ -920,12 +1093,21 @@ FleetSampler::FleetSampler(std::optional<Distributed::FleetSources> sources,
                  PerSeriesKiB,
                  PerSeriesKiB * 2,
                  PerSeriesKiB);
+    // The keyed histories grow with activity rather than being allocated whole, so their figure is a CEILING: every
+    // kept key busy in every bucket of every ring.
+    _logger.Logf(LogLevel::Info,
+                 "a leader's compile history keeps {} requesting machines and {} toolchains by name, the rest in an "
+                 "\"other\" row; at most {} KiB per history",
+                 historyKeys,
+                 historyKeys,
+                 Distributed::KeyedHistoryWorstCaseBytes(historyKeys) / 1024);
 
     _thread = std::jthread { [this](std::stop_token const& stop) {
         auto sinceSave = std::chrono::steady_clock::duration::zero();
         while (!stop.stop_requested())
         {
             SampleOnce();
+            RunAfterSample();
             if (sinceSave >= SaveInterval)
             {
                 Persist();
@@ -940,6 +1122,50 @@ FleetSampler::FleetSampler(std::optional<Distributed::FleetSources> sources,
             sinceSave += Distributed::FleetHistory::SampleInterval;
         }
     } };
+}
+
+void FleetSampler::RunAfterSample() noexcept
+{
+    if (!_afterSample)
+        return;
+    // Caught here, at the one call this loop makes into code it does not own: an exception escaping
+    // the sampler's thread ends the process, and a missed kick costs one minute of a fallback.
+    try
+    {
+        _afterSample();
+    }
+    catch (std::exception const& failure)
+    {
+        ReportAfterSampleFailure(failure.what());
+    }
+    catch (...)
+    {
+        ReportAfterSampleFailure("an exception that is not a std::exception");
+    }
+}
+
+void FleetSampler::ReportAfterSampleFailure(std::string_view why) noexcept
+{
+    try
+    {
+        _logger.Logf(LogLevel::Warn, "fleet sampler: the after-sample step failed ({}); skipped until the next sample", why);
+    }
+    catch (...)
+    {
+        // The report itself failed; counted rather than rethrown, for the reason above.
+        _afterSampleUnreported.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+FleetSampler::Store FleetSampler::KeyedStore(std::filesystem::path path, Distributed::KeyedDimension dimension)
+{
+    // One row per keyed history, from its dimension: the two differ in nothing but which store and what it is called.
+    return Store { .path = std::move(path),
+                   .what = Distributed::KeyedDimensionOf(dimension).section,
+                   .load = [this, dimension](auto const& at) { return _demand.Of(dimension).Load(at); },
+                   .save = [this, dimension](auto const& at) { return _demand.Of(dimension).Save(at); },
+                   .readOnly = [this, dimension] { return _demand.Of(dimension).ReadOnly(); },
+                   .worthWriting = [this, dimension] { return !_demand.Of(dimension).Empty(); } };
 }
 
 FleetSampler::~FleetSampler()
@@ -977,7 +1203,12 @@ bool FleetSampler::SampleOnce()
     // whichever peer happened to be leading at the time. This is the half that
     // survives an election, and in Phase 5 it is the half that rebuilds the leader's.
     if (_nodeFacts)
-        _node.Record(NodeSampleFrom(_metrics, _nodeFacts()));
+    {
+        auto values = NodeSampleFrom(_metrics, _nodeFacts());
+        // This machine's CPU, from its own sampler: absent when there is none or it cannot say, never zero.
+        auto const absent = ApplyCpuReading(values, _load != nullptr ? _load->Sample() : HostLoad {});
+        _node.Record(values, absent);
+    }
 
     // A node with no scheduler has no fleet to answer for, and says so by recording
     // nothing rather than by recording zeroes. It still keeps the series above,
@@ -994,7 +1225,11 @@ bool FleetSampler::SampleOnce()
     // happened. What changed is that this no longer stops the node recording itself.
     if (!Distributed::LeadsTheFleet(snapshot))
         return false;
-    _fleet.Record(SampleFrom(snapshot));
+    // A slot with no fleet total -- a load ratio -- is no fleet's reading, so the fleet series carries it absent.
+    _fleet.Record(SampleFrom(snapshot), Distributed::SlotsWithoutFleetTotal());
+    // The keyed histories' minute is observed for the same reason and only here: a minute this node led and granted
+    // nothing reads zero, and one it did not lead stays absent.
+    _demand.Fold();
     return true;
 }
 

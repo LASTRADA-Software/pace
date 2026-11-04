@@ -15,6 +15,7 @@
 #include <Pace/Metrics/MetricsCatalog.hpp>
 #include <Pace/Metrics/StatsReading.hpp>
 #include <Pace/Metrics/StatsReadingCodec.hpp>
+#include <Pace/Protocol/NodeStatusView.hpp>
 #include <Pace/Transport/NativeListen.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -149,6 +150,46 @@ namespace
 
 } // namespace
 
+TEST_CASE("`node` names the machine by the dashboard's rule: replicated name, else its hostname, and which",
+          "[cli][node][verbs][display-name]")
+{
+    struct Case
+    {
+        std::optional<std::string> displayName;
+        std::optional<std::string> hostName;
+        std::optional<std::string> name;
+        std::optional<std::string> source;
+    };
+    for (auto const& [displayName, hostName, name, source]:
+         { Case { .displayName = "office-pc", .hostName = "buildhost-7", .name = "office-pc", .source = "replicated" },
+           Case { .displayName = std::nullopt, .hostName = "buildhost-7", .name = "buildhost-7", .source = "self-reported" },
+           Case { .displayName = std::nullopt, .hostName = std::nullopt, .name = std::nullopt, .source = std::nullopt } })
+    {
+        CAPTURE(name);
+        auto fields = CacheWire::NodeStatusFields {};
+        fields.version = "1";
+        fields.nodeId = "node-a";
+        fields.runtime.displayName = displayName;
+        fields.runtime.hostName = hostName;
+        ScriptedNodeExchange node { { StatusReply(fields) } };
+        auto const answer = RunNodeVerb("node", node);
+        REQUIRE(answer.outcome == Outcome::Affirmative);
+        auto const& nameCell = RequiredCell(answer, "name");
+        auto const& sourceCell = RequiredCell(answer, "name-source");
+        if (name.has_value())
+        {
+            CHECK(nameCell.lexical == *name);
+            CHECK(std::optional { sourceCell.lexical } == source);
+        }
+        else
+        {
+            // Absent, both cells: neither said, which is not a machine called "".
+            CHECK(nameCell.kind == CellKind::Absent);
+            CHECK(sourceCell.kind == CellKind::Absent);
+        }
+    }
+}
+
 TEST_CASE("`node` reports what the endpoint is", "[cli][node][verbs]")
 {
     ScriptedNodeExchange node { { StatusReply(
@@ -156,7 +197,8 @@ TEST_CASE("`node` reports what the endpoint is", "[cli][node][verbs]")
           .nodeId = "node-a",
           .uptimeSeconds = 3600,
           .surfaces = { { .surface = CacheWire::WireSurface::Admin, .port = 9101, .tls = false },
-                        { .surface = CacheWire::WireSurface::Raft, .port = 9102, .tls = false } },
+                        { .surface = CacheWire::WireSurface::Raft, .port = 9102, .tls = false },
+                        { .surface = CacheWire::WireSurface::Mcp, .port = 9103, .tls = false } },
           .components = CacheWire::NodeComponentBit::CacheTier | CacheWire::NodeComponentBit::Worker }) } };
 
     auto const answer = RunNodeVerb("node", node);
@@ -173,10 +215,70 @@ TEST_CASE("`node` reports what the endpoint is", "[cli][node][verbs]")
     CHECK(RequiredCell(answer, "version").lexical == "0.2.0-124-gd911b33e");
     CHECK(RequiredCell(answer, "node-id").lexical == "node-a");
     CHECK(RequiredCell(answer, "uptime-seconds").lexical == "3600");
+    // The MCP surface is rendered beside the others, under its own name.
+    CHECK(RequiredCell(answer, "mcp-port").lexical == "9103");
     CHECK(RequiredCell(answer, "components").lexical == "cache-tier, worker");
     CHECK(RequiredCell(answer, "admin-port").lexical == "9101");
     CHECK(RequiredCell(answer, "raft-port").lexical == "9102");
     CHECK(RequiredCell(answer, "admin-tls").lexical == "false");
+}
+
+TEST_CASE("`node` shows the slot ceilings, the tiers and the configuration in force as node_status does",
+          "[cli][node][verbs][node-status-detail]")
+{
+    // **One derivation**: every cell below is `NodeStatusView`'s answer over the decoded reply -- the functions the MCP
+    // `node_status` tool reads (`McpNodeTools_test` holds that half) -- so the two cannot disagree.
+    auto fields = CacheWire::NodeStatusFields {};
+    fields.version = "1.0.0";
+    fields.nodeId = "node-a";
+    fields.runtime.slotCeilings = CacheWire::NodeSlotCeilingsFields {
+        .ceilings = { CacheWire::NodeSlotCeilingFields { .name = "registered", .slots = 8 },
+                      CacheWire::NodeSlotCeilingFields { .name = "memory", .slots = 3 },
+                      CacheWire::NodeSlotCeilingFields { .name = "cordoned", .slots = std::nullopt } },
+        .available = 3,
+        .binding = "memory",
+        .sampledSecondsAgo = 5,
+    };
+    fields.runtime.tiers = CacheWire::NodeTiersFields {
+        CacheWire::NodeTierFields { .entries = 4, .bytesUsed = 400, .bytesLimit = 0, .hits = 3, .misses = 1 }, std::nullopt
+    };
+    fields.runtime.effectiveConfig = std::vector {
+        CacheWire::NodeSettingFields { .name = "--toolchain", .kind = CacheWire::WireSettingValue::Value, .text = "gcc" },
+        CacheWire::NodeSettingFields { .name = "--toolchain", .kind = CacheWire::WireSettingValue::Value, .text = "clang" },
+        CacheWire::NodeSettingFields { .name = "--slots", .kind = CacheWire::WireSettingValue::Unset, .text = {} },
+        CacheWire::NodeSettingFields { .name = "--requirepass", .kind = CacheWire::WireSettingValue::Redacted, .text = {} },
+    };
+    ScriptedNodeExchange node { { StatusReply(fields) } };
+    auto const answer = RunNodeVerb("node", node);
+    REQUIRE(answer.outcome == Outcome::Affirmative);
+
+    CHECK(RequiredCell(answer, "slots-available").lexical == "3");
+    CHECK(RequiredCell(answer, "slots-bound-by").lexical == "memory");
+    CHECK(RequiredCell(answer, "slot-ceiling-registered").lexical == "8");
+    CHECK(RequiredCell(answer, "slot-ceiling-cordoned").kind == CellKind::Absent);
+    CHECK(RequiredCell(answer, "slot-ceilings-sampled-seconds-ago").lexical == "5");
+
+    // The memory tier through the view: its zero budget reads unbounded, its ratio is the view's.
+    auto const tiers = NodeStatusView::TiersOf(fields.runtime);
+    REQUIRE(tiers.has_value());
+    auto const& memory = Unwrap(tiers)[0];
+    REQUIRE(memory.stats.has_value());
+    auto const ratio = NodeStatusView::HitRatio(Unwrap(memory.stats));
+    REQUIRE(ratio.has_value());
+    CHECK(RequiredCell(answer, "cache-memory-entries").lexical == "4");
+    CHECK(RequiredCell(answer, "cache-memory-budget").lexical == "unbounded");
+    CHECK(RequiredCell(answer, "cache-memory-hit-ratio").lexical == RealCell(Unwrap(ratio)).lexical);
+    // A tier the cache lacks is an absent cell under its name, never a tier of zeroes.
+    CHECK(RequiredCell(answer, "cache-disk").kind == CellKind::Absent);
+    CHECK(CellOf(answer, "cache-disk-entries") == nullptr);
+
+    // The configuration: a list gathered, unset absent, a credential redacted.
+    CHECK(RequiredCell(answer, "config-toolchain").lexical == "gcc, clang");
+    CHECK(RequiredCell(answer, "config-slots").kind == CellKind::Absent);
+    CHECK(RequiredCell(answer, "config-requirepass").lexical == CacheWire::RedactedSettingText);
+
+    // Overrides the node did not say anything about are ABSENT, never `none`.
+    CHECK(RequiredCell(answer, "budget-overrides").kind == CellKind::Absent);
 }
 
 TEST_CASE("`node` renders an absent surface as an absent FIELD, never a zero port", "[cli][node][verbs]")
@@ -1256,6 +1358,141 @@ TEST_CASE("cluster-members shows each member's key whole", "[cli][node][cluster]
     CHECK(rows[1][column].lexical == FormatEd25519PublicKey(MemberKey("node-c")));
 }
 
+TEST_CASE("cluster-members shows each member's display name, absent where nobody named it",
+          "[cli][node][cluster][display-name]")
+{
+    Cluster::ClusterState state;
+    for (auto const* const id: { "node-b", "node-c" })
+        Apply(state,
+              Cluster::Command { .kind = Cluster::CommandKind::AddMember,
+                                 .key = id,
+                                 .value = "10.0.0.8:6675",
+                                 .schedulerEndpoint = {},
+                                 .publicKey = MemberKey(id) });
+    Apply(state,
+          Cluster::Command { .kind = Cluster::CommandKind::SetDisplayName,
+                             .key = "node-c",
+                             .value = "build-box",
+                             .schedulerEndpoint = {},
+                             .publicKey = std::nullopt });
+    ScriptedNodeExchange node { { ClusterStatusReply(state) } };
+
+    auto const answer = RunNodeVerb("cluster-members", node);
+    CHECK(answer.outcome == Outcome::Affirmative);
+    auto const& rows = RowsOf(answer);
+    REQUIRE(rows.size() == 2);
+    auto const name = ColumnOf(answer, "name");
+    CHECK(rows[0][name].kind == CellKind::Absent);
+    CHECK(rows[1][name].lexical == "build-box");
+}
+
+TEST_CASE("cluster-name sends the member, the name and the edit, and refuses a name no member may carry",
+          "[cli][node][cluster][display-name]")
+{
+    std::vector<std::byte> const noPayload;
+    {
+        ScriptedNodeExchange node { { CacheWire::EncodeReply(CacheWire::Status::Ok, noPayload) } };
+        (void) RunNodeVerb("cluster-name", node, { "node-b", "build-box" });
+        REQUIRE(node.Sent().size() == 1);
+        auto const& frame = SentFrame(node);
+        auto const view =
+            Unwrap(CacheWire::DecodeMemberEditPayload(std::span { frame }.subspan(CacheWire::RequestHeaderSize)));
+        CHECK(view.verb == static_cast<std::uint8_t>(CacheWire::MemberEditVerb::SetDisplayName));
+        CHECK(CacheWire::AsStringView(view.memberId) == "node-b");
+        CHECK(CacheWire::AsStringView(view.value) == "build-box");
+    }
+    {
+        // No name clears it: an empty value.
+        ScriptedNodeExchange node { { CacheWire::EncodeReply(CacheWire::Status::Ok, noPayload) } };
+        (void) RunNodeVerb("cluster-name", node, { "node-b" });
+        REQUIRE(node.Sent().size() == 1);
+        auto const& frame = SentFrame(node);
+        auto const view =
+            Unwrap(CacheWire::DecodeMemberEditPayload(std::span { frame }.subspan(CacheWire::RequestHeaderSize)));
+        CHECK(CacheWire::AsStringView(view.value).empty());
+    }
+    {
+        // The leader's own rule, before anything is sent.
+        ScriptedNodeExchange node { { CacheWire::EncodeReply(CacheWire::Status::Ok, noPayload) } };
+        auto const answer = RunNodeVerb("cluster-name", node, { "node-b", "a\tb" });
+        CHECK(answer.outcome == Outcome::Usage);
+        CHECK(node.Sent().empty());
+    }
+}
+
+TEST_CASE("cluster-budget sends one MEMBER-EDIT through the one budget grammar, and refuses what the leader would",
+          "[cli][node][cluster][budget]")
+{
+    std::vector<std::byte> const noPayload;
+    constexpr auto MiB = std::uint64_t { 1024 * 1024 };
+    {
+        ScriptedNodeExchange node { { CacheWire::EncodeReply(CacheWire::Status::Ok, noPayload) } };
+        (void) RunNodeVerb("cluster-budget", node, { "node-b:memory=64m,disk=2g" });
+        REQUIRE(node.Sent().size() == 1);
+        auto const& frame = SentFrame(node);
+        auto const view =
+            Unwrap(CacheWire::DecodeMemberEditPayload(std::span { frame }.subspan(CacheWire::RequestHeaderSize)));
+        CHECK(view.verb == static_cast<std::uint8_t>(CacheWire::MemberEditVerb::SetBudget));
+        CHECK(CacheWire::AsStringView(view.memberId) == "node-b");
+        CHECK(Unwrap(CacheWire::DecodeBudgetSetValue(view.value)).bytes
+              == CacheWire::PerTier<std::uint64_t> { 64 * MiB, 2048 * MiB });
+    }
+    {
+        ScriptedNodeExchange node { { CacheWire::EncodeReply(CacheWire::Status::Ok, noPayload) } };
+        (void) RunNodeVerb("cluster-budget-clear", node, { "node-b:memory" });
+        REQUIRE(node.Sent().size() == 1);
+        auto const& frame = SentFrame(node);
+        auto const view =
+            Unwrap(CacheWire::DecodeMemberEditPayload(std::span { frame }.subspan(CacheWire::RequestHeaderSize)));
+        CHECK(view.verb == static_cast<std::uint8_t>(CacheWire::MemberEditVerb::ClearBudget));
+        CHECK(Unwrap(CacheWire::DecodeBudgetClearValue(view.value)).tier == 0);
+    }
+    for (auto const& [verb, operand]: { std::pair { "cluster-budget", "node-b:memory=0" },
+                                        std::pair { "cluster-budget", "node-b:memory=25%" },
+                                        std::pair { "cluster-budget", "node-b" },
+                                        std::pair { "cluster-budget-clear", "node-b:both" } })
+    {
+        INFO(verb << " " << operand);
+        ScriptedNodeExchange node { { CacheWire::EncodeReply(CacheWire::Status::Ok, noPayload) } };
+        auto const answer = RunNodeVerb(verb, node, { operand });
+        CHECK(answer.outcome == Outcome::Usage);
+        CHECK(node.Sent().empty());
+    }
+}
+
+TEST_CASE("cluster-members shows each member's recorded budget override, absent where none is",
+          "[cli][node][cluster][budget]")
+{
+    auto state = Cluster::ClusterState {};
+    for (auto const* const id: { "node-a", "node-b" })
+        Cluster::Apply(state,
+                       Cluster::Command { .kind = Cluster::CommandKind::AddMember,
+                                          .key = id,
+                                          .value = "10.0.0.1:6675",
+                                          .schedulerEndpoint = {},
+                                          .publicKey = MemberKey(id) });
+    Cluster::Apply(state,
+                   Cluster::Command { .kind = Cluster::CommandKind::SetBudget,
+                                      .key = "node-b",
+                                      .value = {},
+                                      .schedulerEndpoint = {},
+                                      .publicKey = std::nullopt,
+                                      .budgetBytes = { std::nullopt, 2ULL << 30 },
+                                      .setAtUnixSeconds = 1793613600,
+                                      .setBy = "node-a" },
+                   3);
+    ScriptedNodeExchange node { { ClusterStatusReply(state) } };
+    auto const answer = RunNodeVerb("cluster-members", node);
+    CHECK(answer.outcome == Outcome::Affirmative);
+    auto const& rows = RowsOf(answer);
+    REQUIRE(rows.size() == 2);
+    auto const memory = ColumnOf(answer, "memory-budget");
+    auto const disk = ColumnOf(answer, "disk-budget");
+    CHECK(rows[0][disk].kind == CellKind::Absent);
+    CHECK(rows[1][memory].kind == CellKind::Absent);
+    CHECK(rows[1][disk].lexical == "2G baseline=unset set=2026-11-02T10:00:00Z by=node-a");
+}
+
 TEST_CASE("cluster-settings names every key this build knows, set or not", "[cli][node][cluster]")
 {
     // An operator's real question is usually *what CAN I set*, and a report listing only
@@ -1318,7 +1555,10 @@ TEST_CASE("a cluster change reports ACCEPTED, never committed", "[cli][node][clu
     // a verb quietly dropped from a loop is a verb nothing asserts about.
     for (auto const& spec:
          { std::pair { std::string_view { "cluster-set" }, std::vector<std::string> { "fleet-open", "1" } },
-           std::pair { std::string_view { "cluster-forget" }, std::vector<std::string> { "node-b" } } })
+           std::pair { std::string_view { "cluster-forget" }, std::vector<std::string> { "node-b" } },
+           std::pair { std::string_view { "cluster-name" }, std::vector<std::string> { "node-b", "build-box" } },
+           std::pair { std::string_view { "cluster-budget" }, std::vector<std::string> { "node-b:memory=64m" } },
+           std::pair { std::string_view { "cluster-budget-clear" }, std::vector<std::string> { "node-b:disk" } } })
     {
         INFO("verb: " << spec.first);
         // A typed empty payload: `{}` is ambiguous against `std::span`, and these two
@@ -1526,6 +1766,9 @@ TEST_CASE("the cluster verbs send the opcodes the wire table names", "[cli][node
            Expectation { .verb = "cluster-settings", .operands = {}, .op = CacheWire::Op::ClusterStatus },
            Expectation { .verb = "cluster-set", .operands = { "fleet-open", "1" }, .op = CacheWire::Op::ClusterSet },
            Expectation { .verb = "cluster-forget", .operands = { "node-b" }, .op = CacheWire::Op::ClusterForget },
+           Expectation { .verb = "cluster-name", .operands = { "node-b", "build-box" }, .op = CacheWire::Op::MemberEdit },
+           Expectation { .verb = "cluster-budget", .operands = { "node-b:disk=1g" }, .op = CacheWire::Op::MemberEdit },
+           Expectation { .verb = "cluster-budget-clear", .operands = { "node-b:disk" }, .op = CacheWire::Op::MemberEdit },
            Expectation {
                .verb = "cluster-admit", .operands = { "node-c", "10.0.0.9:6675" }, .op = CacheWire::Op::ClusterAdmit },
            Expectation { .verb = "cluster-admit-learner",
@@ -3106,4 +3349,38 @@ TEST_CASE("`node` says a fleet id --fleet-id would refuse is not one to paste, r
     CHECK(cell.contains("--fleet-id refuses this as it stands"));
     CHECK(cell.contains(std::format("more than {} voter keys", Cluster::MaxPinnedVoterKeys)));
     CHECK(cell.contains("name at most"));
+}
+
+TEST_CASE("fleet shows a named member's display name and where it came from, as the leader rendered it",
+          "[cli][node][fleet][display-name]")
+{
+    // Rendered by the leader's own text renderer, so this asserts that `pacectl fleet` carries the name columns the
+    // dashboard draws, for a member and for a machine, with nothing hand-written in between.
+    Distributed::FleetSnapshot snapshot;
+    snapshot.role = Distributed::SchedulerRole::Leader;
+    snapshot.cluster = Cluster::ClusterState {};
+    auto named = Cluster::ClusterMember {};
+    named.id = "a3f5";
+    named.raftEndpoint = "10.0.0.1:6675";
+    named.displayName = "office-pc";
+    snapshot.cluster->members.push_back(named);
+    auto machine = Distributed::NodeReport {};
+    machine.endpoint = "10.0.0.1:6674";
+    machine.displayName = "buildhost-7";
+    machine.replicatedName = "office-pc";
+    snapshot.nodes = { machine };
+
+    for (auto const& [section, key]: { std::pair { Distributed::FleetSection::Members, std::string_view { "members" } },
+                                       std::pair { Distributed::FleetSection::Machines, std::string_view { "machines" } } })
+    {
+        CAPTURE(key);
+        auto const document = Distributed::RenderFleetText(snapshot, Distributed::FleetHistoryView {}, section);
+        ScriptedNodeExchange node { { FleetDocumentReply(document) } };
+        auto const answer = RunFleet(node, nullptr, { std::string { key } });
+        REQUIRE(answer.outcome == Outcome::Affirmative);
+        auto const& rows = RowsOf(answer);
+        REQUIRE(rows.size() == 1);
+        CHECK(rows[0][ColumnOf(answer, "name")].lexical == "office-pc");
+        CHECK(rows[0][ColumnOf(answer, "name-source")].lexical == "replicated");
+    }
 }

@@ -438,6 +438,34 @@ class FleetHarness final: public Cc::IEndpointExchange, public Pace::Node::IEndp
             throw std::runtime_error { "FleetHarness: the scheduler refused a machine announcement" };
     }
 
+    /// Announce a machine over a connection that proved THAT machine's own key (`TestKeyPair(machineEndpoint)`)
+    /// rather than the harness's shared `ProvenMachine` identity.
+    ///
+    /// A received history is filed under the key the announcing connection proved, so two machines announcing
+    /// through `AnnounceMachine` -- one key between them -- are one machine that moved. A case about two machines'
+    /// histories announces each through here.
+    /// @param scheduler Which scheduler to tell.
+    /// @param machineEndpoint The machine announcing itself; also the name its key is derived from.
+    /// @param history Closed buckets it is handing over.
+    void AnnounceMachineProvingItself(std::string_view scheduler,
+                                      std::string_view machineEndpoint,
+                                      std::span<Distributed::FleetBucket const> history)
+    {
+        auto caller = SetupCaller();
+        caller.provenNodeId = std::string { machineEndpoint };
+        caller.provenKey = TestKeyPair(std::string { machineEndpoint }).PublicKey();
+        auto const reply = NodeAt(scheduler).service.AnnounceNode(
+            caller,
+            Distributed::NodePresence { .endpoint = machineEndpoint,
+                                        .version = "harness",
+                                        .capacity = Distributed::NodeCapacity { .logicalCores = 8 },
+                                        .load = Distributed::NodeLoad {},
+                                        .conditions = std::nullopt },
+            history);
+        if (reply.status != CompileCacheWire::Status::Ok)
+            throw std::runtime_error { "FleetHarness: the scheduler refused a machine announcement" };
+    }
+
     /// Announce a machine carrying its condition rows (#1364), and hand back what the scheduler
     /// ANSWERED rather than throwing on a refusal -- a case about refusing a row that is not text has
     /// to be able to see the refusal, which `AnnounceMachine`'s arranging contract hides.

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "CliFormat.hpp"
 
+#include <Pace/Core/Json.hpp>
 #include <Pace/Distributed/FleetText.hpp>
 
 #include <algorithm>
@@ -45,12 +46,12 @@ namespace
 
     /// Escape a string for a JSON document.
     ///
-    /// `Distributed::AppendJsonText` rather than a `switch` of its own. This was that
-    /// `switch`, and `FleetText.hpp`'s own comment named it as a duplicate that had
-    /// drifted from `JsonEscapes` in BOTH directions (#1356): it spelled `\b` and
-    /// `\f`, which the shared table writes as the numeric escapes `\u0008`
-    /// and `\u000c` -- identical to every JSON parser -- and it carried a byte belonging to no valid UTF-8
-    /// sequence through verbatim, which the shared one replaces.
+    /// `Json::AppendString` -- the tree's one JSON escaper -- rather than a `switch` of its
+    /// own. This was that `switch`, and it had drifted from the shared escaper in BOTH
+    /// directions (#1356): it spelled `\b` and `\f` while the escaper of the day wrote the
+    /// numeric escapes -- identical to every JSON parser, and the one escaper now spells
+    /// them short -- and it carried a byte belonging to no valid UTF-8 sequence through
+    /// verbatim, which the shared one replaces.
     ///
     /// Not depth beside #1356's fix but part of it, and that was measured rather than
     /// assumed. With `TextCell` folded and this writer still hand-rolled, `inspect`
@@ -73,7 +74,7 @@ namespace
     /// @param out Destination; the quotes are written too.
     void AppendJsonString(std::string_view text, std::string& out)
     {
-        Distributed::AppendJsonText(out, text);
+        Json::AppendString(out, text);
     }
 
     /// One cell as a JSON value.

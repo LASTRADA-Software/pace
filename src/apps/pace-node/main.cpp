@@ -12,6 +12,7 @@
 #include "AdminEndpoint.hpp"
 #include "AdmissionResponder.hpp"
 #include "AdmitForwarder.hpp"
+#include "BudgetOverrideApplier.hpp"
 #include "CacheTier.hpp"
 #include "ClusterAdminCli.hpp"
 #include "CompileCapacity.hpp"
@@ -32,6 +33,12 @@
 #include "LiveStatsResponder.hpp"
 #include "LiveStatsSources.hpp"
 #include "MachineBudget.hpp"
+#include "McpActionTools.hpp"
+#include "McpEndpoint.hpp"
+#include "McpFleetTools.hpp"
+#include "McpNodeTools.hpp"
+#include "McpToolchainTools.hpp"
+#include "McpUpstream.hpp"
 #include "NodeActivation.hpp"
 #include "NodeAnnounce.hpp"
 #include "NodeAudience.hpp"
@@ -123,9 +130,11 @@
 #include <format>
 #include <functional>
 #include <iostream>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -439,6 +448,17 @@ template <typename T>
     return tier != nullptr ? &tier->Service() : nullptr;
 }
 
+/// The worker's published survey, or nullptr on a node that runs no worker.
+///
+/// `ServiceOrNull`'s shape and reason: the source exists only behind the tier, and `WorkerBody` sits at the
+/// cognitive-complexity ceiling, so the test lives here rather than as a conditional at the call site.
+/// @param tier The worker tier, or nullptr when none was started.
+/// @return What `fingerprint-inputs` reads, or nullptr.
+[[nodiscard]] Node::IServedInputsSource const* ServedInputsOrNull(Node::WorkerTier* tier) noexcept
+{
+    return tier != nullptr ? &tier->Runtime() : nullptr;
+}
+
 /// @p value's address when @p present, and nullptr otherwise.
 ///
 /// The sibling of `AddressOrNull` for a source this node OWNS unconditionally but
@@ -714,6 +734,115 @@ void StartAdmissionRelay(AdmissionRelay& relay, AdmissionRelayParts const& parts
         parts.tier->ForwardAdmissionWith(*relay.forwarder);
 }
 
+/// The MCP surface's way to the rest of the fleet: who answers where, the proven dial, this node's own frame
+/// router for a call to itself, and the gate that refuses at once when the loop a call would run on is not
+/// turning (`LoopGatedUpstream`).
+///
+/// Built on every start, MCP surface or not, because the directory is told every applied state from the
+/// consensus tier's observers, which are wired before the MCP surface is decided; it costs two strings and a
+/// map. Declared before the `0xFC` surface and the consensus tier, so it outlives both: a forwarded call still
+/// in flight on the loop when the MCP surface stops reaches only objects that are still there.
+class McpForwarding
+{
+  public:
+    /// @param cfg The configuration the node runs under; its id is this node's.
+    /// @param prover The identity prover; engaged on every start (`AdoptNodeKey`).
+    /// @param identityKey This node's identity key: what a call to itself presents as proven.
+    /// @param io The loop calls run on.
+    /// @param directory The applied-state directory every call resolves members in; declared above this and outlives it
+    ///        (`NODE-STATUS` reads it too, for this node's display name).
+    McpForwarding(NodeConfig const& cfg,
+                  std::optional<Node::NodeProofClient> const& prover,
+                  std::optional<Ed25519KeyPair> const& identityKey,
+                  Node::NodeIoLoop& io,
+                  Node::AppliedUpstreamDirectory& directory):
+        _directory { directory },
+        _answerer { identityKey.has_value()
+                        ? std::optional { ProvenIdentity { .id = cfg.nodeId, .key = identityKey->PublicKey() } }
+                        : std::nullopt },
+        _dialer {
+            RequireProver(prover), io.Connector(), io.Reactor(), Node::ForwardDialBudget {}, Node::McpUpstream::MaxReplyBytes
+        },
+        _upstream { io.Loop(), _dialer, _directory, _answerer },
+        _gated { _upstream, [&io] { return io.Turning(); }, [this] { return _stopping.Raised(); } }
+    {
+    }
+
+    /// @return What the consensus tier tells every applied state and term.
+    [[nodiscard]] Node::AppliedUpstreamDirectory& Directory() noexcept
+    {
+        return _directory;
+    }
+
+    /// Answer a call to this node through @p surface's router; before the loop starts.
+    /// @param surface This node's `0xFC` surface, or null when it serves none.
+    void RouteLocalThrough(Node::NodeFrameSurface* surface) noexcept
+    {
+        _answerer.RouteThrough(surface != nullptr ? &surface->Responder() : nullptr);
+    }
+
+    /// @return What the MCP tools ask.
+    [[nodiscard]] Node::IMcpUpstream& Upstream() noexcept
+    {
+        return _gated;
+    }
+
+    /// @return What the MCP endpoint raises as it begins to stop, so `Upstream()` refuses every later call.
+    [[nodiscard]] Node::McpStopFlag& Stopping() noexcept
+    {
+        return _stopping;
+    }
+
+    /// @return The clock a tool's whole-call budget is measured on.
+    [[nodiscard]] core::platform::IClock const& Clock() const noexcept
+    {
+        return _clock;
+    }
+
+  private:
+    /// The invariant `StartAdmissionRelay` states: every start adopts or mints its key before any body runs, so
+    /// the prover is engaged; a change that broke it ends the start on a named exception.
+    /// @param prover The identity prover.
+    /// @return It.
+    [[nodiscard]] static Node::NodeProofClient const& RequireProver(std::optional<Node::NodeProofClient> const& prover)
+    {
+        if (!prover.has_value())
+            throw std::logic_error { "forwarding MCP calls needs the identity prover, which every start builds" };
+        return *prover;
+    }
+
+    // Declaration order IS construction order: each borrows the ones above it.
+    Node::AppliedUpstreamDirectory& _directory;
+    /// Outlives the MCP endpoint that raises it, since this object does: a request still running after the stop
+    /// began reads a flag that is still there.
+    Node::McpStopFlag _stopping;
+    core::platform::SteadyClock _clock;
+    Node::FrameRouterAnswerer _answerer;
+    Node::ProvenSchedulerDialer _dialer;
+    Node::NodeIoUpstream _upstream;
+    Node::LoopGatedUpstream _gated;
+};
+
+/// Every MCP tool this node serves, in the order `tools/list` presents them: the fleet tools, then the node tools,
+/// then the action tools.
+/// @param cfg The configuration the node runs under; its id is the one name a node with no applied state resolves.
+/// @param forwarding How the tools reach the fleet and resolve names; must outlive the MCP surface.
+/// @param logger Where each action an MCP client takes is recorded; must outlive the MCP surface.
+/// @return The table.
+[[nodiscard]] std::vector<Mcp::ToolRow> McpToolTable(NodeConfig const& cfg, McpForwarding& forwarding, ILogger& logger)
+{
+    auto tools = Node::FleetReadTools(forwarding.Upstream(), forwarding.Directory(), cfg.nodeId);
+    std::ranges::move(
+        Node::ToolchainTools(
+            forwarding.Upstream(), forwarding.Directory(), forwarding.Clock(), cfg.nodeId, std::string { VersionString }),
+        std::back_inserter(tools));
+    std::ranges::move(Node::NodeReadTools(forwarding.Upstream(), forwarding.Directory(), cfg.nodeId),
+                      std::back_inserter(tools));
+    std::ranges::move(Node::ActionTools(forwarding.Upstream(), forwarding.Directory(), cfg.nodeId, logger),
+                      std::back_inserter(tools));
+    return tools;
+}
+
 /// Serve the leader's admission queue (#1728) from the scheduler tier, when this node runs one.
 /// @param responder Receives the queue's responder.
 /// @param tier The scheduler tier; null on a node that schedules nothing, which then has no queue.
@@ -740,6 +869,7 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
 /// @param logger Where the node reports.
 /// @param reloader The live configuration; null with no file.
 /// @param hostEvents Where the host's suspend, resume and network events arrive.
+/// @param budgetDrops Whether this process dropped a cluster budget override; outlives every body.
 /// @param routeAt Where this machine's route is asked, and where the last one is kept for the process.
 /// @return The process's exit status.
 [[nodiscard]] int WorkerBody(NodeConfig const& cfg,
@@ -750,6 +880,7 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
                              Node::FormationBody const& formation,
                              std::optional<int> activated,
                              Node::LeaseCheckInForce& leaseCheck,
+                             Node::BudgetDropLatch& budgetDrops,
                              RouteParts const& routeAt)
 {
     // ONE origin for every uptime this process reports. `/healthz` and the `0xFC`
@@ -810,6 +941,11 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     //
     // Declared up here, above every component that reads it, so it outlives all of them.
     Node::AnnouncedEndpoint announced { advertise };
+
+    // The cluster state this node last applied, whole: where the MCP tools resolve a member and `NODE-STATUS` reads
+    // this node's display name. Told by the consensus tier's apply observer; declared up here, above the status
+    // responder and the MCP forwarding that read it, so it outlives both.
+    Node::AppliedUpstreamDirectory clusterDirectory { cfg.nodeId, knownSchedulingLeader, announced };
 
     // The descriptor travels to `StartNodeSurfaceOrExplain` below and is served
     // there. It used to be refused here, for the two months between the surfaces
@@ -1137,9 +1273,13 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     // compile cannot have is what the tier actually HOLDS, which is what the
     // configuration asked for only sometimes. `NodeCapacityOf`'s contract carries the
     // three ways those differ; this is the ordering that lets it be honoured.
+    //
+    // Live since cache-budget overrides: `LiveNodeCapacity` makes those same three calls now and
+    // again whenever `CacheTier::ApplyTierBudget` moves a budget, so the reserve and the machine
+    // budget follow what the tier then holds. Declared right after the tier it listens to, and so
+    // destroyed before it; it unhooks itself under the tier's budget mutex.
     auto const host = MakeSystemHostFacts();
-    auto const capacity =
-        Node::NodeCapacityOf(cfg, *host, Node::CacheCapacityOf(cacheTier.get()), Node::IndexReserveBytesOf(cacheTier.get()));
+    Node::LiveNodeCapacity capacity { cfg, *host, cacheTier.get() };
 
     // The worker: survey, scratch root, lease check, slot cap, compile responder and
     // heartbeat, as one object (#1387). Built BELOW the cache tier, because the slots it
@@ -1297,6 +1437,27 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     auto const workerRequestMax =
         workerTier != nullptr ? std::optional<std::uint64_t> { Node::CompileRequestMaxOf(cfg) } : std::nullopt;
 
+    // And the MCP surface's way to the fleet, declared before the surface and the consensus tier for the reason
+    // its class states -- and before the budget applier below, which reports to the leader through it.
+    McpForwarding mcpForwarding { cfg, prover, identityKey, nodeIo, clusterDirectory };
+
+    // The cluster's cache budget overrides for this member, applied live to the tiers it BUILT: on its own thread,
+    // never the consensus apply callback nor a reactor, coalescing bursts of applied states, comparing every override's
+    // baseline with the configuration IN FORCE (`endpointConfig`, the reloader's live snapshot). Built on every node,
+    // like the shared-cache host: one with no consensus is told no state, and reports what it is configured with.
+    // Declared after the cache tier and the upstream it reaches and before the status and the consensus tier that read
+    // and feed it, so it is destroyed after those and before these.
+    Node::CacheTierBudgets cacheTierBudgets { cacheTier.get() };
+    Node::UpstreamMemberReportClient memberReports { mcpForwarding.Upstream() };
+    Node::BudgetOverrideApplier budgetOverrides { cacheTierBudgets,
+                                                  memberReports,
+                                                  endpointConfig,
+                                                  logger,
+                                                  AddressWhen(Node::RunsConsensus(cfg), conditions),
+                                                  budgetDrops,
+                                                  cfg.nodeId,
+                                                  Node::ReconcileOn::OwnThread };
+
     Node::ConfiguredNodeStatus const nodeStatus {
         cfg,
         statusClock,
@@ -1351,7 +1512,18 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
                                    // learner names the leader its launchers are sent to (#1641);
                                    // null on a node that schedules or runs no consensus. Declared
                                    // well before this responder, so it outlives it.
-                                   .schedulingLeader = AddressWhen(Node::RedirectsScheduling(cfg), knownSchedulingLeader) },
+                                   .schedulingLeader = AddressWhen(Node::RedirectsScheduling(cfg), knownSchedulingLeader),
+                                   // The configuration IN FORCE, the one the endpoint resolver reads: an
+                                   // accepted reload shows on the next `node-status`, credentials redacted.
+                                   .config = &endpointConfig,
+                                   // Null on a node with no cache, which reports no tiers rather than empty ones.
+                                   .cacheTiers = cacheTier.get(),
+                                   // This node's display name, read per request from the state it applied.
+                                   .cluster = &clusterDirectory,
+                                   // Every tier's budget in force and the override behind it, as the applier left it.
+                                   .budgets = &budgetOverrides,
+                                   // What it calls itself: the name its worker registers with.
+                                   .hostName = QueryHostFacts().hostName },
     };
 
     // The operator verbs. Declared BEFORE the surface that routes to it and therefore
@@ -1369,7 +1541,13 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     // What `explain-admission <machine>` answers from: the roster grants are verified against, and
     // the enrollment window where this node serves one.
     Node::NodeMachineStanding const machineStanding { *nodeRoster, AddressWhen(servesEnrollment, enrollmentWindow) };
-    Node::NodeStatusResponder nodeStatusResponder { nodeStatus, liveSources, membership.Oracle(), machineStanding, metrics };
+    // What `fingerprint-inputs` answers from: the worker's published survey, read without touching its served map. A
+    // node running no worker passes a null source and answers that it serves no toolchain.
+    Node::FingerprintInputsResponder const fingerprintInputs { ServedInputsOrNull(workerTier.get()),
+                                                               metrics,
+                                                               std::string { VersionString } };
+    Node::NodeStatusResponder nodeStatusResponder { nodeStatus,      liveSources, membership.Oracle(),
+                                                    machineStanding, metrics,     &fingerprintInputs };
 
     // The dashboard credential, read ONCE for the surfaces that guard the fleet with it: `/fleet`
     // over HTTP, and over `0xFC` the fleet subject of a live-stats subscription and `fleet-text`.
@@ -1534,6 +1712,11 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     // not that case -- this surface's row states `Refuse`, so it arrives as the error
     // above rather than as a null. See `BindFailurePolicy` in NodeSurfaces.hpp.
     auto const nodeSurface = std::move(*nodeSurfaceOrRefusal);
+    mcpForwarding.RouteLocalThrough(nodeSurface.get());
+    // And on EVERY way out from here -- a later refusal's early return as well as the drain -- the budget applier is
+    // stopped before this surface, whose router its in-process reports reach, is destroyed: declared after it, so
+    // destroyed first. The drain below stops it earlier still; `Stop` is idempotent.
+    Node::StopBeforeTeardown const budgetsStopFirst { budgetOverrides };
 
     // Says, once a minute and for as long as any is waiting, that machines have asked to join
     // and nobody has decided about them.
@@ -1583,9 +1766,11 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
         *nodeRoster,
         appliedSchedulers,
         schedulingLeader,
+        &mcpForwarding.Directory(),
         Node::SharedCacheListeners { .directory = sharedCache.Directory(),
                                      .host = sharedCache.Host(),
                                      .upstream = cacheTier != nullptr ? &cacheTier->Upstream() : nullptr },
+        &budgetOverrides,
         metrics,
         logger,
         &conditions,
@@ -1723,13 +1908,25 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
                                  snapshotProvider,
                                  wall,
                                  Node::SetAsideForeignHistory(Node::HistoryPaths::For(cfg), historyGuard, logger),
-                                 logger };
+                                 logger,
+                                 // Its OWN sampler: one holds the previous CPU counters, so sharing the presence
+                                 // loop's would cut that loop's interval and this one's.
+                                 MakeHostLoadSampler(MakeSystemCounterSource()),
+                                 Node::HistoryKeysOf(cfg),
+                                 // The fallback look at a store left over its budget: the tier's own
+                                 // eviction driver does the work on its thread, kicked by every applied
+                                 // budget; this kicks it once a minute in case nothing else did.
+                                 // Declared after the tier, so the tier outlives the thread that calls it.
+                                 [tier = cacheTier.get()] { Node::KickTierEviction(tier); } };
 
     // Wired here because this is the one scope holding both: the scheduler tier is
     // built before the sampler that receives for it, so the sink cannot be a
     // constructor argument on either.
     if (schedulerTier != nullptr)
+    {
         schedulerTier->SetHistorySink(&sampler.Received());
+        schedulerTier->SetDemandSink(&sampler.Demand());
+    }
 
     // What a live-stats stream reads: the same provider, fleet and sampler the admin surface is
     // handed below, so a panel and `/metrics` cannot disagree about this machine. The attachment
@@ -1757,6 +1954,15 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
                                                                                       Node::NodeServedSurfacesFor(cfg) } };
     auto const liveSourcesAttached = liveSources.Attach(nodeLiveSources);
 
+    // The node's two HTTP surfaces, each on a thread of its own: the admin surface, and MCP for a session on
+    // this machine -- off unless `--mcp-listen`, loopback only (`McpListenNotLoopbackRefusal`) and re-checked
+    // per request. Chained rather than checked twice, so a refusal of either ends the start through one
+    // branch. The MCP tools reach the fleet through `mcpForwarding`.
+    struct HttpSurfaces
+    {
+        Node::AdminSurface admin;
+        std::unique_ptr<Node::McpEndpoint> mcp;
+    };
     auto surfaceOrRefusal = Node::StartAdminSurfaceOrExplain(cfg,
                                                              *host,
                                                              metrics,
@@ -1766,7 +1972,18 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
                                                              dashboardCredential,
                                                              logger,
                                                              conditions,
-                                                             nodeIo.AcceptLoops());
+                                                             nodeIo.AcceptLoops())
+                                .and_then([&](Node::AdminSurface admin) {
+                                    return Node::StartMcpSurfaceOrExplain(cfg,
+                                                                          McpToolTable(cfg, mcpForwarding, logger),
+                                                                          mcpForwarding.Stopping(),
+                                                                          metrics,
+                                                                          logger,
+                                                                          nodeIo.AcceptLoops())
+                                        .transform([&admin](std::unique_ptr<Node::McpEndpoint> mcp) {
+                                            return HttpSurfaces { .admin = std::move(admin), .mcp = std::move(mcp) };
+                                        });
+                                });
 
     // Fatal here and not in the daemon, which is a real difference between the two
     // binaries rather than a defect in either; the row says why
@@ -1776,7 +1993,9 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
         logger.Logf(LogLevel::Error, "{}; refusing to start", surfaceOrRefusal.error().reason);
         return ExitCodeFor(surfaceOrRefusal.error().cause);
     }
-    auto const adminSurface = std::move(*surfaceOrRefusal);
+    // Declared in this order so the MCP endpoint stops before the admin surface, the reverse of their start.
+    auto const adminSurface = std::move(surfaceOrRefusal->admin);
+    auto const mcpEndpoint = std::move(surfaceOrRefusal->mcp);
 
     // How loudly a scheduler that does not answer, or refuses, is said: ONE for the process, lent to
     // the worker's heartbeat and to the presence loop below, so a machine says each loss and each
@@ -1920,10 +2139,15 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
         // this call publishes a new configuration and says so, and the next beat picks
         // it up on its own.
         if (DaemonControls::Instance().TakeReloadRequest())
-            Node::ApplyReloadRequest(reloader, membership, conditions, logger);
+            Node::ApplyReloadRequest(reloader, membership, conditions, logger, &budgetOverrides);
         std::this_thread::sleep_for(StopPollInterval);
     }
     logger.Log(LogLevel::Info, Node::DrainSentence(formation.durables.reform.Pending()));
+
+    // **The budget applier stops FIRST, before anything below tears a surface down.** On the leader its MEMBER-REPORT
+    // is answered in-process through this node's own `0xFC` router, which goes before the applier would; a pass in
+    // that window would post onto a freed responder or wait out the call deadline (`BudgetOverrideApplier::Stop`).
+    budgetOverrides.Stop();
 
     // **Every compile drained HERE, while the node's reactor is still turning** -- see
     // `WorkerTier::StopAndDrain` for why destruction order cannot express it.
@@ -1936,7 +2160,10 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     // registry -- outlives the store it routes to. A heartbeat arriving in that
     // window would file a machine's buckets through a pointer to a destroyed one.
     if (schedulerTier != nullptr)
+    {
         schedulerTier->SetHistorySink(nullptr);
+        schedulerTier->SetDemandSink(nullptr);
+    }
 
     // Unblocks the admin accept loop so its jthread can join -- without this the
     // destructor's implicit join waits on a thread parked in accept(), and a worker
@@ -1970,6 +2197,7 @@ struct ServingParts
     Node::ReformRequest& reform;            ///< Raised by a move; ends a body and starts the next.
     Node::FormationRuntimeParts runtime;    ///< What every body's formation acts through.
     Node::LeaseCheckInForce& leaseCheck;    ///< Where every body's worker records the lease check it built.
+    Node::BudgetDropLatch& budgetDrops;     ///< Whether this process dropped a cluster budget override, across bodies.
     RouteParts route;                       ///< Where every body's endpoint resolver asks and keeps the route.
 };
 
@@ -2045,6 +2273,7 @@ void PauseUnlessStopped(std::chrono::milliseconds wait)
                               Node::FormationBody { .record = record, .durables = durables, .reloader = reloader },
                               served,
                               parts.leaseCheck,
+                              parts.budgetDrops,
                               parts.route);
         },
         logger);
@@ -2943,6 +3172,9 @@ int main(int argc, char** argv)
     // the unchecked one (`Node::ReloadCheckWith`). Recorded by the factory that builds the check,
     // in whichever body runs, so the guard asks what was BUILT rather than a flag shape.
     Node::LeaseCheckInForce leaseCheck;
+    // And whether this process has dropped a cluster cache budget override for a later local edit: the latch behind
+    // `cache-budget-override-dropped`, held across every body so a reform does not clear a row nobody has seen.
+    Node::BudgetDropLatch budgetDrops;
     std::optional<NodeReloader> reloader;
     if (!lookup.path.empty())
         reloader.emplace(cfg,
@@ -3129,6 +3361,7 @@ int main(int argc, char** argv)
                                               .wait = formationWait,
                                           },
                                       .leaseCheck = leaseCheck,
+                                      .budgetDrops = budgetDrops,
                                       .route = RouteParts { .probe = *routeProbe, .cell = routeHost } };
     return host->Run([&cfg,
                       &identityKey,

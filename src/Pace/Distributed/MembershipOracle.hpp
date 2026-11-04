@@ -432,10 +432,16 @@ static_assert(RowsInEnumeratorOrder(KeyEvidenceRoutes, &KeyEvidenceRow::evidence
     auto const proven = RestsOnProvenIdentity(decision) && facts.proven.has_value();
     auto provenNodeId = proven ? std::optional { facts.proven->id } : std::nullopt;
     auto provenKey = proven ? std::optional { facts.proven->key } : std::nullopt;
+    // A label only (`CallerContext::ticketKey`): engaged when a live ticket is among the routes that admitted the caller.
+    auto const ticketed = decision.verdict == Membership::Member
+                          && decision.decidedBy.Has(MembershipParticipant::MachineTicket)
+                          && facts.authenticatedMachine.has_value();
+    auto ticketKey = ticketed ? std::optional { facts.authenticatedMachine->key } : std::nullopt;
     return CallerContext { .membership = decision.verdict,
                            .peerId = std::move(facts.host),
                            .provenNodeId = std::move(provenNodeId),
                            .provenKey = provenKey,
+                           .ticketKey = ticketKey,
                            .identified = RestsOnIdentifiedCaller(decision),
                            .operatorStanding = RestsOnOperatorStanding(decision) };
 }

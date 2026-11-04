@@ -69,11 +69,15 @@ class ScriptedFleet final: public ILiveStatsSources
 
     /// @copydoc ILiveStatsSources::FleetText
     [[nodiscard]] std::expected<FleetTextDocument, FleetTextDeclined> FleetText(std::string_view section,
-                                                                                std::string_view range) const override
+                                                                                std::string_view range,
+                                                                                CompileCacheWire::FleetTextFormat format,
+                                                                                std::string_view node) const override
     {
         ++reads;
         askedSection = section;
         askedRange = range;
+        askedFormat = format;
+        askedNode = node;
         return answer;
     }
 
@@ -87,13 +91,19 @@ class ScriptedFleet final: public ILiveStatsSources
     mutable std::size_t reads { 0 };     ///< How many reads reached the sources.
     mutable std::string askedSection {}; ///< The section the last read named.
     mutable std::string askedRange {};   ///< The range the last read named.
+    /// The format the last read named.
+    mutable Wire::FleetTextFormat askedFormat { Wire::FleetTextFormat::Text };
+    mutable std::string askedNode {}; ///< The node the last read named.
 };
 
 /// A FLEET-TEXT frame.
-[[nodiscard]] std::vector<std::byte> FleetTextFrame(std::string section = {}, std::string range = {}, std::string token = {})
+[[nodiscard]] std::vector<std::byte> FleetTextFrame(std::string section = {},
+                                                    std::string range = {},
+                                                    std::string token = {},
+                                                    Wire::FleetTextFormat format = Wire::FleetTextFormat::Text)
 {
     return Wire::EncodeFleetTextRequest(Wire::FleetTextRequest {
-        .section = std::move(section), .range = std::move(range), .dashboardToken = std::move(token) });
+        .section = std::move(section), .range = std::move(range), .dashboardToken = std::move(token), .format = format });
 }
 
 /// What a refusal said, beside its code.
@@ -150,6 +160,57 @@ TEST_CASE("A fleet read is answered with the document the sources rendered for t
     CHECK(NothingCounted(rig.metrics));
 }
 
+TEST_CASE("The format a fleet read names reaches the sources, and a json read is gated like any other", "[node][fleettext]")
+{
+    Rig rig;
+    rig.sources.answer = FleetTextDocument { .leads = true, .leaderEndpoint = {}, .body = R"({"schema":2})" };
+    auto const reply = rig.AskLocally(FleetTextFrame({}, "24h", {}, Wire::FleetTextFormat::Json));
+    REQUIRE(Testing::StatusOf(reply) == Wire::Status::Ok);
+    CHECK(Wire::AsStringView(Testing::PayloadOf(reply)) == R"({"schema":2})");
+    CHECK(rig.sources.askedFormat == Wire::FleetTextFormat::Json);
+
+    // A follower redirects a json read exactly as it does a text one.
+    rig.sources.leadership = LiveLeadership { .leads = false, .leaderEndpoint = "10.0.0.2:6674" };
+    auto const followed = rig.AskLocally(FleetTextFrame({}, {}, {}, Wire::FleetTextFormat::Json));
+    CHECK(Testing::ErrorOf(followed) == Wire::ErrorCode::NotLeader);
+
+    // And a stranger gets nothing, whatever the format.
+    auto const stranger = rig.Ask(rig.responder, FleetTextFrame({}, {}, {}, Wire::FleetTextFormat::Json), "192.0.2.1");
+    CHECK(Testing::ErrorOf(stranger) == Wire::ErrorCode::NotAMember);
+}
+
+TEST_CASE("A fleet read's node selector reaches the sources as typed, and none reads the fleet", "[node][fleettext]")
+{
+    Rig rig;
+    auto const named = rig.AskLocally(Wire::EncodeFleetTextRequest(
+        Wire::FleetTextRequest { .section = "series", .range = "1h", .dashboardToken = {}, .format = {}, .node = "n2" }));
+    REQUIRE(Testing::StatusOf(named) == Wire::Status::Ok);
+    CHECK(rig.sources.askedNode == "n2");
+
+    auto const fleet = rig.AskLocally(FleetTextFrame("series", "1h"));
+    REQUIRE(Testing::StatusOf(fleet) == Wire::Status::Ok);
+    CHECK(rig.sources.askedNode.empty());
+}
+
+TEST_CASE("A version 16 FLEET-TEXT is refused UnsupportedVersion, not as a malformed frame", "[node][fleettext]")
+{
+    Rig rig;
+    // The version-16 grammar: three fields, no format. Hand-built, because the encoder only speaks 17.
+    auto const old = Wire::Detail::EncodeRequest(
+        16, Wire::Op::FleetText, { Wire::AsBytes("series"), Wire::AsBytes("7d"), Wire::AsBytes("") });
+    auto const reply = rig.AskLocally(old);
+    CHECK(Testing::ErrorOf(reply) == Wire::ErrorCode::UnsupportedVersion);
+    CHECK(DetailOf(reply).contains("17..17"));
+    CHECK(rig.sources.reads == 0);
+    // Not mistaken for a malformed frame, which would have moved this counter.
+    CHECK(NothingCounted(rig.metrics));
+
+    // And a version nobody speaks yet is the same answer.
+    auto const future = Wire::Detail::EncodeRequest(
+        18, Wire::Op::FleetText, { Wire::AsBytes(""), Wire::AsBytes(""), Wire::AsBytes(""), Wire::AsBytes("") });
+    CHECK(Testing::ErrorOf(rig.AskLocally(future)) == Wire::ErrorCode::UnsupportedVersion);
+}
+
 TEST_CASE("A stranger is refused a fleet read by name and counted once whichever door it used", "[node][fleettext]")
 {
     Rig rig;
@@ -199,6 +260,40 @@ TEST_CASE("The dashboard credential decides a fleet read and is counted against 
         auto const reply = rig.Ask(rig.responder, FleetTextFrame(), Reader);
         CHECK(Testing::ErrorOf(reply) == Wire::ErrorCode::Unauthenticated);
         CHECK_FALSE(DetailOf(reply).contains(LeaderEndpoint));
+    }
+}
+
+TEST_CASE("A member that proved its key reads the fleet without the dashboard credential", "[node][fleettext]")
+{
+    // What a member's MCP fleet tools reach the leader by: the proven, sealed connection, from a node that
+    // holds no dashboard credential. The production fold, with the key PRESENTED on the connection -- a
+    // host-answering fake cannot stand for a proof.
+    AtomicMetricsSink metrics;
+    ScriptedFleet sources;
+    Testing::RosterFold const roster { { "pc-07" }, { "gone-01" } };
+    FleetTextResponder guarded { sources, roster.admitted, AdminCredential { "s3cret" }, metrics };
+    auto const ask = [&guarded](PeerIdentity peer) {
+        return core::async::syncRun(guarded.Answer(FleetTextFrame({}, {}, {}, Wire::FleetTextFormat::Json), std::move(peer)))
+            .bytes;
+    };
+
+    auto const proven = ask(PeerIdentity { .host = "10.0.0.7", .proven = Testing::IdentityOf("pc-07") });
+    CHECK(Testing::StatusOf(proven) == Wire::Status::Ok);
+    CHECK(sources.reads == 1);
+    CHECK(sources.askedFormat == Wire::FleetTextFormat::Json);
+
+    SECTION("this machine without a proof is still asked for the credential")
+    {
+        // The control: loopback is admitted to the surface, and earns no fleet read under a token file.
+        CHECK(Testing::ErrorOf(ask(PeerIdentity { .host = "127.0.0.1" })) == Wire::ErrorCode::Unauthenticated);
+        CHECK(metrics.Read(IMetricsSink::Counter::FleetTextRequestsRefusedUnauthenticated) == 1);
+    }
+
+    SECTION("a revoked key's proof reads nothing, and is refused as a stranger")
+    {
+        auto const refused = ask(PeerIdentity { .host = "127.0.0.1", .proven = Testing::IdentityOf("gone-01") });
+        CHECK(Testing::ErrorOf(refused) == Wire::ErrorCode::NotAMember);
+        CHECK(sources.reads == 1);
     }
 }
 
@@ -303,14 +398,16 @@ TEST_CASE("A fleet read through the slot is the attached sources' and a detached
     LiveStatsSourceSlot slot;
     {
         auto const attached = slot.Attach(sources);
-        auto const read = slot.FleetText("series", "7d");
+        auto const read = slot.FleetText("series", "7d", Wire::FleetTextFormat::Json, "n2");
         REQUIRE(read.has_value());
         CHECK(read->body == "# kpi\nkey\tvalue\n");
         CHECK(sources.askedSection == "series");
         CHECK(sources.askedRange == "7d");
+        CHECK(sources.askedFormat == Wire::FleetTextFormat::Json);
+        CHECK(sources.askedNode == "n2");
     }
 
-    auto const detached = slot.FleetText("series", "7d");
+    auto const detached = slot.FleetText("series", "7d", Wire::FleetTextFormat::Json, {});
     REQUIRE_FALSE(detached.has_value());
     CHECK(detached.error().refusal == FleetTextRefusal::NoFleet);
     CHECK(sources.reads == 1);

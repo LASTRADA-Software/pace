@@ -659,6 +659,11 @@ inline constexpr std::array DeclineCauseTable {
     // does not arrive `Unrecognised`, which reads as a peer from the future.
     DeclineCauseRow { .code = CompileCacheWire::ErrorCode::NotSharedCache, .cause = DeclineCause::NotPermitted },
     DeclineCauseRow { .code = CompileCacheWire::ErrorCode::WorkerRejectedArgument, .cause = DeclineCause::ArgumentRefused },
+    // FINGERPRINT-INPUTS, an operator's diagnostic no compile sends: meeting it means a launcher reached a surface it
+    // did not think it was talking to -- the shared-cache row's reasoning, and a row so it does not read as a peer
+    // from the future.
+    DeclineCauseRow { .code = CompileCacheWire::ErrorCode::FingerprintInputsUnrecorded,
+                      .cause = DeclineCause::NotPermitted },
 };
 
 /// Whether every refusal this build's wire header knows carries a classification.
@@ -868,6 +873,10 @@ struct DispatchRequest
     /// echoed on the compile request so the worker can key the peak it measures. Read only by the
     /// `AdmitTicket` overload of `Dispatch`; empty when unknown.
     std::string_view admissionSourcePath {};
+
+    /// Whether the leader already granted this compile in this invocation, so the LEASE says it asks again for one
+    /// compile (`CompileCacheWire::AskOrigin`) and the leader's demand history counts it once.
+    CompileCacheWire::AskOrigin askOrigin { CompileCacheWire::AskOrigin::First };
 };
 
 /// Ask the scheduler for a worker and have it compile this translation unit.

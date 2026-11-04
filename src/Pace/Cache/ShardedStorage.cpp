@@ -473,4 +473,27 @@ void ShardedStorage::Resize(std::size_t newTotalBytes)
     }
 }
 
+std::optional<std::size_t> ShardedStorage::ResizeTier(StorageTier tier, std::size_t newTotalBytes)
+{
+    auto const perShard = newTotalBytes / _shards.size();
+    std::optional<std::size_t> excess;
+    for (auto& shard: _shards)
+    {
+        std::unique_lock const lock { shard->mu };
+        excess = CombineTierExcess(excess, shard->storage->ResizeTier(tier, perShard));
+    }
+    return excess;
+}
+
+IStorage::EvictStepOutcome ShardedStorage::EvictStep()
+{
+    EvictStepOutcome total;
+    for (auto& shard: _shards)
+    {
+        std::unique_lock const lock { shard->mu };
+        total = CombineEvictSteps(total, shard->storage->EvictStep());
+    }
+    return total;
+}
+
 } // namespace Pace

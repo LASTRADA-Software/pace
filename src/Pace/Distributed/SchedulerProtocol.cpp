@@ -31,9 +31,10 @@ namespace
     /// derived from it: a verb that reaches this class without a row is refused
     /// rather than served, which is the direction a mistake has to fail in.
     constexpr std::array SchedulerOps {
-        Wire::Op::Register,      Wire::Op::NodeAnnounce, Wire::Op::Heartbeat,          Wire::Op::Withdraw,
-        Wire::Op::Lease,         Wire::Op::Release,      Wire::Op::ClusterStatus,      Wire::Op::ClusterSet,
-        Wire::Op::ClusterForget, Wire::Op::ClusterAdmit, Wire::Op::ClusterAdmitLearner
+        Wire::Op::Register,      Wire::Op::NodeAnnounce, Wire::Op::Heartbeat,           Wire::Op::Withdraw,
+        Wire::Op::Lease,         Wire::Op::Release,      Wire::Op::ClusterStatus,       Wire::Op::ClusterSet,
+        Wire::Op::ClusterForget, Wire::Op::ClusterAdmit, Wire::Op::ClusterAdmitLearner, Wire::Op::MemberEdit,
+        Wire::Op::MemberReport
     };
 
     /// Whether this scheduler serves @p op at all.
@@ -393,6 +394,7 @@ SchedulerReply SchedulerProtocol::Route(Wire::Op op, std::span<std::byte const> 
                                                           // `NodeCapacity`, which must stay a literal type.
                                                           .version = fields->capacity.version,
                                                           .toolchainLabel = fields->capacity.toolchainLabel,
+                                                          .toolchainFamily = fields->capacity.toolchainFamily,
                                                           .displayName = fields->capacity.displayName,
                                                           .slots = fields->slots,
                                                           .codecs = fields->acceptedCodecs,
@@ -467,7 +469,8 @@ SchedulerReply SchedulerProtocol::Route(Wire::Op op, std::span<std::byte const> 
                                                        .key = Wire::AsStringView(fields->key),
                                                        .acceptedCodecs = fields->acceptedCodecs,
                                                        .excluded = excluded,
-                                                       .toolchainLabel = Wire::AsStringView(fields->toolchainLabel) });
+                                                       .toolchainLabel = Wire::AsStringView(fields->toolchainLabel),
+                                                       .origin = fields->origin });
         }
         case Wire::Op::Release: {
             auto const fields = Wire::DecodeReleasePayload(payload);
@@ -489,6 +492,21 @@ SchedulerReply SchedulerProtocol::Route(Wire::Op op, std::span<std::byte const> 
             if (!fields.has_value())
                 return SchedulerReply::Malformed();
             return _service.ClusterSet(caller, Wire::AsStringView(fields->name), Wire::AsStringView(fields->value));
+        }
+
+        case Wire::Op::MemberReport: {
+            auto const fields = Wire::DecodeMemberReportPayload(payload);
+            if (!fields.has_value())
+                return SchedulerReply::Malformed();
+            return _service.MemberReport(caller, fields->verb, Wire::AsStringView(fields->value));
+        }
+
+        case Wire::Op::MemberEdit: {
+            auto const fields = Wire::DecodeMemberEditPayload(payload);
+            if (!fields.has_value())
+                return SchedulerReply::Malformed();
+            return _service.MemberEdit(
+                caller, fields->verb, Wire::AsStringView(fields->memberId), Wire::AsStringView(fields->value));
         }
 
         case Wire::Op::ClusterForget: {
@@ -545,6 +563,7 @@ std::vector<CompileCacheWire::HistoryBucketFields> HistoryToWire(std::span<Fleet
         // One assignment: `EnumTable` IS `std::array`, and the static_assert in the
         // header ties the two extents, so these are the same type.
         record.values = bucket.values;
+        record.absent = bucket.absent;
     }
     return out;
 }
@@ -559,6 +578,9 @@ std::vector<FleetBucket> HistoryFromWire(std::span<CompileCacheWire::HistoryBuck
         bucket.startMillis = static_cast<std::int64_t>(record.startMillis);
         bucket.sampleMillis = static_cast<std::int64_t>(record.sampleMillis);
         bucket.values = record.values;
+        // What the sender said it lacked, plus what a narrower sender never carried, read by each slot's own
+        // policy -- an exclusion count it never sent is zero, a CPU reading it never sent is a gap.
+        bucket.absent = (record.absent | UncarriedAbsentSlots(record.carried)) & EveryFleetSlot;
         bucket.present = true;
     }
     return out;

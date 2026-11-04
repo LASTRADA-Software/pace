@@ -246,7 +246,7 @@ inline constexpr std::array ConditionFieldTable {
     ConditionFieldRow { .member = &NodeConditionFields::persistence, .maxBytes = 32, .name = "persistence" },
     ConditionFieldRow { .member = &NodeConditionFields::severity, .maxBytes = 32, .name = "severity" },
     ConditionFieldRow { .member = &NodeConditionFields::state, .maxBytes = 32, .name = "state" },
-    ConditionFieldRow { .member = &NodeConditionFields::detail, .maxBytes = 448, .name = "detail" },
+    ConditionFieldRow { .member = &NodeConditionFields::detail, .maxBytes = 400, .name = "detail" },
     ConditionFieldRow { .member = &NodeConditionFields::remedy, .maxBytes = 512, .name = "remedy" },
 };
 
@@ -282,7 +282,9 @@ inline constexpr std::size_t MaxConditionIdBytes = ConditionFieldCeiling(&NodeCo
 /// (`CompileCacheWire_test` asserts both sides). When the table's spare row is spent, the detail
 /// ceiling above is what buys another, before the history share is asked to give anything. A
 /// DECODER bound, so it moves with lane 0's version bump.
-inline constexpr std::size_t MaxNodeConditions = 23;
+// 24 since `cache-budget-override-dropped` spent the spare row: the detail ceiling went 448 -> 400 to buy it, the
+// trade this comment names, rather than the history share.
+inline constexpr std::size_t MaxNodeConditions = 24;
 
 /// What one encoded row costs at most, framing included: every field at its ceiling behind its
 /// length prefix, plus the prefix on the row itself.

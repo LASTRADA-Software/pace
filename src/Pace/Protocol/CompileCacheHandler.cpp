@@ -98,6 +98,16 @@ namespace
                             .code = Wire::ErrorCode::NoCluster,
                             .why = "this endpoint is a cache and belongs to no cluster; ask a "
                                    "pace-node instead" },
+        // With the cluster rows and for their reason: an edit of a replicated member record.
+        Wire::RefusedVerb { .op = Wire::Op::MemberEdit,
+                            .code = Wire::ErrorCode::NoCluster,
+                            .why = "this endpoint is a cache and belongs to no cluster; ask a "
+                                   "pace-node instead" },
+        // And a member's report about its own record: a cache daemon holds none.
+        Wire::RefusedVerb { .op = Wire::Op::MemberReport,
+                            .code = Wire::ErrorCode::NoCluster,
+                            .why = "this endpoint is a cache and belongs to no cluster; ask a "
+                                   "pace-node instead" },
         Wire::RefusedVerb { .op = Wire::Op::ClusterForget,
                             .code = Wire::ErrorCode::NoCluster,
                             .why = "this endpoint is a cache and belongs to no cluster; ask a "
@@ -132,6 +142,12 @@ namespace
                             .code = Wire::ErrorCode::DispatchNotPermitted,
                             .why = "this endpoint is a cache, not a compile node; its counters are on the admin "
                                    "surface's /metrics, which needs no credential" },
+        // With the node rows and for their reason: a fingerprint's inputs are a compile node's survey, and this
+        // daemon surveys no toolchain. A client told `UnknownOpcode` would conclude this daemon is too OLD.
+        Wire::RefusedVerb { .op = Wire::Op::FingerprintInputs,
+                            .code = Wire::ErrorCode::DispatchNotPermitted,
+                            .why = "this endpoint is a cache, not a compile node, and serves no toolchain; ask the "
+                                   "pace-node that serves it what its fingerprint was computed from" },
         // With the node rows above and for their reason: admission is a property of the
         // PROCESS being asked -- which routes IT would admit a host through -- and a cache
         // folds no such routes. Not `NoCluster`: a client told that goes looking for
@@ -1276,6 +1292,8 @@ core::async::Task<void> CompileCacheHandler::Run(core::net::ISocket* socket,
             case Wire::Op::Release:
             case Wire::Op::ClusterStatus:
             case Wire::Op::ClusterSet:
+            case Wire::Op::MemberEdit:
+            case Wire::Op::MemberReport:
             case Wire::Op::ClusterForget:
             case Wire::Op::ClusterAdmit:
             case Wire::Op::ClusterAdmitLearner:
@@ -1291,6 +1309,7 @@ core::async::Task<void> CompileCacheHandler::Run(core::net::ISocket* socket,
             // it, and it caught exactly this.
             case Wire::Op::NodeStatus:
             case Wire::Op::NodeMetrics:
+            case Wire::Op::FingerprintInputs:
             case Wire::Op::ExplainAdmission:
             case Wire::Op::Cordon:
             case Wire::Op::MintTicket:

@@ -1445,6 +1445,18 @@ and it is recorded here because the question will be asked again.
     `--raft-join`, because an empty node under a bootstrap set naming only itself
     elects itself and becomes a second cluster. A recovered snapshot's log line says
     *recovered*, an installed one's *installed*.
+  - **"Cannot read" is a TABLE, and the last RELEASE's layout is a row of it.** The
+    refusal above was written while no released build had ever crossed a cluster
+    encoding change; the first one that did (display names, `StateVersion` 10 -> 11,
+    `CommandVersion` 6 -> 7) made a node upgraded from v0.6.0 exit 78 at every start,
+    and the MSI upgrade from the latest release rolled back on it. So
+    `ReadableStateLayouts` and `ReadableCommandLayouts` (`ClusterState.cpp`) name every
+    layout the decoder reads, and an older row is admitted ONLY when its fields are a
+    strict PREFIX of this build's under verbs that mean what they meant -- the fields it
+    lacks are absent, a verb its writer never had is refused by name, and its own arity
+    still holds. A layout that moved a field or changed a verb gets no row and is
+    refused as before. **Before bumping either version, ask what the latest release
+    wrote**: if this build cannot read it, an upgrade from that release does not start.
   - **And a LEADER's snapshot the application cannot read is refused before the node
     takes it on** ([#1552](https://github.com/LASTRADA-Software/pace/issues/1552)).
     Taken on, a snapshot resets the log, moves both indices past it, and is persisted
@@ -2472,6 +2484,35 @@ right, because the wire now trusts it.
   state at the previous version is `UnsupportedVersion`, never `MalformedFrame`, and the test
   builds it in the previous LAYOUT rather than flipping a byte of the current one -- a decoder
   that judged the arity first passes the flipped-byte test and fails this one.
+
+## Display names decide nothing
+
+<!-- agent-tripwire: A display name DECIDES NOTHING -->
+
+A member's display name (`ClusterMember::displayName`, set by `MemberEdit` `SetDisplayName`,
+`--cluster-name`, `pacectl cluster-name`, the MCP `set_display_name` tool) is replicated so every
+surface shows one name for one machine. It is a LABEL, in the sense the hostname already is.
+
+- **No admission, route, key, redirect or credential reads it.** A name that decided anything
+  would be an identity nobody proved: the key is the identity, and the name is how a person finds it.
+- **Unique under ASCII-ONLY case folding** (`AsciiFoldEquals`): `Office` and `office` are one name,
+  `Ä` and `ä` two, and locale-free, since `std::tolower` reads a locale a process may change and two
+  nodes disagreeing about whether a name is taken is a replicated state machine disagreeing with
+  itself. Unicode folding would need tables this project does not carry, and one knowing some
+  scripts and not others answers "same" for one pair and "different" for its neighbour with
+  nothing to say why (`Core/AsciiFold.hpp`). A name spelled like ANOTHER member's id is taken too,
+  since a resolver matches ids first and that machine could never be named by it.
+- **One author for the courtesy and the guarantee** (`DisplayNameHolder`): `ValidateAgainst`
+  refuses a taken name (`DisplayNameTaken`) and `Apply` drops one with the same predicate, so a
+  rename judged first and a rename committed first cannot disagree about what "taken" means.
+- **A label yields to an identity** (`DisplayNameYieldingTo`): an admission whose id is spelled
+  like another member's display name CLEARS that name when it commits, logged at Warn naming both;
+  an admission is never refused over a label.
+- **Resolved exactly, id first** (`NodeNameResolver`): never by prefix, and a name that names
+  several members is refused listing them. A machine row is tied to its member by the identity key
+  its connection PROVED, never by the endpoint it registered with, which is its own unverified claim.
+- The name passes the UTF-8 gate and XML's `Char` production where it enters, like every text a
+  peer reads (`metrics-and-observability.md`), and is at most `Cluster::MaxDisplayNameBytes`.
 
 ## Open work
 

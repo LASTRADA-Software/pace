@@ -448,7 +448,7 @@ TEST_CASE("A reload may not widen admission while the running worker verifies no
     inForce.Record(BuiltLeaseCheck::Unchecked);
     NodeReloader reloader { initial, path, &Reparse, ReloadCheckWith(inForce) };
     NodeConditions conditions;
-    ApplyReloadRequest(&reloader, membership, conditions, logger);
+    ApplyReloadRequest(&reloader, membership, conditions, logger, nullptr);
 
     CHECK_FALSE(Admits(oracle, Stranger));
     CHECK(sink.str().contains("may not widen admission with --fleet-open while this worker compiles WITHOUT verifying"));
@@ -475,7 +475,7 @@ TEST_CASE("A reload widens admission on a worker that verifies its leases, and o
     inForce.Record(built);
     NodeReloader reloader { initial, path, &Reparse, ReloadCheckWith(inForce) };
     NodeConditions conditions;
-    ApplyReloadRequest(&reloader, membership, conditions, logger);
+    ApplyReloadRequest(&reloader, membership, conditions, logger, nullptr);
 
     CHECK(Admits(oracle, Stranger));
 }
@@ -523,7 +523,7 @@ TEST_CASE("Dropping fleet_open closes the node again", "[node][membership][reloa
 
     NodeReloader reloader { initial, path, &Reparse, &ValidateNodeReloadable };
     NodeConditions conditions;
-    ApplyReloadRequest(&reloader, membership, conditions, logger);
+    ApplyReloadRequest(&reloader, membership, conditions, logger, nullptr);
 
     CHECK_FALSE(Admits(oracle, Stranger));
     // And this machine is still admitted, which is the rule that survives every
@@ -597,7 +597,7 @@ TEST_CASE("A reload never revokes what the cluster agreed", "[node][membership][
 
     NodeReloader reloader { initial, path, &Reparse, &ValidateNodeReloadable };
     NodeConditions conditions;
-    ApplyReloadRequest(&reloader, membership, conditions, logger);
+    ApplyReloadRequest(&reloader, membership, conditions, logger, nullptr);
 
     // The node closed, and the cluster's member survived it.
     CHECK_FALSE(Admits(oracle, Stranger));
@@ -629,7 +629,7 @@ TEST_CASE("A reload that gives --advertise clears unqualified-host-name, and one
     {
         auto const path = WriteConfig(scratch.Path(), "log_level: info\n");
         NodeReloader reloader { initial, path, named, &ValidateNodeReloadable };
-        ApplyReloadRequest(&reloader, membership, conditions, logger);
+        ApplyReloadRequest(&reloader, membership, conditions, logger, nullptr);
         CHECK(conditions.StateOf(NodeCondition::UnqualifiedHostName) == Wire::ConditionState::Raised);
     }
 
@@ -637,7 +637,7 @@ TEST_CASE("A reload that gives --advertise clears unqualified-host-name, and one
     {
         auto const path = WriteConfig(scratch.Path(), "advertise: 10.0.0.5:6674\n");
         NodeReloader reloader { initial, path, named, &ValidateNodeReloadable };
-        ApplyReloadRequest(&reloader, membership, conditions, logger);
+        ApplyReloadRequest(&reloader, membership, conditions, logger, nullptr);
         REQUIRE(reloader.Current()->advertise == "10.0.0.5:6674");
         CHECK(conditions.StateOf(NodeCondition::UnqualifiedHostName) == Wire::ConditionState::Clear);
     }
@@ -669,7 +669,61 @@ TEST_CASE("A reload whose file still lists fleet_member is refused by name, and 
     CHECK_FALSE(reloader.Current()->fleetOpen);
     NullLogger logger;
     NodeConditions conditions;
-    ApplyReloadRequest(&reloader, membership, conditions, logger);
+    ApplyReloadRequest(&reloader, membership, conditions, logger, nullptr);
     CHECK_FALSE(Admits(oracle, Stranger));
     CHECK_FALSE(Admits(oracle, "10.0.0.7"));
+}
+
+namespace
+{
+/// Counts the accepted reloads it is told about.
+class CountingReloadListener final: public IAcceptedReloadListener
+{
+  public:
+    void ReloadAccepted() override
+    {
+        ++told;
+    }
+
+    int told { 0 }; ///< How many accepted reloads it was told.
+};
+} // namespace
+
+TEST_CASE("A reloaded cache budget is accepted and handed to the budgets; turning the memory tier off is refused",
+          "[node][reload][budget]")
+{
+    // `--cache-memory` reloads now that a tier resizes live, and the budget applier is woken to put it in force --
+    // or to find a cluster override's baseline outranked. Whether a memory tier EXISTS is still a restart.
+    LeaseCheckInForce inForce;
+    inForce.Record(BuiltLeaseCheck::None);
+    auto initial = RunningNode();
+    initial.cacheMemoryBytes = std::uint64_t { 512 } * 1024 * 1024;
+    NodeMembership membership { initial, membershipLog };
+    NodeConditions conditions;
+    std::ostringstream sink;
+    ConsoleLogger logger { sink, LogLevel::Info, LogTimestamps::No };
+    CountingReloadListener budgets;
+
+    SECTION("a new size is in force, and the budgets are told once")
+    {
+        Testing::ScratchDirectory const scratch { "node-reload-cache-memory" };
+        NodeReloader reloader {
+            initial, WriteConfig(scratch.Path(), "cache_memory: 256m\n"), &Reparse, ReloadCheckWith(inForce)
+        };
+        ApplyReloadRequest(&reloader, membership, conditions, logger, &budgets);
+        CHECK(reloader.Current()->cacheMemoryBytes == std::uint64_t { 256 } * 1024 * 1024);
+        CHECK(budgets.told == 1);
+    }
+
+    SECTION("zero would remove the memory tier: declined, named, and the budgets are not told")
+    {
+        Testing::ScratchDirectory const scratch { "node-reload-cache-memory-off" };
+        NodeReloader reloader {
+            initial, WriteConfig(scratch.Path(), "cache_memory: 0\n"), &Reparse, ReloadCheckWith(inForce)
+        };
+        ApplyReloadRequest(&reloader, membership, conditions, logger, &budgets);
+        CHECK(reloader.Current()->cacheMemoryBytes == initial.cacheMemoryBytes);
+        CHECK(budgets.told == 0);
+        CHECK(sink.str().contains("turning the memory tier on or off"));
+    }
 }

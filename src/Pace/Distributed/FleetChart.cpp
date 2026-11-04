@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <Pace/Core/Json.hpp>
 #include <Pace/Core/MachineName.hpp>
 #include <Pace/Distributed/FleetChart.hpp>
 #include <Pace/Distributed/FleetText.hpp>
@@ -84,7 +85,10 @@ namespace
     /// @return True when the number in that slot means something.
     [[nodiscard]] bool Answers(FleetBucket const& bucket, FleetMetric metric) noexcept
     {
-        return !bucket.backfilled || FleetMetricTable[static_cast<std::size_t>(metric)].scope == FleetMetricScope::Node;
+        // And a slot the bucket records absent -- the CPU a machine could not read, or one no fleet view
+        // carries -- answers nothing, whatever number sits in it.
+        return !IsAbsent(bucket, metric)
+               && (!bucket.backfilled || FleetMetricTable[static_cast<std::size_t>(metric)].scope == FleetMetricScope::Node);
     }
 
     /// Whether a bucket can answer for every slot a series reads.
@@ -805,9 +809,9 @@ std::string RenderSeriesJson(std::vector<FleetBucket> const& buckets, FleetRange
     auto const seconds = BucketSecondsOf(range);
 
     std::string out = "{";
-    AppendJsonText(out, "range");
+    Json::AppendString(out, "range");
     out += ':';
-    AppendJsonText(out, row.key);
+    Json::AppendString(out, row.key);
     // `covers` is what a window nobody missed a sample of holds, so a consumer can
     // read `coverage` as a fraction without knowing this build's sample interval.
     out += std::format(R"(,"bucketSeconds":{},"points":{},"covers":{})", seconds, buckets.size(), FullCoverageOf(range));
@@ -817,7 +821,7 @@ std::string RenderSeriesJson(std::vector<FleetBucket> const& buckets, FleetRange
     for (auto const& array: BucketArrayTable)
     {
         out += ',';
-        AppendJsonText(out, array.key);
+        Json::AppendString(out, array.key);
         out += ":[";
         for (auto const index: std::views::iota(std::size_t { 0 }, buckets.size()))
         {
@@ -834,7 +838,7 @@ std::string RenderSeriesJson(std::vector<FleetBucket> const& buckets, FleetRange
         auto const& series = FleetSeriesTable[index];
         if (index != 0)
             out += ',';
-        AppendJsonText(out, series.key);
+        Json::AppendString(out, series.key);
         out += ":[";
         auto const values = ValuesFor(series, buckets, seconds);
         for (auto const point: std::views::iota(std::size_t { 0 }, values.size()))

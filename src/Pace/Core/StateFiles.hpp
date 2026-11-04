@@ -32,18 +32,20 @@ namespace Pace
 /// the row's, not the enumerator's value.
 enum class StateFile : std::uint8_t
 {
-    Key,             ///< The node's identity key.
-    Identity,        ///< The id it answers to.
-    Formation,       ///< The formation record it runs by.
-    RaftState,       ///< Its consensus term and vote.
-    RaftLog,         ///< Its consensus log.
-    RaftSnapshot,    ///< Its consensus snapshot.
-    FleetEndpoints,  ///< The endpoints it remembers its cluster at.
-    NodeHistory,     ///< Its own history.
-    FleetHistory,    ///< The fleet's history, recorded while leading.
-    ReceivedHistory, ///< What the other machines handed over.
-    Archive,         ///< A DIRECTORY: the consensus stores of clusters it left, one subdirectory each.
-    Last,            ///< Not a file: the length of a table keyed by one.
+    Key,              ///< The node's identity key.
+    Identity,         ///< The id it answers to.
+    Formation,        ///< The formation record it runs by.
+    RaftState,        ///< Its consensus term and vote.
+    RaftLog,          ///< Its consensus log.
+    RaftSnapshot,     ///< Its consensus snapshot.
+    FleetEndpoints,   ///< The endpoints it remembers its cluster at.
+    NodeHistory,      ///< Its own history.
+    FleetHistory,     ///< The fleet's history, recorded while leading.
+    ReceivedHistory,  ///< What the other machines handed over.
+    RequesterHistory, ///< Compiles granted per requesting machine, counted while leading.
+    ToolchainHistory, ///< Compiles granted per toolchain fingerprint, counted while leading.
+    Archive,          ///< A DIRECTORY: the consensus stores of clusters it left, one subdirectory each.
+    Last,             ///< Not a file: the length of a table keyed by one.
 };
 
 /// Who, besides a state file's owner and the administrators, may read it. Nobody else may ever
@@ -106,6 +108,8 @@ inline constexpr EnumTable<StateFile, StateFileNameRow> StateFileNames { {
     { .file = StateFile::NodeHistory, .name = "node-history.bin", .access = StateFileAccess::OthersRead },
     { .file = StateFile::FleetHistory, .name = "fleet-history.bin", .access = StateFileAccess::OthersRead },
     { .file = StateFile::ReceivedHistory, .name = "received-history.bin", .access = StateFileAccess::OthersRead },
+    { .file = StateFile::RequesterHistory, .name = "requester-history.bin", .access = StateFileAccess::OthersRead },
+    { .file = StateFile::ToolchainHistory, .name = "toolchain-history.bin", .access = StateFileAccess::OthersRead },
     { .file = StateFile::Archive, .name = "archive", .access = StateFileAccess::OwnerOnlyDirectory },
 } };
 

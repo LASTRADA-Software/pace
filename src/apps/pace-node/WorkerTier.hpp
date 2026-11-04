@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include "CacheTier.hpp"
 #include "CompileCapacity.hpp"
 #include "CompileResponder.hpp"
 #include "EndpointDialer.hpp"
@@ -117,9 +118,12 @@ using WorkerMachineFactory = std::function<WorkerMachine()>;
 /// What a worker tier borrows from the node that starts it, all of which outlive it.
 struct WorkerTierParts
 {
-    NodeConfig const& cfg;                     ///< The configuration the node started with.
-    NodeReloader const* reloader {};           ///< The live configuration; null with no file.
-    Distributed::NodeCapacity const& capacity; ///< What `NodeCapacityOf` made of this machine.
+    NodeConfig const& cfg;           ///< The configuration the node started with.
+    NodeReloader const* reloader {}; ///< The live configuration; null with no file.
+    /// What `NodeCapacityOf` made of this machine. Read ONCE at construction for the slot count, the
+    /// thread pool and REGISTER's capacity record, which are fixed for the worker's life; read per
+    /// heartbeat for the slot ceilings `node-status` names, which follow a live cache-budget override.
+    INodeCapacitySource const& capacity;
     /// Where this node tells clients to reach it, right now.
     ///
     /// **Owned by `main` rather than by this tier since
@@ -381,6 +385,35 @@ class WorkerTier
     /// @return One registrar per entry of @p served.
     [[nodiscard]] std::vector<Cc::WorkerRegistrar> RegistrarsFor(std::map<std::string, ServedToolchain> const& served);
 
+    /// Re-register under this machine's capacity as it stands now, when it is not the capacity
+    /// the registrations in force carry.
+    ///
+    /// A live cache-budget override moves the reserve the capacity is derived from
+    /// (`LiveNodeCapacity`). The registry sizes this worker by the capacity its REGISTER carried,
+    /// and `node-status` must weigh the worker the same way, so both read `RegisteredCapacity()`
+    /// and this is the one place it moves: the capacity record is rebuilt, the registrars with it
+    /// (the same `(fingerprint, endpoint)` keys, so nothing is withdrawn and the registry updates
+    /// the entry in place), and the round that follows re-registers. Run by the heartbeat once a
+    /// beat, before its round; public, as `RegistrarsFor` is, because it dials nothing.
+    ///
+    /// The slot COUNT and the thread pool do not follow: they are sized once, at startup, and the
+    /// registration keeps sending that count, which the registry takes as given. When `--slots` is
+    /// unset that count was derived from the STARTUP capacity, and it stays the startup figure.
+    /// What follows live is the capacity record itself -- the reserved memory and the tier budgets
+    /// the fleet page's worker rows show -- and the machine budget the presence loop reports, which
+    /// is what admission charges compiles against. The memory ceiling `SlotCeilingsFor` folds is
+    /// the host's free memory each heartbeat, which no budget figure enters.
+    /// @param statusClock What `node-status` stamps against, for the registrations this replaces.
+    /// @return Whether the capacity had moved, and the registrars were rebuilt.
+    bool FollowCapacity(core::platform::IClock const& statusClock);
+
+    /// @return The capacity the registrations in force carry, and that `node-status` weighs this
+    ///         worker by. The heartbeat thread, or before it runs.
+    [[nodiscard]] Distributed::NodeCapacity const& RegisteredCapacity() const noexcept
+    {
+        return _registeredCapacity;
+    }
+
     /// Stop admitting compiles, and wait for the ones admitted to finish.
     void StopAndDrain();
 
@@ -410,6 +443,12 @@ class WorkerTier
 
     /// Make @p served what the compile port and the registrations answer, in that order.
     void Serve(std::map<std::string, ServedToolchain> served);
+
+    /// Adopt the capture walk's survey (`AdoptCapture`): attach its inputs entry by entry, and say whether this beat
+    /// must re-survey from the live configuration.
+    /// @param captured What the capture walk surveyed.
+    /// @return The capture's map, to carry onto the re-survey, when one is due; nothing otherwise.
+    [[nodiscard]] std::optional<std::map<std::string, ServedToolchain>> AdoptCaptured(SurveyResult captured);
 
     /// Re-file the registrations under the endpoint now published, when it is not the one they
     /// were filed under (`_registeredAs`).
@@ -472,6 +511,8 @@ class WorkerTier
     core::platform::SteadyClock _toolchainClock;
     DiscoveredToolchains _discovered;
     std::map<std::string, ServedToolchain> _toolchains;
+    /// Whether this process's capture walk has concluded. Read and written on the heartbeat thread only.
+    InputsCaptureState _capture { InputsCaptureState::Pending };
     std::unique_ptr<IScratchClaim> _scratchClaim;
     Cc::CompileJobRunner _jobs;
     std::vector<std::string> _appliedExtraArgs;
@@ -486,6 +527,11 @@ class WorkerTier
     CompileResponder _responder;
     NodeRuntimeState _runtime;
     CompileCacheWire::CapacityFields _advertisedWire;
+    /// What `NodeCapacityOf` makes of this machine now, read once a beat by `FollowCapacity`.
+    INodeCapacitySource const& _machineCapacity;
+    /// The capacity `_advertisedWire` and the registrars in force were built from: what the scheduler's
+    /// `SlotCeilingsFor` weighs this worker by, and so what `node-status` weighs it by. Heartbeat thread only.
+    Distributed::NodeCapacity _registeredCapacity;
     std::vector<Cc::WorkerRegistrar> _registrars;
     std::vector<Cc::WorkerRegistrar> _withdrawals;
     IEndpointDialer& _dialer;

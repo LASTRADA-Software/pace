@@ -8,10 +8,12 @@
 
 #include <Pace/Metrics/IMetricsSink.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/SealedFrameSocket.hpp>
 
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -63,6 +65,23 @@ inline constexpr std::size_t MaxForwardReplyBytes = SchedulingRedirectResponder:
 static_assert(MaxForwardReplyBytes >= CompileCacheWire::MaxRefusalReply,
               "a relayed refusal must fit the relay's ceiling, or the leader's explanation reads as a lost leader");
 
+/// Why opening a connection to the leader failed, one row per remedy.
+///
+/// **PRIVATE: persisted and transmitted nowhere.** No explicit values; `Last` is the length of a table
+/// keyed by one. The admission relay reads none of this -- every fault fails open the same way -- while a
+/// caller that reports the failure to a person (`McpUpstream`) must not call a busy or restarting peer a
+/// refusal: each row has a different remedy.
+enum class UpstreamOpeningFault : std::uint8_t
+{
+    Unreached,           ///< Nothing answered at the endpoint: the connect failed or ran out of time.
+    HandshakeIncomplete, ///< Connected, and the proof exchange was not answered: lost, closed, or past its deadline.
+    ProofDeferred,       ///< The peer cannot judge the proof YET: its consensus has not applied its log.
+    ProofNotOffered,     ///< The peer serves no proof: it runs no consensus.
+    PeerUntrusted,       ///< THIS node declined to prove itself: the peer's key is not one it trusts.
+    ProofRefused,        ///< The peer answered, and refused this node's proof.
+    Last,                ///< Not a fault.
+};
+
 /// What opening the connection to the leader came to.
 struct UpstreamOpening
 {
@@ -70,6 +89,12 @@ struct UpstreamOpening
     std::unique_ptr<core::net::ISocket> socket;
     /// Why not, for the log and the refusal's words; empty when `socket` is set.
     std::string reason;
+    /// Which half failed; meaningful only when `socket` is null.
+    UpstreamOpeningFault fault { UpstreamOpeningFault::Unreached };
+    /// Why the sealed connection stopped reading, asked once an exchange over `socket` broke -- so a reply the
+    /// seal refused for its SIZE is reported as that, never as a peer that went away. Valid while `socket` lives;
+    /// empty when the connection has no seal to ask (a test's in-memory pair).
+    std::function<std::optional<SealFault>()> sealFault {};
 };
 
 /// Opens a connection to the leader's scheduling endpoint.
@@ -128,10 +153,14 @@ class ProvenSchedulerDialer final: public IUpstreamDialer
     /// @param reactor The loop every socket belongs to and the handshake's deadline is armed on; must
     ///        outlive this.
     /// @param budget How long each half of a dial may take.
+    /// @param maxReplyBytes The largest reply payload a connection opened here reads: the admission
+    ///        relay's own ceiling by default, a report's for a caller that forwards reports
+    ///        (`McpUpstream::MaxReplyBytes`).
     ProvenSchedulerDialer(NodeProofClient const& prover,
                           core::net::IConnector& connector,
                           core::net::EventLoop& reactor,
-                          ForwardDialBudget budget = {}) noexcept;
+                          ForwardDialBudget budget = {},
+                          std::size_t maxReplyBytes = MaxForwardReplyBytes) noexcept;
 
     /// @copydoc IUpstreamDialer::Open
     [[nodiscard]] core::async::Task<UpstreamOpening> Open(std::string endpoint) override;
@@ -141,6 +170,7 @@ class ProvenSchedulerDialer final: public IUpstreamDialer
     core::net::IConnector& _connector;
     core::net::EventLoop& _reactor;
     ForwardDialBudget _budget;
+    std::size_t _maxReplyBytes;
 };
 
 /// What a forwarder is built with beyond its collaborators.

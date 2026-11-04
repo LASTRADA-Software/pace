@@ -35,6 +35,11 @@ enum class ParseFlow : std::uint8_t
     Stop,     ///< Return immediately, discarding whatever follows (`--help`, `--version`).
 };
 
+/// The operand an option row spells for a value that IS a credential: the one marker a status report's
+/// configuration table keys redaction on (`Node::NodeSettingTable()`'s `Redacted` rows must be exactly the rows
+/// carrying it), so a credential flag added later with this operand and shown in clear fails a test.
+inline constexpr std::string_view SecretOperand = "=<secret>";
+
 /// Apply one flag's effect to the result being built.
 ///
 /// The single type-erased shape every flag's effect takes, so one row type can

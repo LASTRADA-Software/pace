@@ -12,7 +12,7 @@
 #
 # reloadable-for: pace-node
 #
-# EIGHT settings are reloadable and the rest are read once at startup. A reload
+# TEN settings are reloadable and the rest are read once at startup. A reload
 # re-reads this file the way the start read it, so a change to anything else is
 # refused BY NAME rather than half-applied -- you are told which key needs the
 # restart instead of running a worker that disagrees with its own file.
@@ -35,6 +35,12 @@
 #                                       working, and is why this is reloadable
 #   raft_self                           moves the address this node's peers
 #                                       dial it at for consensus
+#   cache_memory, cache_disk            resize the live tier: a shrink evicts
+#                                       (the disk tier in slices, while serving);
+#                                       a cluster budget override set against the
+#                                       old value is dropped, since this later
+#                                       edit wins. Turning the memory tier on or
+#                                       off (to or from 0) still takes a restart
 #
 # Every key is one flag, spelled with underscores instead of dashes, and there
 # is no setting that a file can express and a command line cannot. A flag on the
@@ -297,11 +303,23 @@
 # otherwise has none of.
 #admin_listen:
 
+# serve MCP (POST /mcp) here, for a Claude Code session on this machine;
+# off unless given. A bare port binds loopback, and any other address is
+# refused at startup: MCP has no authentication, so it is never reachable
+# from the network.
+#mcp_listen:
+
 # also serve the fleet dashboard on --admin-listen, at /fleet and
 # /fleet.json. Off unless given: the page is a map of every member's
 # hostname, endpoint and capacity. Answered in full only while this node
 # LEADS; anyone else names the leader rather than showing half a fleet.
 #dashboard: false
+
+# how many requesting machines -- and, separately, how many toolchains -- the
+# leader's compile history keeps by name (default 256, at most 1024). The
+# least recently active beyond that fold into one "other" row whose counts
+# stay exact. 0 is refused. Read at startup only.
+#history_requesters:
 
 # credential the dashboard requires, as Basic or Bearer. A FILE and not a
 # flag: a command line is readable through ps. Its own secret rather than

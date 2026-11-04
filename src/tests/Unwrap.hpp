@@ -74,6 +74,22 @@ template <typename T>
     return *value;
 }
 
+/// The object a pointer names, for an accessor that answers null when the shape is wrong (`Json::Value::AsString`).
+///
+/// The same contract as the default-initializable `optional` overload above: a `REQUIRE` precedes every call, and the
+/// shared default is never observed. Spelled as a function rather than `*p` so the null branch is VISIBLE to the optimiser
+/// -- GCC's `-Wnull-dereference` at `-O3` does not carry a `REQUIRE(p != nullptr)` into the dereference after it, and
+/// it cannot: a failed `REQUIRE` returns through Catch2's handler as far as the compiler can see.
+/// @param value The pointer.
+/// @return What it names, or a default-constructed instance when it is null.
+template <typename T>
+    requires std::default_initializable<T>
+[[nodiscard]] T const& Unwrap(T const* value)
+{
+    static T const absent {};
+    return value != nullptr ? *value : absent;
+}
+
 /// `Unwrap` for a caller that must MUTATE or call a non-const member of what the optional holds -- a
 /// component a fixture builds late, held in an `std::optional` because it cannot be constructed in place.
 ///

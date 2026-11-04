@@ -134,6 +134,10 @@ struct Harness
     std::vector<FakeSession*> sessions; ///< The sessions handed out, while they live.
     /// What each `open` was asked about: the failed worker, or nothing for the request as described.
     std::vector<std::optional<std::string>> asked;
+    /// What each `open` said of this compile: asked for the first time, or again after a grant.
+    std::vector<Wire::AskOrigin> openOrigins;
+    /// What each fail-open lease said of this compile.
+    std::vector<Wire::AskOrigin> leaseOrigins;
     /// What `serveStored` answers.
     StoredFetch storedFetch { .kind = StoredFetchKind::Missed, .code = 0 };
     /// Every grant the launcher was told of, in order.
@@ -148,9 +152,11 @@ struct Harness
     [[nodiscard]] MissSeams Seams()
     {
         return MissSeams {
-            .open = [this](std::optional<std::string_view> failedWorker) -> std::unique_ptr<IAdmitSession> {
+            .open = [this](std::optional<std::string_view> failedWorker,
+                           Wire::AskOrigin origin) -> std::unique_ptr<IAdmitSession> {
                 events.log.emplace_back("open");
                 asked.push_back(failedWorker.has_value() ? std::optional<std::string> { *failedWorker } : std::nullopt);
+                openOrigins.push_back(origin);
                 if (openings.empty())
                     return nullptr;
                 auto script = std::move(openings.front());
@@ -183,8 +189,9 @@ struct Harness
                         out.run = CompileRun { .exitCode = compileExit, .out = {}, .err = {} };
                     return out;
                 },
-            .dispatchUnadmitted = [this]() -> std::optional<CompileRun> {
+            .dispatchUnadmitted = [this](Wire::AskOrigin origin) -> std::optional<CompileRun> {
                 events.log.emplace_back("dispatch-unadmitted");
+                leaseOrigins.push_back(origin);
                 if (!legacyDispatches)
                     return std::nullopt;
                 return CompileRun { .exitCode = compileExit, .out = {}, .err = {} };
@@ -757,11 +764,12 @@ TEST_CASE("Launcher.a-passthrough-after-an-unreached-fetch-adds-no-admit-dial", 
     harness.Open({ Grant(Wire::GrantKind::Local) });
     auto seams = harness.Seams();
     auto const dial = seams.open;
-    seams.open = [&](std::optional<std::string_view> failedWorker) -> std::unique_ptr<IAdmitSession> {
+    seams.open = [&](std::optional<std::string_view> failedWorker,
+                     Wire::AskOrigin origin) -> std::unique_ptr<IAdmitSession> {
         if (DecideAskFrom(node, node, std::nullopt, passthrough, now + std::chrono::seconds { 1 }) != AskVerdict::Ask)
             return nullptr;
         ++dials;
-        return dial(failedWorker);
+        return dial(failedWorker, origin);
     };
 
     auto const report = RunMiss(seams);
@@ -873,4 +881,48 @@ TEST_CASE("Launcher.a-plan-is-refused-only-when-every-place-to-spend-it-was-unre
     // With no scheduler named the queue is the only place, so its node down refuses the plan.
     CHECK(PlanUnreachableAt(withoutScheduler, remembering({ node })) == std::optional { node });
     CHECK_FALSE(PlanUnreachableAt(withoutScheduler, remembering({ scheduler })).has_value());
+}
+
+TEST_CASE("Launcher.a-request-after-a-grant-says-it-asks-again-for-one-compile",
+          "[launcher][admission][fleet-keyed-history]")
+{
+    // The leader counts each compile it grants ONCE: what lets it is this launcher saying, on every request after
+    // the first grant, that it asks again for the same compile (`AskOrigin::AfterGrant`).
+    SECTION("the local re-admission after a granted worker failed the compile")
+    {
+        Harness harness;
+        harness.admittedDispatchDeclines = true;
+        harness.Open({ Grant(Wire::GrantKind::Worker) });
+        harness.Open({ Grant(Wire::GrantKind::Local) });
+        (void) RunMiss(harness.Seams());
+        REQUIRE(harness.openOrigins.size() == 2);
+        CHECK(harness.openOrigins[0] == Wire::AskOrigin::First);
+        CHECK(harness.openOrigins[1] == Wire::AskOrigin::AfterGrant);
+    }
+    SECTION("the fail-open lease after an admission broke past its grant")
+    {
+        Harness harness;
+        harness.workerRefuses = { true };
+        harness.Open({ Grant(Wire::GrantKind::Worker), std::unexpected { std::string { "connection lost" } } });
+        (void) RunMiss(harness.Seams());
+        REQUIRE(harness.leaseOrigins.size() == 1);
+        CHECK(harness.leaseOrigins[0] == Wire::AskOrigin::AfterGrant);
+    }
+    SECTION("a first fail-open lease, nothing granted, is the first ask")
+    {
+        Harness harness;
+        harness.Open({ std::unexpected { std::string { "no leader" } } });
+        (void) RunMiss(harness.Seams());
+        REQUIRE(harness.leaseOrigins.size() == 1);
+        CHECK(harness.leaseOrigins[0] == Wire::AskOrigin::First);
+    }
+    SECTION("a reopening after a Stored answer -- which ran nothing -- is still the first ask")
+    {
+        Harness harness;
+        harness.Open({ Grant(Wire::GrantKind::Stored) });
+        harness.Open({ Grant(Wire::GrantKind::Local) });
+        (void) RunMiss(harness.Seams());
+        REQUIRE(harness.openOrigins.size() == 2);
+        CHECK(harness.openOrigins[1] == Wire::AskOrigin::First);
+    }
 }

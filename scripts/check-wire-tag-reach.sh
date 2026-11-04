@@ -48,13 +48,14 @@ Ran=0
 #
 # Rows are `<path>|<reason the WHOLE file is wire subject>`.
 #
-# TOTAL: 4 rows. Derived from nothing -- this is a decision, so the figure is the
+# TOTAL: 5 rows. Derived from nothing -- this is a decision, so the figure is the
 # table's own length and is asserted against it below rather than restated in prose.
 WireFiles=(
     "src/Pace/Protocol/CompileCacheWire_test.cpp|the 0xFC framing and its field grammars; the file is nothing but the wire"
     "src/Pace/Consensus/RaftWire_test.cpp|the Raft peer wire: handshake, framing, tag trailer"
     "src/Pace/Cluster/DiscoveryWire_test.cpp|the LAN discovery datagram grammar: beacon, challenge and signed proof"
     "src/Pace/Consensus/RaftTypes_test.cpp|the one case here pins a transmitted enumerator's byte"
+    "src/Pace/Protocol/FingerprintInputsWire_test.cpp|FINGERPRINT-INPUTS: its opcode byte, its row, and its request, page and index grammars"
 )
 
 Fail() {
@@ -149,10 +150,10 @@ SelfTest() {
 
     # The table's own length, asserted rather than written in prose above.
     Ran=$(( Ran + 1 ))
-    if [ "${#WireFiles[@]}" -eq 4 ]; then
-        echo "self-test ok: the table has its stated 4 rows"
+    if [ "${#WireFiles[@]}" -eq 5 ]; then
+        echo "self-test ok: the table has its stated 5 rows"
     else
-        Fail "the table has ${#WireFiles[@]} rows; the comment above says 4. Update both or neither."
+        Fail "the table has ${#WireFiles[@]} rows; the comment above says 5. Update both or neither."
     fi
 
     rm -rf "$scratch"

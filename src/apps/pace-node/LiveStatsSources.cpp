@@ -53,7 +53,7 @@ std::optional<LiveCapture> NodeLiveStatsSources::Capture(Wire::LiveSubject subje
                 return std::nullopt;
             auto const snapshot = Distributed::CollectFleet(*_parts.fleet);
             // No section and no range, which no table can refuse.
-            auto const document = AnswerFleetText(snapshot, _parts.history, {}, {});
+            auto const document = AnswerFleetText(snapshot, _parts.history, {}, {}, Wire::FleetTextFormat::Text);
             if (!document.has_value())
                 return std::nullopt;
             auto const bytes = Wire::AsBytes(document->body);
@@ -64,12 +64,14 @@ std::optional<LiveCapture> NodeLiveStatsSources::Capture(Wire::LiveSubject subje
 }
 
 std::expected<FleetTextDocument, FleetTextDeclined> NodeLiveStatsSources::FleetText(std::string_view section,
-                                                                                    std::string_view range) const
+                                                                                    std::string_view range,
+                                                                                    CompileCacheWire::FleetTextFormat format,
+                                                                                    std::string_view node) const
 {
     if (!_parts.fleet.has_value())
         return std::unexpected(FleetTextDeclined { .refusal = FleetTextRefusal::NoFleet,
                                                    .detail = "this node runs no scheduler, so it has no fleet" });
-    return AnswerFleetText(Distributed::CollectFleet(*_parts.fleet), _parts.history, section, range);
+    return AnswerFleetText(Distributed::CollectFleet(*_parts.fleet), _parts.history, section, range, format, node);
 }
 
 std::optional<LiveLeadership> NodeLiveStatsSources::Leadership() const

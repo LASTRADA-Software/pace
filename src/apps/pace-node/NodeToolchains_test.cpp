@@ -1107,10 +1107,12 @@ void WriteFile(std::filesystem::path const& path, std::string_view bytes)
     REQUIRE_FALSE(stamp.empty());
     return ServedToolchain { .compiler = path,
                              .label = "cc 1.0",
+                             .family = {},
                              .witness = Cc::ToolchainEvidence { .compiler = path,
                                                                 .banner = "cc 1.0",
                                                                 .roots = std::move(roots),
-                                                                .stamp = std::move(stamp) } };
+                                                                .stamp = std::move(stamp) },
+                             .inputs = nullptr };
 }
 } // namespace
 
@@ -1170,7 +1172,9 @@ TEST_CASE("NodeToolchains: a toolchain patched under a running node is noticed",
         // forces a fleet to agree while a machine is being repaired, and a node that
         // re-derived it would undo exactly that.
         std::map<std::string, ServedToolchain> pinned;
-        pinned.emplace("pinned", ServedToolchain { .compiler = compiler.string(), .label = {}, .witness = {} });
+        pinned.emplace(
+            "pinned",
+            ServedToolchain { .compiler = compiler.string(), .label = {}, .family = {}, .witness = {}, .inputs = nullptr });
         WriteFile(compiler, "binary-v2-which-is-longer");
         CHECK(StaleToolchains(pinned).empty());
     }

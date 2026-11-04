@@ -369,6 +369,24 @@ fault.
     four reads exactly as heavily as one that served forty thousand, so a single
     idle bucket at 0% drags a headline figure the chart beside it visibly
     contradicts.
+  - **A store that COUNTS the events itself stores a per-bucket TALLY, and that is the
+    raw reading, not a stored delta** (`FleetKeyedHistory`: compiles granted per requester
+    and per toolchain). The rule above exists because a counter OUTSIDE the history resets
+    at a restart and only a raw reading shows the step; a store that counts is the counter,
+    so nothing outside it can reset. A running total there would lose each key's first
+    bucket and the first bucket after every gap, and folding a key into `other` could not
+    keep the totals exact. What carries "nobody was watching" is COVERAGE, as for the slot
+    series: minutes counted per bucket against a full bucket's (`coverage`,
+    `full_coverage`), and the window's (`observed_minutes` of `window_minutes`) beside every
+    total -- an hour watched for one minute is `1` of `60`, never an hour's count, and a
+    demotion's gap is minutes nobody counted, never zero grants.
+  - **Such a store counts each EVENT once, and a retry is the same event**: a request that
+    asks again for a compile the leader already granted says so on the wire
+    (`CompileCacheWire::AskOrigin`), because the leader cannot tell it from a first request
+    by anything else it sees -- deduplicating by a time window or an address is a wrong
+    count that looks right. What names nobody is an explicit `unattributed` row, never
+    dropped and never guessed. The keyed stores are the LEADER's and are not handed over at
+    an election (a new leader starts empty; `coverage_since_ms` says when it began).
 - **History is a convenience: no state of its file may keep a node from starting.**
   Missing, short, wrong version, bad checksum -- every one of them starts empty and
   logs one line. It is written whole to a temporary and renamed, so a crash

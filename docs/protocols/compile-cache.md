@@ -120,7 +120,7 @@ diagnostic — the build merely got slower, forever, with nothing to show for it
 | `0x28` | *(reserved)* | Never sent. Was `roster-expired`, named for the certified roster's lapse ([#178](https://github.com/LASTRADA-Software/pace/issues/178)); what it still meant is `grant-unverifiable`. The number is burnt. |
 | `0x29` | node-key-unknown | A node proof verified, under a key this cluster does not hold for the id it named: a machine nobody admitted, or one presenting a key other than the one admitted under its id. The remedy is an admission, not a new key. |
 | `0x2a` | node-key-revoked | A node proof verified under a key the cluster has **revoked** — the forgotten machine itself. The connection is kept and marked, and every later verb on it is refused as the forgotten machine's, from any address, this machine's included. |
-| `0x2b` | node-identity-required | A verb only a machine that **proved** its identity may send — REGISTER, NODE-ANNOUNCE, HEARTBEAT, WITHDRAW, MACHINE-BUDGET — arrived on a connection that has not, loopback included. A machine ticket admits a client and never satisfies these: a ticketed connection is not sealed. |
+| `0x2b` | node-identity-required | A verb only a machine that **proved** its identity may send — REGISTER, NODE-ANNOUNCE, HEARTBEAT, WITHDRAW, MACHINE-BUDGET, MEMBER-REPORT — arrived on a connection that has not, loopback included. A machine ticket admits a client and never satisfies these: a ticketed connection is not sealed. |
 | `0x2c` | enrollment-host-full | The request came from an address that already has as many enrollment requests waiting as one host may hold, counted by the address each request first came from, so it was not recorded. Its own code rather than enrollment-full, because one address asking a lot and many machines waiting are different problems; a joiner treats both as a wait. |
 | `0x2d` | ticket-refused | An AUTH presenting a machine ticket this node did not accept: a signature that does not verify, a machine the roster does not hold, a revoked key, an audience that is not this node, or an expiry passed. One code for all of them. The message names the reason when the caller could have checked it itself -- malformed bytes, a wrong audience, an expiry -- or when it is the node's own state; a forgery, a machine the roster does not hold and a revoked key all read `not admitted by this node`, because AUTH answers any address and those three would tell a stranger which ids the roster holds. The node still counts each of them apart. Not `unauthenticated`, which says a credential is still owed; this one says a credential was presented and judged. |
 | `0x2e` | identified-caller-required | An operator's **control** verb -- `CLUSTER-ADMIT` in every form, `CLUSTER-FORGET`, `CLUSTER-SET`, `ENROLL-CONTROL` -- from a caller admitted by `--fleet-open` alone. `--fleet-open` admits a caller to what the fleet serves and never to what decides the fleet; a caller on this machine, one that proved a node key, or one presenting a verified machine ticket is past this refusal, and is then asked for an operator's standing (`operator-standing-required`). Not `not-a-member`: the caller is admitted, and the remedy is to identify itself. |
@@ -129,6 +129,7 @@ diagnostic — the build merely got slower, forever, with nothing to show for it
 | `0x31` | grant-unverifiable | The worker can check nobody's lease right now: the state its own consensus applied names no voter yet, or no leader that state counts has spoken to it for longer than the silence bound. A statement about the worker, never about the lease — a fresh grant would get the same answer. |
 | `0x32` | roster-not-yet-applied | A node proof the answering node cannot judge **yet**: its consensus has not applied the log it recovered when it started -- a lone voter before its election commits, a follower before its leader first speaks -- so the key roster it judges by may lack a key its cluster holds. Answered instead of `node-key-unknown`, which would tell an operator to admit a machine the cluster already holds. A statement about the answering node: the proving node asks again on a short backoff, and nobody needs to act. A launcher never meets it -- it proves no identity. |
 | `0x33` | operator-standing-required | An operator's **control** verb -- `CLUSTER-ADMIT` in every form, `CLUSTER-FORGET`, `CLUSTER-SET`, `ENROLL-CONTROL` -- from a caller that IS identified, by a proven node key or a verified machine ticket, whose machine holds no **voter's** seat in the state the asked node applied. A ticket proves a fleet machine, never an operator: any process on an admitted laptop can have its node mint one. These verbs are answered to the asked node's own machine and to a voter's identity alone; run the verb on a voter, or promote this machine. A caller `--fleet-open` alone admitted is still told `identified-caller-required`. |
+| `0x34` | fingerprint-inputs-unrecorded | `FINGERPRINT-INPUTS` about a fingerprint the node serves and holds no inputs for, and will not hold on an immediate retry: an operator's `--toolchain=<fingerprint>=<compiler>` pin, which is never probed, or a fingerprint the process's one capture walk did not reproduce -- recorded later only when a re-survey walks that toolchain again (its stamp moved, say) or the node restarts. Not `no-worker`, which is retriable. While the capture walk is still running the answer is `worker-toolchain-survey-in-flight` instead, and asking again shortly does help. |
 
 Every one of these is a **refusal the client answers by compiling locally**,
 never by failing. They are distinct codes rather than one "no" because they mean
@@ -234,6 +235,106 @@ for the question about the connection. A reader refuses a verdict or a standing 
 name and keeps a route bit it cannot name, so a newer node's answer is never misreported as
 a healthy one.
 
+### FINGERPRINT-INPUTS
+
+```
+[0xFC][ver][0x25][u32 len]  payload: [fingerprint][u64 cursor]
+reply, inputs:                       [0x01][fingerprint][version][schema][banner][grammar]
+                                     [u64 cursor][u64 totalFiles][u64 next, or empty][files]
+reply, index:                        [0x00][version][u32 total][entries]
+```
+
+Asks a node what one of its toolchain fingerprints was computed from: the fingerprint schema, the
+compiler's banner verbatim, the driver grammar's name, and the include-tree files, each a relative
+path and a content digest -- exactly the values the node's survey handed to the digest, never a tree
+walked again for the question. It is what the MCP `toolchain_diff` tool explains two fingerprints
+with, and the asker recomputes the fingerprint from the record before it believes it.
+
+The file list is **paged**. A reply is bounded by 4 MiB and a page is cut to fit it; `cursor` is
+the index of the page's first file, `next` where the following page starts (empty on the last
+page), and `totalFiles` how many the record holds, so a cut-short list is never mistaken for a
+whole one. `files` is a field holding, per file, a path field and a digest field. A cursor past
+the end answers an empty last page. A single file too long for a page on its own is refused
+`payload-too-large`, naming it, rather than overflowing the bound.
+
+An **empty** `fingerprint` asks for the index instead: per served toolchain `[fingerprint][label]
+[compiler][state]`, `state` one byte saying whether the node holds the inputs and, if not, why:
+`0` recorded; `1` an operator's `--toolchain=<fingerprint>=<compiler>` pin, which is never probed;
+`2` not yet captured -- a warm start took the fingerprint from the cache and the one capture walk
+per process, run off the registration path, has not finished; `3` not captured -- that walk ended
+without reproducing this fingerprint, or the toolchain arrived after it; a later re-survey that
+walks it records it. A reader refuses a byte
+past `3`. `total` beside a shorter list says the list was cut to the bound.
+
+A member read, gated as `NODE-STATUS` is: a banner and an include tree describe the host, so a
+stranger is refused `not-a-member`, and a caller only `--fleet-open` admitted is refused
+`identified-caller-required`. A fingerprint the node does not serve is refused `no-worker`. One it serves
+and holds no inputs for is refused by its reason: a pin, or a capture that ended without it, is
+`fingerprint-inputs-unrecorded`, which an immediate retry does not change (a later re-survey that
+walks the toolchain, or a restart, can); a capture still running is
+`worker-toolchain-survey-in-flight`, and so is a node whose first survey has not concluded --
+both clear by themselves, so asking again shortly helps. A node running no worker, and a cache daemon, refuse
+`dispatch-not-permitted`. No request ever starts a walk: a node answers from what its survey and
+its one capture walk recorded.
+
+### MEMBER-EDIT
+
+`0x26`, three fields: the **edit** (one byte), the member's **id**, and the edit's **value**. An operator's control verb,
+answered by the leader -- any other node answers `not-leader` naming it, as for `CLUSTER-SET` -- and only to a caller
+with an operator's standing, asked at the door before the payload is read: `identified-caller-required` for a caller
+only `--fleet-open` admits, `operator-standing-required` for a learner's ticket or key. `Ok` and empty: the change is
+**appended, not committed**.
+
+| Edit | Byte | Value |
+| --- | --- | --- |
+| set-display-name | `0x00` | The member's display name, at most 64 bytes of UTF-8 a fleet page can carry and no control byte; empty clears it. |
+| set-budget | `0x01` | One field per cache tier, by position (memory, then disk), each an eight-byte big-endian byte count or empty to leave that tier as it is. At least one, never zero, and no entry past the tiers this build carries. |
+| clear-budget | `0x02` | One field: the tier's position (one byte). Clears whatever is recorded for that tier. |
+
+An edit byte this build does not know is refused `invalid-cluster-change`, naming the byte, never read as another
+edit, and so is a tier position past the tiers the leader's build has.
+
+A display name decides nothing -- no admission, route, key or redirect reads it -- and is unique across the members,
+compared with ASCII letters folded to one case and every other byte exactly. A name spelled like another member's id
+is taken too. A taken name is refused `invalid-cluster-change`, naming the member that holds it.
+`pacectl cluster-name <member-id> [<name>]`, `pace-node --cluster-name=<id>=<name>` and the MCP `set_display_name`
+tool all send it.
+
+A **budget override** is recorded in the member's replicated record, one per tier. A `set-budget` naming both tiers is
+ONE replicated command, so it is recorded whole or not at all. Each override records:
+
+- its **id**, the Raft log index of the entry that recorded it -- the same on every replica, and never reused;
+- **when**, the leader's clock at proposal time, for display only;
+- **by whom**, the operator's MACHINE, and a label that decides nothing: the member holding the identity key the asking
+  connection proved, else the one whose key signed the verified machine ticket it presented, else -- for a caller on the
+  leader's own machine over loopback -- the leader's own member id. An MCP call or a one-shot verb on a member that is
+  not the leader reaches the leader over that member's own proven connection, and MCP on the leader itself presents the
+  leader's own proof. It is absent only when no route named a member: a caller `--fleet-open` alone admitted.
+
+The leader validates the figure (never zero) and that the member is recorded; only the member knows whether it has the
+tier and what it had configured, which it reports with MEMBER-REPORT. `pacectl cluster-budget
+<id>:memory=<size>[,disk=<size>]`, `pace-node --cluster-budget=<id>:memory=<size>[,disk=<size>]` and the MCP
+`set_cache_budget` tool send `set-budget`, all through one grammar: `--cache-memory`'s and `--cache-disk`'s sizes,
+never a share of RAM (it would size the member by another machine's memory) and never zero. `cluster-budget-clear`,
+`--cluster-budget-clear` and `clear_cache_budget` send `clear-budget`.
+
+### MEMBER-REPORT
+
+`0x27`, two fields: the **report** (one byte) and its **value**. A member reporting about its OWN record: **no member id
+travels**, and the leader takes the member from the identity key the connection proved. So only a connection that
+proved a live key sends it (`node-identity-required` otherwise, a ticket and unproven loopback included), a report is
+only ever about the machine sending it, and no operator tool builds one. Answered by the leader; `Ok` and empty, the
+change appended.
+
+| Report | Byte | Value |
+| --- | --- | --- |
+| record-baseline | `0x00` | Three fields: the tier's position (one byte), what the member had configured for it, and the override's id it was measured against (eight bytes each). |
+| drop-override | `0x01` | Two fields: the tier's position (one byte) and the id of the override the member's own later configuration outranks (eight bytes). |
+
+Both name the override by its id. A baseline attaches only to that override and only once: one replaced or cleared
+since -- even with the same figure in the same second -- never inherits it, and the first report wins. A drop removes
+only that override; one an operator set since stands. A report naming a stale override is a no-op.
+
 ### FLEET-SUMMARY
 
 ```
@@ -319,9 +420,10 @@ heartbeats the same machine-wide in-flight count, so the entries fill up togethe
 and the pool behaves as one rather than advertising N times the machine.
 
 `REGISTER`, `HEARTBEAT`, `LEASE` and `RELEASE` go to the scheduler, along with the
-four cluster-administration verbs (`CLUSTER-STATUS` `0x08`, `CLUSTER-SET` `0x09`,
-`CLUSTER-FORGET` `0x0a`, `CLUSTER-ADMIT` `0x0b`), which the **leader** answers and
-only to a member. `COMPILE` goes to a worker on the **same** `--listen-node` port
+cluster-administration verbs (`CLUSTER-STATUS` `0x08`, `CLUSTER-SET` `0x09`,
+`CLUSTER-FORGET` `0x0a`, `CLUSTER-ADMIT` `0x0b`, [`MEMBER-EDIT`](#member-edit) `0x26`,
+[`MEMBER-REPORT`](#member-report) `0x27`),
+which the **leader** answers and only to a member. `COMPILE` goes to a worker on the **same** `--listen-node` port
 that carries its cache verbs and, where the node's mode serves them, the scheduler's:
 [#290](https://github.com/LASTRADA-Software/pace/issues/290) merged what were
 three ports into one `0xFC` surface, so the listener is no longer the policy. Which

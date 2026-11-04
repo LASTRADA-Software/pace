@@ -7,9 +7,11 @@
 #include <Pace/Core/WireFields.hpp>
 #include <Pace/Core/WireFrame.hpp>
 #include <Pace/Protocol/NodeConditionWire.hpp>
+#include <Pace/Protocol/NodeStatusDetailWire.hpp>
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cassert>
 #include <charconv>
 #include <chrono>
@@ -231,7 +233,12 @@ using WireVersion = std::uint8_t;
 /// charge, the object key and the source path), where an empty charge means none was stated. An
 /// older client cannot step over a pulse on a verb it does not know, which is
 /// the argument that moved the floor at version 3.
-inline constexpr WireVersion CurrentVersion = 16;
+///
+/// **17 lets FLEET-TEXT carry the fleet JSON** (the MCP surface): the request gained a trailing
+/// `format` field, and the reply for `Json` is `/fleet.json`'s body byte for byte. `WireSurface`
+/// also gained `Mcp`. A version-16 request has three fields where this build reads four, so it is
+/// refused `UnsupportedVersion`, naming the range, by `FleetTextResponder` before any field is read.
+inline constexpr WireVersion CurrentVersion = 17;
 
 /// The oldest version this build still accepts. Equal to `CurrentVersion` while
 /// only one version exists; widen the range when a second one ships and this
@@ -396,7 +403,12 @@ inline constexpr WireVersion CurrentVersion = 16;
 /// Version 16 moves it for version 3's reason: ADMIT's reply may carry `Status::Progress`, and a
 /// REPLY has a status byte and no kind, so a version-15 client could only read a pulse as a
 /// transport failure. Its request is refused by number, naming the range, before a byte is sent.
-inline constexpr WireVersion MinSupportedVersion = 16;
+///
+/// Version 17 moves it for version 3's reason: FLEET-TEXT's field count is part of the grammar, and
+/// a version-16 request would otherwise be answered as a malformed frame, a confident wrong
+/// diagnosis for a version mismatch. `FleetTextResponder` judges the version itself, because
+/// nothing earlier on the Fleet family's path does.
+inline constexpr WireVersion MinSupportedVersion = 17;
 
 /// Size of the fixed request header: magic, version, op, payload length.
 inline constexpr std::size_t RequestHeaderSize = WireFrame::HeaderSize;
@@ -842,6 +854,46 @@ enum class Op : std::uint8_t
     ///
     /// A machine speaking for itself, so it requires a proven identity as `Register` does.
     MachineBudget = 0x24,
+
+    /// Ask a node what one of its toolchain fingerprints was computed from: the schema, the compiler's banner,
+    /// the driver grammar's name and the include-tree files with their content digests, one page at a time
+    /// (the MCP `toolchain_diff` tool).
+    ///
+    /// **The record the digest was computed FROM**, kept by the node's survey (`Cc::FingerprintInputs`) and
+    /// never re-gathered when asked: a re-walk would describe the tree as it is now rather than what the
+    /// fingerprint says, and the asker recomputes the digest from the record before it believes a word of it.
+    /// An EMPTY fingerprint asks for the index instead -- each served fingerprint with its label and compiler
+    /// path -- which is how a toolchain named by label or path is resolved to one fingerprint.
+    ///
+    /// A member read, gated as `NodeStatus` is: a banner and an include tree describe the host, so a stranger is
+    /// refused, and a caller only `--fleet-open` admitted is refused too, as the configuration is withheld from
+    /// it. The reply is bounded by `FingerprintInputsReplyCeiling`, and the file list is PAGED under it -- a
+    /// toolchain holds thousands of headers -- so nothing is ever cut short in silence: a page says where the next
+    /// one starts and how many files there are in all. `Ok | Error` only, so no version moved.
+    FingerprintInputs = 0x25,
+
+    /// An operator editing one member's replicated record: which edit is the first field
+    /// (`MemberEditVerb`), the member's id the second, and the edit's value the third -- for
+    /// `SetDisplayName`, the name, empty to clear it.
+    ///
+    /// **One verb for every edit of a member record that is not an admission**, with the edit a
+    /// TRANSMITTED enum inside it, so the next edit (a per-node budget override) is a row of
+    /// `MemberEditVerbTable` rather than another opcode, another `RelocatedVerbs` row and another
+    /// switch arm in two binaries. A control verb (`OperatorStanding`), answered by the LEADER, which
+    /// proposes the replicated command; any other node answers `NotLeader` naming the leader, as
+    /// CLUSTER-SET does. `Ok` and empty: the change is appended, not committed. A new verb within
+    /// version 17 -- `Ok | Error` only, and a build that predates it refuses the opcode by name.
+    MemberEdit = 0x26,
+
+    /// A member reporting about its OWN replicated record: which report is the first field
+    /// (`MemberReportVerb`), its record the second -- for `RecordBaseline`, what the member had configured for a
+    /// tier when it applied an override; for `DropOverride`, the override its own later configuration outranks.
+    ///
+    /// **No member id travels**: the leader takes the member from the identity key the connection PROVED, so a
+    /// report is only ever about the machine sending it, and no operator tool can build one. A joining machine's
+    /// verb (`ProvenNodeOnly`), answered by the LEADER, which proposes the replicated command; any other node
+    /// answers `NotLeader`. `Ok` and empty: appended, not committed. A new verb within version 17.
+    MemberReport = 0x27,
 };
 
 /// Reply status, the first byte of every reply.
@@ -1414,6 +1466,17 @@ enum class ErrorCode : std::uint8_t
     /// batch this change lands beside assigns; two builds that each read 0x32 their own way would
     /// disagree about a refusal while both looked correct.
     OperatorStandingRequired = 0x33,
+
+    /// FINGERPRINT-INPUTS about a fingerprint this node serves and holds no inputs for, and will not hold on an
+    /// immediate retry: an operator's `--toolchain=<fingerprint>=<compiler>` pin, which is never probed, or a fingerprint
+    /// this process's one capture walk did not reproduce (recorded later only if a re-survey walks it again, e.g. after its
+    /// stamp moved, or at the next start).
+    ///
+    /// Its own code rather than `NoWorker`, which is RETRIABLE -- a booting fleet has none yet -- and would send the
+    /// asker round again for an answer that cannot change. The transient case, a capture walk still running, is
+    /// `WorkerToolchainSurveyInFlight`, which is retriable and true. A new byte and no version bump: the reply
+    /// grammar is unchanged, and a reader that predates it reads a refusal it does not know.
+    FingerprintInputsUnrecorded = 0x34,
 };
 
 /// Bit for `status` within an `OpDescriptor::legalStatuses` mask.
@@ -1599,9 +1662,9 @@ enum class IdentityRequirement : std::uint8_t
     ProvenNodeOnly,
 
     /// Only a caller admitted by a route that IDENTIFIES it -- this machine, a proven node key or
-    /// a verified machine ticket -- and never by `--fleet-open` alone. No verb names it any more: it
-    /// is `OperatorStanding`'s PREREQUISITE, asked first so a caller `--fleet-open` alone admitted is
-    /// still told that (`ErrorCode::IdentifiedCallerRequired`) rather than to go and find a voter.
+    /// a verified machine ticket -- and never by `--fleet-open` alone. `OperatorStanding`'s PREREQUISITE,
+    /// asked first so a caller `--fleet-open` alone admitted is still told that
+    /// (`ErrorCode::IdentifiedCallerRequired`) rather than to go and find a voter. No verb names it.
     /// Which routes identify is a column of the route table (`Distributed::MembershipRoutes`).
     IdentifiedCaller,
 
@@ -2058,6 +2121,14 @@ inline constexpr std::size_t MaxRefusalReply = 64 * 1024;
 /// four GiB, which no fleet's report comes near.
 inline constexpr std::size_t MaxReportReply = 64U * 1024U * 1024U;
 
+/// The largest FINGERPRINT-INPUTS reply a client reads, and the most one page of a toolchain's inputs may fill.
+///
+/// A ceiling a PAGE is cut to rather than one a record must fit: a toolchain's include tree runs to thousands of
+/// files, so the responder pages the list under this bound and a reply that would exceed it is never built. Four
+/// MiB holds tens of thousands of typical entries -- a relative path and a 32-character digest -- so a typical tree
+/// is one to a few pages, while a single pathological entry that could not fit a page alone is refused by name.
+inline constexpr std::size_t FingerprintInputsReplyCeiling = 4U * 1024U * 1024U;
+
 /// The largest MINT-TICKET reply a client reads: one machine ticket, whose decoder refuses more
 /// than 1 KiB (`Distributed::MaxMachineTicketBytes`, which this dependency-free header cannot
 /// name), or a refusal -- so the refusal ceiling, which holds both.
@@ -2353,7 +2424,7 @@ inline constexpr std::array OpTable {
                    .identity = IdentityRequirement::ProvenNodeOnly },
     OpDescriptor { .code = Op::Lease,
                    .name = "lease",
-                   .fieldCount = 5, // fingerprint, key, accepted codecs, exclusions, toolchain label
+                   .fieldCount = 6, // fingerprint, key, accepted codecs, exclusions, toolchain label, ask origin
                    .legalStatuses = static_cast<std::uint8_t>(StatusBit(Status::Ok) | StatusBit(Status::Error)),
                    .preAuth = RequiresAuth,
                    .maxPayload = BoundedTo(MaxControlPayload),
@@ -2431,6 +2502,30 @@ inline constexpr std::array OpTable {
                    .maxReply = ReplyBoundedTo(MaxReportReply),
                    .family = VerbFamily::Scheduler,
                    .identity = IdentityRequirement::OperatorStanding },
+    // With the cluster control verbs and for their reason: it changes what every node believes,
+    // so the leader's scheduler answers it, behind the same gate and the same standing. Every edit
+    // it carries is an operator's; what a member says about itself is MEMBER-REPORT, below.
+    OpDescriptor { .code = Op::MemberEdit,
+                   .name = "member-edit",
+                   .fieldCount = 3, // edit (`MemberEditVerb`, one byte), member id, value
+                   .legalStatuses = static_cast<std::uint8_t>(StatusBit(Status::Ok) | StatusBit(Status::Error)),
+                   .preAuth = RequiresAuth,
+                   .maxPayload = BoundedTo(MaxControlPayload),
+                   .maxReply = ReplyBoundedTo(MaxReportReply),
+                   .family = VerbFamily::Scheduler,
+                   .identity = IdentityRequirement::OperatorStanding },
+    // A member's report about its OWN record: a fact only that machine can state, so only a connection
+    // that PROVED a live identity key sends it -- no ticket and no unproven loopback -- and the member it
+    // is about is the one holding that key, never a field of the frame.
+    OpDescriptor { .code = Op::MemberReport,
+                   .name = "member-report",
+                   .fieldCount = 2, // report (`MemberReportVerb`, one byte), value
+                   .legalStatuses = static_cast<std::uint8_t>(StatusBit(Status::Ok) | StatusBit(Status::Error)),
+                   .preAuth = RequiresAuth,
+                   .maxPayload = BoundedTo(MaxControlPayload),
+                   .maxReply = ReplyBoundedTo(MaxRefusalReply),
+                   .family = VerbFamily::Scheduler,
+                   .identity = IdentityRequirement::ProvenNodeOnly },
     // The fleet cache verbs: their twins' shapes -- the same objects -- and their own family,
     // which is where their policy lives. `AddressAdmits` because admission is the fold's answer
     // (a proven key, a ticket, loopback), never a column of this table.
@@ -2461,8 +2556,8 @@ inline constexpr std::array OpTable {
     // from a dead leader against its sliding idle bound. A queue is as long as the queue is.
     OpDescriptor { .code = Op::Admit,
                    .name = "admit",
-                   .fieldCount = 9, // kind, fingerprint, cacheKey, sourcePath, treeLabel, storable, codecs, exclusions,
-                                    // toolchain label
+                   .fieldCount = 10, // kind, fingerprint, cacheKey, sourcePath, treeLabel, storable, codecs,
+                                     // exclusions, toolchain label, ask origin
                    .legalStatuses = static_cast<std::uint8_t>(StatusBit(Status::Ok) | StatusBit(Status::Error)
                                                               | StatusBit(Status::Progress)),
                    .preAuth = RequiresAuth,
@@ -2520,6 +2615,21 @@ inline constexpr std::array OpTable {
                    .preAuth = OpenBeforeAuth,
                    .maxPayload = BoundedTo(MaxExplainAdmissionPayload),
                    .maxReply = ReplyBoundedTo(MaxReportReply),
+                   .family = VerbFamily::Node,
+                   .identity = IdentityRequirement::AddressAdmits },
+    // A member read beside node-status, and gated as it is: a banner and an include tree describe the host.
+    // `AddressAdmits` is the DOOR, not the whole rule: the node's handler answers only a caller a route IDENTIFIES
+    // (this machine, a proven key, a verified ticket) and refuses one `--fleet-open` admitted alone
+    // `IdentifiedCallerRequired` -- NODE-STATUS's precedent, which withholds its effective configuration from that
+    // caller. Not `IdentifiedCaller` in this column, which would refuse the whole family's verbs to it; the reply here
+    // is nothing BUT host detail, so this verb refuses where node-status withholds.
+    OpDescriptor { .code = Op::FingerprintInputs,
+                   .name = "fingerprint-inputs",
+                   .fieldCount = 2, // fingerprint (empty asks for the index), page cursor
+                   .legalStatuses = static_cast<std::uint8_t>(StatusBit(Status::Ok) | StatusBit(Status::Error)),
+                   .preAuth = RequiresAuth,
+                   .maxPayload = BoundedTo(MaxControlPayload),
+                   .maxReply = ReplyBoundedTo(FingerprintInputsReplyCeiling),
                    .family = VerbFamily::Node,
                    .identity = IdentityRequirement::AddressAdmits },
     OpDescriptor { .code = Op::NodeMetrics,
@@ -2622,7 +2732,7 @@ inline constexpr std::array OpTable {
     // fleet map.
     OpDescriptor { .code = Op::FleetText,
                    .name = "fleet-text",
-                   .fieldCount = 3, // section key, range key, dashboard token
+                   .fieldCount = 5, // section key, range key, dashboard token, format, node id
                    .legalStatuses = static_cast<std::uint8_t>(StatusBit(Status::Ok) | StatusBit(Status::Error)),
                    .preAuth = RequiresAuth,
                    .maxPayload = BoundedTo(MaxControlPayload),
@@ -2778,29 +2888,30 @@ static_assert(EveryOpcodeIsDistinct(), "two verbs claim one wire byte; the later
 /// `Register`, `NodeAnnounce`, `Heartbeat` and `Withdraw` decide where the fleet's work is sent and
 /// what it knows about each machine, so an address may not stand in for who is sending them.
 /// `MachineBudget` joins them: a machine stating how much memory it may be charged is a figure the
-/// leader places work by. Every other verb is a CLIENT's, an operator's or a peer handshake's, and an address still admits
-/// those
-/// -- which is owner decision 5 on #178 stated as a table rather than as a list at the gate.
+/// leader places work by. `MemberReport` too: a member reporting about its own record (an override's baseline, an
+/// override its own configuration outranks) speaks for the machine holding the proven key, which is how the leader
+/// knows WHICH member it is about. Every other verb is a CLIENT's, an operator's or a peer handshake's, and an address
+/// still admits those -- which is owner decision 5 on #178 stated as a table rather than as a list at the gate.
 ///
 /// Both directions, because each is a different mistake: a joining verb left open is an endpoint
 /// anybody on an admitted host can register, and any other verb marked here refuses every launcher.
-/// @return True when the column names exactly those five.
+/// @return True when the column names exactly those six.
 [[nodiscard]] constexpr bool JoiningVerbsNeedAnIdentity() noexcept
 {
     return std::ranges::all_of(OpTable, [](OpDescriptor const& row) {
         auto const joining = row.code == Op::Register || row.code == Op::NodeAnnounce || row.code == Op::Heartbeat
-                             || row.code == Op::Withdraw || row.code == Op::MachineBudget;
+                             || row.code == Op::Withdraw || row.code == Op::MachineBudget || row.code == Op::MemberReport;
         return joining == (row.identity == IdentityRequirement::ProvenNodeOnly);
     });
 }
 
 static_assert(JoiningVerbsNeedAnIdentity(),
-              "exactly Register, NodeAnnounce, Heartbeat, Withdraw and MachineBudget require a proven identity -- see "
-              "IdentityRequirement");
+              "exactly Register, NodeAnnounce, Heartbeat, Withdraw, MachineBudget and MemberReport require a proven "
+              "identity -- see IdentityRequirement");
 
 /// Whether exactly an operator's CONTROL verbs require an operator's standing.
 ///
-/// The cluster verbs that change the fleet -- admit, admit as a learner, forget, set -- and the
+/// The cluster verbs that change the fleet -- admit, admit as a learner, forget, set, edit a member -- and the
 /// enrollment decisions (`EnrollControl`: approve, reject, arm or disarm auto-approval,
 /// clear, and the list that names the joiners' keys). Both directions: a control verb left at
 /// `AddressAdmits` is one an anonymous caller on a `--fleet-open` node sends, and any other verb
@@ -2808,20 +2919,22 @@ static_assert(JoiningVerbsNeedAnIdentity(),
 /// `MintTicket` are not rows: each already answers this machine alone, a narrower rule its
 /// responder enforces. And no verb names `IdentifiedCaller`, which is only `OperatorStanding`'s
 /// prerequisite: a verb that named it would let a learner's ticket decide the fleet again.
-/// @return True when the column names exactly those five.
+/// @return True when the column names exactly those six.
 [[nodiscard]] constexpr bool ControlVerbsNeedOperatorStanding() noexcept
 {
     return std::ranges::all_of(OpTable, [](OpDescriptor const& row) {
         auto const control = row.code == Op::ClusterSet || row.code == Op::ClusterForget || row.code == Op::ClusterAdmit
-                             || row.code == Op::ClusterAdmitLearner || row.code == Op::EnrollControl;
+                             || row.code == Op::ClusterAdmitLearner || row.code == Op::EnrollControl
+                             || row.code == Op::MemberEdit;
         return control == (row.identity == IdentityRequirement::OperatorStanding)
                && row.identity != IdentityRequirement::IdentifiedCaller;
     });
 }
 
-static_assert(ControlVerbsNeedOperatorStanding(),
-              "exactly the cluster control verbs and EnrollControl require an operator's standing, and no verb names "
-              "IdentifiedCaller -- see IdentityRequirement");
+static_assert(
+    ControlVerbsNeedOperatorStanding(),
+    "exactly the cluster control verbs, MemberEdit and EnrollControl require an operator's standing, and no verb names "
+    "IdentifiedCaller -- see IdentityRequirement");
 
 /// Whether asking again, UNCHANGED, may be answered differently -- with nobody acting on the
 /// request in between.
@@ -3102,6 +3215,13 @@ inline constexpr std::array ErrorTable {
                                         "nobody to it",
                       .retry = RetryWillNotHelp,
                       .retryWhy = "who the caller is does not change by asking again" },
+    ErrorDescriptor { .code = ErrorCode::FingerprintInputsUnrecorded,
+                      .name = "fingerprint-inputs-unrecorded",
+                      .defaultMessage = "this node serves that fingerprint and holds no record of what it was computed "
+                                        "from",
+                      .retry = RetryWillNotHelp,
+                      .retryWhy = "an immediate retry meets the same record: a pin is never probed, and a fingerprint the "
+                                  "capture missed is recorded only when a re-survey walks it again or the node restarts" },
     ErrorDescriptor { .code = ErrorCode::OperatorStandingRequired,
                       .name = "operator-standing-required",
                       .defaultMessage = "an operator's control verb needs this machine, or a voter's identity; a machine "
@@ -4590,6 +4710,18 @@ struct CapacityFields
     ///
     /// **Owned, not a view**, for `version`'s reason.
     std::vector<std::string> interfaceAddresses {};
+
+    /// Which compiler family this registration's toolchain belongs to, as `Cc::ToolchainFamily` derives it from
+    /// the BANNER -- `gcc`, `g++`, `clang`, `apple-clang`, `cl` -- for the upgrade report, which compares versions
+    /// within a family and never across one. Empty means "did not say": no banner was read, or no family row
+    /// knows the driver, and such a toolchain joins no family.
+    ///
+    /// Per registration, like `toolchainLabel` and for its reason. **Advice only, never an identity**: the
+    /// fingerprint decides every match. Field TEN of the record, appended last so a record from a build that
+    /// predates it decodes with this empty; `CompileCacheWire_test` pins the position.
+    ///
+    /// **Owned, not a view**, for `version`'s reason.
+    std::string toolchainFamily {};
 };
 
 /// Frame a capacity record as one nested field list.
@@ -4628,7 +4760,8 @@ struct CapacityFields
                                 std::span<std::byte const> { reservedMemory },
                                 AsBytes(capacity.toolchainLabel),
                                 AsBytes(capacity.displayName),
-                                std::span<std::byte const> { addresses } });
+                                std::span<std::byte const> { addresses },
+                                AsBytes(capacity.toolchainFamily) });
 }
 
 /// Read a capacity record back.
@@ -4716,6 +4849,9 @@ struct CapacityFields
     if (!addresses.has_value())
         return std::nullopt;
     out.interfaceAddresses = *std::move(addresses);
+    // Free-form here for the label's reason; `SchedulerService::Register` refuses it where it enters when it is not
+    // UTF-8 or longer than `MaxToolchainFamilyBytes`. Absent from an older peer, which reads as "did not say".
+    out.toolchainFamily = std::string { AsStringView(at(10)) };
     return out;
 }
 
@@ -4790,6 +4926,19 @@ static_assert(std::ranges::all_of(std::to_array<std::string_view>({ "cl 19.44.35
                                   [](std::string_view label) { return label.size() * 2 <= MaxToolchainLabelBytes; }),
               "MaxToolchainLabelBytes must hold twice the longest real toolchain label");
 
+/// The longest toolchain family a scheduler records, in bytes: a REGISTER's `CapacityFields::toolchainFamily`.
+///
+/// Sized from what a family IS: one row key of `Cc::ToolchainFamily`'s table, the longest of which is
+/// `apple-clang++`. Twice the longest known, so a family a row or two longer still fits; a peer sending more is
+/// refused and counted where it enters, never truncated, as the label is.
+inline constexpr std::size_t MaxToolchainFamilyBytes = 32;
+
+static_assert(
+    std::ranges::all_of(std::to_array<std::string_view>(
+                            { "gcc", "g++", "clang", "clang++", "apple-clang", "apple-clang++", "cl", "clang-cl" }),
+                        [](std::string_view family) { return family.size() * 2 <= MaxToolchainFamilyBytes; }),
+    "MaxToolchainFamilyBytes must hold twice the longest toolchain family");
+
 /// The longest toolchain fingerprint a scheduler records, in bytes: a LEASE's and a REGISTER's.
 ///
 /// KEPT, as the label is: a lease refused `no-worker` is remembered under its fingerprint and named
@@ -4797,7 +4946,7 @@ static_assert(std::ranges::all_of(std::to_array<std::string_view>({ "cl 19.44.35
 /// 64 KiB of text a peer chose; and a worker entry is filed under the fingerprint it registered.
 /// Refused and counted past it, like the label.
 ///
-/// Sized from what a fingerprint IS. `ComputeToolchainFingerprint` -- one translation unit, which
+/// Sized from what a fingerprint IS. `ComputeToolchainFingerprint` -- one header-only function, which
 /// the launcher and the worker both compile -- renders a `KeyDigest`: `KeyDigest::HexLength`, 32
 /// lowercase hex characters. 64 is twice that, room for a digest twice as wide before this bound
 /// has to move. The `static_assert` holding it there sits in `pace-cc/Dispatch.cpp`, where the
@@ -4860,6 +5009,24 @@ inline constexpr std::size_t MaxNodeVersionBytes = 128;
 /// on the wire.
 inline constexpr std::size_t MaxDisplayNameBytes = 255;
 
+/// Whether a request asks the leader for a compile for the FIRST time, or once more for a compile the leader
+/// already GRANTED in this same invocation: the re-admission after a granted worker failed the compile
+/// (`LocalOnly`, that worker excluded), or the fail-open `LEASE` after an admission broke past its grant.
+///
+/// What lets the leader's demand history count one compile ONCE (`ICompileDemandSink`): the leader cannot tell
+/// a retry from a first request by anything else it sees -- a first request may be `LocalOnly` with exclusions
+/// too -- and guessing by a time window or an address would be a wrong count that looks right. The client's own
+/// statement: a client that misstates it moves only its own row. Carried by ADMIT and LEASE, the last field of
+/// each. Explicit values: transmitted. `Last` is the count, never a value.
+enum class AskOrigin : std::uint8_t
+{
+    /// The first time the leader is asked for this compile.
+    First = 0,
+    /// The leader already granted this compile once in this invocation; this asks again for the same compile.
+    AfterGrant = 1,
+    Last = 2
+};
+
 /// A client asking the scheduler where to compile.
 struct LeaseRequest
 {
@@ -4882,6 +5049,10 @@ struct LeaseRequest
     /// kept, and what is kept is gated where it enters -- as the key and the fingerprint are, against
     /// `MaxLeaseKeyBytes` and `MaxToolchainFingerprintBytes`. Empty is always acceptable.
     std::string_view toolchainLabel {};
+
+    /// Whether the leader already granted this compile once in this invocation (`AskOrigin`): a fail-open lease
+    /// after an admission broke past its grant says `AfterGrant`, so the compile is not counted twice.
+    AskOrigin origin { AskOrigin::First };
 };
 
 /// The same, as views into a received payload.
@@ -4892,6 +5063,7 @@ struct LeaseView
     CodecList acceptedCodecs;
     std::vector<std::span<std::byte const>> excluded; ///< Borrowed from the payload, newest first.
     std::span<std::byte const> toolchainLabel;        ///< Empty when the client did not say.
+    AskOrigin origin { AskOrigin::First };            ///< Whether this asks again for a granted compile.
 };
 
 /// A client handing a worker one translation unit.
@@ -5167,7 +5339,7 @@ struct RegisterReplyFields
 /// come across as zero. Sending just the node-scoped ones would make the arity
 /// depend on a table the two peers might disagree about, and a misaligned reading is
 /// worse than five wasted words.
-inline constexpr std::size_t HistorySlotCount = 10;
+inline constexpr std::size_t HistorySlotCount = 11;
 
 /// One closed bucket of a node's own history.
 ///
@@ -5178,12 +5350,24 @@ inline constexpr std::size_t HistorySlotCount = 10;
 /// and the one a decoder trusted would be the one nothing kept correct. Nor would a
 /// fold help: the leader merges these into a FLEET-wide series whose peak is the
 /// peak of the sums, which is not the sum of the peaks. The nested record is
-/// variable-arity, so a build that finds a use can add a field without a version.
+/// variable-arity, so a build that finds a use can add a field without a version --
+/// which is how the absence mask arrived, as an optional fourth field.
 struct HistoryBucketFields
 {
     std::uint64_t startMillis { 0 };                       ///< Wall-clock start of the bucket.
     std::uint64_t sampleMillis { 0 };                      ///< When the reading in `values` was taken.
     std::array<std::uint64_t, HistorySlotCount> values {}; ///< The readings, positionally.
+    /// The slots that carry no reading, one bit per position (bit `n` is `values[n]`). The record's fourth
+    /// field, OPTIONAL: a peer that sends none had no slot that could be absent, so zero.
+    ///
+    /// Travels because nothing can recompute it: a CPU reading the machine could not take is not a zero.
+    std::uint64_t absent { 0 };
+    /// How many positions the sender's record actually carried, at most `HistorySlotCount`.
+    ///
+    /// Decoded, never encoded: a receiver reads the slots a narrower peer never sent by the policy of the
+    /// SLOT, which this dependency-free header cannot see -- so it reports the width and the side that can
+    /// see `FleetMetricTable` decides (`Distributed::HistoryFromWire`).
+    std::size_t carried { HistorySlotCount };
 };
 
 /// The most closed buckets one heartbeat may carry.
@@ -5197,12 +5381,12 @@ inline constexpr std::size_t MaxHistoryBucketsPerHeartbeat = 128;
 
 /// What one encoded bucket costs at most, framing included.
 ///
-/// Three fields, each a length-prefixed word or array, plus the prefix on the record
+/// Four fields, each a length-prefixed word or array, plus the prefix on the record
 /// itself. Written out rather than measured so the ceiling below is a compile-time
 /// fact, and in terms of `FieldPrefixSize` rather than a literal 4, which would
 /// restate the framing contract beside the one place it is defined.
 inline constexpr std::size_t MaxHistoryBucketBytes =
-    (2 * (sizeof(std::uint64_t) + WireFields::FieldPrefixSize))
+    (3 * (sizeof(std::uint64_t) + WireFields::FieldPrefixSize))
     + ((HistorySlotCount * sizeof(std::uint64_t)) + WireFields::FieldPrefixSize) + WireFields::FieldPrefixSize;
 
 /// The batch fits, with the rest of a heartbeat still to fit beside it.
@@ -5241,7 +5425,8 @@ static_assert(MaxHistoryBucketsPerHeartbeat * MaxHistoryBucketBytes <= HistoryPa
         owned.push_back(
             WireFields::Encode({ std::span<std::byte const> { WireFields::ToBigEndian<std::uint64_t>(bucket.startMillis) },
                                  std::span<std::byte const> { WireFields::ToBigEndian<std::uint64_t>(bucket.sampleMillis) },
-                                 std::span<std::byte const> { packed } }));
+                                 std::span<std::byte const> { packed },
+                                 std::span<std::byte const> { WireFields::ToBigEndian<std::uint64_t>(bucket.absent) } }));
         fields.emplace_back(owned.back());
     }
     return WireFields::Encode(WireFields::FieldList { fields });
@@ -5251,8 +5436,10 @@ static_assert(MaxHistoryBucketsPerHeartbeat * MaxHistoryBucketBytes <= HistoryPa
 ///
 /// Tolerant of a peer carrying more slots than this build knows and of one carrying
 /// fewer, exactly as `DecodeLoad` is: the extra are ignored and the missing stay
-/// zero. Strict about WIDTH, because a slot at the wrong width is a number nobody
-/// can interpret rather than one somebody can ignore.
+/// zero, with `carried` saying how many there were so the side that knows each slot's
+/// meaning can read the hole. The absence mask is optional for the same reason; a
+/// field past it is a newer peer's and ignored. Strict about WIDTH, because a slot at
+/// the wrong width is a number nobody can interpret rather than one somebody can ignore.
 ///
 /// @param field The nested record's bytes.
 /// @return The buckets, or nullopt when a field is present at the wrong width.
@@ -5290,13 +5477,21 @@ static_assert(MaxHistoryBucketsPerHeartbeat * MaxHistoryBucketBytes <= HistoryPa
         if (packed.size() % sizeof(std::uint64_t) != 0)
             return std::nullopt;
         auto const carried = packed.size() / sizeof(std::uint64_t);
-        for (auto const slot: std::views::iota(std::size_t { 0 }, std::min(carried, HistorySlotCount)))
+        bucket.carried = std::min(carried, HistorySlotCount);
+        for (auto const slot: std::views::iota(std::size_t { 0 }, bucket.carried))
         {
             auto const read = WireFields::FromBigEndian<std::uint64_t>(
                 packed.subspan(slot * sizeof(std::uint64_t), sizeof(std::uint64_t)));
             if (!read.has_value())
                 return std::nullopt;
             bucket.values[slot] = *read;
+        }
+        if (parts->size() > 3)
+        {
+            auto const absent = WireFields::FromBigEndian<std::uint64_t>((*parts)[3]);
+            if (!absent.has_value())
+                return std::nullopt;
+            bucket.absent = *absent;
         }
         out.push_back(bucket);
     }
@@ -5406,7 +5601,7 @@ inline constexpr std::size_t MaxAddressListBytes = MaxInterfaceAddresses * Detai
 
 /// The longest capacity record `EncodeCapacity` writes, field by field in its order: cores, memory,
 /// class, reserved cores, the cache record (one field holding the tier list, each tier one u64),
-/// version, reserved memory, toolchain label, display name, interface addresses.
+/// version, reserved memory, toolchain label, display name, interface addresses, toolchain family.
 inline constexpr std::size_t MaxCapacityRecordBytes =
     Detail::FramedField(sizeof(std::uint32_t)) + Detail::FramedField(sizeof(std::uint64_t)) + Detail::FramedField(1)
     + Detail::FramedField(sizeof(std::uint32_t))
@@ -5414,7 +5609,7 @@ inline constexpr std::size_t MaxCapacityRecordBytes =
         Detail::FramedField(CarriedCacheTiers * Detail::FramedField(Detail::FramedField(sizeof(std::uint64_t)))))
     + Detail::FramedField(MaxNodeVersionBytes) + Detail::FramedField(sizeof(std::uint64_t))
     + Detail::FramedField(MaxToolchainLabelBytes) + Detail::FramedField(MaxDisplayNameBytes)
-    + Detail::FramedField(MaxAddressListBytes);
+    + Detail::FramedField(MaxAddressListBytes) + Detail::FramedField(MaxToolchainFamilyBytes);
 
 /// The longest load record `EncodeLoad` writes WITHOUT its two variable passengers, whose own
 /// shares cover them: CPU, memory, scratch, the cache record (the tier list, each tier four u64s,
@@ -5851,13 +6046,15 @@ struct WithdrawView
 {
     auto const codecs = EncodeCodecList(request.acceptedCodecs);
     auto const excluded = EncodeExclusions(request.excluded);
+    auto const origin = std::array<std::byte, 1> { static_cast<std::byte>(static_cast<std::uint8_t>(request.origin)) };
     return Detail::EncodeRequest(version,
                                  Op::Lease,
                                  { AsBytes(request.fingerprint),
                                    AsBytes(request.key),
                                    std::span<std::byte const> { codecs },
                                    std::span<std::byte const> { excluded },
-                                   AsBytes(request.toolchainLabel) });
+                                   AsBytes(request.toolchainLabel),
+                                   std::span<std::byte const> { origin } });
 }
 
 /// Split a LEASE payload.
@@ -5871,11 +6068,16 @@ struct WithdrawView
     auto excluded = DecodeExclusions((*fields)[3]);
     if (!excluded.has_value())
         return std::nullopt;
+    auto const& originField = (*fields)[5];
+    if (originField.size() != 1
+        || std::to_integer<std::uint8_t>(originField[0]) >= static_cast<std::uint8_t>(AskOrigin::Last))
+        return std::nullopt;
     return LeaseView { .fingerprint = (*fields)[0],
                        .key = (*fields)[1],
                        .acceptedCodecs = DecodeCodecList((*fields)[2]),
                        .excluded = *std::move(excluded),
-                       .toolchainLabel = (*fields)[4] };
+                       .toolchainLabel = (*fields)[4],
+                       .origin = static_cast<AskOrigin>(std::to_integer<std::uint8_t>(originField[0])) };
 }
 
 /// A client reporting that the job it leased has ended.
@@ -5994,6 +6196,367 @@ struct ClusterSetView
     if (!fields.has_value())
         return std::nullopt;
     return (*fields)[0];
+}
+
+/// Which edit of a member's record a MEMBER-EDIT asks for: its first field, one byte.
+///
+/// **TRANSMITTED**: explicit values, append-only, and `Last` never travels -- a byte at or past it
+/// is an edit this build does not know (`DecodeMemberEditVerb`), refused by name rather than read
+/// as whichever edit it aliases.
+enum class MemberEditVerb : std::uint8_t
+{
+    SetDisplayName = 0, ///< Give the member a display name, or clear it with an empty value.
+    SetBudget = 1,      ///< Override the member's cache budgets: the value is a `BudgetSetValue`.
+    ClearBudget = 2,    ///< Clear one tier's override, whatever it is: the value is a `BudgetClearValue`.
+    Last = 3,           ///< Not an edit, and never travels: the length of a table keyed by one.
+};
+
+/// How one `MemberEditVerb` is spelled.
+struct MemberEditVerbRow
+{
+    MemberEditVerb verb;   ///< The edit this row describes.
+    std::string_view name; ///< Its one spelling, for a log line and a refusal.
+};
+
+/// One row per `MemberEditVerb`, in enumerator order. Adding an edit is adding a row.
+///
+/// Every edit here is an OPERATOR's: the verb's door (`OpTable`) asks an operator's standing of whoever sends it. What
+/// a member reports about itself travels on its own verb, MEMBER-REPORT, whose door asks a proven node -- so no
+/// operator tool can build one, and no member's own report can stand in for an operator's word.
+inline constexpr EnumTable<MemberEditVerb, MemberEditVerbRow> MemberEditVerbTable { {
+    { .verb = MemberEditVerb::SetDisplayName, .name = "set-display-name" },
+    { .verb = MemberEditVerb::SetBudget, .name = "set-budget" },
+    { .verb = MemberEditVerb::ClearBudget, .name = "clear-budget" },
+} };
+
+static_assert(RowsInEnumeratorOrder(MemberEditVerbTable, &MemberEditVerbRow::verb),
+              "MemberEditVerbTable must hold one row per MemberEditVerb, in enumerator order");
+
+/// @param verb An edit.
+/// @return Its row.
+[[nodiscard]] constexpr MemberEditVerbRow const& MemberEditRowOf(MemberEditVerb verb) noexcept
+{
+    return MemberEditVerbTable[static_cast<std::size_t>(verb)];
+}
+
+/// The edit @p raw names, if this build knows it.
+/// @param raw The edit byte, as received.
+/// @return The edit, or nullopt for a byte at or past `MemberEditVerb::Last`.
+[[nodiscard]] constexpr std::optional<MemberEditVerb> DecodeMemberEditVerb(std::uint8_t raw) noexcept
+{
+    if (raw >= static_cast<std::uint8_t>(MemberEditVerb::Last))
+        return std::nullopt;
+    return static_cast<MemberEditVerb>(raw);
+}
+
+/// An operator editing one member's replicated record.
+struct MemberEditRequest
+{
+    MemberEditVerb verb;       ///< Which edit.
+    std::string_view memberId; ///< The member, by its id exactly.
+    std::string_view value;    ///< The edit's value: for `SetDisplayName`, the name, empty to clear; else its record.
+};
+
+/// The same, as views into a received payload. The edit stays a RAW byte here, so a byte this build
+/// does not know reaches whoever refuses it by name (`DecodeMemberEditVerb`) rather than reading as a
+/// malformed frame.
+struct MemberEditView
+{
+    std::uint8_t verb {};                ///< The edit byte, as received.
+    std::span<std::byte const> memberId; ///< The member's id.
+    std::span<std::byte const> value;    ///< The edit's value.
+};
+
+/// Frame a MEMBER-EDIT request.
+/// @param request The edit, the member and the value.
+/// @param version Version to advertise.
+/// @return The framed request.
+[[nodiscard]] inline std::vector<std::byte> EncodeMemberEdit(MemberEditRequest const& request,
+                                                             WireVersion version = CurrentVersion)
+{
+    auto const verb = std::array { static_cast<std::byte>(request.verb) };
+    return Detail::EncodeRequest(
+        version, Op::MemberEdit, { std::span<std::byte const> { verb }, AsBytes(request.memberId), AsBytes(request.value) });
+}
+
+/// Split a MEMBER-EDIT payload.
+/// @param payload The bytes following the request header.
+/// @return The fields, or nullopt when malformed -- three fields, the first exactly one byte.
+[[nodiscard]] inline std::optional<MemberEditView> DecodeMemberEditPayload(std::span<std::byte const> payload)
+{
+    auto const fields = SplitFields(payload, OpFieldCount(Op::MemberEdit));
+    if (!fields.has_value() || (*fields)[0].size() != 1)
+        return std::nullopt;
+    return MemberEditView { .verb = static_cast<std::uint8_t>((*fields)[0][0]),
+                            .memberId = (*fields)[1],
+                            .value = (*fields)[2] };
+}
+
+/// What a member reports about its own record in a MEMBER-REPORT: its first field, one byte.
+///
+/// **TRANSMITTED**: explicit values, append-only, and `Last` never travels -- a byte at or past it is a report this
+/// build does not know (`DecodeMemberReportVerb`), refused by name.
+enum class MemberReportVerb : std::uint8_t
+{
+    RecordBaseline = 0, ///< What this member had configured for a tier when it applied an override: `BudgetBaselineValue`.
+    DropOverride = 1,   ///< This member's own later configuration outranks an override: `BudgetDropValue`.
+    Last = 2,           ///< Not a report, and never travels: the length of a table keyed by one.
+};
+
+/// How one `MemberReportVerb` is spelled.
+struct MemberReportVerbRow
+{
+    MemberReportVerb verb; ///< The report this row describes.
+    std::string_view name; ///< Its one spelling, for a log line and a refusal.
+};
+
+/// One row per `MemberReportVerb`, in enumerator order.
+inline constexpr EnumTable<MemberReportVerb, MemberReportVerbRow> MemberReportVerbTable { {
+    { .verb = MemberReportVerb::RecordBaseline, .name = "record-baseline" },
+    { .verb = MemberReportVerb::DropOverride, .name = "drop-override" },
+} };
+
+static_assert(RowsInEnumeratorOrder(MemberReportVerbTable, &MemberReportVerbRow::verb),
+              "MemberReportVerbTable must hold one row per MemberReportVerb, in enumerator order");
+
+/// @param verb A report.
+/// @return Its row.
+[[nodiscard]] constexpr MemberReportVerbRow const& MemberReportRowOf(MemberReportVerb verb) noexcept
+{
+    return MemberReportVerbTable[static_cast<std::size_t>(verb)];
+}
+
+/// The report @p raw names, if this build knows it.
+/// @param raw The report byte, as received.
+/// @return The report, or nullopt for a byte at or past `MemberReportVerb::Last`.
+[[nodiscard]] constexpr std::optional<MemberReportVerb> DecodeMemberReportVerb(std::uint8_t raw) noexcept
+{
+    if (raw >= static_cast<std::uint8_t>(MemberReportVerb::Last))
+        return std::nullopt;
+    return static_cast<MemberReportVerb>(raw);
+}
+
+/// A member reporting about its own record. **No member id**: the leader takes the member from the identity key the
+/// connection PROVED, so a report can only ever be about the machine that sends it.
+struct MemberReportRequest
+{
+    MemberReportVerb verb;            ///< Which report.
+    std::span<std::byte const> value; ///< Its record (`BudgetBaselineValue`, `BudgetDropValue`).
+};
+
+/// A received MEMBER-REPORT, as views into its payload; the report stays a RAW byte, for `MemberEditView`'s reason.
+struct MemberReportView
+{
+    std::uint8_t verb {};             ///< The report byte, as received.
+    std::span<std::byte const> value; ///< Its record.
+};
+
+/// Frame a MEMBER-REPORT request.
+/// @param request The report and its record.
+/// @param version Version to advertise.
+/// @return The framed request.
+[[nodiscard]] inline std::vector<std::byte> EncodeMemberReport(MemberReportRequest const& request,
+                                                               WireVersion version = CurrentVersion)
+{
+    auto const verb = std::array { static_cast<std::byte>(request.verb) };
+    return Detail::EncodeRequest(version, Op::MemberReport, { std::span<std::byte const> { verb }, request.value });
+}
+
+/// Split a MEMBER-REPORT payload.
+/// @param payload The bytes following the request header.
+/// @return The fields, or nullopt when malformed -- two fields, the first exactly one byte.
+[[nodiscard]] inline std::optional<MemberReportView> DecodeMemberReportPayload(std::span<std::byte const> payload)
+{
+    auto const fields = SplitFields(payload, OpFieldCount(Op::MemberReport));
+    if (!fields.has_value() || (*fields)[0].size() != 1)
+        return std::nullopt;
+    return MemberReportView { .verb = static_cast<std::uint8_t>((*fields)[0][0]), .value = (*fields)[1] };
+}
+
+/// A `SetBudget` edit's value: the budget asked for each cache tier, POSITIONALLY by `StorageTier` (`PerTier`'s
+/// rule); an absent entry leaves that tier's override as it is.
+///
+/// One edit for both tiers, proposed as ONE command, so `--cluster-budget=<node>:memory=..,disk=..` is recorded
+/// whole or not at all. A list LONGER than this build knows -- an entry past `CarriedCacheTiers`, present or empty --
+/// is refused, never truncated (`DecodeBudgetSetValue`).
+struct BudgetSetValue
+{
+    PerTier<std::uint64_t> bytes; ///< Per tier: the budget in bytes, or absent for no change.
+};
+
+/// A `ClearBudget` edit's value: the tier, by position. An operator's clear removes whatever is recorded.
+struct BudgetClearValue
+{
+    std::uint8_t tier {}; ///< The tier's position in `StorageTier`.
+};
+
+/// A `RecordBaseline` report's value: what this member had configured for a tier when it applied an override.
+struct BudgetBaselineValue
+{
+    std::uint8_t tier {};        ///< The tier's position in `StorageTier`.
+    std::uint64_t baseline {};   ///< The member's own configured budget for it; zero is *unbounded*, a real value.
+    std::uint64_t overrideId {}; ///< The override it was measured against: the log index of the entry that set it.
+};
+
+/// A `DropOverride` report's value: the override this member's own later configuration outranks, named EXACTLY.
+struct BudgetDropValue
+{
+    std::uint8_t tier {};        ///< The tier's position in `StorageTier`.
+    std::uint64_t overrideId {}; ///< The override to drop; a newer one set since stands.
+};
+
+namespace Detail
+{
+    /// Eight bytes, big-endian.
+    /// @param value The figure.
+    /// @return Its encoding.
+    [[nodiscard]] inline std::array<std::byte, 8> BudgetFigure(std::uint64_t value)
+    {
+        return WireFields::ToBigEndian<std::uint64_t>(value);
+    }
+
+    /// Read a field that must be exactly eight bytes.
+    /// @param field The field.
+    /// @return The figure, or nullopt for any other width.
+    [[nodiscard]] inline std::optional<std::uint64_t> ReadBudgetFigure(std::span<std::byte const> field)
+    {
+        return field.size() == 8 ? WireFields::FromBigEndian<std::uint64_t>(field) : std::nullopt;
+    }
+
+    /// Read a field that must be exactly one byte.
+    /// @param field The field.
+    /// @return The byte, or nullopt for any other width.
+    [[nodiscard]] inline std::optional<std::uint8_t> ReadTierByte(std::span<std::byte const> field)
+    {
+        return field.size() == 1 ? std::optional { static_cast<std::uint8_t>(field[0]) } : std::nullopt;
+    }
+} // namespace Detail
+
+/// Frame a `SetBudget` value.
+/// @param value The per-tier budgets.
+/// @return The bytes to send as MEMBER-EDIT's third field.
+[[nodiscard]] inline std::vector<std::byte> EncodeBudgetSetValue(BudgetSetValue const& value)
+{
+    auto owned = std::vector<std::array<std::byte, 8>> {};
+    auto fields = std::vector<std::span<std::byte const>> {};
+    owned.reserve(value.bytes.size());
+    fields.reserve(value.bytes.size());
+    for (auto const& tier: value.bytes)
+    {
+        if (!tier.has_value())
+        {
+            fields.emplace_back();
+            continue;
+        }
+        owned.push_back(Detail::BudgetFigure(*tier));
+        fields.emplace_back(owned.back());
+    }
+    return WireFields::Encode(WireFields::FieldList { fields });
+}
+
+/// Read a `SetBudget` value back.
+///
+/// Split under a cap of `CarriedCacheTiers` fields -- never an unbounded walk -- so an entry past the tiers this
+/// build carries, present OR empty, is refused rather than truncated: a sender naming a third tier asked for
+/// something this leader cannot record.
+/// @param bytes MEMBER-EDIT's third field.
+/// @return The per-tier budgets, or nullopt when an entry is neither empty nor eight bytes, or there are too many.
+[[nodiscard]] inline std::optional<BudgetSetValue> DecodeBudgetSetValue(std::span<std::byte const> bytes)
+{
+    auto const fields = WireFields::SplitAtMost(bytes, CarriedCacheTiers);
+    if (!fields.has_value())
+        return std::nullopt;
+    auto out = BudgetSetValue {};
+    out.bytes.reserve(fields->size());
+    for (auto const& field: *fields)
+    {
+        if (field.empty())
+        {
+            out.bytes.emplace_back();
+            continue;
+        }
+        auto const figure = Detail::ReadBudgetFigure(field);
+        if (!figure.has_value())
+            return std::nullopt;
+        out.bytes.emplace_back(*figure);
+    }
+    return out;
+}
+
+/// Frame a `ClearBudget` value: the tier byte.
+/// @param value The tier.
+/// @return The bytes to send as MEMBER-EDIT's third field.
+[[nodiscard]] inline std::vector<std::byte> EncodeBudgetClearValue(BudgetClearValue const& value)
+{
+    auto const tier = std::array { static_cast<std::byte>(value.tier) };
+    return WireFields::Encode({ std::span<std::byte const> { tier } });
+}
+
+/// Read a `ClearBudget` value back.
+/// @param bytes MEMBER-EDIT's third field.
+/// @return The value, or nullopt when malformed: exactly one one-byte field.
+[[nodiscard]] inline std::optional<BudgetClearValue> DecodeBudgetClearValue(std::span<std::byte const> bytes)
+{
+    auto const fields = WireFields::SplitExactly(bytes, 1);
+    if (!fields.has_value())
+        return std::nullopt;
+    auto const tier = Detail::ReadTierByte((*fields)[0]);
+    if (!tier.has_value())
+        return std::nullopt;
+    return BudgetClearValue { .tier = *tier };
+}
+
+/// Frame a `RecordBaseline` value: the tier byte, the baseline, then the override's id.
+/// @param value The report.
+/// @return The bytes to send as MEMBER-REPORT's second field.
+[[nodiscard]] inline std::vector<std::byte> EncodeBudgetBaselineValue(BudgetBaselineValue const& value)
+{
+    auto const tier = std::array { static_cast<std::byte>(value.tier) };
+    auto const baseline = Detail::BudgetFigure(value.baseline);
+    auto const id = Detail::BudgetFigure(value.overrideId);
+    return WireFields::Encode(
+        { std::span<std::byte const> { tier }, std::span<std::byte const> { baseline }, std::span<std::byte const> { id } });
+}
+
+/// Read a `RecordBaseline` value back.
+/// @param bytes MEMBER-REPORT's second field.
+/// @return The report, or nullopt when malformed: three fields, a one-byte tier and two eight-byte figures.
+[[nodiscard]] inline std::optional<BudgetBaselineValue> DecodeBudgetBaselineValue(std::span<std::byte const> bytes)
+{
+    auto const fields = WireFields::SplitExactly(bytes, 3);
+    if (!fields.has_value())
+        return std::nullopt;
+    auto const tier = Detail::ReadTierByte((*fields)[0]);
+    auto const baseline = Detail::ReadBudgetFigure((*fields)[1]);
+    auto const id = Detail::ReadBudgetFigure((*fields)[2]);
+    if (!tier.has_value() || !baseline.has_value() || !id.has_value())
+        return std::nullopt;
+    return BudgetBaselineValue { .tier = *tier, .baseline = *baseline, .overrideId = *id };
+}
+
+/// Frame a `DropOverride` value: the tier byte, then the override's id.
+/// @param value The report.
+/// @return The bytes to send as MEMBER-REPORT's second field.
+[[nodiscard]] inline std::vector<std::byte> EncodeBudgetDropValue(BudgetDropValue const& value)
+{
+    auto const tier = std::array { static_cast<std::byte>(value.tier) };
+    auto const id = Detail::BudgetFigure(value.overrideId);
+    return WireFields::Encode({ std::span<std::byte const> { tier }, std::span<std::byte const> { id } });
+}
+
+/// Read a `DropOverride` value back.
+/// @param bytes MEMBER-REPORT's second field.
+/// @return The report, or nullopt when malformed: two fields, a one-byte tier and an eight-byte id.
+[[nodiscard]] inline std::optional<BudgetDropValue> DecodeBudgetDropValue(std::span<std::byte const> bytes)
+{
+    auto const fields = WireFields::SplitExactly(bytes, 2);
+    if (!fields.has_value())
+        return std::nullopt;
+    auto const tier = Detail::ReadTierByte((*fields)[0]);
+    auto const id = Detail::ReadBudgetFigure((*fields)[1]);
+    if (!tier.has_value() || !id.has_value())
+        return std::nullopt;
+    return BudgetDropValue { .tier = *tier, .overrideId = *id };
 }
 
 /// An operator adding a member to the cluster, or moving one.
@@ -6508,6 +7071,7 @@ enum class WireSurface : std::uint8_t
     Admin = 0x01,     ///< `/metrics`, `/healthz`, the fleet dashboard.
     Raft = 0x02,      ///< Consensus traffic between peers.
     Discovery = 0x03, ///< The LAN beacon.
+    Mcp = 0x04,       ///< MCP for a session on this machine; loopback only.
 };
 
 /// **The `0xFC` port itself is deliberately not a `WireSurface`.**
@@ -7097,6 +7661,38 @@ struct NodeRuntimeFields
 
     /// The worker's per-request ceiling as resolved (`--compile-request-max`), disengaged as above.
     std::optional<std::uint64_t> compileRequestMaxBytes {};
+
+    /// Every ceiling the worker's slots are held to and which one binds, as of its last heartbeat (field 26),
+    /// or disengaged on a node with no worker, one whose first heartbeat has not been sampled, or a sender too
+    /// old to say. See `NodeSlotCeilingsFields`.
+    ///
+    /// **This replaces nothing the scheduler concludes**: it is the same `Distributed::SlotCeilingsFor`, over
+    /// the very load the heartbeat sent, so the worker and the scheduler cannot name two different limits for
+    /// one reading. The cordon is one of its ceilings, and `cordon` above still says whether it has drained.
+    std::optional<NodeSlotCeilingsFields> slotCeilings {};
+
+    /// The cache tiers this node holds, positionally by `StorageTier` (field 27), or disengaged on a node with
+    /// no cache. **A disengaged POSITION is a tier this cache lacks, never one holding nothing.**
+    std::optional<NodeTiersFields> tiers {};
+
+    /// The configuration in force -- after every accepted reload, not the one the process started with -- one
+    /// row per setting (field 28), every credential `Redacted` BY THE SENDER, so its value never leaves the
+    /// machine. Disengaged from a sender too old to say.
+    std::optional<std::vector<NodeSettingFields>> effectiveConfig {};
+
+    /// The cache budgets this node applies from the cluster rather than its own flags (field 29). Declared and
+    /// sent by nothing yet, so ABSENT everywhere: *does not say*, never *no overrides*.
+    std::optional<std::vector<NodeBudgetOverrideFields>> budgetOverrides {};
+
+    /// The display name the cluster this node APPLIED records for it (`Cluster::ClusterMember::displayName`, field 30),
+    /// or disengaged when it records none, the node holds no cluster state, or the sender is too old to say. A label
+    /// that decides nothing; an engaged name is never empty.
+    std::optional<std::string> displayName {};
+
+    /// What this machine calls itself -- its hostname, the name a worker registers with (field 31) -- or disengaged
+    /// when it could not read one or the sender is too old to say. The self-reported half of the name a surface shows
+    /// (`Distributed::NameShown`); an engaged name is never empty.
+    std::optional<std::string> hostName {};
 };
 
 /// What an operator reads `NodeRuntimeFields::consensusEndpoint` under, as prose: the
@@ -7406,6 +8002,17 @@ inline constexpr std::size_t SharedCacheStatusFieldCount = 5;
     auto const fleetPin = runtime.fleetPin.has_value() ? EncodeNodeFleetPin(*runtime.fleetPin) : std::vector<std::byte> {};
     auto const inflightMax = Detail::OptionalBigEndian(runtime.compileInflightMaxBytes);
     auto const requestMax = Detail::OptionalBigEndian(runtime.compileRequestMaxBytes);
+    // Absent as zero length; each engaged record encodes non-empty -- see `NodeStatusDetailWire.hpp`.
+    auto const slotCeilings =
+        runtime.slotCeilings.has_value() ? EncodeNodeSlotCeilings(*runtime.slotCeilings) : std::vector<std::byte> {};
+    auto const tiers = runtime.tiers.has_value() ? EncodeNodeTiers(*runtime.tiers) : std::vector<std::byte> {};
+    auto const effectiveConfig =
+        runtime.effectiveConfig.has_value() ? EncodeNodeSettings(*runtime.effectiveConfig) : std::vector<std::byte> {};
+    auto const budgetOverrides = runtime.budgetOverrides.has_value() ? EncodeNodeBudgetOverrides(*runtime.budgetOverrides)
+                                                                     : std::vector<std::byte> {};
+    // Absent as zero length; an engaged name is never empty -- see the members.
+    auto const displayName = runtime.displayName.has_value() ? AsBytes(*runtime.displayName) : std::span<std::byte const> {};
+    auto const hostName = runtime.hostName.has_value() ? AsBytes(*runtime.hostName) : std::span<std::byte const> {};
 
     // Positional, so the ORDER here is the wire contract for this record. Append only:
     // an insertion shifts every later field and every peer decodes one fact as the next.
@@ -7434,7 +8041,13 @@ inline constexpr std::size_t SharedCacheStatusFieldCount = 5;
                                 fleetId,
                                 fleetPin,
                                 inflightMax,
-                                requestMax });
+                                requestMax,
+                                slotCeilings,
+                                tiers,
+                                effectiveConfig,
+                                budgetOverrides,
+                                displayName,
+                                hostName });
 }
 
 /// Read a runtime record back.
@@ -7645,6 +8258,19 @@ inline constexpr std::size_t SharedCacheStatusFieldCount = 5;
     if (!Detail::ReadOptionalBigEndian(at(24), out.compileInflightMaxBytes)
         || !Detail::ReadOptionalBigEndian(at(25), out.compileRequestMaxBytes))
         return std::nullopt;
+
+    // Fields 26 to 29, the detail `node_status` and `pacectl node` show: empty is ABSENT, and a record this
+    // build cannot read refuses the reply, for the rule every field above follows.
+    if (!ReadNodeSlotCeilings(at(26), out.slotCeilings) || !ReadNodeTiers(at(27), out.tiers)
+        || !ReadNodeSettings(at(28), out.effectiveConfig) || !ReadNodeBudgetOverrides(at(29), out.budgetOverrides))
+        return std::nullopt;
+
+    // Fields 30 and 31, the two halves of the name a surface shows: empty is ABSENT, as for the consensus endpoint,
+    // and so is a record from a sender older than them.
+    if (auto const displayName = at(30); !displayName.empty())
+        out.displayName = std::string { AsStringView(displayName) };
+    if (auto const hostName = at(31); !hostName.empty())
+        out.hostName = std::string { AsStringView(hostName) };
 
     return out;
 }
@@ -7967,6 +8593,7 @@ struct CordonFields
             case WireSurface::Admin:
             case WireSurface::Raft:
             case WireSurface::Discovery:
+            case WireSurface::Mcp:
                 break;
             default:
                 continue;
@@ -9643,6 +10270,8 @@ struct AdmitRequest
     /// leader with no worker for it NAME what nobody serves (`unserved-toolchain`). UTF-8 and at most
     /// `MaxToolchainLabelBytes`, or the whole request is refused where it enters.
     std::string_view toolchainLabel;
+    /// Whether the leader already granted this compile once in this invocation (`AskOrigin`).
+    AskOrigin origin { AskOrigin::First };
 };
 
 /// The same, as the leader decodes it. OWNS its bytes.
@@ -9657,6 +10286,7 @@ struct AdmitRequestFields
     CodecList acceptedCodecs;
     std::vector<std::string> excluded;
     std::string toolchainLabel;
+    AskOrigin origin { AskOrigin::First };
 
     /// @return True when every field is equal.
     [[nodiscard]] bool operator==(AdmitRequestFields const&) const = default;
@@ -9779,6 +10409,7 @@ namespace Detail
     auto const storable = std::array<std::byte, 1> { static_cast<std::byte>(request.storable ? 1 : 0) };
     auto const codecs = EncodeCodecList(request.acceptedCodecs);
     auto const excluded = EncodeExclusions(request.excluded);
+    auto const origin = Detail::EncodeEnumByte(request.origin);
     return Detail::EncodeRequest(version,
                                  Op::Admit,
                                  { std::span<std::byte const> { kind },
@@ -9789,7 +10420,8 @@ namespace Detail
                                    std::span<std::byte const> { storable },
                                    std::span<std::byte const> { codecs },
                                    std::span<std::byte const> { excluded },
-                                   AsBytes(request.toolchainLabel) });
+                                   AsBytes(request.toolchainLabel),
+                                   std::span<std::byte const> { origin } });
 }
 
 /// Split an ADMIT payload.
@@ -9804,6 +10436,9 @@ namespace Detail
         return std::nullopt;
     auto const kind = Detail::DecodeEnumByte<AdmitKind>((*fields)[0]);
     if (!kind.has_value())
+        return std::nullopt;
+    auto const origin = Detail::DecodeEnumByte<AskOrigin>((*fields)[9]);
+    if (!origin.has_value())
         return std::nullopt;
     auto const& storable = (*fields)[5];
     if (storable.size() != 1 || std::to_integer<std::uint8_t>(storable[0]) > 1)
@@ -9831,6 +10466,7 @@ namespace Detail
     for (auto const endpoint: *excluded)
         out.excluded.emplace_back(AsStringView(endpoint));
     out.toolchainLabel = std::string { AsStringView((*fields)[8]) };
+    out.origin = *origin;
     return out;
 }
 
@@ -10081,6 +10717,17 @@ struct SubscribeRequest
                               .dashboardToken = std::string { AsStringView((*fields)[2]) } };
 }
 
+/// Which document a FLEET-TEXT request asks for.
+///
+/// **Transmitted**, so the values are explicit and part of the wire (the request's fourth field is
+/// this byte). `Json` is `/fleet.json`'s body, byte for byte, and takes no section.
+enum class FleetTextFormat : std::uint8_t
+{
+    Text = 0, ///< The tab-separated tables `/fleet.txt` serves.
+    Json = 1, ///< The document `/fleet.json` serves.
+    Last = 2, ///< Count; never a format.
+};
+
 /// A FLEET-TEXT request's fields: the words a reader typed, which the leader looks up.
 ///
 /// **Keys rather than enumerators**, for the reason `/fleet.txt` takes them as query words: which
@@ -10093,6 +10740,13 @@ struct FleetTextRequest
     std::string range {};   ///< A `FleetRangeTable` key, or empty for the default day.
     /// The dashboard credential, or empty; a secret, so the request is the only place it travels.
     std::string dashboardToken {};
+    /// Which document is wanted; the request's fourth field.
+    FleetTextFormat format { FleetTextFormat::Text };
+    /// A member id whose OWN history the `series` section draws, or empty for the fleet's; the request's fifth
+    /// and last field. Empty is the absence: a reader that names no machine reads the fleet, as before the field.
+    /// The leader resolves it to the key the member record holds and refuses it on any other selection
+    /// (`UnknownFleetSelector`) rather than dropping it.
+    std::string node {};
 };
 
 /// Frame a FLEET-TEXT request.
@@ -10102,21 +10756,33 @@ struct FleetTextRequest
 [[nodiscard]] inline std::vector<std::byte> EncodeFleetTextRequest(FleetTextRequest const& request,
                                                                    WireVersion version = CurrentVersion)
 {
-    return Detail::EncodeRequest(
-        version, Op::FleetText, { AsBytes(request.section), AsBytes(request.range), AsBytes(request.dashboardToken) });
+    auto const formatByte = static_cast<std::byte>(request.format);
+    return Detail::EncodeRequest(version,
+                                 Op::FleetText,
+                                 { AsBytes(request.section),
+                                   AsBytes(request.range),
+                                   AsBytes(request.dashboardToken),
+                                   std::span<std::byte const> { &formatByte, 1 },
+                                   AsBytes(request.node) });
 }
 
 /// Decode a FLEET-TEXT request's payload.
 /// @param payload The request body.
-/// @return The request, or nullopt when its fields do not exactly fill it.
+/// @return The request, or nullopt when its fields do not exactly fill it or the format byte
+///         names no `FleetTextFormat`.
 [[nodiscard]] inline std::optional<FleetTextRequest> DecodeFleetTextRequest(std::span<std::byte const> payload)
 {
     auto const fields = WireFields::SplitExactly(payload, OpFieldCount(Op::FleetText));
     if (!fields.has_value())
         return std::nullopt;
+    if ((*fields)[3].size() != 1
+        || std::to_integer<std::uint8_t>((*fields)[3][0]) >= static_cast<std::uint8_t>(FleetTextFormat::Last))
+        return std::nullopt;
     return FleetTextRequest { .section = std::string { AsStringView((*fields)[0]) },
                               .range = std::string { AsStringView((*fields)[1]) },
-                              .dashboardToken = std::string { AsStringView((*fields)[2]) } };
+                              .dashboardToken = std::string { AsStringView((*fields)[2]) },
+                              .format = static_cast<FleetTextFormat>(std::to_integer<std::uint8_t>((*fields)[3][0])),
+                              .node = std::string { AsStringView((*fields)[4]) } };
 }
 
 /// The cadence a server grants for @p subject when asked for @p asked.

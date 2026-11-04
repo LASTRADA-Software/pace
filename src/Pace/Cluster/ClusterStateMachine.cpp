@@ -2,8 +2,12 @@
 #include <Pace/Cluster/ClusterStateMachine.hpp>
 
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
+#include <string>
 #include <utility>
+
+#include <core/Ranges.hpp>
 
 namespace Pace::Cluster
 {
@@ -17,7 +21,9 @@ namespace
     /// and bytes that are not a state or a command at all are `MalformedFrame`. The first
     /// two are INTACT bytes a different build laid out, which the storage rule calls
     /// `UnsupportedFormatVersion` -- never the damage code, because damage is what gets a
-    /// healthy state deleted rather than an upgrade finished. Only the third is damage.
+    /// healthy state deleted rather than an upgrade finished. Only the third is damage, and
+    /// it includes a converted layout carrying a verb its writer never had: that pair names
+    /// a build this one knows, which never wrote it, so the decoder already says `MalformedFrame`.
     /// @param decoded What the decoder said; its context is kept.
     /// @return The same refusal, in the two codes `IRaftStateMachine` refuses with.
     [[nodiscard]] ConsensusError AsHeldStateRefusal(ConsensusError decoded)
@@ -58,11 +64,31 @@ void ClusterStateMachine::Apply(Consensus::AppliedEntry const& entry)
     }
 
     auto published = ClusterState {};
+    auto yielded = std::optional<std::string> {};
     {
         auto const guard = std::unique_lock { _mutex };
-        Cluster::Apply(_state, *command);
+        yielded = DisplayNameYieldingTo(_state, *command);
+        // At the entry's index, which identifies any budget override it records (`BudgetOverride::id`).
+        Cluster::Apply(_state, *command, entry.index.value);
         published = _state;
     }
+    // A label yielded to an identity (`DisplayNameYieldingTo`): said at Warn, naming both, because an operator who
+    // chose the name is about to find it gone -- and only when the admission actually applied. NOT once per fleet or
+    // per process: every replica applying the entry says it, and a restart replaying the unsnapshotted log tail
+    // (`RaftDriver::Create`) says it again until a snapshot covers the entry. Each line is the same fact re-applied,
+    // and no state is kept to suppress it, because suppressing it would need state the replay cannot reconstruct.
+    if (yielded.has_value())
+        if (auto const* const holder = core::findOrNull(published.members, *yielded, &ClusterMember::id);
+            holder != nullptr && holder->displayName.empty()
+            && core::findOrNull(published.members, command->key, &ClusterMember::id) != nullptr)
+            _logger.Logf(LogLevel::Warn,
+                         "cluster: applying the admission of member {} under an id spelled like {}'s display name, so "
+                         "{} no longer carries it (a name yields to an identity; this repeats wherever and whenever the "
+                         "entry is applied, replay included); give {} another name with --cluster-name",
+                         command->key,
+                         *yielded,
+                         *yielded,
+                         *yielded);
     Publish(published);
 }
 

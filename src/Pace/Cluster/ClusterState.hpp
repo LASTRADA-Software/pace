@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <Pace/Cluster/BudgetOverride.hpp>
 #include <Pace/Consensus/RaftTypes.hpp>
 #include <Pace/Consensus/Standing.hpp>
 #include <Pace/Core/Ed25519.hpp>
@@ -159,8 +160,81 @@ struct ClusterMember
     /// (`CommandKind::Forget`).
     Ed25519PublicKey publicKey {};
 
+    /// What an operator calls this member, e.g. `office-pc`; empty when nobody has named it.
+    ///
+    /// **A label that decides nothing**, under the rule the self-reported hostname
+    /// (`WorkerInfo::displayName`) obeys: no admission, route, key, redirect or identity reads it -- the id and the key
+    /// decide all of those -- so `RosterDiffers` leaves it out and naming a member never moves `rosterVersion`. It
+    /// exists because an id is MINTED (`a3f5...`), and a person needs something to recognise the machine by.
+    ///
+    /// Replicated rather than per machine, so every node, the fleet page and every MCP answer call one machine by one
+    /// name. Written by `CommandKind::SetDisplayName` alone, and KEPT across a re-admission -- `AddMember` and
+    /// `AddLearner` apply the endpoints wholesale and not this, which no admission states -- while a forget removes it
+    /// with the record. Held to `RefuseDisplayName`'s rule, and unique across the members under ASCII-only case folding
+    /// (`DisplayNameHolder`).
+    std::string displayName {};
+
+    /// The memory tier's budget as the cluster overrides it for this machine, or absent when nobody has.
+    ///
+    /// Written by `CommandKind::SetBudget` and `ClearBudget`, and its baseline by `RecordBaseline` from the member
+    /// itself. **Decides nothing about the roster** -- `RosterDiffers` leaves it out -- and, like the display name, is
+    /// KEPT across a re-admission, which states no budget, and removed with the record by a forget. Reached by tier
+    /// through `BudgetSlots`, never by naming the field at a site that means "the tier's".
+    std::optional<BudgetOverride> memoryOverride {};
+
+    /// The disk tier's budget as the cluster overrides it for this machine, or absent when nobody has. As
+    /// `memoryOverride`.
+    std::optional<BudgetOverride> diskOverride {};
+
     [[nodiscard]] friend bool operator==(ClusterMember const&, ClusterMember const&) = default;
 };
+
+/// Where one tier's override lives in a member record.
+struct BudgetSlotRow
+{
+    StorageTier tier;                                    ///< The tier.
+    std::optional<BudgetOverride> ClusterMember::* slot; ///< Its field.
+};
+
+/// One row per `StorageTier`, in enumerator order: the ONE map from a tier to its field, so `Apply`, the encoder, the
+/// decoder and every renderer reach a tier's override the same way, and a third tier is a row and a field.
+inline constexpr EnumTable<StorageTier, BudgetSlotRow> BudgetSlots { {
+    { .tier = StorageTier::Memory, .slot = &ClusterMember::memoryOverride },
+    { .tier = StorageTier::Disk, .slot = &ClusterMember::diskOverride },
+} };
+
+static_assert(RowsInEnumeratorOrder(BudgetSlots, &BudgetSlotRow::tier),
+              "BudgetSlots must hold one row per StorageTier, in enumerator order");
+
+/// @param member A member record.
+/// @param tier A tier.
+/// @return The override the cluster records for that tier of that member, absent when none.
+[[nodiscard]] constexpr std::optional<BudgetOverride> const& BudgetOf(ClusterMember const& member, StorageTier tier) noexcept
+{
+    return member.*(BudgetSlots[static_cast<std::size_t>(tier)].slot);
+}
+
+/// The longest display name a member may carry, in bytes.
+///
+/// Bytes rather than characters, because every reader bounds bytes -- the wire's control payload, a fleet page cell,
+/// an MCP answer -- and a name of 64 multi-byte characters would be four times what a column was sized for. Long
+/// enough for any host-like label, short enough to sit in a table beside the id it annotates.
+inline constexpr std::size_t MaxDisplayNameBytes = 64;
+
+/// Refuse a display name no member may carry, or nothing when it may.
+///
+/// **One rule, asked by every door a name enters by** -- `Validate` on the leader, and each client before it sends,
+/// `pacectl cluster-name`, `pace-node --cluster-name` and the MCP `set_display_name` -- so a client refusing early can
+/// never refuse what the leader accepts, nor the reverse. Empty is accepted: it CLEARS the name.
+///
+/// The name is rendered by `/fleet.json` (JSON, which RFC 8259 holds to UTF-8), by the fleet page and its SVG charts
+/// (XML, whose `Char` production excludes most control code points) and by plain-text tables and logs, so it must be
+/// all three: valid UTF-8, every code point one markup may carry (`FirstUncarriableByte`), and no control byte at all
+/// -- the `Char` production admits a tab and a line break, and a name carrying one would forge a row in `/fleet.txt`.
+/// REFUSED and never repaired: a name rewritten on the way in is one the operator did not choose.
+/// @param name The name as typed.
+/// @return Why no member may carry it, or nullopt when one may.
+[[nodiscard]] std::optional<std::string> RefuseDisplayName(std::string_view name);
 
 /// A key the cluster will never admit again, and whose it was (#178).
 ///
@@ -644,6 +718,24 @@ struct ClusterState
     [[nodiscard]] std::optional<std::string> HolderOf(Ed25519PublicKey const& key) const;
 };
 
+/// Which OTHER member already answers to @p name, if one does.
+///
+/// A name is taken by a member whose display name equals it under ASCII-only case folding (`AsciiFoldEquals`: `Office`
+/// and `office` are one name, `Ä` and `ä` are two), or whose ID is exactly @p name -- a name spelled like another
+/// member's id would be shadowed by that id wherever a tool resolves a name (ids are matched first), so the machine
+/// carrying it could never be named by it. The member @p except is never the holder, so renaming a member to a case
+/// variant of its own name is allowed.
+///
+/// The one author of the rule `ValidateAgainst` refuses by (`DisplayNameTaken`) and `Apply` drops by, so the courtesy
+/// and the guarantee cannot disagree about what a taken name is.
+/// @param state The state.
+/// @param name A non-empty display name.
+/// @param except The member being named, which never holds its own name against itself.
+/// @return The holder's id, or nullopt when nobody else answers to @p name.
+[[nodiscard]] std::optional<std::string> DisplayNameHolder(ClusterState const& state,
+                                                           std::string_view name,
+                                                           std::string_view except);
+
 /// The key `id` holds LIVE as a member.
 ///
 /// Members only: every fleet machine is admitted as a member, voter or learner, so a machine
@@ -755,6 +847,44 @@ enum class CommandKind : std::uint8_t
     /// (`createdAtUnixSeconds`) -- the one field no earlier verb had, which is why `CommandVersion`
     /// moved with it.
     DissolveInto,
+
+    /// Give a member a display name, or clear it (`ClusterMember::displayName`): `key` is the member's id and `value`
+    /// the name, empty to clear. MEMBER-EDIT's `SetDisplayName`, proposed by the leader.
+    ///
+    /// A verb of its own rather than a field on `AddMember`, because a name is not part of an admission: every route
+    /// that re-proposes a record -- an approval, an announced endpoint, a leader's own word -- states the endpoints and
+    /// the key and has no opinion about a label, so a name riding `AddMember` would be wiped by the next announcement.
+    /// It decides nothing, so it never moves `rosterVersion`. Dropped at commit when its member is gone or its name has
+    /// been taken since it was judged (`DisplayNameHolder`), as every verb is when its preconditions stop holding.
+    SetDisplayName,
+
+    /// Record cache budget overrides for one member (`ClusterMember::memoryOverride`/`diskOverride`): `key` is the
+    /// member's id, `budgetBytes` the figure per tier (an absent tier left as it is), `setAtUnixSeconds` the LEADER's
+    /// clock and `setBy` the member whose key the proposing connection proved. MEMBER-EDIT's `SetBudget`, proposed by
+    /// the leader.
+    ///
+    /// **One command for every tier it names**, so a two-tier edit is recorded whole or not at all. Each tier it names
+    /// gets a new override identified by the entry's log index (`BudgetOverride::id`), baseline unset: a new figure is a
+    /// new override, whose baseline the member reports afresh. Settable for a member that is down -- the record is the
+    /// state, and the member applies it when it returns. Dropped at commit when the member is gone.
+    SetBudget,
+
+    /// Clear one member's override for one tier: `key` is the member's id, `value` the tier's name.
+    ///
+    /// Two senders. An operator's MEMBER-EDIT `ClearBudget` names no override and clears whatever is recorded. A
+    /// member's MEMBER-REPORT `DropOverride` names the override its own later configuration outranks (`overrideId`),
+    /// and is dropped at commit when another has been recorded since, so a member cannot drop a newer override an
+    /// operator set in between.
+    ClearBudget,
+
+    /// Record the baseline a member reports for its own override: `key` is the member's id (taken by the leader from
+    /// the key the reporting connection proved), `value` the tier's name, `baselineBytes` the member's own configured
+    /// value, `overrideId` the override it answers. MEMBER-REPORT's `RecordBaseline`.
+    ///
+    /// Dropped at commit unless that very override is still recorded and has no other baseline yet -- an override
+    /// replaced or cleared since the member measured never inherits the measurement, and the first report wins.
+    /// Deterministic, so every replica records the same baseline or none.
+    RecordBaseline,
 
     Last, ///< Not a verb, and has no row: the length of a table keyed by one.
 };
@@ -871,10 +1001,11 @@ struct Command
 {
     CommandKind kind { CommandKind::AddMember };
     /// The member id for `AddMember`/`AddLearner`, the setting name for `SetSetting`, the
-    /// member's id for `Forget`, and the survivor's id for `DissolveInto`.
+    /// member's id for `Forget`, `SetDisplayName` and the budget verbs, and the survivor's id for `DissolveInto`.
     std::string key;
-    /// The consensus endpoint for `AddMember`/`AddLearner`, the value for `SetSetting`,
-    /// empty otherwise.
+    /// The consensus endpoint for `AddMember`/`AddLearner`, the value for `SetSetting`, the
+    /// survivor's leader endpoint for `DissolveInto`, the display name for `SetDisplayName`
+    /// (empty clears it), the tier's name for the budget verbs, empty otherwise.
     std::string value;
 
     /// `AddMember`/`AddLearner` only: where this member's `0xFC` port answers.
@@ -904,8 +1035,40 @@ struct Command
     /// `publicKey` (`DissolveOrder::leaderKey`). Refused for every other verb.
     std::optional<Ed25519PublicKey> leaderKey {};
 
+    /// `SetBudget` only, and at least one tier there: the figure per tier, positionally by `StorageTier`; an absent
+    /// tier is left as it is. Refused (every tier absent) for every other verb.
+    std::array<std::optional<std::uint64_t>, EnumeratorCount<StorageTier>> budgetBytes {};
+
+    /// `RecordBaseline` only, and required there: the member's own configured value for the tier. Refused for every
+    /// other verb.
+    std::optional<std::uint64_t> baselineBytes {};
+
+    /// `SetBudget` only, and required there: when the leader proposed it, by the leader's clock -- for display, never
+    /// read from a clock inside `Apply`. Refused for every other verb.
+    std::optional<std::int64_t> setAtUnixSeconds {};
+
+    /// The override a member's report names (`BudgetOverride::id`): required for `RecordBaseline`, optional for
+    /// `ClearBudget` (a member's conditional drop), refused for every other verb.
+    std::optional<std::uint64_t> overrideId {};
+
+    /// `SetBudget` only: the member whose key the proposing connection proved (`BudgetOverride::setBy`), empty when
+    /// none did. Empty for every other verb.
+    std::string setBy {};
+
     [[nodiscard]] friend bool operator==(Command const&, Command const&) = default;
 };
+
+/// The member whose display name an admission's id would shadow, if any: an `AddMember`/`AddLearner` whose id is
+/// spelled exactly like ANOTHER member's display name.
+///
+/// **A label yields to an identity.** `Apply` clears that member's display name when the admission commits, so the
+/// state never holds a name and an id that a person could mean either way -- and an admission is never refused over a
+/// label, which decides nothing. One author for `Apply` and for whoever reports the clearing
+/// (`ClusterStateMachine::Apply` logs it at Warn, naming both).
+/// @param state The state the command applies to.
+/// @param command Any command; only an admission can yield anything.
+/// @return The id of the member whose name yields, or nullopt.
+[[nodiscard]] std::optional<std::string> DisplayNameYieldingTo(ClusterState const& state, Command const& command);
 
 /// Serialize a command for a log entry's payload.
 /// @param command The change.
@@ -940,13 +1103,29 @@ struct Command
 ///         for bytes that are not a state.
 [[nodiscard]] std::expected<ClusterState, ConsensusError> DecodeState(std::span<std::byte const> bytes);
 
-/// Apply one command, in place.
+/// Apply one command, in place, as the entry at @p entryIndex.
 ///
 /// Total: every well-formed command has an effect or is a no-op, and none can fail.
 /// That is a property consensus needs rather than a convenience — an entry is
 /// applied *after* it is committed, so there is nobody left to report a failure to
 /// and no way to un-commit it. Anything that could be refused has to be refused
 /// **before** it is proposed, which is what `Validate` is for.
+///
+/// The index is the entry's position in the Raft log, handed down by whoever applies the log
+/// (`ClusterStateMachine::Apply`); it is what identifies an override `SetBudget` records
+/// (`BudgetOverride::id`), the one fact a command cannot carry because it is assigned when the
+/// entry is appended. Every replica applies the entry at the same index, so every replica records
+/// the same id.
+/// @param state The state to change.
+/// @param command The change.
+/// @param entryIndex The log index of the entry carrying @p command.
+void Apply(ClusterState& state, Command const& command, std::uint64_t entryIndex);
+
+/// Apply one command that sits in no log -- a test's state, a preview.
+///
+/// Exactly `Apply(state, command, entryIndex)`, except that a `SetBudget` is DROPPED: an override is identified by
+/// the entry that recorded it, and a command outside any log has no such entry to be identified by. A production path
+/// applying committed entries always has an index, and uses the overload that takes it.
 /// @param state The state to change.
 /// @param command The change.
 void Apply(ClusterState& state, Command const& command);
@@ -985,7 +1164,8 @@ void Apply(ClusterState& state, Command const& command);
 
 /// Whether `command` may be proposed against the state as it stands (#178).
 ///
-/// `Validate`, and then the rules only the state can answer, which are all about KEYS: a
+/// `Validate`, and then the rules only the state can answer. A display name must name a recorded member and
+/// one no other member answers to (`DisplayNameTaken`, through `DisplayNameHolder`). The rest are about KEYS: a
 /// revoked key is never admitted again (`KeyRevoked`, a refusal of the command -- nothing
 /// the state can later do un-revokes it); a key is held by one id at a time; and a member is
 /// never admitted with NO key, stated

@@ -62,7 +62,9 @@ enum class HostArchitecture : std::uint8_t
 ///
 /// **Implementations must tolerate concurrent calls.** The compile node
 /// fingerprints several toolchains at once and every one of them asks this seam
-/// about the machine, so the same object is reached from up to four threads. Both
+/// about the machine, so the same object is reached from several threads: a
+/// survey's toolchain threads, and on a node the capture walk's beside a
+/// re-survey's -- and the hold the capture reads (`AwaitCaptureRelease`). Both
 /// implementations already are: the real one holds nothing across a call, and the
 /// scripted one is written before any case reads it. Stated here because the
 /// requirement is otherwise invisible at the point somebody writes a third.

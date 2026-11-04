@@ -165,6 +165,16 @@ class InMemoryLruStorage final: public IStorage
     /// SIGHUP. Triggers eviction until under the new budget.
     void Resize(std::size_t newMaxBytes) override;
 
+    /// Resize this store when @p tier is `StorageTier::Memory`, the one tier it is.
+    ///
+    /// Evicts to fit before returning, as `Resize` does: an in-memory eviction is a list
+    /// splice and a map erase, with no I/O to bound, so nothing is left for `EvictStep`.
+    /// A grow evicts nothing.
+    /// @param tier Which tier's budget to change.
+    /// @param newMaxBytes The new budget; zero is unbounded, as at construction.
+    /// @return 0 for the memory tier, which always fits on return; nullopt for any other.
+    std::optional<std::size_t> ResizeTier(StorageTier tier, std::size_t newMaxBytes) override;
+
     /// Insert / overwrite an entry verbatim, preserving its `cas`, `flags`,
     /// `expiry`, and `generation` exactly as supplied — no fresh CAS token
     /// is issued. Used by `LayeredStorage` to mirror an entry observed in a

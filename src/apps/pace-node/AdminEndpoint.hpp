@@ -10,6 +10,7 @@
 #include <Pace/Core/Logger.hpp>
 #include <Pace/Core/SecureBytes.hpp>
 #include <Pace/Distributed/FleetHistory.hpp>
+#include <Pace/Distributed/FleetKeyedHistory.hpp>
 #include <Pace/Distributed/FleetView.hpp>
 #include <Pace/Metrics/IMetricsSink.hpp>
 #include <Pace/Metrics/PrometheusFormatter.hpp>
@@ -196,9 +197,11 @@ struct NodeScrapeSources
 /// exists to hold every one of them.
 enum class HistoryFile : std::uint8_t
 {
-    Node = 0, ///< This machine's own series.
-    Fleet,    ///< The fleet-wide series, recorded while leading.
-    Received, ///< What every other machine handed over.
+    Node = 0,   ///< This machine's own series.
+    Fleet,      ///< The fleet-wide series, recorded while leading.
+    Received,   ///< What every other machine handed over.
+    Requesters, ///< Compiles granted per requesting machine, counted while leading.
+    Toolchains, ///< Compiles granted per toolchain fingerprint, counted while leading.
     Last
 };
 
@@ -219,13 +222,15 @@ enum class HistoryFile : std::uint8_t
 /// Every history path a node keeps, so the sampler takes one argument rather than three.
 struct HistoryPaths
 {
-    std::filesystem::path fleet;    ///< The fleet-wide series.
-    std::filesystem::path node;     ///< This machine's own series.
-    std::filesystem::path received; ///< What the other machines handed over.
+    std::filesystem::path fleet;         ///< The fleet-wide series.
+    std::filesystem::path node;          ///< This machine's own series.
+    std::filesystem::path received;      ///< What the other machines handed over.
+    std::filesystem::path requesters {}; ///< Compiles granted per requesting machine.
+    std::filesystem::path toolchains {}; ///< Compiles granted per toolchain.
 
     /// Every path this configuration names.
     /// @param cfg The parsed configuration.
-    /// @return The three, each empty when this node keeps no state directory.
+    /// @return Every one, each empty when this node keeps no state directory.
     [[nodiscard]] static HistoryPaths For(NodeConfig const& cfg);
 };
 
@@ -254,6 +259,31 @@ class IFleetHistoryView
 
     /// Whether this record is written to disk and so survives a restart.
     [[nodiscard]] virtual bool Durable() const = 0;
+
+    /// One machine's own series, by the identity key it PROVED -- the second thing a route may read, and through
+    /// this same door, so a per-machine answer and the fleet's come from one record.
+    ///
+    /// A machine's view: its FLEET-scoped slots are absent, and a slot it could not read is absent, never zero.
+    /// @param identityKey The raw key, as the cluster records it; empty names nobody.
+    /// @param range Which window.
+    /// @return The buckets, oldest first, gaps included; nullopt when no series is filed under that key.
+    [[nodiscard]] virtual std::optional<std::vector<Distributed::FleetBucket>> MachineBuckets(
+        std::string_view identityKey, Distributed::FleetRange range) const = 0;
+
+    /// One keyed compile history over a window -- the third thing a route may read, through this same door.
+    ///
+    /// Not pure: a view that keeps no keyed history -- every test double of the series alone -- answers absent,
+    /// which renders `null`, the truth about it.
+    /// @param dimension Which keyed history.
+    /// @param range Which window.
+    /// @return The view, or absent when this record keeps none.
+    [[nodiscard]] virtual std::optional<Distributed::KeyedView> Keyed(Distributed::KeyedDimension dimension,
+                                                                      Distributed::FleetRange range) const
+    {
+        (void) dimension;
+        (void) range;
+        return std::nullopt;
+    }
 };
 
 /// The fleet document for one selection: the ONE renderer `/fleet.txt` and the `fleet-text` verb
@@ -270,11 +300,20 @@ class IFleetHistoryView
 /// @param history The history the figures and the series draw on, or null to draw none.
 /// @param sectionKey A `FleetSectionTable` key, or empty for every whole-document section.
 /// @param rangeKey A `FleetRangeTable` key, or empty for the day.
+/// @param format `Text` for the tables; `Json` for the body `/fleet.json` serves, rendered by the
+///        same `RenderFleetJson` over the same history view. `Json` takes no section: it is one
+///        document, and a section accepted and silently dropped is the answer this refuses.
+/// @param nodeId A member id whose OWN series the `series` section draws, or empty for the fleet's. Honoured by
+///        the `series` section of the tables alone -- every other selection refuses it rather than dropping it --
+///        and resolved to the key the member record holds, never to an endpoint, so the series is the one the
+///        machine holding that key handed over (`IFleetHistoryView::MachineBuckets`).
 /// @return The document, or `UnknownSelector` with every key this build serves.
 [[nodiscard]] std::expected<FleetTextDocument, FleetTextDeclined> AnswerFleetText(Distributed::FleetSnapshot const& snapshot,
                                                                                   IFleetHistoryView const* history,
                                                                                   std::string_view sectionKey,
-                                                                                  std::string_view rangeKey);
+                                                                                  std::string_view rangeKey,
+                                                                                  CompileCacheWire::FleetTextFormat format,
+                                                                                  std::string_view nodeId = {});
 
 [[nodiscard]] std::vector<AdminRoute> MakeFleetRoutes(Distributed::FleetSources sources,
                                                       AdminCredential const& credential,
@@ -319,12 +358,22 @@ class FleetSampler final: public IFleetHistoryView
     /// @param wall Where a bucket's timestamp comes from.
     /// @param paths Where each store is kept; any of them empty is memory-only.
     /// @param logger Shared logger.
+    /// @param load Where the node series reads this machine's CPU busy (`FleetMetric::CpuBusyPermille`): a
+    ///             sampler of its OWN, since one holds the previous counters and a shared one would cut another
+    ///             reader's interval. Null, or a reading the sampler cannot take, records the slot ABSENT.
+    /// @param historyKeys How many requesters and toolchains the keyed histories keep by name.
+    /// @param afterSample Run on the sampler's thread after every sample, or empty for nothing. The node's
+    ///             one periodic loop that runs on EVERY node, so it is where the cache tier's eviction driver
+    ///             gets its fallback kick (`KickTierEviction`); the eviction itself runs on that driver's thread.
     FleetSampler(std::optional<Distributed::FleetSources> sources,
                  IMetricsSink const& metrics,
                  AdminHttpServer::SnapshotProvider node,
                  core::platform::WallClockRef wall,
                  HistoryPaths paths,
-                 ILogger& logger);
+                 ILogger& logger,
+                 std::unique_ptr<IHostLoadSampler> load = nullptr,
+                 std::size_t historyKeys = Distributed::DefaultHistoryKeys,
+                 std::function<void()> afterSample = {});
 
     /// Stops the thread and writes every store out one last time.
     ~FleetSampler() override;
@@ -352,6 +401,25 @@ class FleetSampler final: public IFleetHistoryView
     [[nodiscard]] Distributed::FleetNodeHistories& Received() noexcept
     {
         return _received;
+    }
+
+    /// Where the admission queue reports each compile it grants: the requester and toolchain histories.
+    ///
+    /// Counted by whoever grants -- only a leader does -- and folded per minute by this sampler only while it leads,
+    /// so a minute this node did not lead reads absent.
+    [[nodiscard]] Distributed::CompileDemandHistory& Demand() noexcept
+    {
+        return _demand;
+    }
+
+    /// `IFleetHistoryView`: one keyed compile history.
+    /// @param dimension Which keyed history.
+    /// @param range Which window.
+    /// @return Its view.
+    [[nodiscard]] std::optional<Distributed::KeyedView> Keyed(Distributed::KeyedDimension dimension,
+                                                              Distributed::FleetRange range) const override
+    {
+        return _demand.Of(dimension).View(range);
     }
 
     /// The next batch of this machine's closed buckets to hand over.
@@ -398,6 +466,16 @@ class FleetSampler final: public IFleetHistoryView
     /// @param range Which view.
     /// @return The buckets, backfilled where this leader has no reading.
     [[nodiscard]] std::vector<Distributed::FleetBucket> Buckets(Distributed::FleetRange range) const override;
+
+    /// `IFleetHistoryView`: one machine's series, from what the machines handed over.
+    /// @param identityKey The raw key it proved.
+    /// @param range Which view.
+    /// @return Its buckets, or nullopt when none are filed under that key.
+    [[nodiscard]] std::optional<std::vector<Distributed::FleetBucket>> MachineBuckets(
+        std::string_view identityKey, Distributed::FleetRange range) const override
+    {
+        return _received.MachineBuckets(identityKey, range);
+    }
 
     /// `IFleetHistoryView`: the fleet series' generation.
     [[nodiscard]] std::uint64_t Generation() const override
@@ -465,22 +543,43 @@ class FleetSampler final: public IFleetHistoryView
 
     void Persist();
 
+    /// The store row for one keyed history.
+    /// @param path Where it is kept; empty is memory-only.
+    /// @param dimension Which keyed history.
+    /// @return The row.
+    [[nodiscard]] Store KeyedStore(std::filesystem::path path, Distributed::KeyedDimension dimension);
+
+    /// Run `_afterSample`, catching anything it throws: never ends the sampler's thread.
+    void RunAfterSample() noexcept;
+
+    /// Say, once per failure, that the after-sample step threw. Never throws.
+    /// @param why What the exception said.
+    void ReportAfterSampleFailure(std::string_view why) noexcept;
+
     /// What the fleet series reads, or nullopt on a node with no scheduler.
     std::optional<Distributed::FleetSources> _sources;
     IMetricsSink const& _metrics;
     /// This machine's own facts, read the same way `/metrics` reads them.
     AdminHttpServer::SnapshotProvider _nodeFacts;
+    /// This machine's CPU, for the node series; null records the slot absent.
+    std::unique_ptr<IHostLoadSampler> _load;
     Distributed::FleetHistory _fleet;
     Distributed::FleetHistory _node;
     Distributed::FleetNodeHistories _received;
-    /// The three, fleet first. Declared AFTER everything they reach into.
-    std::array<Store, 3> _stores;
+    /// Compiles granted per requester and per toolchain, counted while leading.
+    Distributed::CompileDemandHistory _demand;
+    /// Every store, fleet first. Declared AFTER everything they reach into.
+    std::array<Store, 5> _stores;
     /// How far this machine has handed its own series over; -1 before anything has.
     ///
     /// Atomic because the heartbeat thread moves it while the sampler thread writes
     /// the series it indexes.
     std::atomic<std::int64_t> _handedThrough { -1 };
     ILogger& _logger;
+    /// Run after every sample, on the sampler's thread; empty for nothing.
+    std::function<void()> _afterSample;
+    /// After-sample failures whose Warn could not be written either.
+    std::atomic<std::uint64_t> _afterSampleUnreported { 0 };
     std::jthread _thread;
 };
 
@@ -507,6 +606,17 @@ class FleetSampler final: public IFleetHistoryView
 /// @return The readings, node-scoped slots filled.
 [[nodiscard]] EnumTable<Distributed::FleetMetric, std::uint64_t> NodeSampleFrom(IMetricsSink const& metrics,
                                                                                 MetricsSnapshot const& snapshot);
+
+/// The node series' CPU slot from one load reading.
+///
+/// Pure, so the rule it carries is a unit assertion rather than a property of a running sampler: a reading the
+/// sampler could not take -- its first after construction, a counter that went backwards, a platform that will not
+/// say -- leaves the slot ABSENT, never zero.
+/// @param values The node reading, filled in place.
+/// @param load What the sampler answered.
+/// @return The slots the reading could not answer for: `SlotBit(CpuBusyPermille)` when it had no CPU, else none.
+[[nodiscard]] Distributed::FleetSlotMask ApplyCpuReading(EnumTable<Distributed::FleetMetric, std::uint64_t>& values,
+                                                         HostLoad const& load);
 
 /// Where a node keeps its fleet history.
 ///

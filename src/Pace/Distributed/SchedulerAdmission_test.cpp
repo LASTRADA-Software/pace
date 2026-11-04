@@ -3,8 +3,10 @@
 // The admission half of `SchedulerService` (#1728) on a ManualClock: the grants it mints on a worker,
 // the lease and the job each takes, and every way they are given back.
 #include <Pace/Core/Ed25519.hpp>
+#include <Pace/Core/Json.hpp>
 #include <Pace/Core/Logger.hpp>
 #include <Pace/Distributed/FleetView.hpp>
+#include <Pace/Distributed/IClusterAdmin.hpp>
 #include <Pace/Distributed/LeaseToken.hpp>
 #include <Pace/Distributed/SchedulerService.hpp>
 #include <Pace/Metrics/IMetricsSink.hpp>
@@ -16,13 +18,21 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
+#include <format>
 #include <functional>
+#include <latch>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
+#include <tuple>
+#include <utility>
 #include <vector>
 
+#include <core/Ranges.hpp>
 #include <core/platform/Clock.hpp>
 #include <tests/LeaseRosterFakes.hpp>
 #include <tests/RaftPeerKeyFakes.hpp>
@@ -149,6 +159,54 @@ struct Fleet
 {
     REQUIRE_FALSE(verdict.refusal.has_value());
     return Unwrap(Wire::DecodeAdmitGrant(verdict.grant));
+}
+
+/// The joined compile rows of a leading scheduler.
+[[nodiscard]] std::vector<CompileRow> CompilesOf(SchedulerService const& service)
+{
+    auto rows = service.AdmissionReportNow().compiles;
+    REQUIRE(rows.has_value());
+    return Unwrap(rows);
+}
+
+/// The row for @p ticket; the case fails when there is none.
+[[nodiscard]] CompileRow RowOf(std::vector<CompileRow> const& rows, Ticket ticket)
+{
+    auto const found = std::ranges::find(rows, ticket, [](CompileRow const& row) { return row.ticket.ticket; });
+    REQUIRE(found != rows.end());
+    return *found;
+}
+
+/// The `compiles` element of a fleet document whose `ticket` is @p ticket; the case fails when there is none.
+[[nodiscard]] Json::Value CompileJsonOf(Json::Value const& document, Ticket ticket)
+{
+    auto const* const compiles = document.Find("compiles");
+    REQUIRE(compiles != nullptr);
+    REQUIRE(compiles->AsArray() != nullptr);
+    // Found, then required: nothing may follow a `FAIL`, which MSVC reads as unreachable code (C4702).
+    auto const* const found = core::findIfOrNull(Unwrap(compiles->AsArray()), [ticket](Json::Value const& row) {
+        auto const* const id = row.Find("ticket");
+        return id != nullptr && id->AsInt() == static_cast<std::int64_t>(ticket);
+    });
+    INFO("ticket " << ticket);
+    REQUIRE(found != nullptr);
+    return *found;
+}
+
+/// The member @p key of a JSON object; the case fails when it is missing -- which is not `null`.
+[[nodiscard]] Json::Value MemberOf(Json::Value const& object, std::string_view key)
+{
+    auto const* const member = object.Find(key);
+    REQUIRE(member != nullptr);
+    return *member;
+}
+
+/// A JSON string member's text; the case fails when it is missing or not a string.
+[[nodiscard]] std::string TextOf(Json::Value const& object, std::string_view key)
+{
+    auto const member = MemberOf(object, key);
+    REQUIRE(member.AsString() != nullptr);
+    return Unwrap(member.AsString());
 }
 } // namespace
 
@@ -714,5 +772,730 @@ TEST_CASE("SchedulerAdmission.a-late-queue-settle-counts-released-late-and-an-ab
         fleet.service.AbandonAdmission(ticket);
         CHECK(releasedLate(fleet) == 0);
         CHECK(DispatchCountsOf(fleet) == DispatchCounts { .granted = 1, .released = 0 });
+    }
+}
+
+namespace
+{
+/// A cluster that has agreed one state, for the fleet page to read; it proposes nothing.
+class AgreedCluster final: public IClusterAdmin
+{
+  public:
+    /// @param state What the cluster has agreed.
+    explicit AgreedCluster(Cluster::ClusterState state):
+        _state { std::move(state) }
+    {
+    }
+
+    [[nodiscard]] Cluster::ClusterState ClusterState() const override
+    {
+        return _state;
+    }
+
+    [[nodiscard]] std::expected<void, ConsensusError> ProposeToCluster(Cluster::Command const& /*command*/) override
+    {
+        return std::unexpected { InvalidConfiguration("this cluster proposes nothing") };
+    }
+
+    void NoteAnnouncedEndpoint(Consensus::NodeId const& /*member*/, std::string /*endpoint*/) override {}
+
+  private:
+    Cluster::ClusterState _state;
+};
+} // namespace
+
+TEST_CASE("SchedulerAdmission.dashboard-shows-the-replicated-name-and-says-where-a-name-came-from",
+          "[distributed][admission][scheduler][fleetview][display-name]")
+{
+    // The page joins a machine to its member record by the key the machine PROVED -- for the label alone -- and
+    // prefers the name an operator chose over the one the machine reports for itself, saying which it showed.
+    Fleet fleet;
+    auto const reply = fleet.service.Register(
+        fleet.Worker(),
+        WorkerRegistration {
+            .fingerprint = Toolchain, .endpoint = WorkerEndpoint, .displayName = "build-7", .slots = 1, .codecs = {} });
+    REQUIRE(reply.status == Wire::Status::Ok);
+
+    auto state = Cluster::ClusterState {};
+    for (auto const& [id, key]: { std::pair { std::string { "w1" }, fleet.workerKey.PublicKey() },
+                                  std::pair { std::string { "w2" }, Testing::TestKeyPair("w2").PublicKey() } })
+        Cluster::Apply(state,
+                       Cluster::Command { .kind = Cluster::CommandKind::AddLearner,
+                                          .key = id,
+                                          .value = {},
+                                          .schedulerEndpoint = {},
+                                          .publicKey = key });
+
+    SECTION("nobody named it: the machine's own word, marked self-reported, on both rows")
+    {
+        AgreedCluster const cluster { state };
+        auto const snapshot = CollectFleet({ .scheduler = &fleet.service, .cluster = &cluster, .metrics = &fleet.metrics });
+        auto const json = RenderFleetJson(snapshot, FleetHistoryView {});
+        INFO(json);
+        CHECK(json.contains(R"("name":"build-7","name-source":"self-reported")"));
+        CHECK(json.contains(R"("id":"w1","name":"build-7","name-source":"self-reported")"));
+        // A member no machine of the fleet speaks for, and nobody named, renders absent at the cell.
+        CHECK(json.contains(R"("id":"w2","name":null,"name-source":null)"));
+    }
+    SECTION("an operator named it: the replicated name wins, marked replicated, on both rows and in the queue")
+    {
+        Cluster::Apply(state,
+                       Cluster::Command { .kind = Cluster::CommandKind::SetDisplayName,
+                                          .key = "w1",
+                                          .value = "lab-box",
+                                          .schedulerEndpoint = {},
+                                          .publicKey = std::nullopt });
+        AgreedCluster const cluster { state };
+        fleet.Report(MachineOf(fleet.workerKey.PublicKey()), 1024 * MiB, 1);
+        auto const snapshot = CollectFleet({ .scheduler = &fleet.service, .cluster = &cluster, .metrics = &fleet.metrics });
+        REQUIRE(snapshot.nodes.size() == 1);
+        CHECK(snapshot.nodes.front().replicatedName == "lab-box");
+        auto const json = RenderFleetJson(snapshot, FleetHistoryView {});
+        INFO(json);
+        CHECK(json.contains(R"("name":"lab-box","name-source":"replicated")"));
+        CHECK(json.contains(R"("id":"w1","name":"lab-box","name-source":"replicated")"));
+        CHECK_FALSE(json.contains("build-7"));
+        // The page and the text document say it too: one column table, one spelling.
+        CHECK(RenderFleetHtml(snapshot, FleetHistoryView {}, 0).contains("lab-box"));
+        CHECK(RenderFleetText(snapshot, FleetHistoryView {}, FleetSection::Members).contains("w1\tlab-box\treplicated"));
+        // And a machine the admission queue names is named by it.
+        REQUIRE(snapshot.admission.has_value());
+        CHECK(std::ranges::contains(Unwrap(snapshot.admission).machines, "lab-box", &AdmissionMachineRow::machine));
+    }
+}
+
+TEST_CASE("SchedulerAdmission.a-machine-is-named-as-a-member-by-the-key-it-proved-never-by-the-endpoint-it-claimed",
+          "[distributed][admission][scheduler][fleetview][display-name]")
+{
+    // A registration's endpoint is the machine's own unverified claim, so the `node-id` a machine and worker row carry
+    // is the member holding the key the connection PROVED -- the join the name already makes -- and nothing else.
+    Fleet fleet;
+    constexpr std::string_view OwnEndpoint = "127.0.0.1:7100";
+    constexpr std::string_view ClaimedEndpoint = "10.0.0.7:6674";
+    // This fleet's own machine, over loopback: a member records no loopback 0xFC endpoint (`Validate` refuses one), so
+    // only the proven key can place this row -- the one-node fleet's every row.
+    auto own = fleet.Worker();
+    own.peerId = "127.0.0.1";
+    REQUIRE(fleet.service
+                .Register(own,
+                          WorkerRegistration { .fingerprint = Toolchain, .endpoint = OwnEndpoint, .slots = 1, .codecs = {} })
+                .status
+            == Wire::Status::Ok);
+    // A machine proving a key NO member holds, registering under the endpoint member w2 RECORDS as its 0xFC endpoint.
+    auto const strangerKey = Testing::TestKeyPair("stranger");
+    auto stranger = fleet.Worker();
+    stranger.peerId = "10.0.0.9";
+    stranger.provenNodeId = "stranger";
+    stranger.provenKey = strangerKey.PublicKey();
+    REQUIRE(
+        fleet.service
+            .Register(stranger,
+                      WorkerRegistration { .fingerprint = Toolchain, .endpoint = ClaimedEndpoint, .slots = 1, .codecs = {} })
+            .status
+        == Wire::Status::Ok);
+
+    auto state = Cluster::ClusterState {};
+    for (auto const& [id, endpoint, key]:
+         { std::tuple { std::string { "w1" }, std::string {}, fleet.workerKey.PublicKey() },
+           std::tuple { std::string { "w2" }, std::string { ClaimedEndpoint }, Testing::TestKeyPair("w2").PublicKey() } })
+        Cluster::Apply(state,
+                       Cluster::Command { .kind = Cluster::CommandKind::AddLearner,
+                                          .key = id,
+                                          .value = {},
+                                          .schedulerEndpoint = endpoint,
+                                          .publicKey = key });
+    REQUIRE(state.members.size() == 2);
+    // The control: w2 really does RECORD the endpoint the stranger claims, so an endpoint join would name it w2.
+    auto const* const claimed = core::findOrNull(state.members, std::string { "w2" }, &Cluster::ClusterMember::id);
+    REQUIRE(claimed != nullptr);
+    REQUIRE(claimed->schedulerEndpoint == ClaimedEndpoint);
+
+    AgreedCluster const cluster { state };
+    auto const snapshot = CollectFleet({ .scheduler = &fleet.service, .cluster = &cluster, .metrics = &fleet.metrics });
+    auto const nodeAt = [&snapshot](std::string_view endpoint) {
+        auto const* const node = core::findOrNull(snapshot.nodes, endpoint, &NodeReport::endpoint);
+        REQUIRE(node != nullptr);
+        return *node;
+    };
+    auto const workerAt = [&snapshot](std::string_view endpoint) {
+        auto const* const worker = core::findIfOrNull(
+            snapshot.workers, [endpoint](WorkerReport const& candidate) { return candidate.info.endpoint == endpoint; });
+        REQUIRE(worker != nullptr);
+        return *worker;
+    };
+    // Its own row, named by its key over loopback.
+    CHECK(nodeAt(OwnEndpoint).memberId == "w1");
+    CHECK(workerAt(OwnEndpoint).memberId == "w1");
+    // The claimant is NOT w2, whose endpoint it claimed; its key is no member's, so it is nobody.
+    CHECK(nodeAt(ClaimedEndpoint).memberId.empty());
+    CHECK(workerAt(ClaimedEndpoint).memberId.empty());
+
+    // And the documents say it in the one `node-id` column, absent at the cell where nobody is placed.
+    auto const json = RenderFleetJson(snapshot, FleetHistoryView {});
+    INFO(json);
+    CHECK(json.contains(R"("endpoint":"127.0.0.1:7100","node-id":"w1")"));
+    CHECK(json.contains(R"("endpoint":"10.0.0.7:6674","node-id":null)"));
+    CHECK(json.contains(R"("name-source":null,"node-id":"w1")"));
+    CHECK(json.contains(R"("name-source":null,"node-id":null)"));
+    CHECK_FALSE(json.contains(R"("node-id":"w2")"));
+    CHECK(RenderFleetText(snapshot, FleetHistoryView {}, FleetSection::Workers).contains("127.0.0.1:7100\tw1"));
+
+    // Without cluster state nobody is placed: absent, not guessed.
+    auto const alone = CollectFleet({ .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics });
+    CHECK(std::ranges::all_of(alone.nodes, [](NodeReport const& node) { return node.memberId.empty(); }));
+    CHECK(std::ranges::all_of(alone.workers, [](WorkerReport const& worker) { return worker.memberId.empty(); }));
+}
+
+TEST_CASE("SchedulerAdmission.two-members-registering-under-one-endpoint-name-nobody-on-the-machine-row",
+          "[distributed][admission][scheduler][fleetview][display-name]")
+{
+    // One machine row folds every registration at an endpoint. When two MEMBERS' proven keys meet there, the row is
+    // no one member's account: `node-id` is null on it -- the answer `fleet_overview` reads -- just as the MCP
+    // `toolchains` tool names nobody for registrations that disagree. Each worker row keeps its own key's member.
+    Fleet fleet;
+    constexpr std::string_view Shared = "10.0.0.7:6674";
+    auto const otherKey = Testing::TestKeyPair("w2");
+    auto other = fleet.Worker();
+    other.provenNodeId = "w2";
+    other.provenKey = otherKey.PublicKey();
+    for (auto const& [caller, fingerprint]:
+         { std::pair { fleet.Worker(), std::string { "gcc-14" } }, std::pair { other, std::string { "clang-18" } } })
+        REQUIRE(
+            fleet.service
+                .Register(caller,
+                          WorkerRegistration { .fingerprint = fingerprint, .endpoint = Shared, .slots = 1, .codecs = {} })
+                .status
+            == Wire::Status::Ok);
+
+    auto state = Cluster::ClusterState {};
+    for (auto const& [id, key]: { std::pair { std::string { "w1" }, fleet.workerKey.PublicKey() },
+                                  std::pair { std::string { "w2" }, otherKey.PublicKey() } })
+        Cluster::Apply(state,
+                       Cluster::Command { .kind = Cluster::CommandKind::AddLearner,
+                                          .key = id,
+                                          .value = {},
+                                          .schedulerEndpoint = {},
+                                          .publicKey = key });
+    AgreedCluster const cluster { state };
+    auto const snapshot = CollectFleet({ .scheduler = &fleet.service, .cluster = &cluster, .metrics = &fleet.metrics });
+    REQUIRE(snapshot.nodes.size() == 1);
+    CHECK(snapshot.nodes.front().fingerprints.size() == 2);
+    CHECK(snapshot.nodes.front().memberId.empty());
+    // Each registration still names its own member: the disagreement is the ROW's, never invented per worker.
+    auto workerIds = std::vector<std::string> {};
+    for (auto const& worker: snapshot.workers)
+        workerIds.push_back(worker.memberId);
+    std::ranges::sort(workerIds);
+    CHECK(workerIds == std::vector<std::string> { "w1", "w2" });
+    auto const json = RenderFleetJson(snapshot, FleetHistoryView {});
+    INFO(json);
+    CHECK(json.contains(R"("name-source":null,"node-id":null)"));
+}
+
+TEST_CASE("SchedulerAdmission.a-granted-ticket-lease-carries-its-ticket-id",
+          "[distributed][admission][scheduler][fleetview]")
+{
+    Fleet fleet;
+    auto const worker = fleet.RegisterWorker();
+    fleet.Report(MachineOf(fleet.workerKey.PublicKey()));
+    auto const ticket = fleet.Admit("k1");
+    auto const verdicts = fleet.service.PumpAdmission();
+    REQUIRE(verdicts.size() == 1);
+    auto const grant = GrantOf(verdicts[0]);
+    REQUIRE(grant.kind == Wire::GrantKind::Worker);
+
+    fleet.clock.advance(3s);
+    auto const rows = CompilesOf(fleet.service);
+    REQUIRE(rows.size() == 1);
+    auto const& row = rows.front();
+    CHECK(row.ticket.ticket == ticket);
+    CHECK(row.ticket.state == TicketView::State::Running);
+    CHECK(row.ticket.sourcePath == "src/a.cpp");
+    CHECK(row.ticket.fingerprint == Toolchain);
+    CHECK(row.ticket.treeLabel == "tree");
+    CHECK(row.ticket.caller == fleet.service.OwnMachineId());
+    CHECK(row.ticket.age == 3s);
+    CHECK(row.toolchainLabel == ToolchainLabel);
+    REQUIRE(row.ticket.placement.has_value());
+    CHECK(Unwrap(row.ticket.placement).workerId == worker);
+    // Joined through the lease the grant took: its worker, and what is left of the lifetime the grant told
+    // the client, measured on the same clock.
+    CHECK(row.worker == std::optional<std::string> { worker });
+    CHECK(row.leaseExpiresIn == std::optional<std::chrono::milliseconds> { grant.lifetime - 3s });
+
+    // Settled, the ticket and its lease are gone together.
+    REQUIRE(fleet.service.SettleAdmission(ticket, Settlement { .outcome = Wire::SettleOutcome::Stored, .peakBytes = {} })
+            == SettleResult::Settled);
+    CHECK(CompilesOf(fleet.service).empty());
+
+    // A node that does not lead has no compiles to show, which is not a fleet compiling nothing.
+    fleet.service.SetRole(SchedulerRole::Follower, "10.9.9.9:7100", 1);
+    CHECK_FALSE(fleet.service.AdmissionReportNow().compiles.has_value());
+    auto const snapshot = CollectFleet({ .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics });
+    CHECK_FALSE(snapshot.compiles.has_value());
+    CHECK(RenderFleetJson(snapshot, FleetHistoryView {})
+              .contains(R"("compiles":null,"compiles-truncated":null,"compile-totals":null)"));
+}
+
+TEST_CASE("SchedulerAdmission.compiles-join-exact-ticket-ids-never-by-cache-key",
+          "[distributed][admission][scheduler][fleetview]")
+{
+    // Two tickets that missed the SAME cache key, unstorable so the queue runs both, each on a worker of
+    // its own. A join by cache key would hand both rows one lease; the join by ticket id hands each its own.
+    Fleet fleet;
+    auto const first = fleet.RegisterWorker(/*slots=*/1);
+    constexpr std::string_view SecondEndpoint = "10.0.0.3:7100";
+    auto const registered = fleet.service.Register(
+        fleet.Worker(),
+        WorkerRegistration { .fingerprint = Toolchain, .endpoint = SecondEndpoint, .slots = 1, .codecs = {} });
+    REQUIRE(registered.status == Wire::Status::Ok);
+    auto const second = Unwrap(Wire::DecodeRegisterReply(registered.payload)).workerId;
+    REQUIRE(first != second);
+    fleet.Report(MachineOf(fleet.workerKey.PublicKey()), 1024 * MiB, 2);
+    auto const workerAt = [&](std::string_view endpoint) {
+        return endpoint == WorkerEndpoint ? first : second;
+    };
+
+    auto const older = fleet.Admit("same");
+    auto const olderGrant = GrantOf(fleet.service.PumpAdmission().at(0));
+    fleet.clock.advance(5s);
+    auto const newer = fleet.Admit("same");
+    auto const newerGrant = GrantOf(fleet.service.PumpAdmission().at(0));
+    REQUIRE(olderGrant.endpoint != newerGrant.endpoint);
+
+    auto const rows = CompilesOf(fleet.service);
+    REQUIRE(rows.size() == 2);
+    auto const olderRow = RowOf(rows, older);
+    auto const newerRow = RowOf(rows, newer);
+    CHECK(olderRow.worker == std::optional<std::string> { workerAt(olderGrant.endpoint) });
+    CHECK(newerRow.worker == std::optional<std::string> { workerAt(newerGrant.endpoint) });
+    CHECK(olderRow.leaseExpiresIn == std::optional<std::chrono::milliseconds> { olderGrant.lifetime - 5s });
+    CHECK(newerRow.leaseExpiresIn == std::optional<std::chrono::milliseconds> { newerGrant.lifetime });
+
+    // Settling one leaves the other joined to ITS lease, not to whatever lease remains for the key.
+    REQUIRE(fleet.service.SettleAdmission(older, Settlement { .outcome = Wire::SettleOutcome::NotStored, .peakBytes = {} })
+            == SettleResult::Settled);
+    auto const after = CompilesOf(fleet.service);
+    REQUIRE(after.size() == 1);
+    CHECK(after.front().ticket.ticket == newer);
+    CHECK(after.front().worker == std::optional<std::string> { workerAt(newerGrant.endpoint) });
+}
+
+TEST_CASE("SchedulerAdmission.a-local-placement-reports-worker-local-and-no-expiry",
+          "[distributed][admission][scheduler][fleetview]")
+{
+    Fleet fleet;
+    fleet.Report(fleet.service.OwnMachineId());
+    auto const ticket = fleet.Admit("k1", Wire::AdmitKind::LocalOnly);
+    REQUIRE(GrantOf(fleet.service.PumpAdmission().at(0)).kind == Wire::GrantKind::Local);
+
+    auto const row = RowOf(CompilesOf(fleet.service), ticket);
+    CHECK(row.ticket.state == TicketView::State::Running);
+    CHECK_FALSE(row.ticket.placement.has_value());
+    CHECK(row.worker == std::optional<std::string> { std::string { LocalCompileWorker } });
+    CHECK_FALSE(row.leaseExpiresIn.has_value());
+
+    auto const document = Unwrap(Json::Parse(RenderFleetJson(
+        CollectFleet({ .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics }), FleetHistoryView {})));
+    auto const json = CompileJsonOf(document, ticket);
+    CHECK(TextOf(json, "worker") == LocalCompileWorker);
+    CHECK(MemberOf(json, "lease-expires-in").IsNull());
+    // The requester exactly, by its key, beside the name a person reads.
+    CHECK(TextOf(json, "requester-key") == FormatEd25519PublicKey(fleet.signer.PublicKey()));
+    CHECK_FALSE(TextOf(json, "requester").empty());
+    CHECK(TextOf(json, "fingerprint") == Toolchain);
+}
+
+TEST_CASE("SchedulerAdmission.an-unknown-fingerprint-renders-absent", "[distributed][admission][scheduler][fleetview]")
+{
+    // A local-only request may not know its toolchain. That is a fingerprint nobody stated -- `null` at
+    // the cell -- never an empty string presented as one.
+    Fleet fleet;
+    auto const ticket = fleet.service.Admit(
+        Fleet::Insider,
+        [] { return Fleet::Insider; },
+        fleet.service.OwnMachineId(),
+        Wire::AdmitRequestFields { .kind = Wire::AdmitKind::LocalOnly,
+                                   .fingerprint = {},
+                                   .cacheKey = "k1",
+                                   .sourcePath = "src/a.cpp",
+                                   .treeLabel = "tree",
+                                   .storable = false,
+                                   .acceptedCodecs = {},
+                                   .excluded = {},
+                                   .toolchainLabel = {} });
+    REQUIRE(ticket.has_value());
+
+    auto const document = Unwrap(Json::Parse(RenderFleetJson(
+        CollectFleet({ .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics }), FleetHistoryView {})));
+    auto const json = CompileJsonOf(document, Unwrap(ticket));
+    CHECK(MemberOf(json, "fingerprint").IsNull());
+    CHECK(MemberOf(json, "toolchain").IsNull());
+}
+
+TEST_CASE("SchedulerAdmission.queue-depth-and-compile-totals-are-one-sample",
+          "[distributed][admission][scheduler][fleetview]")
+{
+    // The queue's depth and the compile totals are published side by side in one document, so they come
+    // from ONE read: `AdmissionReportNow` is the only door to either half, which is the structural half of
+    // the guarantee. This is the behavioural half -- a helper thread admits and abandons as fast as it can
+    // while this thread reads, and every read's `depth` equals the queued tickets it lists.
+    constexpr int Churns = 50'000;
+    constexpr int Reads = 50'000;
+    Fleet fleet;
+    // A reported machine keeps the queue's view present whatever the depth; nothing is placed on it.
+    fleet.Report(MachineOf(Testing::TestKeyPair("bystander").PublicKey()), 1024 * MiB, 0);
+    auto const request = Wire::AdmitRequestFields { .kind = Wire::AdmitKind::LocalOnly,
+                                                    .fingerprint = {},
+                                                    .cacheKey = "k",
+                                                    .sourcePath = "src/a.cpp",
+                                                    .treeLabel = "tree",
+                                                    .storable = false,
+                                                    .acceptedCodecs = {},
+                                                    .excluded = {},
+                                                    .toolchainLabel = {} };
+
+    std::latch start { 2 };
+    auto churn = std::thread { [&] {
+        start.arrive_and_wait();
+        // Every ticket is abandoned again, so the queue stays small and each read stays cheap; the depth
+        // still moves on every admit and every abandon.
+        for ([[maybe_unused]] auto const round: std::views::iota(0, Churns))
+        {
+            auto const ticket =
+                fleet.service.Admit(Fleet::Insider, [] { return Fleet::Insider; }, fleet.service.OwnMachineId(), request);
+            if (ticket.has_value())
+                fleet.service.AbandonAdmission(*ticket);
+        }
+    } };
+
+    start.arrive_and_wait();
+    auto disagreements = 0;
+    auto sampled = 0;
+    for ([[maybe_unused]] auto const round: std::views::iota(0, Reads))
+    {
+        auto const report = fleet.service.AdmissionReportNow();
+        if (!report.queue.has_value() || !report.compiles.has_value())
+            continue;
+        ++sampled;
+        auto const queued = std::ranges::count(
+            Unwrap(report.compiles), TicketView::State::Queued, [](CompileRow const& row) { return row.ticket.state; });
+        if (std::cmp_not_equal(queued, Unwrap(report.queue).depth))
+            ++disagreements;
+    }
+    churn.join();
+
+    CHECK(sampled == Reads);
+    CHECK(disagreements == 0);
+}
+
+TEST_CASE("SchedulerAdmission.queued-tickets-report-no-worker", "[distributed][admission][scheduler][fleetview]")
+{
+    Fleet fleet;
+    (void) fleet.RegisterWorker(/*slots=*/1);
+    fleet.Report(MachineOf(fleet.workerKey.PublicKey()), 1024 * MiB, 1);
+    (void) fleet.Admit("k1");
+    auto const queued = fleet.Admit("k2");
+    REQUIRE(fleet.service.PumpAdmission().size() == 1);
+
+    auto const row = RowOf(CompilesOf(fleet.service), queued);
+    CHECK(row.ticket.state == TicketView::State::Queued);
+    CHECK_FALSE(row.ticket.placement.has_value());
+    CHECK_FALSE(row.worker.has_value());
+    CHECK_FALSE(row.leaseExpiresIn.has_value());
+
+    // In the document the cells are ABSENT -- `null`, the fleet document's spelling of it -- never an
+    // empty string, `local`, or a zero.
+    auto const document = Unwrap(Json::Parse(RenderFleetJson(
+        CollectFleet({ .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics }), FleetHistoryView {})));
+    auto const json = CompileJsonOf(document, queued);
+    CHECK(TextOf(json, "state") == "queued");
+    CHECK(MemberOf(json, "worker").IsNull());
+    CHECK(MemberOf(json, "lease-expires-in").IsNull());
+}
+
+TEST_CASE("SchedulerAdmission.compile-totals-count-tickets-as-the-queue-does",
+          "[distributed][admission][scheduler][fleetview]")
+{
+    // Running equals what was granted and not settled, queued equals the queue's own depth, and a request
+    // waiting on an identical storable compile is a third state -- in neither of those, and still listed.
+    Fleet fleet;
+    (void) fleet.RegisterWorker(/*slots=*/2);
+    fleet.Report(MachineOf(fleet.workerKey.PublicKey()), 1024 * MiB, 2);
+    auto const owner = fleet.Admit("shared", Wire::AdmitKind::Dispatchable, /*storable=*/true);
+    auto const waiter = fleet.Admit("shared", Wire::AdmitKind::Dispatchable, /*storable=*/true);
+    (void) fleet.Admit("k2");
+    auto const queued = fleet.Admit("k3");
+    auto const granted = fleet.service.PumpAdmission();
+
+    auto const snapshot = CollectFleet({ .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics });
+    REQUIRE(snapshot.compiles.has_value());
+    REQUIRE(snapshot.admission.has_value());
+    auto const& compiles = Unwrap(snapshot.compiles);
+    auto const total = [&](TicketView::State state) {
+        return compiles.totals[static_cast<std::size_t>(state)];
+    };
+    CHECK(total(TicketView::State::Running) == granted.size());
+    CHECK(total(TicketView::State::Queued) == Unwrap(snapshot.admission).depth);
+    CHECK(total(TicketView::State::Waiting) == 1);
+    CHECK(compiles.rows.size() == 4);
+    CHECK(compiles.truncated == 0);
+
+    auto const stateOf = [&](Ticket ticket) {
+        return std::ranges::find(compiles.rows, ticket, [](FleetCompile const& c) { return c.compile.ticket.ticket; })
+            ->compile.ticket.state;
+    };
+    CHECK(stateOf(owner) == TicketView::State::Running);
+    CHECK(stateOf(waiter) == TicketView::State::Waiting);
+    CHECK(stateOf(queued) == TicketView::State::Queued);
+
+    CHECK(RenderFleetJson(snapshot, FleetHistoryView {})
+              .contains(std::format(R"("compile-totals":{{"queued":{},"waiting":1,"running":{}}})",
+                                    Unwrap(snapshot.admission).depth,
+                                    granted.size())));
+
+    // Woken by the owner's store and not yet answered, the waiter is still in progress: still waiting.
+    REQUIRE(fleet.service.SettleAdmission(owner, Settlement { .outcome = Wire::SettleOutcome::Stored, .peakBytes = {} })
+            == SettleResult::Settled);
+    CHECK(RowOf(CompilesOf(fleet.service), waiter).ticket.state == TicketView::State::Waiting);
+    (void) fleet.service.PumpAdmission();
+    auto const answered = CompilesOf(fleet.service);
+    CHECK(std::ranges::find(answered, waiter, [](CompileRow const& row) { return row.ticket.ticket; }) == answered.end());
+}
+
+TEST_CASE("SchedulerAdmission.compiles-over-the-ceiling-report-truncated", "[distributed][admission][scheduler][fleetview]")
+{
+    // Nothing reports a budget, so every ticket stays queued. One past the ceiling is left out of the
+    // list -- the NEWEST, since the list is oldest first -- and counted, and the totals still count it.
+    Fleet fleet;
+    std::vector<Ticket> tickets;
+    tickets.reserve(FleetJsonCompileCeiling + 1);
+    for ([[maybe_unused]] auto const index: std::views::iota(std::size_t { 0 }, FleetJsonCompileCeiling + 1))
+        tickets.push_back(fleet.Admit(std::format("k{}", index)));
+
+    auto const snapshot = CollectFleet({ .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics });
+    REQUIRE(snapshot.compiles.has_value());
+    auto const& compiles = Unwrap(snapshot.compiles);
+    CHECK(compiles.rows.size() == FleetJsonCompileCeiling);
+    CHECK(compiles.truncated == 1);
+    CHECK(compiles.totals[static_cast<std::size_t>(TicketView::State::Queued)] == FleetJsonCompileCeiling + 1);
+    CHECK(compiles.rows.front().compile.ticket.ticket == tickets.front());
+    CHECK(compiles.rows.back().compile.ticket.ticket == tickets[FleetJsonCompileCeiling - 1]);
+    CHECK(RenderFleetJson(snapshot, FleetHistoryView {}).contains(R"("compiles-truncated":1,)"));
+}
+
+TEST_CASE("SchedulerAdmission.fleet-collects-every-lease-past-the-page-window",
+          "[distributed][admission][scheduler][fleetview]")
+{
+    // The page shows `OutstandingLeaseRows`; the snapshot -- and so the JSON -- holds every live lease
+    // up to `FleetJsonLeaseCeiling`, so a program reading it is not handed the page's window as the whole.
+    constexpr auto Granted = static_cast<std::uint32_t>(OutstandingLeaseRows + 5);
+    Fleet fleet;
+    (void) fleet.RegisterWorker(Granted);
+    fleet.Report(MachineOf(fleet.workerKey.PublicKey()), Granted * 128 * MiB, Granted);
+    for (auto const index: std::views::iota(std::uint32_t { 0 }, Granted))
+        (void) fleet.Admit(std::format("k{}", index));
+    REQUIRE(fleet.service.PumpAdmission().size() == Granted);
+
+    auto const snapshot = CollectFleet({ .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics });
+    CHECK(snapshot.liveLeases == Granted);
+    CHECK(snapshot.outstandingLeases.size() == Granted);
+    CHECK(RenderFleetJson(snapshot, FleetHistoryView {}).contains(R"("leases-outstanding-truncated":0)"));
+}
+
+namespace
+{
+/// Every grant the demand sink was told of, in order.
+class RecordingDemandSink final: public ICompileDemandSink
+{
+  public:
+    struct Grant
+    {
+        std::string requester;   ///< The machine the queue charged, raw.
+        std::string fingerprint; ///< The toolchain the request named.
+    };
+
+    void CompileGranted(std::string_view requester, std::string_view fingerprint) override
+    {
+        grants.push_back(Grant { .requester = std::string { requester }, .fingerprint = std::string { fingerprint } });
+    }
+
+    std::vector<Grant> grants;
+};
+} // namespace
+
+TEST_CASE("SchedulerAdmission.a-granted-compile-is-reported-once-by-machine-and-toolchain",
+          "[distributed][admission][scheduler][fleet-keyed-history]")
+{
+    Fleet fleet;
+    RecordingDemandSink demand;
+    fleet.service.SetDemandSink(&demand);
+    (void) fleet.RegisterWorker(/*slots=*/2);
+    auto const workerMachine = MachineOf(fleet.workerKey.PublicKey());
+    fleet.Report(workerMachine);
+    fleet.Report(fleet.service.OwnMachineId());
+
+    SECTION("a worker grant, from a forwarded machine")
+    {
+        auto const forwarded = MachineOf(Testing::TestKeyPair("requester").PublicKey());
+        fleet.Report(forwarded);
+        (void) fleet.Admit("k1", Wire::AdmitKind::Dispatchable, false, {}, {}, forwarded);
+        REQUIRE(GrantOf(fleet.service.PumpAdmission().at(0)).kind == Wire::GrantKind::Worker);
+        REQUIRE(demand.grants.size() == 1);
+        CHECK(demand.grants[0].requester == forwarded);
+        CHECK(demand.grants[0].fingerprint == Toolchain);
+    }
+    SECTION("a local grant counts, on this node's own machine")
+    {
+        (void) fleet.Admit("k1", Wire::AdmitKind::LocalOnly);
+        REQUIRE(GrantOf(fleet.service.PumpAdmission().at(0)).kind == Wire::GrantKind::Local);
+        REQUIRE(demand.grants.size() == 1);
+        CHECK(demand.grants[0].requester == fleet.service.OwnMachineId());
+    }
+    SECTION("a worker refusal and the grant after it are one compile asked for")
+    {
+        auto const ticket = fleet.Admit("k1");
+        REQUIRE(GrantOf(fleet.service.PumpAdmission().at(0)).kind == Wire::GrantKind::Worker);
+        REQUIRE(fleet.service.SettleAdmission(ticket,
+                                              Settlement { .outcome = Wire::SettleOutcome::WorkerRefused, .peakBytes = {} })
+                == SettleResult::Requeued);
+        fleet.Report(workerMachine);
+        auto const again = fleet.service.PumpAdmission();
+        REQUIRE(again.size() == 1);
+        REQUIRE(GrantOf(again[0]).kind == Wire::GrantKind::Worker);
+        CHECK(demand.grants.size() == 1);
+    }
+    SECTION("a duplicate answered by another compile's object counts nothing")
+    {
+        auto const first = fleet.Admit("same", Wire::AdmitKind::Dispatchable, /*storable=*/true);
+        (void) fleet.Admit("same", Wire::AdmitKind::Dispatchable, /*storable=*/true);
+        REQUIRE(fleet.service.PumpAdmission().size() == 1);
+        REQUIRE(fleet.service.SettleAdmission(first, Settlement { .outcome = Wire::SettleOutcome::Stored, .peakBytes = {} })
+                == SettleResult::Settled);
+        auto const woken = fleet.service.PumpAdmission();
+        REQUIRE(woken.size() == 1);
+        REQUIRE(GrantOf(woken[0]).kind == Wire::GrantKind::Stored);
+        CHECK(demand.grants.size() == 1);
+    }
+    SECTION("a request abandoned before its grant counts nothing")
+    {
+        auto const ticket = fleet.Admit("k1");
+        fleet.service.AbandonAdmission(ticket);
+        CHECK(fleet.service.PumpAdmission().empty());
+        CHECK(demand.grants.empty());
+    }
+    SECTION("a request refused at its grant counts nothing")
+    {
+        (void) fleet.Admit("k1", Wire::AdmitKind::Dispatchable, false, [] {
+            return CallerContext { .membership = Membership::Outsider, .peerId = "10.9.9.9" };
+        });
+        auto const verdicts = fleet.service.PumpAdmission();
+        REQUIRE(verdicts.size() == 1);
+        REQUIRE(verdicts[0].refusal.has_value());
+        CHECK(demand.grants.empty());
+    }
+    SECTION("an unwired sink is told nothing and nothing breaks")
+    {
+        fleet.service.SetDemandSink(nullptr);
+        (void) fleet.Admit("k1");
+        REQUIRE(fleet.service.PumpAdmission().size() == 1);
+        CHECK(demand.grants.empty());
+    }
+}
+
+TEST_CASE("SchedulerAdmission.a-local-retry-after-a-granted-worker-failed-is-not-a-second-compile",
+          "[distributed][admission][scheduler][fleet-keyed-history]")
+{
+    // pace-cc's `AdmitHere`: the granted worker failed the compile, the grant is settled `NotStored`, and the SAME
+    // compile is asked for again as a new LocalOnly ticket -- which says so (`AskOrigin::AfterGrant`).
+    Fleet fleet;
+    RecordingDemandSink demand;
+    fleet.service.SetDemandSink(&demand);
+    (void) fleet.RegisterWorker();
+    fleet.Report(MachineOf(fleet.workerKey.PublicKey()));
+    fleet.Report(fleet.service.OwnMachineId());
+
+    auto const first = fleet.Admit("k1");
+    REQUIRE(GrantOf(fleet.service.PumpAdmission().at(0)).kind == Wire::GrantKind::Worker);
+    REQUIRE(fleet.service.SettleAdmission(first, Settlement { .outcome = Wire::SettleOutcome::NotStored, .peakBytes = {} })
+            == SettleResult::Settled);
+
+    auto const retry = fleet.service.Admit(
+        Fleet::Insider,
+        [] { return Fleet::Insider; },
+        fleet.service.OwnMachineId(),
+        Wire::AdmitRequestFields { .kind = Wire::AdmitKind::LocalOnly,
+                                   .fingerprint = std::string { Toolchain },
+                                   .cacheKey = "k1",
+                                   .sourcePath = "src/a.cpp",
+                                   .treeLabel = "tree",
+                                   .storable = true,
+                                   .acceptedCodecs = {},
+                                   .excluded = { std::string { WorkerEndpoint } },
+                                   .toolchainLabel = {},
+                                   .origin = Wire::AskOrigin::AfterGrant });
+    REQUIRE(retry.has_value());
+    REQUIRE(GrantOf(fleet.service.PumpAdmission().at(0)).kind == Wire::GrantKind::Local);
+    // One compile: one count, for that requester and that toolchain.
+    REQUIRE(demand.grants.size() == 1);
+    CHECK(demand.grants[0].requester == fleet.service.OwnMachineId());
+    CHECK(demand.grants[0].fingerprint == Toolchain);
+}
+
+TEST_CASE("SchedulerAdmission.a-fail-open-lease-is-counted-once-and-attributed-like-an-admission",
+          "[distributed][admission][scheduler][fleet-keyed-history]")
+{
+    Fleet fleet;
+    RecordingDemandSink demand;
+    fleet.service.SetDemandSink(&demand);
+    (void) fleet.RegisterWorker(/*slots=*/8);
+    auto const lease = [&](CallerContext const& caller, std::string const& key, Wire::AskOrigin origin) {
+        return fleet.service.Lease(caller,
+                                   Wire::LeaseRequest { .fingerprint = Toolchain,
+                                                        .key = key,
+                                                        .acceptedCodecs = {},
+                                                        .excluded = {},
+                                                        .toolchainLabel = {},
+                                                        .origin = origin });
+    };
+    auto const proven = Testing::TestKeyPair("lease-requester").PublicKey();
+
+    SECTION("a proven caller: under the key it proved")
+    {
+        auto const caller = CallerContext { .membership = Membership::Member,
+                                            .peerId = "10.0.0.5",
+                                            .provenNodeId = "n5",
+                                            .provenKey = proven,
+                                            .identified = true };
+        REQUIRE(lease(caller, "k1", Wire::AskOrigin::First).status == Wire::Status::Ok);
+        REQUIRE(demand.grants.size() == 1);
+        CHECK(demand.grants[0].requester == MachineOf(proven));
+        CHECK(demand.grants[0].fingerprint == Toolchain);
+    }
+    SECTION("a caller on this machine: under this leader's own key")
+    {
+        REQUIRE(lease(Fleet::Insider, "k1", Wire::AskOrigin::First).status == Wire::Status::Ok);
+        REQUIRE(demand.grants.size() == 1);
+        CHECK(demand.grants[0].requester == fleet.service.OwnMachineId());
+    }
+    SECTION("a caller that identified no machine (a ticket): unattributed, never its address")
+    {
+        auto const caller = CallerContext { .membership = Membership::Member, .peerId = "10.0.0.8", .identified = true };
+        REQUIRE(lease(caller, "k1", Wire::AskOrigin::First).status == Wire::Status::Ok);
+        REQUIRE(demand.grants.size() == 1);
+        CHECK(demand.grants[0].requester.empty());
+        CHECK(demand.grants[0].fingerprint == Toolchain);
+    }
+    SECTION("a lease after an admission broke past its grant is the same compile: not counted")
+    {
+        REQUIRE(lease(Fleet::Insider, "k1", Wire::AskOrigin::AfterGrant).status == Wire::Status::Ok);
+        CHECK(demand.grants.empty());
+    }
+    SECTION("a lease refused counts nothing")
+    {
+        REQUIRE(lease(Fleet::Insider, "k1", Wire::AskOrigin::First).status == Wire::Status::Ok);
+        // The same key again is refused AlreadyInFlight: no grant, no count.
+        CHECK(lease(Fleet::Insider, "k1", Wire::AskOrigin::First).status == Wire::Status::Error);
+        CHECK(demand.grants.size() == 1);
     }
 }

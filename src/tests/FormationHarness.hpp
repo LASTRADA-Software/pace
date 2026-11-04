@@ -571,6 +571,9 @@ class FormationHarness
         Cluster::ClusterState state;    ///< Applied at once, as a quorum of one would.
         std::string leaderId;           ///< Its founder, which leads it throughout.
         std::string leaderNodeEndpoint; ///< Where the leader's `0xFC` port answers.
+        /// The log index the next proposed change is applied at: every change is one entry, as on a replica, so an
+        /// override a `SetBudget` records carries an id as `ClusterStateMachine::Apply` would give it.
+        std::uint64_t appliedIndex { 0 };
     };
 
     /// The consensus a machine's body proposes through: the cluster its record names.
@@ -1099,7 +1102,8 @@ class FormationHarness
         {
             auto run = ClusterRun { .state = {},
                                     .leaderId = machine.self.nodeId,
-                                    .leaderNodeEndpoint = machine.advertised.Current() };
+                                    .leaderNodeEndpoint = machine.advertised.Current(),
+                                    .appliedIndex = 0 };
             run.state.members.push_back(
                 Cluster::ClusterMember { .id = machine.self.nodeId,
                                          .raftEndpoint = machine.raftAdvertised.Current(),
@@ -1144,7 +1148,9 @@ class FormationHarness
     void Propose(std::string const& clusterId, Cluster::Command const& command)
     {
         auto& run = _clusters.at(clusterId);
-        Cluster::Apply(run.state, command);
+        // The index-carrying overload, as production applies a committed entry: the index-free one drops a
+        // `SetBudget`, so an override proposed through this harness would be recorded nowhere.
+        Cluster::Apply(run.state, command, ++run.appliedIndex);
         for (auto& [id, machine]: _machines)
             if (machine->body != nullptr && ClusterOf(id) == clusterId
                 && std::ranges::contains(run.state.members, id, &Cluster::ClusterMember::id))

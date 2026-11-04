@@ -1220,3 +1220,140 @@ TEST_CASE("A cluster command that reached nobody is transient, and one the sched
         CHECK(refused.error().ending == CommandEnding::Failed);
     }
 }
+
+TEST_CASE("The cluster-name flag names a member, splitting at the first separator, and refuses what no member may carry",
+          "[node][clusteradmin][display-name]")
+{
+    auto const named = ParsedFrom({ "--cluster-name=n3=build box=2" });
+    CHECK(named.cluster.action == ClusterAction::Name);
+    CHECK(named.cluster.key == "n3");
+    // Split at the FIRST `=`: an id holds none, and a name may.
+    CHECK(named.cluster.value == "build box=2");
+
+    // An empty name is how it is cleared.
+    auto const cleared = ParsedFrom({ "--cluster-name=n3=" });
+    CHECK(cleared.cluster.action == ClusterAction::Name);
+    CHECK(cleared.cluster.value.empty());
+
+    // Refused where the operator is watching, in the leader's own words: no member, no name, a control byte, too long.
+    auto const longName = std::format("--cluster-name=n3={}", std::string(Cluster::MaxDisplayNameBytes + 1, 'x'));
+    for (auto const* const bad: { "--cluster-name=n3", "--cluster-name==box", "--cluster-name=n3=a\tb", longName.c_str() })
+    {
+        INFO(bad);
+        NodeConfig cfg;
+        auto const args = std::vector<char const*> { bad };
+        CHECK_FALSE(ParseOptionsInto(NodeOptions(), std::span<char const* const> { args }, cfg).has_value());
+    }
+}
+
+TEST_CASE("A name reaches the cluster as SetDisplayName, and a status report shows each member's",
+          "[node][clusteradmin][display-name]")
+{
+    Fixture fixture;
+    FakeCluster cluster;
+    cluster.state = Agreed();
+    fixture.service.AdministerWith(cluster);
+
+    CHECK(StatusOf(fixture.Ask(Ask(ClusterAction::Name, "n2", "build-box"))) == Wire::Status::Ok);
+    REQUIRE(cluster.proposed.size() == 1);
+    CHECK(cluster.proposed[0] == Cmd(Cluster::CommandKind::SetDisplayName, "n2", "build-box"));
+
+    // Appended, never committed: reported as every other change is.
+    CHECK(InterpretClusterReply(ClusterAction::Name, {})
+          == std::expected<std::string, std::string> { "accepted; the change is replicating\n" });
+
+    auto state = Agreed();
+    Apply(state, Cmd(Cluster::CommandKind::SetDisplayName, "n2", "build-box"));
+    auto const rendered = RenderClusterState(state);
+    CHECK(rendered.contains("name=build-box"));
+    // A member nobody named shows the dash, never an empty `name=`.
+    CHECK(rendered.contains("name=-"));
+}
+
+TEST_CASE("The cluster-budget flags parse the one budget grammar and refuse what the leader would",
+          "[node][clusteradmin][budget]")
+{
+    constexpr auto MiB = std::uint64_t { 1024 * 1024 };
+    auto const both = ParsedFrom({ "--cluster-budget=n2:memory=64m,disk=2g" });
+    CHECK(both.cluster.action == ClusterAction::Budget);
+    CHECK(both.cluster.key == "n2");
+    auto const value = Unwrap(Wire::DecodeBudgetSetValue(Wire::AsBytes(std::string_view { both.cluster.value })));
+    CHECK(value.bytes == Wire::PerTier<std::uint64_t> { 64 * MiB, 2048 * MiB });
+
+    auto const cleared = ParsedFrom({ "--cluster-budget-clear=n2:disk" });
+    CHECK(cleared.cluster.action == ClusterAction::BudgetClear);
+    CHECK(cleared.cluster.key == "n2");
+    auto const clear = Unwrap(Wire::DecodeBudgetClearValue(Wire::AsBytes(std::string_view { cleared.cluster.value })));
+    CHECK(clear.tier == static_cast<std::uint8_t>(StorageTier::Disk));
+
+    // Refused where the operator is watching: zero, a share of RAM, no tier, a tier twice, no member, no tier to clear.
+    for (auto const* const bad: { "--cluster-budget=n2:memory=0",
+                                  "--cluster-budget=n2:memory=50%",
+                                  "--cluster-budget=n2",
+                                  "--cluster-budget=n2:disk=1g,disk=2g",
+                                  "--cluster-budget=:memory=1m",
+                                  "--cluster-budget-clear=n2",
+                                  "--cluster-budget-clear=n2:both" })
+    {
+        INFO(bad);
+        NodeConfig cfg;
+        auto const args = std::vector<char const*> { bad };
+        CHECK_FALSE(ParseOptionsInto(NodeOptions(), std::span<char const* const> { args }, cfg).has_value());
+    }
+}
+
+TEST_CASE("A budget reaches the cluster as one override per tier, and a status report shows each member's",
+          "[node][clusteradmin][budget]")
+{
+    Fixture fixture;
+    FakeCluster cluster;
+    cluster.state = Agreed();
+    fixture.service.AdministerWith(cluster);
+
+    auto const request = ParsedFrom({ "--cluster-budget=n2:memory=64m,disk=2g" }).cluster;
+    CHECK(StatusOf(fixture.Ask(request)) == Wire::Status::Ok);
+    // ONE proposal carrying both tiers, so the edit is recorded whole.
+    REQUIRE(cluster.proposed.size() == 1);
+    CHECK(cluster.proposed[0].kind == Cluster::CommandKind::SetBudget);
+    CHECK(cluster.proposed[0].budgetBytes == std::array<std::optional<std::uint64_t>, 2> { 64ULL << 20, 2ULL << 30 });
+    CHECK(InterpretClusterReply(ClusterAction::Budget, {})
+          == std::expected<std::string, std::string> { "accepted; the change is replicating\n" });
+
+    // The status report: an override recorded for n2's memory tier, beneath n2, and nothing for n1.
+    auto state = Agreed();
+    auto budget = Cluster::Command { .kind = Cluster::CommandKind::SetBudget,
+                                     .key = "n2",
+                                     .value = {},
+                                     .schedulerEndpoint = {},
+                                     .publicKey = std::nullopt,
+                                     .budgetBytes = { 64ULL << 20, std::nullopt },
+                                     .setAtUnixSeconds = 1793613600,
+                                     .setBy = "n1" };
+    Apply(state, budget, 9);
+    auto const rendered = RenderClusterState(state);
+    CHECK(rendered.contains("memory-budget=64M baseline=unset set=2026-11-02T10:00:00Z by=n1"));
+    CHECK_FALSE(rendered.contains("disk-budget="));
+}
+
+TEST_CASE("A learner's --cluster-budget-clear is refused at the leader's door, counted",
+          "[node][clusteradmin][budget][operator-standing]")
+{
+    // The one-shot proves the learner's key; MEMBER-EDIT asks an operator's standing, so a learner clearing even its
+    // OWN override is refused before the payload is read. A member drops its override only by MEMBER-REPORT.
+    Fixture fixture;
+    FakeCluster cluster;
+    cluster.state = Agreed();
+    fixture.service.AdministerWith(cluster);
+    auto const learner = Distributed::CallerContext { .membership = Distributed::Membership::Member,
+                                                      .peerId = "10.0.0.2",
+                                                      .provenNodeId = "n2",
+                                                      .provenKey = Testing::TestKeyPair("n2").PublicKey(),
+                                                      .identified = true,
+                                                      .operatorStanding = false };
+    auto const request = ParsedFrom({ "--cluster-budget-clear=n2:memory" }).cluster;
+    auto const door = fixture.protocol.RefusePeer(learner, static_cast<std::uint8_t>(Wire::Op::MemberEdit));
+    CHECK(ErrorOf(Unwrap(door)) == Wire::ErrorCode::OperatorStandingRequired);
+    CHECK(ErrorOf(fixture.Ask(request, learner)) == Wire::ErrorCode::OperatorStandingRequired);
+    CHECK(fixture.metrics.Read(IMetricsSink::Counter::SchedulerRequestsRefusedOperatorStandingRequired) == 2);
+    CHECK(cluster.proposed.empty());
+}

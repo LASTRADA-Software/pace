@@ -23,11 +23,13 @@
 #include <filesystem>
 #include <format>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -410,13 +412,255 @@ CacheTier::CacheTier(std::unique_ptr<IStorage> storage,
                      std::unique_ptr<ICacheUpstream> upstream,
                      ILocalityOracle const& locality,
                      core::platform::IClock& clock,
-                     IMetricsSink& metrics):
+                     IMetricsSink& metrics,
+                     ILogger& logger):
     _storage { std::move(storage) },
     _upstream { std::move(upstream) },
     _cache { *_storage, *_upstream, clock, metrics, PrivateTierProfile },
     _proxy { _cache, metrics },
-    _responder { _proxy, locality, metrics }
+    _responder { _proxy, locality, metrics },
+    _eviction { *_storage, clock, logger, [this] { NotifyBudgetListener(); }, DefaultEvictionPacing() }
 {
+    // A store reopened over its budget -- an operator lowered `--cache-disk` across a restart --
+    // comes down to it in the background from the start, never through clients' writes.
+    _eviction.Kick();
+}
+
+EvictionPacing DefaultEvictionPacing()
+{
+    return EvictionPacing { .runBudget = std::chrono::milliseconds { 200 },
+                            .pause = std::chrono::milliseconds { 50 },
+                            .betweenSlices = [](std::stop_token const& /*stop*/) { std::this_thread::yield(); } };
+}
+
+TierEvictionDriver::TierEvictionDriver(IStorage& storage,
+                                       core::platform::IClock& clock,
+                                       ILogger& logger,
+                                       std::function<void()> converged,
+                                       EvictionPacing pacing):
+    _storage { storage },
+    _clock { clock },
+    _logger { logger },
+    _converged { std::move(converged) },
+    _pacing { std::move(pacing) },
+    _thread { [this](std::stop_token const& stop) { Loop(stop); } }
+{
+}
+
+TierEvictionDriver::~TierEvictionDriver()
+{
+    // `jthread`'s own destructor would do both; spelled out because the order matters to the
+    // owner -- this must be over before the store it steps goes.
+    _thread.request_stop();
+    if (_thread.joinable())
+        _thread.join();
+}
+
+void TierEvictionDriver::Kick()
+{
+    {
+        std::scoped_lock const lock { _mutex };
+        _kicked = true;
+    }
+    _wake.notify_one();
+}
+
+void TierEvictionDriver::Loop(std::stop_token const& stop)
+{
+    while (!stop.stop_requested())
+    {
+        {
+            std::unique_lock lock { _mutex };
+            if (!_wake.wait(lock, stop, [this] { return _kicked; }))
+                return;
+            _kicked = false;
+        }
+        // The loop's boundary is the one place a failed run is caught: an exception escaping a
+        // thread ends the process, and a cache that cannot shed entries is a degradation, never a
+        // reason for the node to stop. Said once per failed run, at Warn, with what was left
+        // undone; the driver stays alive, and the next kick tries again.
+        auto const before = Slices();
+        try
+        {
+            Run(stop);
+        }
+        catch (std::exception const& failure)
+        {
+            ReportFailedRun(failure.what(), Slices() - before);
+        }
+        catch (...)
+        {
+            ReportFailedRun("an exception that is not a std::exception", Slices() - before);
+        }
+    }
+}
+
+void TierEvictionDriver::ReportFailedRun(std::string_view why, std::uint64_t slices) noexcept
+{
+    try
+    {
+        _logger.Logf(LogLevel::Warn,
+                     "cache eviction: a run failed after {} slice(s) ({}); the tier stays over its budget until the "
+                     "next kick retries",
+                     slices,
+                     why);
+    }
+    catch (...)
+    {
+        // The report itself failed -- out of memory, most likely. Counted rather than thrown: an
+        // exception from here would end the process this guard exists to keep alive.
+        _unreportedFailures.fetch_add(1, std::memory_order_acq_rel);
+    }
+    // Counted AFTER the report, so a reader that sees the count also sees the line.
+    _failedRuns.fetch_add(1, std::memory_order_acq_rel);
+}
+
+void TierEvictionDriver::Run(std::stop_token const& stop)
+{
+    auto wasOver = false;
+    while (!stop.stop_requested())
+    {
+        auto const started = _clock.now();
+        auto outcome = IStorage::EvictStepOutcome {};
+        // Back to back, the store's lock taken and released inside each step, until the run's
+        // budget is spent. A step that found the store over and erased nothing ends the run:
+        // nothing more can go until something changes, and the next kick looks again.
+        while (true)
+        {
+            outcome = _storage.EvictStep();
+            _slices.fetch_add(1, std::memory_order_acq_rel);
+            // A step that erased anything found the store over, even when it was the step that
+            // brought it to fit.
+            if (outcome.evicted != 0)
+                wasOver = true;
+            if (outcome.bytesOverBudget == 0 || outcome.evicted == 0 || stop.stop_requested())
+                break;
+            if (_clock.now() - started >= _pacing.runBudget)
+                break;
+            if (_pacing.betweenSlices)
+                _pacing.betweenSlices(stop);
+            if (stop.stop_requested())
+                return;
+        }
+        if (outcome.bytesOverBudget == 0)
+        {
+            if (wasOver)
+            {
+                _convergences.fetch_add(1, std::memory_order_acq_rel);
+                if (_converged)
+                    _converged();
+            }
+            return;
+        }
+        if (outcome.evicted == 0 || stop.stop_requested())
+            return;
+        // The run spent its budget with the store still over: pause, so traffic on the lock is
+        // never shut out, then run again. Only a stop ends the pause early.
+        std::unique_lock lock { _mutex };
+        if (_wake.wait_for(lock, stop, _pacing.pause, [] { return false; }); stop.stop_requested())
+            return;
+    }
+}
+
+std::expected<void, std::string> CacheTier::ApplyTierBudget(StorageTier tier, std::size_t bytes)
+{
+    auto const checked = CheckTierBudget(bytes);
+    if (!checked.has_value())
+        return std::unexpected(checked.error());
+    return ResizeTier(tier, *checked);
+}
+
+std::expected<void, std::string> CacheTier::RestoreTierBudget(StorageTier tier, std::uint64_t bytes)
+{
+    // Zero is not refused here: it is the configured value meaning what it meant when the tier was built from it
+    // (unbounded, `IStorage::ResizeTier`'s rule) -- not an override removing a tier, which `ApplyTierBudget` refuses.
+    if (!std::in_range<std::size_t>(bytes))
+        return std::unexpected(std::format("a budget of {} bytes is more than this process can address", bytes));
+    return ResizeTier(tier, static_cast<std::size_t>(bytes));
+}
+
+std::expected<void, std::string> CacheTier::ResizeTier(StorageTier tier, std::size_t bytes)
+{
+    std::scoped_lock const lock { _budgetMutex };
+    // One call that both asks and acts: every store answers nullopt for a tier it does not
+    // have BEFORE touching anything, so an absent tier is refused with nothing changed and
+    // there is no window between a presence check and the resize.
+    if (!_storage->ResizeTier(tier, bytes).has_value())
+        return std::unexpected(std::format("no {} tier on this node", TraitsFor(tier).name));
+    if (_budgetListener != nullptr)
+        _budgetListener->TierBudgetApplied();
+    // After the listener, so the capacity it re-derived describes the budget the driver is now
+    // working toward; the driver's own convergence tells the listener again.
+    _eviction.Kick();
+    return {};
+}
+
+void CacheTier::KickEviction()
+{
+    _eviction.Kick();
+}
+
+void KickTierEviction(CacheTier* tier)
+{
+    if (tier != nullptr)
+        tier->KickEviction();
+}
+
+void CacheTier::NotifyBudgetListener()
+{
+    std::scoped_lock const lock { _budgetMutex };
+    if (_budgetListener != nullptr)
+        _budgetListener->TierBudgetApplied();
+}
+
+void CacheTier::SetBudgetListener(ITierBudgetListener* listener)
+{
+    std::scoped_lock const lock { _budgetMutex };
+    _budgetListener = listener;
+    // Told once on registering, under the same lock every later notification takes: a drain the
+    // startup kick began may converge before anybody listens, and that notification went to
+    // nobody. Deriving here, serialised with every other one, is what makes the listener's first
+    // figure no older than the last change it could have missed.
+    if (_budgetListener != nullptr)
+        _budgetListener->TierBudgetApplied();
+}
+
+LiveNodeCapacity::LiveNodeCapacity(NodeConfig const& cfg, IHostFactsSource const& host, CacheTier* tier):
+    _cfg { cfg },
+    _host { host },
+    _tier { tier },
+    _current { Derive() }
+{
+    // Registering re-derives under the tier's budget mutex (`SetBudgetListener`), so a convergence
+    // between the derivation above and the registration is not lost.
+    if (_tier != nullptr)
+        _tier->SetBudgetListener(this);
+}
+
+LiveNodeCapacity::~LiveNodeCapacity()
+{
+    if (_tier != nullptr)
+        _tier->SetBudgetListener(nullptr);
+}
+
+Distributed::NodeCapacity LiveNodeCapacity::Current() const
+{
+    std::scoped_lock const lock { _mutex };
+    return _current;
+}
+
+void LiveNodeCapacity::TierBudgetApplied()
+{
+    // Derived OUTSIDE the lock: it takes the store's shard mutex, and a reader of `Current`
+    // must never wait on a cache verb.
+    auto const derived = Derive();
+    std::scoped_lock const lock { _mutex };
+    _current = derived;
+}
+
+Distributed::NodeCapacity LiveNodeCapacity::Derive() const
+{
+    return NodeCapacityOf(_cfg, _host, CacheCapacityOf(_tier), IndexReserveBytesOf(_tier));
 }
 
 std::expected<std::unique_ptr<CacheTier>, std::string> CacheTier::Start(NodeConfig const& cfg,
@@ -430,8 +674,8 @@ std::expected<std::unique_ptr<CacheTier>, std::string> CacheTier::Start(NodeConf
     // The kind is decided ONCE and both the upstream and the line below read it, so the startup
     // line cannot name a choice other than the one that was built.
     auto const& kind = UpstreamKindTable[static_cast<std::size_t>(UpstreamKindOf(upstream))];
-    auto tier =
-        std::unique_ptr<CacheTier> { new CacheTier { std::move(storage), kind.build(upstream), locality, clock, metrics } };
+    auto tier = std::unique_ptr<CacheTier> { new CacheTier {
+        std::move(storage), kind.build(upstream), locality, clock, metrics, logger } };
 
     // No address in this line since #290: the cache verbs are answered on the node's
     // one 0xFC listener, and that listener names itself when it binds. A tier that

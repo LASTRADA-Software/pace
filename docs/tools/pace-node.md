@@ -32,7 +32,7 @@ all — read [How it works](../how-it-works.md#who-leads-and-what-happens-when-t
 
 ## How the pieces fit
 
-A node is up to four surfaces in one process: a **compile worker** always, and
+A node is up to four components in one process: a **compile worker** always, and
 optionally a **scheduler**, a **cache tier** and a **consensus member**. A client
 misses its cache, asks the scheduler for a worker, sends that worker preprocessed
 text, and stores the object it gets back.
@@ -63,6 +63,7 @@ admin             -             not served; set --admin-listen
 raft              0.0.0.0:6680  TCP
 discovery beacon  0.0.0.0:6681  UDP
 discovery reply   0.0.0.0:*     UDP, port chosen by the kernel at bind
+mcp               -             not served; set --mcp-listen
 
 dialled at:
   consensus endpoint  AT STARTUP  -- the address this machine routes from on the raft port, or its fully qualified name until a route is known; derived when the node starts; give --raft-self to state it now
@@ -122,10 +123,11 @@ The surfaces, and what each is for:
 | Admin / metrics | `--admin-listen` | off; a bare port takes **loopback** | TCP |
 | Consensus peer | `--listen-raft` | `6680`; the **mode** opens it (every mode but a learner's), an empty `--listen-raft=` closes it, and a bare port takes the **wildcard** | TCP |
 | Discovery | `--discovery` + `--discovery-reply-port` | `6681`, **on** beside consensus, plus a kernel-chosen reply port; an empty `--discovery=` turns it off; always binds the **wildcard** | **UDP** |
+| MCP, for a Claude Code session on this machine | `--mcp-listen` | off; a bare port takes **loopback**, and any other address is **refused at startup** — never a firewall rule | TCP |
 
 Several things on that table are easy to get wrong and expensive to get wrong:
 
-- **Discovery is UDP.** Three TCP rules and one wrong one leaves a beacon that
+- **Discovery is UDP.** TCP rules alone, however many, leave a beacon that
   reaches nobody, and that presents as a fleet that never forms rather than as a
   firewall mistake.
 - **`--discovery`'s address is where beacons are *sent*, not where they are heard.**
@@ -161,6 +163,17 @@ Several things on that table are easy to get wrong and expensive to get wrong:
   still answer this machine alone, whatever it is bound to. `--admin-listen 6677` binds
   **loopback**, and that is the sharpest of the three: it is what the dashboard's
   credential rule turns on, so widening that address is what makes a token required.
+
+**MCP is never reachable from the network.** `--mcp-listen` serves `POST /mcp` for a
+Claude Code session on this machine, on threads of its own (four requests at once). There is no MCP
+authentication scheme, so an address other machines could reach is refused at startup,
+and every request is checked again for a caller on this machine before its body is parsed.
+The tools, who may act and who answers are in [Asking the fleet through
+MCP](../operations/mcp.md). A refused request is counted:
+
+| Series | What a rise means |
+|---|---|
+| `pace_mcp_requests_refused_not_loopback_total` | An MCP request whose connection came from another machine was refused `403`. The surface binds loopback only, so any count means a caller reached it from an address it was never meant to answer. Absent on a node without `--mcp-listen`. |
 
 **One caveat `--print-surfaces` states and cannot compute.** Under systemd socket
 activation the `.socket` unit owns the address and port, and `--listen-node` is read
@@ -958,9 +971,10 @@ is no more than `/metrics` already serves unauthenticated.
 
 | Counter | What a rise means |
 |---|---|
-| `pace_node_status_requests_refused_not_a_member_total` | An operator verb was refused because the caller is not a fleet member: `node-status`, `node-metrics`, or `explain-admission` asked about a machine (asked about the caller's own connection, it is answered to anyone and moves nothing). Unlike the cache tier's not-local refusal this is not ordinary on any deployment: a steady rise is `pacectl` run from a machine the cluster has not admitted, or has forgotten, and a burst from one host is somebody scanning. |
+| `pace_node_status_requests_refused_not_a_member_total` | An operator verb was refused because the caller is not a fleet member: `node-status`, `node-metrics`, `fingerprint-inputs`, or `explain-admission` asked about a machine (asked about the caller's own connection, it is answered to anyone and moves nothing). Unlike the cache tier's not-local refusal this is not ordinary on any deployment: a steady rise is `pacectl` run from a machine the cluster has not admitted, or has forgotten, and a burst from one host is somebody scanning. |
 | `pace_node_status_requests_refused_payload_too_large_total` | A header declared more payload than these verbs may carry. `node-status` and `node-metrics` are **fieldless**, so against either this came from no client of this tree at any version. `explain-admission` carries one subject -- a machine id or a 43-character key -- under its own 512-byte ceiling, and is reachable before admission, so against it this is an operand no roster could name or a stranger probing the port. Never sum it with the cache tier's row of the same name. |
 | `pace_node_admission_explanations_refused_malformed_total` | An `explain-admission` arrived that was not exactly one field naming its subject. No shipped client can build one -- the CLI encodes it through `EncodeExplainAdmissionRequest` -- so a rise is a client of another build or somebody probing the port by hand, and the two are told apart by whether anything else on this surface refuses at the same time. Kept apart from the node-status refusals, which are fieldless verbs and cannot arise from the same mistake. |
+| `pace_node_fingerprint_inputs_refused_malformed_total` | A `fingerprint-inputs` arrived that was not exactly a fingerprint of at most 64 bytes and an eight-byte page cursor. The one shipped client is the MCP `toolchain_diff` tool, which encodes it through `EncodeFingerprintInputsRequest` and cannot build a malformed one, so a rise is a client of another build or somebody probing the port by hand. The verb is a member read, so a stranger is refused before this is asked and moves the not-a-member row instead. |
 | `pace_node_status_requests_refused_endpoint_busy_total` | The surface had no bytes left in flight. These are the verbs somebody reaches for when a node is in trouble, so this is the node saying it is too busy to say what it is. Read it beside `pace_node_cache_requests_refused_endpoint_busy_total`, never summed: this says the diagnosis failed, that says why. |
 
 #### A host the cluster has forgotten
@@ -1007,12 +1021,14 @@ is rendered by every node.
 
 A `fleet-text` request reads the fleet document once, one section or all of them, over `0xFC` rather than `/fleet.txt` over HTTP ([#1391](https://github.com/LASTRADA-Software/pace/issues/1391)) -- so a fleet table is readable from a leader that serves no admin surface at all. `pacectl fleet <section>` is its client, and follows a follower's `not-leader` to the leader. The text is the route's to the byte: both answer from one function, which parses the section and the range and renders the document, so neither door has a renderer of its own.
 
-It is admitted as the fleet subject of a subscription is, by the same decision: a fleet member, then the dashboard credential (or, with no `--dashboard-token-file`, this machine only), then leadership. A follower refuses `not-leader` naming the leader, and the client follows it; a node running no scheduler says the fleet is served elsewhere; a section or a range this build does not serve is `unknown-fleet-selector`, listing the ones it does. None of those three is counted -- the first two are what a healthy fleet answers a client pointed at the wrong node, and the third is a typo its typist already sees.
+A request names its format: the text document `/fleet.txt` serves, or the JSON document `/fleet.json` serves -- one document, so a JSON request naming a section is refused `unknown-fleet-selector`. The MCP tools read the fleet this way, from the same function the route answers from.
+
+It is admitted by the decision the fleet subject of a subscription is, with one difference. A fleet member comes first. A caller that **proved a live roster key** on the connection -- a learner included -- then reads without the dashboard credential, because a node asking the leader holds none, and the MCP tools on a node that does not lead must read the leader's fleet. Any other member needs the dashboard credential (or, with no `--dashboard-token-file`, must be on this machine): a machine ticket, `--fleet-open` and loopback without a proof earn nothing more here. Leadership is asked last. The live-stats fleet subscription does not take the proof in place of the credential. A follower refuses `not-leader` naming the leader, and the client follows it; a node running no scheduler says the fleet is served elsewhere; a section or a range this build does not serve is `unknown-fleet-selector`, listing the ones it does. None of those three is counted -- the first two are what a healthy fleet answers a client pointed at the wrong node, and the third is a typo its typist already sees.
 
 | Counter | What a rise means |
 |---|---|
 | `pace_fleet_text_requests_refused_not_a_member_total` | A fleet read was refused because its peer is not a fleet member. The fleet is read by the same peers a subscription to it streams to; a burst from one host is a stranger probing the port. |
-| `pace_fleet_text_requests_refused_unauthenticated_total` | A fleet read was refused: a wrong or missing dashboard credential, or a remote peer while no `--dashboard-token-file` is configured. The fleet map is behind the same credential here as on `/fleet`; a burst from one host is somebody guessing. |
+| `pace_fleet_text_requests_refused_unauthenticated_total` | A fleet read that proved no live roster key was refused: a wrong or missing dashboard credential, or a remote peer while no `--dashboard-token-file` is configured. The fleet map is behind the same credential here as on `/fleet`; a burst from one host is somebody guessing. |
 | `pace_fleet_text_requests_refused_malformed_total` | A `fleet-text` request did not decode. No client of this tree sends one; a rise is a client of another build, or not a client at all. |
 | `pace_fleet_text_requests_refused_payload_too_large_total` | A `fleet-text` header declared more than the control payload the verb is bounded to, and was refused before a byte of it was read. No client of this tree at any version sends one. |
 | `pace_fleet_text_requests_refused_endpoint_busy_total` | A fleet read was refused because the `0xFC` listener's in-flight byte budget was full of other requests. A rise says an operator asked for the fleet exactly when the leader was busiest. |
@@ -1110,7 +1126,8 @@ every other node answers those verbs `not-shared-cache` (see [the named
 machine](#the-named-machine)).
 
 "Fleet" here is what the scheduler **serves** -- a lease, a status. What **decides** the fleet --
-`--cluster-admit` in every form, `--cluster-forget`, `--cluster-set`, and the enrollment decisions
+`--cluster-admit` in every form, `--cluster-forget`, `--cluster-set`, `--cluster-name`, `--cluster-budget`,
+`--cluster-budget-clear`, and the enrollment decisions
 (`--enroll-approve`, `--enroll-reject`, auto-approval, the list) -- is answered only to a caller
 with an operator's standing: a process on this machine, or a **voter** of the cluster, by its
 proven key or the machine ticket its node mints. A caller that only `--fleet-open` admits is
@@ -2026,8 +2043,55 @@ pace-node --scheduler=10.0.0.1:6675 --cluster-status
 pace-node --scheduler=10.0.0.1:6675 --cluster-set=fleet-open=1
 pace-node --scheduler=10.0.0.1:6675 --cluster-admit=n4=10.0.0.4:6680
 pace-node --scheduler=10.0.0.1:6675 --cluster-admit-learner=laptop=10.0.0.9:6680
+pace-node --scheduler=10.0.0.1:6675 --cluster-name=n4=build-box
+pace-node --scheduler=10.0.0.1:6675 --cluster-budget=n4:memory=2g,disk=64g
+pace-node --scheduler=10.0.0.1:6675 --cluster-budget-clear=n4:disk
 pace-node --scheduler=10.0.0.1:6675 --cluster-forget=n3
 ```
+
+`--cluster-name=<id>=<name>` gives a member a **display name** -- `--cluster-name=<id>=` clears it -- which every
+node, the fleet page (`name`, with `name-source` saying `replicated` or `self-reported`), `pacectl` and every MCP
+answer show, and which MCP tools accept wherever they accept a node id. A label that decides nothing: no admission,
+route, key or redirect reads it. At most 64 bytes of UTF-8 with no control byte, and unique across the members with
+ASCII letters compared in one case; the leader refuses a taken one, naming the member that holds it. A re-admission
+keeps it, and `--cluster-forget` removes it with the record. A machine is tied to its member — the fleet page's
+`node-id`, and every MCP answer's `node_id` — by the identity key its connection proved, never by the endpoint it
+registered with, which is its own unverified claim.
+
+`--cluster-budget=<id>:memory=<size>[,disk=<size>]` records a **cache budget override** for a member's memory tier,
+disk tier or both, in its replicated record; `--cluster-budget-clear=<id>:<memory|disk>` removes one. Sizes are
+`--cache-memory`'s and `--cache-disk`'s (`k`, `m`, `g`), but never a share of RAM -- the leader records the figure and
+the member applies it, so `25%` would be the RAM of whichever machine read it -- and never `0`, since an override
+removes no tier. The leader records it even while the member is down. The member applies it when it next sees the
+state, and reports the value its own flag had as the override's **baseline**, which only it can know. The member's
+own LATER change of that flag outranks the override. A forget removes it with the record, and a re-admission keeps it.
+`--cluster-status` prints each recorded override beneath its member, as
+`memory-budget=2G baseline=unset set=2026-11-02T10:00:00Z by=n1` (the leader's clock, and the machine the operator
+acted from: the member whose key the connection proved or whose key signed its ticket, or the leader itself for a
+caller on its own machine; `-` only when nothing identified the caller), and the fleet page's members table has
+`memory-override`, `disk-override` and their `-by`, `-baseline` and `-set-at` columns.
+
+#### Cache budget overrides, applied by the member
+
+The member applies its overrides **live**, on a thread of its own -- never on the consensus apply path or a
+reactor: the memory tier evicts to the new budget at once, the disk tier adopts it and evicts toward it in bounded
+slices while it serves, and the capacity it reports is re-derived from what the tiers then hold. **The later change
+wins, and no clock decides which is later.** At every start, every accepted reload and every applied state the member
+compares its configured `--cache-memory`/`--cache-disk` -- the configuration in force, so a reload counts -- with the
+override's baseline:
+
+| Baseline | What the member does |
+|---|---|
+| unset | reports its configured value as the baseline (MEMBER-REPORT `record-baseline`, under its own proof), then applies the override; while the leader cannot be reached it waits and asks again, and never applies an override no baseline was recorded for |
+| equal to the configured value | applies the override, or keeps it applied |
+| different | its own edit is the later change: it logs both values at Warn, raises the latched `cache-budget-override-dropped` condition, asks the leader to drop exactly that override (MEMBER-REPORT `drop-override`), and runs with its configured value |
+
+An override for a tier the member does not have is not applied, and says so. A budget the tier refuses is shown with
+the reason and retried only when something changes. Clearing an override gives the tier its configured budget back,
+`0` (unbounded) included. `pacectl node` (`budget-memory`, `budget-disk`, `budget-overrides`) and MCP `node_status`
+(`budget_overrides`) show each tier's budget in force, whether it comes from the `cluster` or is `configured`, the
+override and its baseline, when and by whom it was set, the excess still being evicted while it converges, and why an
+override is not in force.
 
 `--cluster-status` prints the members — each with the `seat` it was admitted into,
 `voter` or `learner` (see [admitting a learner](#a-machine-that-is-usually-away-admitting-a-learner))
@@ -3049,13 +3113,17 @@ address — so a list is written as one key with every value under it.
 
 | Reloadable | Requires a restart |
 |---|---|
-| `log_level`, `allow_compile_arg`, `requirepass`, `fleet_open`, `toolchain`, `no_toolchain_discovery`, `advertise`, `raft_self` | `slots`, `node_class`, `reserve_cores`, and every listen, cache, cluster and TLS setting |
+| `log_level`, `allow_compile_arg`, `requirepass`, `fleet_open`, `toolchain`, `no_toolchain_discovery`, `advertise`, `raft_self`, `cache_memory`, `cache_disk` | `slots`, `node_class`, `reserve_cores`, and every listen, cluster and TLS setting and every other cache setting |
 
 `log_level`, `allow_compile_arg`, `requirepass` and `fleet_open` take
 effect immediately and tell the fleet nothing; `toolchain` and `no_toolchain_discovery`
 re-register this worker, which is the section after next; `advertise` re-registers it
 too, at a new address, and retires the entry under the old one -- with the cost that
 section states. `raft_self` moves the address this node's peers dial for consensus.
+`cache_memory` and `cache_disk` resize the running tier -- a shrink evicts, the disk tier in
+bounded slices while it serves -- and a cluster budget override set against the old value is
+dropped, because the edit is the later change (see [cache budget overrides](#cache-budget-overrides-applied-by-the-member)).
+Turning the memory tier on or off, to or from `0`, still takes a restart and is refused by name.
 
 Both default to `auto`: the address this machine routes from, on the bound port while the
 listener binds the wildcard, re-derived when the network changes (this machine's fully
@@ -3542,6 +3610,7 @@ Every row says two things before anything else:
 | `fleet-split-healing` | live | warning | this fleet and another established one are one fleet split in two, by a key this fleet already held: its speaker is a VOTER recorded here under that key, which heals by itself -- the detail names which side yields and why -- or its speaker is a LEARNER here, or a machine of this fleet once asked it and it lists that machine, which are first-use trust and wait on an operator -- the detail names the machine the evidence rests on. Not evaluated, as `foreign-fleet-visible` is, until discovery has heard enough to say there is none | where it heals by itself, nothing: the yielding fleet dissolves and rejoins by itself, and a machine the survivor did not record waits on its `--enroll-list`. Where an operator decides, nothing moves until one does: ask the named machine which fleet it belongs to and check the other fleet with `--cluster-status`; if it is yours, `--cluster-forget` each machine of the fleet that does not stay and approve it on the survivor's `--enroll-list`. It clears a few minutes after the other fleet stops being heard |
 | `consensus-leader-silent` | live | warning | no leader this node's applied configuration counts has spoken to it for longer than it may trust that state (65 minutes, `LeaderSilenceBound`), so every lease grant it is handed is refused -- a voter its fleet forgot meanwhile could still be in the state it holds. The start counts as contact, so a node starting cut off has the same 65 minutes. The detail says how long it has been | restore its Raft sessions to the fleet: check the network path to its voters and `--cluster-status` on one of them. Compiles sent to it fall back to their own machines meanwhile; it clears at the first leader contact |
 | `state-directory-unsynced` | latched | warning | the filesystem holding the state directory answers a directory sync with "not supported here" (`EINVAL`, `ENOTSUP`, `EBADF` from `fsync`; `ERROR_INVALID_FUNCTION`, `ERROR_NOT_SUPPORTED`, `ERROR_INVALID_PARAMETER` from `FlushFileBuffers`), so a replaced state file is not known to survive a power loss: every replace still lands and is used. The detail names the directory and the answer; also counted in `pace_state_directory_syncs_unsupported_total` | stop the node, move the state directory **whole** to a local volume (it holds the node's identity, so a new empty directory is a new machine), point `--cluster-dir` at it and start; restarting on the same volume does not clear it |
+| `cache-budget-override-dropped` | latched | warning | a cluster cache budget override was dropped because this machine's own `--cache-memory`/`--cache-disk` changed after the override was set (its configured value no longer equals the baseline it reported); the detail names the tier, both values and the override's figure | the machine's own configuration changed after the override was set; set it again with set_cache_budget if still wanted |
 | `formation-move-refused` | live | alert | a move of this node's formation -- to the mode the detail names -- was not taken, because the startup rules refuse the shape it would give this node: a restart into it would be refused, so the node keeps the mode it is in. Every move is judged this way before its record is written, whether or not it rebuilds the node; the detail names the rule | fix the rule the detail names and restart this node; until then it keeps the mode it is in rather than serve a shape its next restart would refuse |
 
 The remedy each row carries is longer than this column, and it is the node's text: an older
@@ -4117,6 +4186,53 @@ It is the one section the every-section document leaves out. Its size is the ran
 rather than the fleet's (a day is 288 rows, whatever the fleet is), so it is asked for
 by name.
 
+**`cpu-busy` is one machine's, never the fleet's.** It is the host CPU busy in permille
+(0..1000, this node's own compiles included), sampled with every other figure once a
+minute. A load ratio summed or averaged over machines is nobody's load, so the fleet's
+`series` table carries the column as `-` in every row. A machine's own series carries it:
+a `fleet-text` request naming a member id in its node field draws the `series` table
+from what **that** machine handed the leader, found by the identity key its member record
+holds -- never by an endpoint -- and still answerable after the machine left, for as long
+as the rings hold its readings. In a machine's series the dispatch columns are `-`, since
+only the scheduler produces those, and a minute whose CPU could not be read (the first
+sample after a start has no earlier counters to difference against, and a platform may
+not say) is `-` as well, never `0`. The node field is refused on every other selection,
+on an id no member holds (listing the members), and for a member nobody handed history
+over for. The MCP `history` tool's `node` argument is its client: `cpu-busy` requires it,
+and the dispatch series refuse it.
+
+**Who asked, and which toolchain.** `/fleet.json` carries two more sections over the
+range asked for: `requesters` (compiles granted per requesting machine) and
+`toolchain_demand` (per toolchain fingerprint); each says what it counts in its own
+`counts` field. A compile is counted once, when the leader **grants** it -- a queued
+admission placed on a worker or on the requesting machine, or a fail-open lease -- and
+never a request refused, one whose connection closed before its grant, or a duplicate
+answered by another compile's object. A request that asks **again** for a compile the
+leader already granted -- the launcher's local retry after the granted worker failed
+it, or the lease it falls back to after an admission broke past its grant -- says so on
+the wire (ADMIT's and LEASE's last field) and is not counted again. A requester is the
+machine the queue charged: the identity key its connection proved, or the leader itself
+for a caller on the leader's own machine; a lease asked under a machine ticket names no
+machine and is counted in `unattributed`, as is a toolchain with no fingerprint --
+never guessed from an address, a worker id or a hostname. Each row names its machine by
+`node_id` and `display_name` (both `null` when no member holds that key). Coverage is
+stated as the slot series state it: `coverage` gives the minutes the leader counted in
+each bucket against `full_coverage`, and `observed_minutes` of `window_minutes` the
+window's -- a total is over the minutes counted, so an hour watched for one minute
+reads `1` of `60` and a demotion is a gap whose counts are `null` (uncovered), never zero grants and never part of a whole. A bucket the
+leader was not counting in is `null`, never `0`. The most recently active
+`--history-requesters` keys (`keys_kept_max`; default 256, at most 1024, `0` refused;
+restart-only; it governs both sections) are kept by name, and the rest are summed into
+`other`, whose `keys_folded` says how many -- the totals stay exact. A key folded once
+and seen again says `earlier_counts: in-other`: its row shows only what it did since.
+These are the leader's own records, kept in `requester-history.bin` and
+`toolchain-history.bin` beside the other histories, and they are **not handed over at
+an election**: a new leader starts empty, `coverage_since_ms` is the instant it first
+counted, and a node that does not lead answers both sections `null`. The MCP `history`
+tool returns either section exactly as written (`series: requesters` or
+`toolchain-demand`, with `key` selecting one row: by its key, else a node id, else a
+display name, whichever matches first).
+
 Three of the seven are derived from the **history** rather than the snapshot, so both
 surfaces take `range` exactly as the page does, and refuse an unknown one for the same
 reason. A figure the range cannot answer is `null` / `-` and **never `0`**: a fleet
@@ -4153,8 +4269,8 @@ What it shows, and why each part is split the way it is:
 |---|---|
 | The readouts | The figures across the top: compiles dispatched over the selected range (with a sparkline), compiling now, cache hit rate, the share of dispatch decisions refused, leases outstanding, the **oldest** heartbeat in the fleet, and how many toolchains have **never been picked**. The oldest heartbeat and not the mean — one machine that stopped answering an hour ago is the fact worth surfacing, and an average over a healthy fleet buries it. Never picked counts distinct toolchains rather than registry entries, so one compiler served by four machines and reached through any of them counts as reached; a fleet with nothing registered shows `–` rather than `0`, because zero here means *every toolchain is being reached* and an empty fleet cannot claim it. |
 | Fleet capacity | One meter over every registered slot, split three ways: compiling, free, and **withheld** by a ceiling. The third is the one to read first — slots a ceiling withdrew are not this fleet being busy, so buying machines does not return them. A fleet that has never been dispatched to says *that* instead, because the same three numbers mean something else there — see below. |
-| Machines | One row **per machine**, not per toolchain: the software version it is running, cores, memory, free scratch, class and reserve, cache hit rate, heartbeat age. |
-| Workers | One row per `(toolchain, endpoint)` registry entry: slots, in flight, available — and *which* limit withdrew the difference. The `compiler` column says what the toolchain **is** (`cl 19.44.35207`); the `toolchain` fingerprint beside it is what actually decides a match, and a row shows `–` when the node did not say, which a pinned `--toolchain=<fingerprint>=<compiler>` override never does. `registered-age` and `last-picked-age` are read together: the second is `–` when the scheduler has never chosen that entry, and that is a finding beside a registration age of forty minutes and says nothing beside one of a second. |
+| Machines | One row **per machine**, not per toolchain: its `name` and `node-id` — the member holding the identity key the machine's connection **proved**, `–` when no member holds it, and never matched by the endpoint, which a machine only claims — the software version it is running, cores, memory, free scratch, class and reserve, cache hit rate, heartbeat age. |
+| Workers | One row per `(toolchain, endpoint)` registry entry: the `node-id` its registration's proven key places it at (as on a machine row), slots, in flight, available — and *which* limit withdrew the difference. The `compiler` column says what the toolchain **is** (`cl 19.44.35207`); the `toolchain` fingerprint beside it is what actually decides a match, and a row shows `–` when the node did not say, which a pinned `--toolchain=<fingerprint>=<compiler>` override never does. The `family` column is the compiler family the node read off the banner rather than the name it was invoked by — Apple clang installed as `gcc` is `apple-clang` — and it is what the MCP `toolchains` upgrade report compares versions within; `–` when no banner was read or no family is known for the driver. `registered-age` and `last-picked-age` are read together: the second is `–` when the scheduler has never chosen that entry, and that is a finding beside a registration age of forty minutes and says nothing beside one of a second. |
 | Leases outstanding | One row per lease the scheduler has handed out and not yet seen resolved: the object key, the worker it went to, that worker's endpoint, and how long it has been held. **Oldest first, and bounded** — the header says `the 50 oldest of 900` when there are more, so a truncated table is not read as the whole fleet's work. A client hands its lease back when the job ends however it ended, so a row that has been there for minutes is a client that died mid-build, and the endpoint is where its work was going. A row with no endpoint is a lease against a worker that is no longer registered. |
 | Why requests were refused | Granted, and refused split four ways, each with what it tells you to do. |
 | Cache tiers | Items, bytes, budget, evictions and index RAM **per tier**. A tier no member runs has no column at all, and a fleet where nobody runs one says so rather than showing an empty table. `index-ram` is what the tier's key index costs in memory: always RAM, even for a disk tier whose budget is bytes on a filesystem, so the two are not comparable and must not be added. |

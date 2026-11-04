@@ -1,17 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <Pace/Consensus/DurableFile.hpp>
-#include <Pace/Core/ByteAppender.hpp>
-#include <Pace/Core/Crc32c.hpp>
-#include <Pace/Core/Endian.hpp>
 #include <Pace/Core/WireFields.hpp>
 #include <Pace/Distributed/FleetHistory.hpp>
+#include <Pace/Distributed/HistoryEnvelope.hpp>
 
 #include <algorithm>
 #include <array>
-#include <fstream>
 #include <ranges>
 #include <span>
-#include <sstream>
 #include <utility>
 
 namespace Pace::Distributed
@@ -19,6 +14,8 @@ namespace Pace::Distributed
 
 namespace
 {
+    using namespace HistoryEnvelope;
+
     /// One ring's bucket width, in milliseconds.
     /// @param ring Which ring.
     /// @return Its bucket width.
@@ -28,26 +25,11 @@ namespace
             .count();
     }
 
-    /// What a store's file says about itself.
-    ///
-    /// A file that could not say which build wrote it makes an upgrade a silent
-    /// corruption, which is the reasoning `ClusterState`'s own version byte records.
-    /// Unlike that one, an OLDER version is not necessarily an error: `HistoryFormats`
-    /// carries a reader for one and inflates it forward.
-    ///
-    /// A descriptor rather than a base class, because the two stores share the
-    /// framing and nothing else -- one holds rings, the other a body per machine. A
-    /// third store is then a third constant, and it gets the durability, the checksum
-    /// and the never-overwrite-a-newer-file rule by construction rather than by
-    /// somebody remembering to copy them.
-    struct FileEnvelope
-    {
-        std::array<char, 4> magic; ///< What this file is.
-        std::uint8_t newest;       ///< The newest version this build writes.
-    };
-
     /// A node's own series: three rings in one file.
-    constexpr FileEnvelope RingFile { .magic = { 'F', 'C', 'F', 'H' }, .newest = 3 };
+    ///
+    /// Version 4 added each bucket's absence mask and the CPU slot, together: the slot is the first that can be
+    /// absent inside a present bucket, so the two are one change to the shape.
+    constexpr FileEnvelope RingFile { .magic = { 'F', 'C', 'F', 'H' }, .newest = 4 };
 
     /// The received-histories store: one nested `FleetHistory` body per machine.
     ///
@@ -59,19 +41,18 @@ namespace
     /// reader can learn whether it was written at `ReadVersion2`'s width or
     /// `ReadVersion3`'s. Version 1 wrote the former, version 2 the latter -- moved
     /// here because `DispatchAllExcluded` widened `FleetMetric`, the same reason
-    /// `RingFile` moved to 3.
-    constexpr FileEnvelope NodeStoreFile { .magic = { 'F', 'C', 'N', 'H' }, .newest = 2 };
+    /// `RingFile` moved to 3. Version 3 writes `ReadVersion4`'s shape -- the CPU slot and
+    /// the absence mask -- and files each series under the identity key it was proven under
+    /// (`[endpoint][high-water][key][body]`), which is what a machine's own series is looked up BY.
+    constexpr FileEnvelope NodeStoreFile { .magic = { 'F', 'C', 'N', 'H' }, .newest = 3 };
 
-    /// Magic, version byte, body length, body checksum.
-    constexpr std::size_t EnvelopeSize = 4 + 1 + (sizeof(std::uint64_t) * 2);
-
-    /// What one bucket costs in a body: four scalars, the readings, and the fold.
+    /// What one bucket costs in a body: five scalars, the readings, and the fold.
     ///
     /// Derived from the metric table rather than written down, so a tenth metric
     /// moves it. Only a reservation hint -- being wrong costs a reallocation, not a
     /// wrong file -- but a hint nothing keeps current is a hint that stops helping.
     constexpr std::size_t BucketBytes =
-        (4 + EnumeratorCount<FleetMetric> + (EnumeratorCount<FleetMetric> * 3)) * sizeof(std::uint64_t);
+        (5 + EnumeratorCount<FleetMetric> + (EnumeratorCount<FleetMetric> * 3)) * sizeof(std::uint64_t);
 
     /// The largest ring this build keeps, as a ceiling on a declared bucket count.
     ///
@@ -108,44 +89,59 @@ namespace
     /// @param widthMillis Width of one of its buckets.
     /// @param nowMillis When this reading was taken.
     /// @param values The reading.
+    /// @param absent The slots this reading could not answer for; their values are ignored.
     /// @param previous The reading before this one, or null when there is none or
     ///                 when it is too old to subtract from.
+    /// @param previousAbsent The slots that earlier reading could not answer for.
     /// @return True when this opened a bucket that was not already there.
     bool AccumulateInto(std::vector<FleetBucket>& ring,
                         std::int64_t widthMillis,
                         std::int64_t nowMillis,
                         EnumTable<FleetMetric, std::uint64_t> const& values,
-                        EnumTable<FleetMetric, std::uint64_t> const* previous)
+                        FleetSlotMask absent,
+                        EnumTable<FleetMetric, std::uint64_t> const* previous,
+                        FleetSlotMask previousAbsent)
     {
         auto const number = nowMillis / widthMillis;
         auto const start = number * widthMillis;
         auto& slot = ring[static_cast<std::size_t>(number) % ring.size()];
         auto const opened = !slot.present || slot.startMillis != start;
 
+        // What the bucket held before this reading: on opening, nothing at all -- every slot absent -- so the
+        // first reading of each slot is its first wherever in the bucket it lands.
+        auto const heldBefore = opened ? EveryFleetSlot : slot.absent;
         if (opened)
-            slot = FleetBucket { .startMillis = start, .sampleMillis = nowMillis, .values = values, .present = true };
-        else
-        {
-            // `nowMillis` for the sample instant, NOT the aligned `start`. Stamping
-            // the alignment throws the reading's real time away at the moment it is
-            // recorded, and no later fold can recover it -- which made the divisor a
-            // no-op for a view whose bucket IS its sub-bucket, since those are always
-            // exactly one nominal width apart.
-            slot.sampleMillis = nowMillis;
-            slot.values = values;
-        }
+            slot = FleetBucket { .startMillis = start, .sampleMillis = nowMillis, .values = {}, .present = true };
+        // `nowMillis` for the sample instant, NOT the aligned `start`. Stamping
+        // the alignment throws the reading's real time away at the moment it is
+        // recorded, and no later fold can recover it -- which made the divisor a
+        // no-op for a view whose bucket IS its sub-bucket, since those are always
+        // exactly one nominal width apart.
+        slot.sampleMillis = nowMillis;
+        // A slot stays absent only while EVERY reading in the bucket lacked it.
+        slot.absent = heldBefore & absent;
 
         for (auto const& row: FleetMetricTable)
         {
             auto const index = static_cast<std::size_t>(row.metric);
-            auto const reading = values[index];
+            auto const bit = SlotBit(row.metric);
             auto& fold = slot.fold[index];
+            if (opened)
+                fold = FleetFold {};
+            // A slot this reading could not answer for keeps what the bucket already had: the newest reading
+            // that existed, and a fold over readings alone -- an absence is neither a floor nor a peak.
+            if ((absent & bit) != 0)
+                continue;
+
+            auto const reading = values[index];
+            auto const first = (heldBefore & bit) != 0;
+            slot.values[index] = reading;
 
             if (row.kind == FleetMetricKind::Gauge)
             {
-                fold.low = opened ? reading : std::min(fold.low, reading);
-                fold.high = opened ? reading : std::max(fold.high, reading);
-                fold.total = (opened ? 0 : fold.total) + reading;
+                fold.low = first ? reading : std::min(fold.low, reading);
+                fold.high = first ? reading : std::max(fold.high, reading);
+                fold.total = (first ? 0 : fold.total) + reading;
                 continue;
             }
 
@@ -153,10 +149,9 @@ namespace
             // which for a bucket's first sample sits in the bucket before it. A
             // counter has no meaningful floor or sum: its mean over a window is the
             // delta across it, and its minimum is not a fact anybody acts on.
-            if (opened)
-                fold = FleetFold {};
-            // Backwards is a restart, whose step is unknowable rather than enormous.
-            if (previous != nullptr && reading >= (*previous)[index])
+            // Backwards is a restart, whose step is unknowable rather than enormous;
+            // and a reading the previous sample lacked has no step at all.
+            if (previous != nullptr && (previousAbsent & bit) == 0 && reading >= (*previous)[index])
                 fold.high = std::max(fold.high, reading - (*previous)[index]);
         }
 
@@ -206,18 +201,32 @@ namespace
                 continue;
             }
 
-            if (slot.startMillis > out->startMillis)
+            // Walked oldest first, so every later sub-bucket is the newer one: its instant wins, and so does each
+            // reading it HAS -- a slot it lacks keeps the newest reading an earlier sub-bucket held.
+            auto const newer = slot.startMillis > out->startMillis;
+            if (newer)
             {
                 out->startMillis = slot.startMillis;
                 out->sampleMillis = slot.sampleMillis;
-                out->values = slot.values;
             }
 
             for (auto const& row: FleetMetricTable)
             {
                 auto const index = static_cast<std::size_t>(row.metric);
+                auto const bit = SlotBit(row.metric);
+                if ((slot.absent & bit) != 0)
+                    continue;
                 auto& into = out->fold[index];
                 auto const& from = slot.fold[index];
+                if ((out->absent & bit) != 0)
+                {
+                    // The first sub-bucket with a reading for this slot: its value and fold are the window's so far.
+                    out->values[index] = slot.values[index];
+                    into = from;
+                    continue;
+                }
+                if (newer)
+                    out->values[index] = slot.values[index];
                 // A counter's `low` and `total` are unused and stay zero, so the same
                 // three lines serve both kinds rather than branching on one to do
                 // nothing.
@@ -225,24 +234,10 @@ namespace
                 into.high = std::max(into.high, from.high);
                 into.total += from.total;
             }
+            out->absent &= slot.absent;
             out->coverage += slot.coverage;
         }
         return out;
-    }
-
-    /// Big-endian, because that is what every other encoder in this tree writes;
-    /// the choice is arbitrary for a private file and consistency is not.
-    ///
-    /// Kept as a named helper over `ByteAppender` rather than spelled at each of its
-    /// fifteen call sites, because the sentence above is what it is for. What it no
-    /// longer does is state the byte order a second time (#305): this file's records
-    /// are `[u64 length][bytes]`, which is NOT the `[u32 length][bytes]` grammar
-    /// `AppendField` writes, so the framing stays here and only the integer is shared.
-    /// @param out The buffer.
-    /// @param value Host-order value.
-    void AppendU64(std::string& out, std::uint64_t value)
-    {
-        ByteAppender { out }.AppendU64(value);
     }
 
     /// Stamp a big-endian word over one already appended.
@@ -253,162 +248,6 @@ namespace
     {
         WireFields::PutBigEndian<std::uint64_t>(std::as_writable_bytes(std::span { out }), offset, value);
     }
-
-    [[nodiscard]] std::uint64_t ReadU64(std::string_view bytes, std::size_t offset) noexcept
-    {
-        return ReadBigEndian<std::uint64_t>(
-            std::span { reinterpret_cast<std::byte const*>(bytes.data()) + offset, sizeof(std::uint64_t) });
-    }
-
-    /// A buffer with the header's bytes reserved in front, ready for a body.
-    ///
-    /// The body is appended straight into the buffer that becomes the file, because
-    /// a received-histories store is most of a megabyte per machine: composing the
-    /// body separately would copy all of it twice, once to join the header and once
-    /// again to reach the stream.
-    /// @return The buffer, `EnvelopeSize` placeholder bytes long.
-    [[nodiscard]] std::string FramedBuffer()
-    {
-        return std::string(EnvelopeSize, char { 0 });
-    }
-
-    /// Stamp the header onto such a buffer and put it where a crash cannot leave
-    /// half of it.
-    /// @param path Where the file belongs.
-    /// @param envelope What to stamp.
-    /// @param file The whole file: header space, then the body.
-    /// @param which Which state file it is, and so who may read it.
-    /// @return True when the file was replaced.
-    [[nodiscard]] bool WriteFramed(std::filesystem::path const& path,
-                                   FileEnvelope const& envelope,
-                                   std::string& file,
-                                   StateFile which)
-    {
-        std::string_view const body { file.data() + EnvelopeSize, file.size() - EnvelopeSize };
-
-        std::string header;
-        header.reserve(EnvelopeSize);
-        header.append(envelope.magic.data(), envelope.magic.size());
-        header.push_back(static_cast<char>(envelope.newest));
-        AppendU64(header, body.size());
-        AppendU64(header, Crc32c::Compute(std::span { reinterpret_cast<std::byte const*>(body.data()), body.size() }));
-        std::ranges::copy(header, file.begin());
-
-        // Through the node's one durable writer: a crash leaves the previous file whole rather than
-        // half of this one, and what lands is synced and its close checked, as every state file is.
-        return Consensus::ReplaceFileAtomically(path, std::as_bytes(std::span { file }), which).has_value();
-    }
-
-    /// What reading a framed file produced.
-    enum class FramedOutcome : std::uint8_t
-    {
-        Ok,      ///< The body is there and its checksum matched.
-        Missing, ///< Absent, short, not ours, or damaged: start empty, overwrite freely.
-        Newer,   ///< Ours, and written by a LATER build: start empty and NEVER write.
-    };
-
-    /// A framed file's contents.
-    ///
-    /// `body` OWNS its bytes rather than viewing a buffer this returned by value: a
-    /// struct a decoder hands back must not borrow from what it decoded, or the
-    /// obvious spelling is a use-after-free.
-    struct FramedFile
-    {
-        FramedOutcome outcome { FramedOutcome::Missing }; ///< Whether there is anything to read.
-        std::uint8_t version { 0 };                       ///< Which build's shape the body is in.
-        std::string body;                                 ///< The bytes after the header.
-    };
-
-    /// Read a framed file and check everything about it except the shape of its body.
-    /// @param path Where to look.
-    /// @param envelope What the file must claim to be.
-    /// @return The body, or why there is none.
-    [[nodiscard]] FramedFile ReadFramed(std::filesystem::path const& path, FileEnvelope const& envelope)
-    {
-        std::ifstream in { path, std::ios::binary };
-        if (!in)
-            return {};
-
-        // Sized and read in one go rather than through `istreambuf_iterator`: GCC at
-        // -O3 inlines that far enough to trip `-Werror=null-dereference`, which this
-        // codebase has already worked around twice.
-        in.seekg(0, std::ios::end);
-        auto const end = in.tellg();
-        if (end < 0)
-            return {};
-        in.seekg(0, std::ios::beg);
-
-        std::string raw(static_cast<std::size_t>(end), char { 0 });
-        in.read(raw.data(), static_cast<std::streamsize>(raw.size()));
-        if (in.gcount() != static_cast<std::streamsize>(raw.size()))
-            return {};
-
-        if (raw.size() < EnvelopeSize)
-            return {};
-        if (!std::equal(envelope.magic.begin(), envelope.magic.end(), raw.begin()))
-            return {};
-
-        auto const version = static_cast<std::uint8_t>(raw[envelope.magic.size()]);
-        // The magic matched, so this IS one of ours -- and a version above the newest
-        // this build writes was written by a LATER one. Everything else here is
-        // recoverable by waiting; overwriting a year of readings that the newer build
-        // could still have read is not.
-        if (version > envelope.newest)
-            return FramedFile { .outcome = FramedOutcome::Newer, .version = version, .body = {} };
-
-        auto const declared = ReadU64(raw, envelope.magic.size() + 1);
-        auto const checksum = ReadU64(raw, envelope.magic.size() + 1 + sizeof(std::uint64_t));
-        // The header is dropped rather than copied past: what is left IS the body.
-        raw.erase(0, EnvelopeSize);
-        if (raw.size() != declared)
-            return {};
-        if (Crc32c::Compute(std::span { reinterpret_cast<std::byte const*>(raw.data()), raw.size() }) != checksum)
-            return {};
-
-        return FramedFile { .outcome = FramedOutcome::Ok, .version = version, .body = std::move(raw) };
-    }
-
-    /// A cursor over a file's body, so a reader cannot walk off the end by omission.
-    class BodyReader
-    {
-      public:
-        /// @param body The bytes after the header.
-        explicit BodyReader(std::string_view body) noexcept:
-            _body { body }
-        {
-        }
-
-        /// @param into Where the next big-endian `uint64` lands.
-        /// @return False when the body is exhausted, leaving @p into untouched.
-        bool Take(std::uint64_t& into) noexcept
-        {
-            if (_cursor + sizeof(std::uint64_t) > _body.size())
-                return false;
-            into = ReadU64(_body, _cursor);
-            _cursor += sizeof(std::uint64_t);
-            return true;
-        }
-
-        /// @param length How many bytes to take.
-        /// @param into A view of them, valid as long as the body is.
-        /// @return False when the body is exhausted, leaving @p into untouched.
-        ///
-        /// Written as a remaining-length comparison rather than `_cursor + length`,
-        /// because a length read off a damaged file can overflow that sum and let a
-        /// bounds check pass on a span that runs off the end.
-        bool Take(std::uint64_t length, std::string_view& into) noexcept
-        {
-            if (length > _body.size() - _cursor)
-                return false;
-            into = _body.substr(_cursor, static_cast<std::size_t>(length));
-            _cursor += static_cast<std::size_t>(length);
-            return true;
-        }
-
-      private:
-        std::string_view _body;
-        std::size_t _cursor { 0 };
-    };
 
     /// The rings a reader recovered, before they are installed.
     struct LoadedHistory
@@ -521,6 +360,11 @@ namespace
     /// that slot at zero is correct, not a gap.
     constexpr std::size_t LegacyValueWidth = 9;
 
+    /// The value and fold width version 3 wrote: ten, for as long as `DispatchAllExcluded` was the newest slot.
+    ///
+    /// Frozen for `LegacyValueWidth`'s reason. `CpuBusyPermille` lands past index 9, and a v3 bucket never
+    /// wrote it -- which, unlike an exclusion count, reads ABSENT (`FleetUncarried`), not zero.
+    constexpr std::size_t VersionThreeValueWidth = 10;
     /// Version 1: a generation, then two rings -- minute and hour -- of
     /// `[start][present][9 values]`, with no fold and no coverage.
     ///
@@ -554,6 +398,7 @@ namespace
                 if (!from.Take(bucket.values[index]))
                     return false;
             bucket.coverage = bucket.present ? 1 : 0;
+            bucket.absent = UncarriedAbsentSlots(LegacyValueWidth);
             for (auto const& row: FleetMetricTable)
             {
                 if (row.kind != FleetMetricKind::Gauge)
@@ -601,20 +446,20 @@ namespace
                 if (!from.Take(bucket.fold[index].low) || !from.Take(bucket.fold[index].high)
                     || !from.Take(bucket.fold[index].total))
                     return false;
+            bucket.absent = UncarriedAbsentSlots(LegacyValueWidth);
             return true;
         });
     }
 
-    /// Version 3: the same shape version 2 wrote, over THIS build's full value and fold
-    /// width -- `[start][sample][present][coverage][N values][N x low,high,total]`,
-    /// where `N` is `EnumeratorCount<FleetMetric>`.
+    /// Version 3: the same shape version 2 wrote, at ten values and ten folds --
+    /// `[start][sample][present][coverage][10 values][10 x low,high,total]`.
     ///
-    /// Minted because `DispatchAllExcluded` widened that count past what versions 1 and
+    /// Minted because `DispatchAllExcluded` widened `FleetMetric` past what versions 1 and
     /// 2 ever wrote (#308's ordinals are a persisted contract, so it landed at the END
     /// rather than reordering either), and reading a v2 body against a wider layout
-    /// would misalign every field after the first missing one. `ReadVersion2` stays
-    /// pinned at nine for that reason; this reader is what moves forward with the live
-    /// table, until it grows again and earns a version 4 of its own.
+    /// would misalign every field after the first missing one. Frozen at
+    /// `VersionThreeValueWidth` since version 4 moved forward with the live table; the CPU
+    /// slot it never carried reads absent.
     /// @param reader The cursor.
     /// @param out Where the rings land.
     /// @return False on a truncated or implausible body.
@@ -629,6 +474,42 @@ namespace
             bucket.startMillis = static_cast<std::int64_t>(start);
             bucket.sampleMillis = static_cast<std::int64_t>(sample);
             bucket.present = present != 0;
+            for (auto const index: std::views::iota(std::size_t { 0 }, VersionThreeValueWidth))
+                if (!from.Take(bucket.values[index]))
+                    return false;
+            for (auto const index: std::views::iota(std::size_t { 0 }, VersionThreeValueWidth))
+                if (!from.Take(bucket.fold[index].low) || !from.Take(bucket.fold[index].high)
+                    || !from.Take(bucket.fold[index].total))
+                    return false;
+            bucket.absent = UncarriedAbsentSlots(VersionThreeValueWidth);
+            return true;
+        });
+    }
+
+    /// Version 4: version 3's shape with each bucket's absence mask after its coverage, over THIS build's full
+    /// value and fold width -- `[start][sample][present][coverage][absent][N values][N x low,high,total]`, where
+    /// `N` is `EnumeratorCount<FleetMetric>`.
+    ///
+    /// Minted by `CpuBusyPermille`, the first slot that can be absent inside a present bucket: without the mask
+    /// a restart would read every CPU gap back as an idle zero. This reader moves forward with the live table
+    /// until it grows again and earns a version 5 of its own.
+    /// @param reader The cursor.
+    /// @param out Where the rings land.
+    /// @return False on a truncated or implausible body.
+    bool ReadVersion4(BodyReader& reader, LoadedHistory& out)
+    {
+        return ReadBody(reader, out, Version2Rings, [](BodyReader& from, FleetBucket& bucket) {
+            std::uint64_t start = 0;
+            std::uint64_t sample = 0;
+            std::uint64_t present = 0;
+            std::uint64_t absent = 0;
+            if (!from.Take(start) || !from.Take(sample) || !from.Take(present) || !from.Take(bucket.coverage)
+                || !from.Take(absent))
+                return false;
+            bucket.startMillis = static_cast<std::int64_t>(start);
+            bucket.sampleMillis = static_cast<std::int64_t>(sample);
+            bucket.present = present != 0;
+            bucket.absent = absent & EveryFleetSlot;
             for (auto& value: bucket.values)
                 if (!from.Take(value))
                     return false;
@@ -654,11 +535,15 @@ namespace
     /// the upgrade. Bumping `FileVersion` without adding a row here remains the
     /// decision to discard every history -- and is then a visible one, made by
     /// deleting a row rather than by not noticing a constant.
-    constexpr std::array<HistoryFormat, 3> HistoryFormats {
+    constexpr std::array<HistoryFormat, 4> HistoryFormats {
         HistoryFormat { .version = 1, .read = &ReadVersion1 },
         HistoryFormat { .version = 2, .read = &ReadVersion2 },
         HistoryFormat { .version = 3, .read = &ReadVersion3 },
+        HistoryFormat { .version = 4, .read = &ReadVersion4 },
     };
+
+    static_assert(HistoryFormats.back().version == RingFile.newest,
+                  "the newest ring format this build writes must be one it can read back");
 
     /// The reader for a version, if this build has one.
     /// @param version What the header said.
@@ -679,11 +564,20 @@ namespace
     /// standalone ring file and a nested body can move on different schedules even
     /// though today they happen to share readers. Version 1 wrote a nested body in
     /// `ReadVersion2`'s shape (frozen at nine values); version 2 moved to
-    /// `ReadVersion3`'s, the same day `FleetMetric` grew `DispatchAllExcluded`.
-    constexpr std::array<HistoryFormat, 2> NestedBodyFormats {
+    /// `ReadVersion3`'s, the same day `FleetMetric` grew `DispatchAllExcluded`; version 3
+    /// to `ReadVersion4`'s, the day it grew `CpuBusyPermille` and buckets their absence mask.
+    constexpr std::array<HistoryFormat, 3> NestedBodyFormats {
         HistoryFormat { .version = 1, .read = &ReadVersion2 },
         HistoryFormat { .version = 2, .read = &ReadVersion3 },
+        HistoryFormat { .version = 3, .read = &ReadVersion4 },
     };
+
+    static_assert(NestedBodyFormats.back().version == NodeStoreFile.newest,
+                  "the newest received-store format this build writes must be one it can read back");
+
+    /// The first `NodeStoreFile` version that files each series under the identity key it was proven under. Older
+    /// stores carry none, so every series they hold is dropped on load (`FleetNodeHistories::DroppedOnLoad`).
+    constexpr std::uint8_t NodeStoreKeyedSince = 3;
 
     /// The nested-body reader for one `NodeStoreFile` version, if this build has one.
     /// @param version What `NodeStoreFile`'s envelope said.
@@ -719,9 +613,9 @@ std::int64_t FleetHistory::NowMillis() const noexcept
     return std::chrono::duration_cast<std::chrono::milliseconds>(_wall.now().time_since_epoch()).count();
 }
 
-void FleetHistory::Record(EnumTable<FleetMetric, std::uint64_t> const& values)
+void FleetHistory::Record(EnumTable<FleetMetric, std::uint64_t> const& values, FleetSlotMask absent)
 {
-    RecordAt(NowMillis(), values);
+    RecordAt(NowMillis(), values, absent);
 }
 
 void FleetHistory::Adopt(FleetBucket const& bucket)
@@ -730,10 +624,10 @@ void FleetHistory::Adopt(FleetBucket const& bucket)
         return;
     // Its own sample instant, not this leader's clock. See the header: stamping a
     // catch-up with the moment it arrived would pile a day into one window.
-    RecordAt(bucket.sampleMillis, bucket.values);
+    RecordAt(bucket.sampleMillis, bucket.values, bucket.absent);
 }
 
-void FleetHistory::RecordAt(std::int64_t now, EnumTable<FleetMetric, std::uint64_t> const& values)
+void FleetHistory::RecordAt(std::int64_t now, EnumTable<FleetMetric, std::uint64_t> const& values, FleetSlotMask absent)
 {
     auto const guard = std::scoped_lock { _mutex };
 
@@ -756,7 +650,8 @@ void FleetHistory::RecordAt(std::int64_t now, EnumTable<FleetMetric, std::uint64
     for (auto const& row: FleetRingTable)
     {
         auto const index = static_cast<std::size_t>(row.ring);
-        auto const openedHere = AccumulateInto(_rings[index], RingWidthMillis(row.ring), now, values, previous);
+        auto const openedHere = AccumulateInto(
+            _rings[index], RingWidthMillis(row.ring), now, values, absent & EveryFleetSlot, previous, _lastAbsent);
         // The generation follows the BASE ring, which is the one whose buckets close
         // fastest: an ETag that only moved when the day ring rolled would hold a
         // stale chart for a day.
@@ -765,6 +660,7 @@ void FleetHistory::RecordAt(std::int64_t now, EnumTable<FleetMetric, std::uint64
     }
 
     _last = values;
+    _lastAbsent = absent & EveryFleetSlot;
     _lastMillis = now;
     _hasLast = true;
     if (opened)
@@ -912,6 +808,7 @@ void FleetHistory::AppendBody(std::string& out) const
             AppendU64(out, static_cast<std::uint64_t>(bucket.sampleMillis));
             AppendU64(out, bucket.present ? 1U : 0U);
             AppendU64(out, bucket.coverage);
+            AppendU64(out, bucket.absent);
             for (auto const value: bucket.values)
                 AppendU64(out, value);
             for (auto const& fold: bucket.fold)
@@ -996,37 +893,70 @@ FleetNodeHistories::FleetNodeHistories(core::platform::WallClockRef wall):
 {
 }
 
-std::size_t FleetNodeHistories::AcceptHistory(std::string_view endpoint, std::span<FleetBucket const> buckets)
+FleetNodeHistories::Series::Series(core::platform::WallClockRef wall, std::string at):
+    history { wall },
+    endpoint { std::move(at) }
 {
-    // The map's lock covers finding the entry and moving its mark, and nothing else.
-    // Adopting a batch walks three rings up to a hundred and twenty-eight times, and
-    // doing that here would put every other machine's heartbeat behind this one's.
-    // The entry itself outlives the lock: nothing ever erases one, and the history is
-    // held by pointer so a rehash cannot move it.
-    Entry* entry = nullptr;
+}
+
+void FleetNodeHistories::EvictForOneMoreLocked()
+{
+    if (_byKey.size() < MaxReceivedHistories)
+        return;
+    // The series whose newest reading is OLDEST: a machine still reporting is never the one dropped while a silent one
+    // is kept. Each mark is read under its series' lock -- the map's lock is held first, in the one order both are
+    // ever taken in.
+    auto const markOf = [](auto const& each) {
+        auto const guard = std::scoped_lock { each.second->mutex };
+        return each.second->highWater;
+    };
+    auto const oldest = std::ranges::min_element(_byKey, {}, markOf);
+    if (oldest != _byKey.end())
+        _byKey.erase(oldest);
+}
+
+std::size_t FleetNodeHistories::AcceptHistory(std::string_view endpoint,
+                                              std::string_view provenKey,
+                                              std::span<FleetBucket const> buckets)
+{
+    // A connection that proved no key is not filed at all. Its series could answer for no machine, and it may be the
+    // same machine a proven connection also reports -- filing both would sum it twice into every fleet window it
+    // fills. NODE-ANNOUNCE is a proven-only verb, so in production this is a refusal the gate already made.
+    if (provenKey.empty())
+        return 0;
+
+    // The map's lock covers finding or opening the series, and nothing else: adopting a batch walks three rings up
+    // to a hundred and twenty-eight times, and doing that here would put every other machine's announcement behind
+    // this one's. The series is shared, so an eviction meanwhile cannot free it.
+    std::shared_ptr<Series> series;
     {
         auto const guard = std::scoped_lock { _mutex };
-        auto found = _nodes.find(endpoint);
-        if (found == _nodes.end())
-            found = _nodes
-                        .emplace(std::string { endpoint },
-                                 Entry { .history = std::make_unique<FleetHistory>(_wall), .highWater = -1 })
-                        .first;
-        entry = &found->second;
+        auto found = _byKey.find(provenKey);
+        if (found == _byKey.end())
+        {
+            EvictForOneMoreLocked();
+            found =
+                _byKey.emplace(std::string { provenKey }, std::make_shared<Series>(_wall, std::string { endpoint })).first;
+        }
+        series = found->second;
     }
 
+    // The series' OWN lock across claiming and adding, so neither can be seen without the other: a `Save` copies the
+    // mark and the rings under this same lock and so never persists a mark past buckets it does not hold, and two
+    // announcements under one key add their buckets in the order they claimed them.
+    auto const guard = std::scoped_lock { series->mutex };
+    // Where it reports from NOW: a machine that moved keeps its series and changes its label.
+    series->endpoint = std::string { endpoint };
     std::size_t taken = 0;
     for (auto const& bucket: buckets)
     {
         // At or below the mark is a replay, not news. Ignored rather than refused:
         // the node is behaving correctly when it resends after a reply it never saw,
         // and the only wrong answer here is to add the reading twice.
-        if (!bucket.present || bucket.startMillis <= entry->highWater)
+        if (!bucket.present || bucket.startMillis <= series->highWater)
             continue;
-        entry->history->Adopt(bucket);
-        // Plain assignment: the guard above already established that this bucket is
-        // strictly newer, so a `max` could only ever pick it.
-        entry->highWater = bucket.startMillis;
+        series->history.Adopt(bucket);
+        series->highWater = bucket.startMillis;
         ++taken;
     }
     return taken;
@@ -1041,12 +971,13 @@ void FleetNodeHistories::BackfillInto(std::vector<FleetBucket>& into, FleetRange
     if (std::ranges::none_of(into, [](FleetBucket const& each) { return !each.present; }))
         return;
 
-    std::vector<FleetHistory const*> histories;
+    // Shared, so an eviction while this renders cannot free one.
+    std::vector<std::shared_ptr<Series const>> histories;
     {
         auto const guard = std::scoped_lock { _mutex };
-        histories.reserve(_nodes.size());
-        for (auto const& [endpoint, entry]: _nodes)
-            histories.push_back(entry.history.get());
+        histories.reserve(_byKey.size());
+        for (auto const& [key, series]: _byKey)
+            histories.push_back(series);
     }
     if (histories.empty())
         return;
@@ -1057,8 +988,8 @@ void FleetNodeHistories::BackfillInto(std::vector<FleetBucket>& into, FleetRange
     // a heartbeat must not wait behind it.
     std::vector<std::vector<FleetBucket>> perNode;
     perNode.reserve(histories.size());
-    for (auto const* history: histories)
-        perNode.push_back(history->Buckets(range));
+    for (auto const& series: histories)
+        perNode.push_back(series->history.Buckets(range));
 
     for (auto const index: std::views::iota(std::size_t { 0 }, into.size()))
     {
@@ -1070,6 +1001,9 @@ void FleetNodeHistories::BackfillInto(std::vector<FleetBucket>& into, FleetRange
             continue;
 
         FleetBucket filled = into[index];
+        // Every slot starts absent and becomes present only where some machine read it; a slot with no fleet
+        // total, or one only a scheduler answers for, never does.
+        filled.absent = EveryFleetSlot;
         auto contributors = std::size_t { 0 };
         for (auto const& node: perNode)
         {
@@ -1082,10 +1016,15 @@ void FleetNodeHistories::BackfillInto(std::vector<FleetBucket>& into, FleetRange
             {
                 // NODE-scoped only. A machine cannot answer for a dispatch outcome,
                 // so summing one would be summing zeroes into a number a reader would
-                // take for a measurement.
-                if (row.scope != FleetMetricScope::Node)
+                // take for a measurement. And only a slot whose sum MEANS something:
+                // a load ratio summed over machines is nobody's load.
+                if (row.scope != FleetMetricScope::Node || row.fleetTotal != FleetTotal::Summed)
+                    continue;
+                // A machine that could not read a slot contributes nothing to it, rather than a zero.
+                if (IsAbsent(node[index], row.metric))
                     continue;
                 auto const slot = static_cast<std::size_t>(row.metric);
+                filled.absent &= ~SlotBit(row.metric);
                 filled.values[slot] += node[index].values[slot];
                 filled.fold[slot].low += node[index].fold[slot].low;
                 filled.fold[slot].high += node[index].fold[slot].high;
@@ -1105,27 +1044,33 @@ bool FleetNodeHistories::Save(std::filesystem::path const& path, StateFile which
 {
     // The same refusal `FleetHistory::Save` makes, and for the same reason: a build
     // that cannot read this file must not replace it with one it can.
-    std::vector<std::pair<std::string, Entry const*>> listed;
+    std::vector<std::pair<std::string, std::shared_ptr<Series const>>> listed;
     {
         auto const guard = std::scoped_lock { _mutex };
         if (_readOnly)
             return false;
-        listed.reserve(_nodes.size());
-        for (auto const& [endpoint, entry]: _nodes)
-            listed.emplace_back(endpoint, &entry);
+        listed.reserve(_byKey.size());
+        for (auto const& [key, series]: _byKey)
+            listed.emplace_back(key, series);
     }
 
     // Composed with the map's lock RELEASED. One machine's series is most of a
-    // megabyte, so serializing a fleet of them under the lock every heartbeat has to
-    // take would put each inbound `Accept` behind all of it. Each `FleetHistory`
-    // guards itself, and nothing erases an entry once made.
+    // megabyte, so serializing a fleet of them under the lock every announcement has to
+    // take would put each inbound `Accept` behind all of it.
     auto file = FramedBuffer();
     AppendU64(file, listed.size());
-    for (auto const& [endpoint, entry]: listed)
+    for (auto const& [key, series]: listed)
     {
-        AppendU64(file, endpoint.size());
-        file += endpoint;
-        AppendU64(file, static_cast<std::uint64_t>(entry->highWater));
+        // Under the series' own lock, which `AcceptHistory` holds across claiming and adding: the mark written is
+        // never one past buckets the body does not hold.
+        auto const guard = std::scoped_lock { series->mutex };
+        // `[endpoint][high-water][key]`: the endpoint first, where versions 1 and 2 had it, then the key the series
+        // is filed under.
+        AppendU64(file, series->endpoint.size());
+        file += series->endpoint;
+        AppendU64(file, static_cast<std::uint64_t>(series->highWater));
+        AppendU64(file, key.size());
+        file += key;
         // The nested body, written by the very code that reads it back. A second copy
         // of the ring encoding here would drift from that one the first time a bucket
         // grew a field -- and would drift silently, because both halves would still
@@ -1136,7 +1081,7 @@ bool FleetNodeHistories::Save(std::filesystem::path const& path, StateFile which
         auto const lengthAt = file.size();
         AppendU64(file, 0);
         auto const bodyAt = file.size();
-        entry->history->AppendBody(file);
+        series->history.AppendBody(file);
         WriteU64(file, lengthAt, file.size() - bodyAt);
     }
     return WriteFramed(path, NodeStoreFile, file, which);
@@ -1163,28 +1108,57 @@ bool FleetNodeHistories::Load(std::filesystem::path const& path)
     if (count > opened.body.size())
         return false;
 
-    std::map<std::string, Entry, std::less<>> restored;
+    std::map<std::string, std::shared_ptr<Series>, std::less<>> byKey;
+    std::size_t dropped = 0;
     for ([[maybe_unused]] auto const index: std::views::iota(std::uint64_t { 0 }, count))
     {
         std::uint64_t length = 0;
         std::string_view endpoint;
         std::uint64_t highWater = 0;
-        std::uint64_t nestedSize = 0;
-        std::string_view nested;
-        if (!reader.Take(length) || !reader.Take(length, endpoint) || !reader.Take(highWater) || !reader.Take(nestedSize)
-            || !reader.Take(nestedSize, nested))
+        if (!reader.Take(length) || !reader.Take(length, endpoint) || !reader.Take(highWater))
             return false;
 
-        auto history = std::make_unique<FleetHistory>(_wall);
-        if (!history->ReadBody(nested, opened.version))
+        // Keyed stores only: an older one recorded no key at all.
+        std::uint64_t keyLength = 0;
+        std::string_view provenKey;
+        if (opened.version >= NodeStoreKeyedSince && (!reader.Take(keyLength) || !reader.Take(keyLength, provenKey)))
             return false;
-        restored.emplace(std::string { endpoint },
-                         Entry { .history = std::move(history), .highWater = static_cast<std::int64_t>(highWater) });
+
+        std::uint64_t nestedSize = 0;
+        std::string_view nested;
+        if (!reader.Take(nestedSize) || !reader.Take(nestedSize, nested))
+            return false;
+
+        // A series filed under no key is DROPPED, and counted so the start can say so: it answers for no machine, and
+        // the machine it came from files its readings under its key once it reports again -- the same minutes in two
+        // series, summed twice into every fleet window either fills. The leader's own fleet series is untouched;
+        // only handed-over copies go. Its body is still parsed first, so a damaged one refuses the file as before.
+        auto series = std::make_shared<Series>(_wall, std::string { endpoint });
+        if (!series->history.ReadBody(nested, opened.version))
+            return false;
+        if (provenKey.empty())
+        {
+            ++dropped;
+            continue;
+        }
+        series->highWater = static_cast<std::int64_t>(highWater);
+        // A file naming one machine twice is not one this build wrote: refused whole, like any other damage.
+        if (!byKey.emplace(provenKey, std::move(series)).second)
+            return false;
     }
 
     auto const guard = std::scoped_lock { _mutex };
-    _nodes = std::move(restored);
-    return true;
+    _byKey = std::move(byKey);
+    _droppedOnLoad = dropped;
+    // A store written under a larger ceiling keeps the series that reported most recently.
+    while (_byKey.size() > MaxReceivedHistories)
+    {
+        auto const before = _byKey.size();
+        EvictForOneMoreLocked();
+        if (_byKey.size() == before)
+            break;
+    }
+    return !_byKey.empty();
 }
 
 bool FleetNodeHistories::ReadOnly() const
@@ -1193,17 +1167,48 @@ bool FleetNodeHistories::ReadOnly() const
     return _readOnly;
 }
 
+std::size_t FleetNodeHistories::DroppedOnLoad() const
+{
+    auto const guard = std::scoped_lock { _mutex };
+    return _droppedOnLoad;
+}
+
+std::optional<std::vector<FleetBucket>> FleetNodeHistories::MachineBuckets(std::string_view provenKey,
+                                                                           FleetRange range) const
+{
+    std::shared_ptr<Series const> series;
+    {
+        auto const guard = std::scoped_lock { _mutex };
+        auto const found = provenKey.empty() ? _byKey.end() : _byKey.find(provenKey);
+        if (found == _byKey.end())
+            return std::nullopt;
+        series = found->second;
+    }
+
+    // Rendered with the map's lock released, as `BackfillInto` renders; the history guards itself.
+    auto buckets = series->history.Buckets(range);
+    for (auto& bucket: buckets)
+        bucket.absent |= FleetScopedSlots();
+    return buckets;
+}
+
 std::size_t FleetNodeHistories::Count() const
 {
     auto const guard = std::scoped_lock { _mutex };
-    return _nodes.size();
+    return _byKey.size();
 }
 
 std::int64_t FleetNodeHistories::HighWaterFor(std::string_view endpoint) const
 {
     auto const guard = std::scoped_lock { _mutex };
-    auto const found = _nodes.find(endpoint);
-    return found == _nodes.end() ? -1 : found->second.highWater;
+    auto newest = std::int64_t { -1 };
+    for (auto const& [key, series]: _byKey)
+    {
+        auto const seriesGuard = std::scoped_lock { series->mutex };
+        if (series->endpoint == endpoint)
+            newest = std::max(newest, series->highWater);
+    }
+    return newest;
 }
 
 } // namespace Pace::Distributed

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "AdminEndpoint.hpp"
+#include "BudgetOverrideApplier.hpp"
 #include "ConsensusTier.hpp"
 #include "DiscoveryTier.hpp"
 #include "EnrollmentWindow.hpp"
@@ -458,6 +459,28 @@ TEST_CASE("Every condition row is evaluated on a fully configured node", "[node]
     SharedSessionPool sharedSessions { sharedDialer, sharedSessionClock, sharedSessionHome };
     SharedCacheUpstream const sharedUpstream { sharedDirectory, sharedSessions,          nullptr, metrics, &conditions,
                                                logger,          SharedCacheDialPolicy {} };
+
+    // The cache budget applier, built the way `main` builds it on every node, handed the registry where consensus runs:
+    // it answers `cache-budget-override-dropped` from its construction, since nothing has been dropped yet.
+    CacheTierBudgets noTier { nullptr };
+    struct UnreachableReports final: IMemberReportClient
+    {
+        [[nodiscard]] std::expected<void, std::string> RecordBaseline(StorageTier /*tier*/,
+                                                                      std::uint64_t /*baseline*/,
+                                                                      std::uint64_t /*overrideId*/) override
+        {
+            return std::unexpected(std::string { "unreachable" });
+        }
+        [[nodiscard]] std::expected<void, std::string> DropOverride(StorageTier /*tier*/,
+                                                                    std::uint64_t /*overrideId*/) override
+        {
+            return std::unexpected(std::string { "unreachable" });
+        }
+    } reports;
+    LiveNodeConfig const budgetConfig { clusteredNode, nullptr };
+    BudgetDropLatch budgetDrops;
+    BudgetOverrideApplier const budgets { noTier,      reports,     budgetConfig, logger,
+                                          &conditions, budgetDrops, "n1",         ReconcileOn::Caller };
 
     // The formation, built the way `main` builds it over the consensus node: it answers
     // `formation-move-refused` as its controller starts.

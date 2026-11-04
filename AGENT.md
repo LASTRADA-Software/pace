@@ -304,9 +304,13 @@ launcher's cache key is made of. Before `apps/pace-cc/`, `CompileCache/`.
 - What a node holds back from compiles is what its tier **built**, never what a flag asked for, so
   capacity is derived *below* the tier startup. Which tiers cost RAM is a `StorageTierTable`
   column, a present zero is *unbounded*, and a disk tier's key index is **a working set rather than a store** (`storage.md`).
+- A cache budget override is applied OFF the consensus apply path and off every reactor, and the
+  later edit wins by its recorded BASELINE, never by comparing clocks (`BudgetOverrideApplier`).
 - A node SERVES while it identifies its toolchains: the cheap half at startup, the walk on the
   heartbeat thread's first round, registering NOTHING until the fingerprint is real;
   `ToolchainSurvey` travels beside the map with a deleted default constructor.
+- Fingerprint inputs are CAPTURED, never re-gathered: `FINGERPRINT-INPUTS` reads what the survey
+  published; ONE capture walk per process runs on a thread of its own, and no request starts one.
 - A probe that did not RUN is not one that answered nothing, and an identity built on one is
   neither served nor cached: the guard is `exitCode == NotSpawned`, never the count.
 - A reply's codec is chosen from what the OTHER end said it accepts, never from this end's list
@@ -522,6 +526,8 @@ launcher's cache key is made of. Before `apps/pace-cc/`, `CompileCache/`.
   NOTHING** (`StateUseRows`, `OwnStateAccountRows`); a start keeps the strict set, and no remedy removes for an owner alone.
 - **The hostname is a fleet-page LABEL and decides nothing**, and it still passes the UTF-8 gate
   at `SchedulerService::Register`. **No prefix matching on ids.**
+- A display name DECIDES NOTHING; it is unique under ASCII-only folding through ONE `DisplayNameHolder`,
+  and a label yields to an identity.
 - **A replicated setting must not decide where a node sends a CREDENTIAL** — refused BY NAME
   through `RefusedSettingTable`; `shared-cache` complies: it names an ID, the peer proves that
   ID's roster key before anything is sent, and the leg carries no credential.
@@ -554,8 +560,7 @@ shim is the same position from the other side.
 **[`.agent/rules/wire-and-protocol.md`](.agent/rules/wire-and-protocol.md)** —
 framing, the auth gate, sockets, dialling and coroutine lifetime. Before
 `Protocol/`, `Transport/`, or code over `core::async` and `core::net`.
-- A frame declares its own length, so a rejection is a **reply** and a resynchronization — never a
-  close.
+- A frame declares its own length, so a rejection is a **reply** and a resynchronization — never a close.
 - A reply carries a status byte and NO kind, so step-over-what-you-do-not-know is REQUEST-side
   only: `Status::Progress` moved `MinSupportedVersion` with `CurrentVersion`. Its `static_assert`ed
   verb column, empty payload and terminal-status loop are in the rules file.
@@ -585,15 +590,13 @@ framing, the auth gate, sockets, dialling and coroutine lifetime. Before
 - The coroutines, the event loop, the sockets and TLS are core-cpp's `core::async`, `core::net` and
   `core::net_tls` (#1596), pinned in `CMakeLists.txt`. A defect in them is fixed in core-cpp and
   re-pinned, never worked around here; `Transport/` holds only what core-cpp does not offer yet.
-- `CompileCacheWire.hpp` must stay header-only and dependency-free — the launcher does not link
-  `Pace` — so it carries cache tiers **positionally**, making `StorageTier`'s enumerator order
-  a wire contract.
+- `CompileCacheWire.hpp` must stay header-only and dependency-free — the launcher does not link `Pace` —
+  so it carries cache tiers **positionally**, making `StorageTier`'s enumerator order a wire contract.
 - **And an enum SAYS which kind it is at its declaration** — transmitted or persisted, or private —
   because *no comment* means both. The explicit `= N` is the enforcement and is harmful on a
   PRIVATE enum; **`RowsInEnumeratorOrder` is not that guard although it reads like one**, and the
   `static_cast<T>(byte)` census is NARROWER than it reads, so this bullet is the guard.
-- SIGPIPE is suppressed per socket, never process-wide: an ignored disposition is inherited across
-  exec.
+- SIGPIPE is suppressed per socket, never process-wide: an ignored disposition is inherited across exec.
 - So is keepalive, and for the mirror reason: not in `ApplyHotSocketOptions`, where every socket
   passes, but a `DialOptions` field — and the flag without the intervals inherits a two-hour
   default that reads back as armed. A faster failure nobody can NAME is not an improvement: expiry
@@ -700,6 +703,8 @@ framing, the auth gate, sockets, dialling and coroutine lifetime. Before
 - On disk a read may not reclaim and a write must: `Get`/`Peek` can hold a shared lock, every write
   verb holds the exclusive one. Reporting without erasing is worse than neither — the record stays
   and fires `expired` again.
+- MCP is LOOPBACK ONLY, asked twice (a startup refusal AND `McpAdmits` per request), adds no
+  credential, and every answer SHARES ITS DERIVATION with the dashboard or `pacectl`.
 
 **[`.agent/rules/platform-service-and-config.md`](.agent/rules/platform-service-and-config.md)**
 — service registration, config lookup, the CLI table. Before `Platform/`, `Config/`,
@@ -733,11 +738,10 @@ framing, the auth gate, sockets, dialling and coroutine lifetime. Before
   protects the FILE (not the MSI; repaired only while broadly readable, never by content), and a
   directory a SERVICE mints a credential in is `PathPrivacy::Private`, the DEFAULTED state directory
   included: a PROTECTED list or REFUSED.
-- A secret reached BY PATH is not provenance-gated — the path is not the secret and the file is —
-  while `--requirepass` out of a config file still is. Which `=<path>` rows are which is a TABLE
-  per binary, classification is MANDATORY (`--tls-cert` is named PUBLIC, not left off), and BOTH
-  binaries ask at the START and at every accepted reload through one `SecretExposureWatcher` that
-  re-asks the FILESYSTEM.
+- A secret reached BY PATH is not provenance-gated — the path is not the secret and the file is — while
+  `--requirepass` out of a config file still is. Which `=<path>` rows are which is a TABLE per binary,
+  classification is MANDATORY (`--tls-cert` is named PUBLIC, not left off), and BOTH binaries ask at the
+  START and at every accepted reload through one `SecretExposureWatcher` that re-asks the FILESYSTEM.
 - Every flag is one row of `CliOptions()`, which drives parsing **and** help.
 - Which flags carry text *other machines* will read is a column of that table (`ParseUtf8Text`);
   `--cluster-forget`, every path-valued flag and the compiler half of `--toolchain` are out.
@@ -876,7 +880,7 @@ converting a store. Before `Cache/CowTreeStorage`, `CowTree/`.
   SVG behind a 200, and a run of one reading is a DOT, since closing it draws nothing while
   still claiming the series was observed. Neither is visible on dense data — render GAPS.
 - The dashboard credential is its own file, never `--requirepass`; a non-loopback bind without
-  one is a startup refusal, and TLS does not substitute for it.
+  one is a startup refusal, and TLS does not substitute for it. A PROVEN roster key reads `FLEET-TEXT` without it.
 - Plain HTTP is a supported way to serve the admin surface; TLS is on by naming material or by
   asking for material to be made (`--tls-self-signed`), never by a bare boolean.
 - A generated certificate encrypts but does not identify: its fingerprint is logged because that
@@ -943,9 +947,8 @@ what differs between compilers, standard libraries, hosts and tool versions.
 - A script that NAMES a tool version must name it **everywhere that version matters**, and a
   cached `find_program` result outlives every reason it was chosen — check the pin against the
   cache, not only pass it. `ctest -R local-gate-selftest`.
-- A **reference build passes `-DUSE_COMPILER_CACHE=OFF`, and the gate is a reference build.**
-  Pinning the other two tools argues for REMOVING this one; the refusal reads `build.ninja`, never
-  `CMakeCache.txt`.
+- A **reference build passes `-DUSE_COMPILER_CACHE=OFF`, and the gate is a reference build.** Pinning the
+  other two tools argues for REMOVING this one; the refusal reads `build.ninja`, never `CMakeCache.txt`.
 - **sccache is never selected AUTOMATICALLY** (`ALLOW_SCCACHE_FALLBACK`, default OFF): gate the
   ROW, never have CI set `CMAKE_CXX_COMPILER_LAUNCHER`. **And dropping sccache RELOCATES the
   silence to ccache rather than ending it**, so a rejection matching its `predicts` column is a
@@ -1073,9 +1076,8 @@ what differs between compilers, standard libraries, hosts and tool versions.
   walk instead. Consolidating the splitting idiom is **#495**, not the ticket in front of you.
 - **`if(VAR STREQUAL "")` does not fire when VAR is UNSET**, and the one place that matters is a
   glob that came back empty: `set(x ${empty})` unsets `x`. Quote the variable.
-- **A clean-tree injection understates a check that only reports violations**, so plant the
-  violation. Three arms, and the third is not decoration: violation alone, violation behind a
-  bracket, bracket alone.
+- **A clean-tree injection understates a check that only reports violations**, so plant the violation.
+  Three arms, and the third is not decoration: violation alone, violation behind a bracket, bracket alone.
 - **A census cannot falsify a premise — it can only produce a number consistent with it.**
   Re-derive an inherited claim BEFORE the census, never after: **agreement between a fresh
   measurement and a source you have not read is worth nothing**.
@@ -1227,12 +1229,11 @@ and what they may assume.
   ends the process at one, in every test binary (#1211). Return the observation and assert after
   `.get()`/`.join()`; it cannot see `INFO`/`CAPTURE`/`SECTION`.
 - A C++ test waits through `src/tests/BoundedWait.hpp` — `WaitUntil` on the case's thread,
-  `OffThreadWaits` on a helper thread, `AwaitUntil` in a coroutine, which STOPS when its wait runs
-  out — never a counted or unbounded poll. `ctest -R test-loops` refuses an atomic-polling `while`
-  and a coroutine `while` that OPENS by parking **in tests** — it fails open on a park spelled any
-  other way — and a C-style `for` **anywhere under `src/`**; `scripts/check-test-loops-backlog.txt`
-  is a RATCHET. **The count is not repeated here on purpose.** **Neuter a new wait and watch the
-  teardown.**
+  `OffThreadWaits` on a helper thread, `AwaitUntil` in a coroutine, which STOPS when its wait runs out —
+  never a counted or unbounded poll. `ctest -R test-loops` refuses an atomic-polling `while` and a
+  coroutine `while` that OPENS by parking **in tests** — it fails open on a park spelled any other way —
+  and a C-style `for` **anywhere under `src/`**; `scripts/check-test-loops-backlog.txt` is a RATCHET.
+  **The count is not repeated here on purpose.** **Neuter a new wait and watch the teardown.**
 - A **cumulative** figure cannot answer a question about **now**, and a duty cycle over the same
   window is the same number divided by the same constant. Draw the verdict from a RECENT window;
   no magnitude bar calibrates but **zero does not vary**, so test presence over the process TREE.
@@ -1260,8 +1261,7 @@ and what they may assume.
 - A fixture whose client is always LOCAL cannot test who is admitted: loopback is admitted before any
   other route is asked, so relabel the peer (`src/tests/RelabelledPeerListener.hpp`) and assert BOTH
   directions with the refusal COUNTER moving, beside a control that the relabelling is live.
-- A script-driven test naming more than one executable is registered in `src/tests`, not beside a
-  binary.
+- A script-driven test naming more than one executable is registered in `src/tests`, not beside a binary.
 - An abbreviated identifier is a DISPLAY form: the full one is read, never padded, truncated or
   re-derived. **Zero rows is not a verdict, it is the absence of one** — check the SHAPE first,
   fail hard on what will not parse, say what was searched, and give a zero census a POSITIVE CONTROL.
@@ -1273,9 +1273,9 @@ and what they may assume.
   what gets tested.
 - `Unwrap(x)` after `REQUIRE(x.has_value())` for `std::optional`; a bare `*x` is a build failure.
 - A Catch2 case name is an ARGUMENT, and that one fact has three consequences. It may not begin with
-  `-`. A **COMMA** splits the spec, so such a name selects NOTHING and `No tests ran` exits
-  **non-zero** — a deterministic red, not an empty result. Select by TAG, and **anything selecting a
-  subset asserts how many cases RAN**; write it as *the name is an argument*.
+  `-` or `/` (an option on Windows). A **COMMA** splits the spec, so such a name selects NOTHING and
+  `No tests ran` exits **non-zero** — a deterministic red, not an empty result. Select by TAG, and
+  **anything selecting a subset asserts how many cases RAN**; write it as *the name is an argument*.
 - A DUPLICATED case name registers two ctest entries that each run BOTH cases — nothing is skipped,
   ATTRIBUTION breaks, so it reads as harmless. `test-name-hygiene` refuses duplicates; an exemption
   row carries a REASON and is refused STALE once it stops describing one.

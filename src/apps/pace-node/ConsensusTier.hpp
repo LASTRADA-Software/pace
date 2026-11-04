@@ -65,6 +65,8 @@
 namespace Pace::Node
 {
 
+class AppliedUpstreamDirectory;
+class BudgetOverrideApplier;
 class SchedulingLeaderPublisher;
 
 /// Why a consensus tier cannot start without this node's id.
@@ -1138,9 +1140,14 @@ struct SharedCacheListeners
 ///        every pass, on every node that runs consensus whether or not it schedules: what a node
 ///        running no scheduler redirects a launcher's scheduling verbs to (#1639). Must outlive
 ///        the tier.
+/// @param upstreamDirectory Told every applied state and every term this node observes: who the MCP surface's
+///        forwarded calls reach, and the term its answers report (`McpUpstream.hpp`). Null where nothing
+///        reads it; must otherwise outlive the tier.
 /// @param sharedCache Told every applied state: the directory and the host by reference, since every
 ///        node builds both and a consensus node that told them nothing would neither find nor serve
 ///        the tier the cluster named; the upstream where there is one. Each must outlive the tier.
+/// @param budgetOverrides Told every applied state: this member's cache budget overrides, recorded and handed to
+///        the applier's own thread, never applied here. Null where nothing applies them; must otherwise outlive the tier.
 /// @param metrics Where a refused peer connection is counted; must outlive the tier.
 /// @param logger Where progress and refusals are reported.
 /// @param conditions Where the tier answers its node conditions; null when nobody reads them.
@@ -1156,7 +1163,9 @@ struct SharedCacheListeners
     NodeRoster& roster,
     AppliedSchedulers& schedulers,
     SchedulingLeaderPublisher& schedulingLeader,
+    AppliedUpstreamDirectory* upstreamDirectory,
     SharedCacheListeners sharedCache,
+    BudgetOverrideApplier* budgetOverrides,
     IMetricsSink& metrics,
     ILogger& logger,
     NodeConditions* conditions,

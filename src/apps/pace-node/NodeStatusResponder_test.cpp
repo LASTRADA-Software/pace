@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+#include "BudgetOverrideApplier.hpp"
 #include "EnrollmentWindow.hpp"
 #include "MachineStandingTestUtils.hpp"
+#include "McpUpstreamFakes.hpp"
 #include "NodeAnnounce.hpp"
 #include "NodeConfig.hpp"
 #include "NodeFormation.hpp"
@@ -13,6 +15,7 @@
 #include <Pace/Cluster/FleetPin.hpp>
 #include <Pace/Cluster/NodeMode.hpp>
 #include <Pace/Cluster/Roster.hpp>
+#include <Pace/CompileCache/ToolchainFingerprint.hpp>
 #include <Pace/Core/Ed25519.hpp>
 #include <Pace/Core/WireFrame.hpp>
 #include <Pace/Distributed/MembershipOracle.hpp>
@@ -20,6 +23,7 @@
 #include <Pace/Metrics/StatsReading.hpp>
 #include <Pace/Metrics/StatsReadingCodec.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/FingerprintInputsWire.hpp>
 #include <Pace/Protocol/LeaderRedirect.hpp>
 #include <Pace/Protocol/LiveStream.hpp>
 
@@ -30,6 +34,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <iterator>
+#include <memory>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -105,7 +111,9 @@ class CapturedReadings final: public ILiveStatsSources
     /// No fleet: `NodeMetrics` reads a node's own tier, and a case here that reached the fleet
     /// document would be asserting something this responder never renders.
     [[nodiscard]] std::expected<FleetTextDocument, FleetTextDeclined> FleetText(std::string_view /*section*/,
-                                                                                std::string_view /*range*/) const override
+                                                                                std::string_view /*range*/,
+                                                                                CompileCacheWire::FleetTextFormat /*format*/,
+                                                                                std::string_view /*node*/) const override
     {
         return std::unexpected(FleetTextDeclined { .refusal = FleetTextRefusal::NoFleet, .detail = {} });
     }
@@ -222,6 +230,7 @@ struct ConfigShape
     bool admin { false };         ///< Give `--listen-admin` an address.
     bool raft { false };          ///< Give `--listen-raft` an address.
     bool discovery { false };     ///< Give `--discovery` an address.
+    bool mcp { false };           ///< Give `--mcp-listen` an address.
     bool tlsPair { false };       ///< Name a certificate AND a key.
     bool tlsCertOnly { false };   ///< Name a certificate and no key.
     bool tlsSelfSigned { false }; ///< Ask for material to be made.
@@ -245,6 +254,8 @@ struct ConfigShape
     if (shape.raft)
         cfg.raftListen = shape.raftWildcard ? std::format("{}", RaftPort) : std::format("127.0.0.1:{}", RaftPort);
     cfg.raftSelf = std::string { shape.raftSelf };
+    if (shape.mcp)
+        cfg.mcpListen = "127.0.0.1:6677";
     cfg.discoveryAddress = shape.discovery ? std::format("0.0.0.0:{}", DiscoveryPort) : std::string {};
     if (shape.tlsPair || shape.tlsCertOnly)
         cfg.tlsCertFile = "cert.pem";
@@ -288,6 +299,16 @@ struct DirectSources
     Cc::IAdvertisedEndpointSource const* raftEndpoint { nullptr };
     /// Where a node that redirects scheduling names the leader; null is a node that does not.
     ISchedulingLeaderSource const* schedulingLeader { nullptr };
+    /// The configuration in force; null reports none.
+    INodeConfigSource const* config { nullptr };
+    /// The cache's tiers; null is a node with no cache.
+    ITierStatsSource const* cacheTiers { nullptr };
+    /// The applied cluster state, for this node's display name; null is nothing wired.
+    IAppliedClusterView const* cluster { nullptr };
+    /// What the machine calls itself; empty is a machine that could not read it.
+    std::string hostName {};
+    /// Where the budgets come from; null is nothing applying budgets.
+    IBudgetOverrideStatusSource const* budgets { nullptr };
 };
 
 /// A `ConfiguredNodeStatus` beside the configuration it holds a reference to.
@@ -312,7 +333,7 @@ struct Fixture
             core::platform::IClock const& clock,
             NodeComponents components = {},
             std::optional<ToolchainReading> initial = std::nullopt,
-            DirectSources direct = {}):
+            DirectSources const& direct = {}):
         cfg { NodeConfigOf(shape) },
         runtime { initial.value_or(UnwiredSentinel) },
         status { cfg,
@@ -330,7 +351,12 @@ struct Fixture
                                       .roster = direct.roster,
                                       .sharedCache = direct.sharedCache,
                                       .raftEndpoint = direct.raftEndpoint,
-                                      .schedulingLeader = direct.schedulingLeader } }
+                                      .schedulingLeader = direct.schedulingLeader,
+                                      .config = direct.config,
+                                      .cacheTiers = direct.cacheTiers,
+                                      .cluster = direct.cluster,
+                                      .budgets = direct.budgets,
+                                      .hostName = direct.hostName } }
     {
     }
 
@@ -358,6 +384,22 @@ struct Fixture
 }
 
 } // namespace
+
+TEST_CASE("A node reports the MCP surface exactly when --mcp-listen resolves one", "[node][node-status]")
+{
+    core::platform::ManualClock clock;
+
+    Fixture const off { { .admin = true }, clock };
+    CHECK_FALSE(SurfaceOf(off.status.Describe(), Wire::WireSurface::Mcp).has_value());
+
+    Fixture const on { { .admin = true, .mcp = true }, clock };
+    auto const fields = on.status.Describe();
+    auto const mcp = SurfaceOf(fields, Wire::WireSurface::Mcp);
+    REQUIRE(mcp.has_value());
+    CHECK(Unwrap(mcp).port == 6677);
+    CHECK_FALSE(Unwrap(mcp).tls);
+    CHECK(fields.surfaces.size() == 2);
+}
 
 TEST_CASE("A node reports only the surfaces its configuration resolves", "[node][node-status]")
 {
@@ -540,6 +582,42 @@ TEST_CASE("The worker component BIT and the toolchain state answer different que
     REQUIRE(walkingFields.runtime.toolchains.has_value());
     REQUIRE(readyFields.runtime.toolchains.has_value());
     CHECK(walkingFields.runtime.toolchains != readyFields.runtime.toolchains);
+}
+
+TEST_CASE("A node reports the display name its applied state records for it, and its hostname, per request",
+          "[node][node-status][display-name]")
+{
+    core::platform::ManualClock clock;
+    auto state = Cluster::ClusterState {};
+    auto self = Cluster::ClusterMember {};
+    self.id = "node-a";
+    self.displayName = "office-pc";
+    state.members.push_back(self);
+
+    // A view whose state a case changes, so the second answer shows a rename the first did not.
+    struct Named final: IAppliedClusterView
+    {
+        std::optional<Cluster::ClusterState> state;
+        [[nodiscard]] std::optional<Cluster::ClusterState> AppliedState() const override
+        {
+            return state;
+        }
+    };
+    Named view;
+    view.state = state;
+    Fixture const fixture { {}, clock, {}, std::nullopt, DirectSources { .cluster = &view, .hostName = "buildhost-7" } };
+
+    auto const first = fixture.status.Describe();
+    CHECK(first.runtime.displayName == std::optional<std::string> { "office-pc" });
+    CHECK(first.runtime.hostName == std::optional<std::string> { "buildhost-7" });
+
+    view.state->members[0].displayName.clear();
+    CHECK_FALSE(fixture.status.Describe().runtime.displayName.has_value());
+
+    // Nothing wired, nothing said: ABSENT, never an empty name.
+    Fixture const bare { {}, clock };
+    CHECK_FALSE(bare.status.Describe().runtime.displayName.has_value());
+    CHECK_FALSE(bare.status.Describe().runtime.hostName.has_value());
 }
 
 TEST_CASE("A node that publishes no runtime facts reports them ABSENT, not as zeroes", "[node][node-status][toolchains]")
@@ -1592,6 +1670,25 @@ TEST_CASE("A node reports where it keeps its identity, and why there", "[node][n
     CHECK(Unwrap(decoded).stateDirectoryReason == runtime.stateDirectoryReason);
 }
 
+TEST_CASE("A state directory that is not text is reported as its bytes and never throws", "[node][node-status][defaults]")
+{
+    // On Windows `path.string()` THROWS for a path holding a lone surrogate, which would turn NODE-STATUS -- and the
+    // MCP `node_status` tool reading it -- into a failure. The path travels as its WTF-8 bytes (`PathBytes`) for the
+    // reader to mark, exactly as a POSIX directory's stray bytes do.
+    core::platform::ManualClock clock;
+    Fixture named { {}, clock };
+#if defined(_WIN32)
+    named.cfg.clusterDir = std::filesystem::path { std::wstring { L"C:\\state\\pace-" } + static_cast<wchar_t>(0xD800) };
+    auto const expected = std::string { "C:\\state\\pace-\xED\xA0\x80" };
+#else
+    named.cfg.clusterDir = std::filesystem::path { std::string { "/srv/pace-\xff" } };
+    auto const expected = std::string { "/srv/pace-\xff" };
+#endif
+    auto const runtime = named.status.Describe().runtime;
+    CHECK(runtime.stateDirectory == std::optional { expected });
+    CHECK(runtime.stateDirectoryReason.has_value());
+}
+
 TEST_CASE("A leader with an armed window reports auto-approve and the seconds left, and a manual one reports none",
           "[node][node-status][enrollment][auto-approve]")
 {
@@ -1715,4 +1812,355 @@ TEST_CASE("A node reports the fleet id to paste, with its voters' keys, and the 
     CHECK(pinned.runtime.fleetPin
           == std::optional { Wire::NodeFleetPinFields {
               .fleet = std::format("fedcba9876543210fedcba9876543210@{}", FormatEd25519PublicKey(desk)) } });
+}
+
+namespace
+{
+
+/// A configuration source a case can change between two answers, as an accepted reload does.
+class ReloadableConfig final: public INodeConfigSource
+{
+  public:
+    /// @copydoc INodeConfigSource::Current
+    [[nodiscard]] NodeConfig Current() const override
+    {
+        return inForce;
+    }
+
+    NodeConfig inForce; ///< What the next answer reads.
+};
+
+/// A cache whose tiers a case states.
+class StatedTiers final: public ITierStatsSource
+{
+  public:
+    /// @copydoc ITierStatsSource::SnapshotTiers
+    [[nodiscard]] TieredStorageStats SnapshotTiers() const noexcept override
+    {
+        return tiers;
+    }
+
+    TieredStorageStats tiers {}; ///< One entry per tier the cache has.
+};
+
+/// @param fields What `NodeStatus` answered.
+/// @param flag A setting.
+/// @return Its rows in the configuration the node reported.
+[[nodiscard]] std::vector<Wire::NodeSettingFields> SettingRows(Wire::NodeStatusFields const& fields, std::string_view flag)
+{
+    auto out = std::vector<Wire::NodeSettingFields> {};
+    if (fields.runtime.effectiveConfig.has_value())
+        std::ranges::copy_if(
+            *fields.runtime.effectiveConfig, std::back_inserter(out), [flag](auto const& row) { return row.name == flag; });
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("A node names every slot ceiling of its last heartbeat and the binding one, and none before it",
+          "[node][node-status][node-status-detail]")
+{
+    core::platform::ManualClock clock;
+    Fixture fixture {
+        {}, clock, {}, ToolchainReading { .state = Wire::ToolchainState::Serving, .served = 1, .discovered = 1 }
+    };
+
+    // Before the first heartbeat has sampled the host: no ceilings, never a worker bound by nothing.
+    CHECK_FALSE(fixture.status.Describe().runtime.slotCeilings.has_value());
+
+    // The scheduler's own arithmetic over a reading whose memory binds.
+    auto const ceilings = Distributed::SlotCeilingsFor(
+        Distributed::NodeCapacity { .logicalCores = 8 },
+        8,
+        Distributed::NodeLoad { .inFlight = 0,
+                                .cpuBusyPermille = std::nullopt,
+                                .availableMemoryBytes = 2 * Distributed::MemoryBudgetPerJobBytes,
+                                .freeScratchBytes = std::nullopt,
+                                .cache = {},
+                                .cordoned = false,
+                                .compileBudget = std::nullopt });
+    REQUIRE(ceilings.binding == Distributed::SlotLimit::Memory);
+    fixture.runtime.PublishSlotCeilings(SlotCeilingsReading { .ceilings = ceilings, .sampledAt = clock.now() });
+    clock.advance(std::chrono::seconds { 7 });
+
+    auto const reported = fixture.status.Describe().runtime.slotCeilings;
+    REQUIRE(reported.has_value());
+    auto const& record = Unwrap(reported);
+    CHECK(record.binding == "memory");
+    CHECK(record.available == 2);
+    CHECK(record.sampledSecondsAgo == 7);
+    REQUIRE(record.ceilings.size() == Distributed::SlotLimitTable.size());
+    CHECK(record.ceilings[0] == Wire::NodeSlotCeilingFields { .name = "registered", .slots = 8 });
+    // A CPU the reading did not carry is a ceiling that did not apply: absent, never zero.
+    CHECK(record.ceilings[1] == Wire::NodeSlotCeilingFields { .name = "external-cpu", .slots = std::nullopt });
+    CHECK(record.ceilings[2] == Wire::NodeSlotCeilingFields { .name = "memory", .slots = 2 });
+    CHECK(record.ceilings[5] == Wire::NodeSlotCeilingFields { .name = "cordoned", .slots = std::nullopt });
+}
+
+TEST_CASE("A node reports each tier its cache has, a tier it lacks as absent, and no tiers without a cache",
+          "[node][node-status][node-status-detail]")
+{
+    core::platform::ManualClock clock;
+    Fixture const noCache { {}, clock };
+    CHECK_FALSE(noCache.status.Describe().runtime.tiers.has_value());
+
+    StatedTiers cache;
+    auto memory = StorageStats {};
+    memory.itemCount = 5;
+    memory.bytesUsed = 500;
+    memory.bytesLimit = 4096;
+    memory.getHits = 9;
+    memory.getMisses = 3;
+    cache.tiers[static_cast<std::size_t>(StorageTier::Memory)] = memory;
+    Fixture const withCache { {}, clock, {}, std::nullopt, DirectSources { .cacheTiers = &cache } };
+    auto const tiers = withCache.status.Describe().runtime.tiers;
+    REQUIRE(tiers.has_value());
+    CHECK(Unwrap(tiers)
+          == Wire::NodeTiersFields {
+              Wire::NodeTierFields { .entries = 5, .bytesUsed = 500, .bytesLimit = 4096, .hits = 9, .misses = 3 },
+              std::nullopt });
+}
+
+TEST_CASE("A node reports the configuration in force now, after a reload, with its credential redacted",
+          "[node][node-status][node-status-detail]")
+{
+    core::platform::ManualClock clock;
+    ReloadableConfig config;
+    config.inForce.slots = 4;
+    Fixture const fixture { {}, clock, {}, std::nullopt, DirectSources { .config = &config } };
+
+    CHECK(SettingRows(fixture.status.Describe(), "--slots")
+          == std::vector {
+              Wire::NodeSettingFields { .name = "--slots", .kind = Wire::WireSettingValue::Value, .text = "4" } });
+
+    // An accepted reload: the next answer reads it, not the configuration the start built the status over.
+    config.inForce.slots = 6;
+    config.inForce.requirePass = "a-secret-the-reply-must-not-carry";
+    auto const after = fixture.status.Describe();
+    CHECK(SettingRows(after, "--slots")
+          == std::vector {
+              Wire::NodeSettingFields { .name = "--slots", .kind = Wire::WireSettingValue::Value, .text = "6" } });
+    CHECK(SettingRows(after, "--requirepass")
+          == std::vector {
+              Wire::NodeSettingFields { .name = "--requirepass", .kind = Wire::WireSettingValue::Redacted, .text = {} } });
+
+    // And none of it reached the wire.
+    auto const bytes = Wire::EncodeNodeStatus(after);
+    CHECK(std::string_view { reinterpret_cast<char const*>(bytes.data()), bytes.size() }.find("a-secret-the-reply")
+          == std::string_view::npos);
+
+    // A node that wires no source says nothing about its configuration.
+    Fixture const unwired { {}, clock };
+    CHECK_FALSE(unwired.status.Describe().runtime.effectiveConfig.has_value());
+}
+
+TEST_CASE("The configuration in force is told to a caller a route identifies, never to one --fleet-open admits alone",
+          "[node][node-status][node-status-detail][admission]")
+{
+    // Over the production fold a `--fleet-open` node composes, each caller labelled by the HOST and evidence its
+    // connection established -- a relabelled peer, not a local client every route admits first. The anonymous
+    // caller is a member (it reads the rest of the record) and is not IDENTIFIED, so the configuration is absent.
+    core::platform::ManualClock clock;
+    AtomicMetricsSink metrics;
+    ReloadableConfig config;
+    config.inForce.slots = 4;
+    Fixture const fixture { {}, clock, {}, std::nullopt, DirectSources { .config = &config } };
+    CapturedReadings const readings { metrics, {} };
+    Testing::OpenFleetFold const fold;
+    NodeStatusResponder responder { fixture.status, readings, fold.admitted, HoldsNoRoster, metrics };
+
+    auto const statusFrom = [&responder](PeerIdentity peer) {
+        auto const reply = AnswerFrom(responder, HeaderFor(Wire::Op::NodeStatus), std::move(peer));
+        auto const header = Wire::DecodeReplyHeader(reply);
+        REQUIRE(header.has_value());
+        REQUIRE(Unwrap(header).status == Wire::Status::Ok);
+        auto const fields = Wire::DecodeNodeStatus(PayloadOf(reply, Unwrap(header)));
+        REQUIRE(fields.has_value());
+        return Unwrap(fields);
+    };
+
+    // Admitted by --fleet-open alone: answered, and the configuration withheld -- absent, never empty.
+    auto const anonymous = statusFrom(Testing::OpenFleetFold::Anonymous());
+    CHECK(anonymous.version == "1.2.3");
+    CHECK_FALSE(anonymous.runtime.effectiveConfig.has_value());
+
+    // The same address with a verified ticket, or having proved the roster's key, and this machine: told.
+    for (auto const& [label, peer]: { std::pair { "ticketed", Testing::OpenFleetFold::Ticketed() },
+                                      std::pair { "proven", Testing::OpenFleetFold::Proven() },
+                                      std::pair { "loopback", PeerIdentity { .host = "127.0.0.1" } } })
+    {
+        INFO(label);
+        auto const told = statusFrom(peer);
+        CHECK(told.runtime.effectiveConfig.has_value());
+    }
+}
+
+namespace
+{
+
+/// A survey published by nobody in particular: one toolchain with a three-file record.
+class OneServedToolchain final: public IServedInputsSource
+{
+  public:
+    /// @copydoc IServedInputsSource::ServedInputsNow
+    [[nodiscard]] std::shared_ptr<ServedInputs const> ServedInputsNow() const override
+    {
+        auto record = Cc::CaptureFingerprintInputs("gcc 13",
+                                                   "gnu",
+                                                   { Cc::ToolchainFile { .relativePath = "a.h", .contentHash = "00" },
+                                                     Cc::ToolchainFile { .relativePath = "b.h", .contentHash = "01" } });
+        auto fingerprint = Cc::ComputeToolchainFingerprint(record);
+        return std::make_shared<ServedInputs const>(
+            ServedInputs { ServedToolchainInputs { .fingerprint = std::move(fingerprint),
+                                                   .label = "gcc 13",
+                                                   .compiler = "/usr/bin/gcc",
+                                                   .inputs = std::make_shared<Cc::FingerprintInputs const>(record) } });
+    }
+};
+
+/// @return A FINGERPRINT-INPUTS frame asking for the index.
+[[nodiscard]] std::vector<std::byte> IndexRequest()
+{
+    return Wire::EncodeFingerprintInputsRequest(Wire::FingerprintInputsRequest { .fingerprint = {}, .cursor = 0 });
+}
+
+} // namespace
+
+TEST_CASE("FINGERPRINT-INPUTS is gated as node-status is: a stranger is refused and counted",
+          "[node][node-status][fingerprint-inputs][admission]")
+{
+    core::platform::ManualClock clock;
+    AtomicMetricsSink metrics;
+    ListedMembership const membership { { "10.0.0.9" }, Distributed::MembershipParticipant::OpenPolicy };
+    Fixture const fixture { {}, clock };
+    CapturedReadings const readings { metrics, {} };
+    OneServedToolchain const served;
+    FingerprintInputsResponder const inputs { &served, metrics, "1.2.3" };
+    NodeStatusResponder responder { fixture.status, readings, membership, HoldsNoRoster, metrics, &inputs };
+
+    auto const shape = ShapeOf(AnswerNow(responder, IndexRequest()));
+    CHECK(shape.code == Wire::ErrorCode::NotAMember);
+    CHECK(metrics.Read(IMetricsSink::Counter::NodeStatusRequestsRefusedNotAMember) == 1);
+    CHECK_FALSE(shape.detail.contains("/usr/bin/gcc"));
+}
+
+TEST_CASE("FINGERPRINT-INPUTS is told to a caller a route identifies, never to one --fleet-open admits alone",
+          "[node][node-status][fingerprint-inputs][admission]")
+{
+    core::platform::ManualClock clock;
+    AtomicMetricsSink metrics;
+    Fixture const fixture { {}, clock };
+    CapturedReadings const readings { metrics, {} };
+    Testing::OpenFleetFold const fold;
+    OneServedToolchain const served;
+    FingerprintInputsResponder const inputs { &served, metrics, "1.2.3" };
+    NodeStatusResponder responder { fixture.status, readings, fold.admitted, HoldsNoRoster, metrics, &inputs };
+
+    // Admitted by --fleet-open alone: a member, and not identified -- refused, with the remedy, and nothing told.
+    auto const anonymous = ShapeOf(AnswerFrom(responder, IndexRequest(), Testing::OpenFleetFold::Anonymous()));
+    CHECK(anonymous.code == Wire::ErrorCode::IdentifiedCallerRequired);
+    CHECK_FALSE(anonymous.detail.contains("/usr/bin/gcc"));
+    CHECK(metrics.Read(IMetricsSink::Counter::NodeStatusRequestsRefusedNotAMember) == 0);
+
+    // The same address with a verified ticket, or having proved the roster's key, and this machine: answered.
+    for (auto const& [label, peer]: { std::pair { "ticketed", Testing::OpenFleetFold::Ticketed() },
+                                      std::pair { "proven", Testing::OpenFleetFold::Proven() },
+                                      std::pair { "loopback", PeerIdentity { .host = "127.0.0.1" } } })
+    {
+        INFO(label);
+        auto const reply = AnswerFrom(responder, IndexRequest(), peer);
+        auto const header = Wire::DecodeReplyHeader(reply);
+        REQUIRE(header.has_value());
+        REQUIRE(Unwrap(header).status == Wire::Status::Ok);
+        auto const index = Wire::DecodeFingerprintIndex(PayloadOf(reply, Unwrap(header)));
+        REQUIRE(index.has_value());
+        REQUIRE(Unwrap(index).entries.size() == 1);
+        CHECK(Unwrap(index).entries.front().compiler == "/usr/bin/gcc");
+    }
+}
+
+TEST_CASE("FINGERPRINT-INPUTS is a verb this node implements, never one it refuses as unknown",
+          "[node][node-status][fingerprint-inputs]")
+{
+    // With no answerer wired the node says it runs no worker -- `NoCompileWorker`'s fact -- never `UnimplementedVerb`,
+    // which a client reads as *this build is too old*.
+    core::platform::ManualClock clock;
+    AtomicMetricsSink metrics;
+    Distributed::LoopbackMembership membership;
+    Fixture const fixture { {}, clock };
+    CapturedReadings const readings { metrics, {} };
+    NodeStatusResponder responder { fixture.status, readings, membership, HoldsNoRoster, metrics };
+
+    auto const shape = ShapeOf(AnswerFrom(responder, IndexRequest(), PeerIdentity { .host = "127.0.0.1" }));
+    CHECK(shape.code != std::optional { Wire::UnimplementedVerb });
+    CHECK(shape.code == Wire::NoCompileWorker::Code);
+    CHECK(Wire::SaysNoCompileWorker(Wire::NoCompileWorker::Code, shape.detail));
+}
+
+namespace
+{
+/// A budget applier's answer a case states.
+class StatedBudgets final: public IBudgetOverrideStatusSource
+{
+  public:
+    /// @copydoc IBudgetOverrideStatusSource::BudgetStatus
+    [[nodiscard]] std::vector<TierBudgetStatus> BudgetStatus() const override
+    {
+        return rows;
+    }
+
+    std::vector<TierBudgetStatus> rows; ///< What the applier last left.
+};
+} // namespace
+
+TEST_CASE("node_status shows a budget in force from the cluster, with its baseline, setter and the excess still over",
+          "[node][node-status][node-status-detail][budget]")
+{
+    core::platform::ManualClock clock;
+    Fixture const noApplier { {}, clock };
+    // Nothing applies budgets: ABSENT, never an empty list.
+    CHECK_FALSE(noApplier.status.Describe().runtime.budgetOverrides.has_value());
+
+    constexpr auto MiB = std::uint64_t { 1024 } * 1024;
+    StatedBudgets budgets;
+    budgets.rows.push_back(TierBudgetStatus {
+        .tier = StorageTier::Memory,
+        .configured = 512 * MiB,
+        .effective = 64 * MiB,
+        .source = BudgetSource::Cluster,
+        .recorded =
+            Cluster::BudgetOverride {
+                .bytes = 64 * MiB, .baseline = 512 * MiB, .setAtUnixSeconds = 1'767'225'600, .id = 7, .setBy = "voter-1" },
+        .note = {} });
+    StatedTiers cache;
+    auto memory = StorageStats {};
+    memory.bytesUsed = static_cast<std::size_t>(70 * MiB);
+    memory.bytesLimit = static_cast<std::size_t>(64 * MiB);
+    cache.tiers[static_cast<std::size_t>(StorageTier::Memory)] = memory;
+    auto state = Cluster::ClusterState {};
+    auto voter = Cluster::ClusterMember {};
+    voter.id = "voter-1";
+    voter.displayName = "build box";
+    state.members.push_back(voter);
+    McpFakes::FixedCluster const cluster { state };
+    Fixture const fixture {
+        {}, clock, {}, std::nullopt, DirectSources { .cacheTiers = &cache, .cluster = &cluster, .budgets = &budgets }
+    };
+
+    auto const rows = fixture.status.Describe().runtime.budgetOverrides;
+    REQUIRE(rows.has_value());
+    REQUIRE(Unwrap(rows).size() == 1);
+    auto const& row = Unwrap(rows)[0];
+    CHECK(row.tier == 0);
+    CHECK(row.source == "cluster");
+    CHECK(row.bytes == std::optional { 64 * MiB });
+    CHECK(row.configuredBytes == 512 * MiB);
+    CHECK(row.overrideBytes == std::optional { 64 * MiB });
+    CHECK(row.baselineBytes == std::optional { 512 * MiB });
+    CHECK(row.setAtUnixSeconds == std::optional<std::int64_t> { 1'767'225'600 });
+    CHECK(row.setBy == "voter-1");
+    CHECK(row.setByName == "build box");
+    // Read off the store NOW: what is still over the budget in force.
+    CHECK(row.excessBytes == std::optional { 6 * MiB });
+    CHECK(row.note.empty());
 }

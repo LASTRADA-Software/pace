@@ -14,6 +14,7 @@
 
 #include <Pace/Cache/StorageTier.hpp>
 #include <Pace/Cli/Duration.hpp>
+#include <Pace/Cli/MemberId.hpp>
 #include <Pace/Cluster/ClusterState.hpp>
 #include <Pace/Cluster/FleetPin.hpp>
 #include <Pace/Cluster/ProvenFleet.hpp>
@@ -26,6 +27,7 @@
 #include <Pace/Core/EnumTable.hpp>
 #include <Pace/Core/Errors/ConfigError.hpp>
 #include <Pace/Core/HostPort.hpp>
+#include <Pace/Distributed/FleetKeyedHistory.hpp>
 #include <Pace/Platform/Firewall.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
 
@@ -51,57 +53,12 @@ namespace Pace::Node
 
 namespace
 {
-    /// Why an id is refused for its length: the sentence every door that takes one says.
-    /// @param bytes How long the id was.
-    /// @return The reason, naming the bound.
-    [[nodiscard]] std::string IdTooLong(std::size_t bytes)
-    {
-        return std::format("is {} bytes, longer than the {} an id may be: every peer refuses a fleet summary naming "
-                           "a longer one",
-                           bytes,
-                           CompileCacheWire::MaxIdBytes);
-    }
-
-    /// An id typed on this command line -- this node's own, or the machine an enrollment verb names --
-    /// held to the ONE bound every reader of an id holds it to (`CompileCacheWire::MaxIdBytes`), and
-    /// to being text.
-    ///
-    /// Refused here, by name, because past it the id is no less valid to this node: it is every
-    /// PEER that refuses the fleet summary carrying it, silently, as malformed. Empty passes: an
-    /// empty `--node-id` is how a node asks to mint one.
+    /// An id typed on this command line: `Pace::ParseMemberId`, the rule `pacectl` holds an id to as well.
     /// @param sv The value text.
     /// @return The id, or why it is too long or not text.
     [[nodiscard]] std::expected<std::string, ConfigError> ParseId(std::string_view sv)
     {
-        if (sv.size() > CompileCacheWire::MaxIdBytes)
-            return std::unexpected(ArgvError(ConfigErrorCode::ParseError, std::format("value {}", IdTooLong(sv.size()))));
-        return ParseUtf8Text(sv);
-    }
-
-    /// CLI spelling of a LogLevel, matching what ParseNodeLogLevel accepts.
-    ///
-    /// The inverse of that parser, and the pair is what makes a log level survive
-    /// a round trip into a supervisor's argument list.
-    /// @param level Level to name.
-    /// @return Its CLI spelling.
-    [[nodiscard]] constexpr std::string_view LogLevelName(LogLevel level) noexcept
-    {
-        switch (level)
-        {
-            case LogLevel::Trace:
-                return "trace";
-            case LogLevel::Debug:
-                return "debug";
-            case LogLevel::Info:
-                return "info";
-            case LogLevel::Warn:
-                return "warn";
-            case LogLevel::Error:
-                return "error";
-            case LogLevel::Fatal:
-                return "fatal";
-        }
-        return "info";
+        return ParseMemberId(sv);
     }
 
     /// A port, refusing 0 rather than letting a bind fail with a confusing message.
@@ -151,6 +108,28 @@ namespace
                 return std::unexpected(ArgvError(ConfigErrorCode::OutOfRange,
                                                  "must be more than zero: a machine with no compile slots would "
                                                  "queue every compile on it for ever"));
+            return *count;
+        });
+    }
+
+    /// `--history-requesters`: how many keys each keyed compile history keeps by name.
+    ///
+    /// Zero is refused: it would keep no machine by name and fold every one into `other`, which answers "who asked"
+    /// with nobody. Above `Distributed::MaxHistoryKeys` is refused too, the bound on what one store may hold.
+    /// @param sv Text to parse.
+    /// @return The count, or why it is not one.
+    [[nodiscard]] std::expected<std::uint32_t, ConfigError> ParseHistoryKeys(std::string_view sv)
+    {
+        return ParseSlots(sv).and_then([](std::optional<std::uint32_t> count) -> std::expected<std::uint32_t, ConfigError> {
+            if (count.value_or(0) == 0)
+                return std::unexpected(ArgvError(ConfigErrorCode::OutOfRange,
+                                                 "must be more than zero: a history that keeps no key by name answers "
+                                                 "\"who asked\" with nobody"));
+            if (*count > Distributed::MaxHistoryKeys)
+                return std::unexpected(
+                    ArgvError(ConfigErrorCode::OutOfRange,
+                              std::format("must be at most {}: the rest are kept, exactly, in the history's \"other\" row",
+                                          Distributed::MaxHistoryKeys)));
             return *count;
         });
     }
@@ -343,7 +322,7 @@ namespace
             request.action = Action;
 
             if constexpr (Action == ClusterAction::Admit || Action == ClusterAction::AdmitLearner
-                          || Action == ClusterAction::Set)
+                          || Action == ClusterAction::Set || Action == ClusterAction::Name)
             {
                 // These two COMMIT their operand through consensus: an admitted
                 // member's id and endpoint land in every peer's `ClusterState` and
@@ -375,6 +354,46 @@ namespace
                 if (value.empty())
                     return std::unexpected(ArgvError(ConfigErrorCode::ParseError, "names no member"));
                 request.key = std::string { value };
+            }
+            else if constexpr (Action == ClusterAction::Name)
+            {
+                // `<node>=<name>`, split at the FIRST `=`: an id holds none (`ParseMemberSpec` splits there too),
+                // and a name may. The name is held to the leader's own rule here, so an operator is told in front of
+                // the command they typed rather than by the leader's refusal.
+                auto const split = value.find('=');
+                if (split == std::string_view::npos || split == 0)
+                    return std::unexpected(
+                        ArgvError(ConfigErrorCode::ParseError,
+                                  std::format("not <node-id>=<name> (an empty name clears it): {}", value)));
+                auto bounded = ParseId(value.substr(0, split));
+                if (!bounded.has_value())
+                    return std::unexpected(std::move(bounded).error());
+                auto const name = value.substr(split + 1);
+                if (auto refused = Cluster::RefuseDisplayName(name); refused.has_value())
+                    return std::unexpected(ArgvError(ConfigErrorCode::ParseError, *std::move(refused)));
+                request.key = *std::move(bounded);
+                request.value = std::string { name };
+            }
+            else if constexpr (Action == ClusterAction::Budget)
+            {
+                // `<node>:memory=<size>,disk=<size>` through the ONE grammar every door shares
+                // (`Cluster::ParseBudgetSpec`): each size in its tier's startup flag's grammar, zero and a share
+                // of RAM refused, so the operator is told here what the leader would refuse.
+                auto spec = Cluster::ParseBudgetSpec(value);
+                if (!spec.has_value())
+                    return std::unexpected(ArgvError(ConfigErrorCode::ParseError, std::move(spec).error()));
+                request.key = std::move(spec->memberId);
+                request.value = std::string { CompileCacheWire::AsStringView(CompileCacheWire::EncodeBudgetSetValue(
+                    CompileCacheWire::BudgetSetValue { .bytes = { spec->bytes.begin(), spec->bytes.end() } })) };
+            }
+            else if constexpr (Action == ClusterAction::BudgetClear)
+            {
+                auto spec = Cluster::ParseBudgetClearSpec(value);
+                if (!spec.has_value())
+                    return std::unexpected(ArgvError(ConfigErrorCode::ParseError, std::move(spec).error()));
+                request.key = std::move(spec->memberId);
+                request.value = std::string { CompileCacheWire::AsStringView(CompileCacheWire::EncodeBudgetClearValue(
+                    CompileCacheWire::BudgetClearValue { .tier = static_cast<std::uint8_t>(spec->tier) })) };
             }
             else if constexpr (Action == ClusterAction::Admit || Action == ClusterAction::AdmitLearner)
             {
@@ -1525,6 +1544,33 @@ std::span<OptionSpec<NodeConfig> const> NodeOptions() noexcept
                          "--cluster-admit on it promotes it; the same token\n"
                          "as --cluster-admit, and the member must likewise\n"
                          "be waiting to be admitted." },
+        { .primary = "--cluster-name",
+          .arity = Arity::Value,
+          .operand = "=<node-id>=<name>",
+          .apply = SelectClusterAction<ClusterAction::Name>(),
+          .description = "give a member a display name and exit; an empty\n"
+                         "name clears it. Replicated, so every node, the\n"
+                         "fleet page and pacectl show it; unique across the\n"
+                         "fleet with ASCII letters compared in one case, at\n"
+                         "most 64 bytes of text. A label that decides\n"
+                         "nothing: no admission, route or key reads it." },
+        { .primary = "--cluster-budget",
+          .arity = Arity::Value,
+          .operand = "=<node-id>:memory=<size>[,disk=<size>]",
+          .apply = SelectClusterAction<ClusterAction::Budget>(),
+          .description = "override a member's cache budgets and exit; name\n"
+                         "either tier or both. Recorded by the leader and\n"
+                         "applied by the member, also while it is down.\n"
+                         "Sizes as --cache-memory and --cache-disk take them\n"
+                         "(k, m, g), never a share of RAM or 0. The member's\n"
+                         "own later change of that flag outranks it." },
+        { .primary = "--cluster-budget-clear",
+          .arity = Arity::Value,
+          .operand = "=<node-id>:<memory|disk>",
+          .apply = SelectClusterAction<ClusterAction::BudgetClear>(),
+          .description = "clear a member's override of one cache tier's\n"
+                         "budget and exit; the member returns to its own\n"
+                         "configured value." },
         { .primary = "--cluster-forget",
           .arity = Arity::Value,
           .operand = "=<node-id>",
@@ -1625,6 +1671,20 @@ std::span<OptionSpec<NodeConfig> const> NodeOptions() noexcept
             .same = FieldEq<&NodeConfig::adminListen>(),
         },
         {
+            .primary = "--mcp-listen",
+            .arity = Arity::Value,
+            .operand = "=[<address>:]<port>",
+            .apply = AssignFrom<&NodeConfig::mcpListen, ParseText>(),
+            .explicitBit = &NodeConfig::mcpListenExplicit,
+            .description = "serve MCP (POST /mcp) here, for a Claude Code session\n"
+                           "on this machine; off unless given. A bare port binds\n"
+                           "loopback, and any other address is refused at startup:\n"
+                           "MCP has no authentication, so it is never reachable\n"
+                           "from the network.",
+            .yamlKey = "mcp_listen",
+            .same = FieldEq<&NodeConfig::mcpListen>(),
+        },
+        {
             .primary = "--dashboard",
             .apply = SetTrue<&NodeConfig::dashboard>(),
             .description = "also serve the fleet dashboard on --admin-listen, at\n"
@@ -1634,6 +1694,22 @@ std::span<OptionSpec<NodeConfig> const> NodeOptions() noexcept
                            "names the leader rather than showing half a fleet.",
             .yamlKey = "dashboard",
             .same = FieldEq<&NodeConfig::dashboard>(),
+        },
+        // Restart-only (`Reloadable::No`, the default): the ceiling sizes the stores the sampler builds at start, and
+        // lowering it under a running store would fold keys an operator never asked to fold.
+        {
+            .primary = "--history-requesters",
+            .arity = Arity::Value,
+            .operand = "=<n>",
+            .apply = AssignFrom<&NodeConfig::historyRequesters, ParseHistoryKeys>(),
+            .description = "how many requesting machines -- and, separately, how\n"
+                           "many toolchains -- the leader's compile history keeps\n"
+                           "by name (default 256, at most 1024). The least recently\n"
+                           "active beyond that fold into one \"other\" row whose\n"
+                           "counts stay exact. 0 is refused.",
+            .yamlKey = "history_requesters",
+            .same = FieldEq<&NodeConfig::historyRequesters>(),
+            .present = PresentIn<&NodeConfig::historyRequesters>(),
         },
         {
             .primary = "--dashboard-token-file",
@@ -1719,6 +1795,11 @@ std::span<OptionSpec<NodeConfig> const> NodeOptions() noexcept
                            "It exists so a local rebuild on a slow or bad\n"
                            "network never reaches the wire at all.",
             .yamlKey = "cache_memory",
+            // Reloadable since a tier can be resized live (`CacheTier::RestoreTierBudget`): a reload puts the new
+            // budget in force through the budget applier, which is also where it outranks a cluster override set
+            // against the old one (`BudgetOverrideApplier`). Turning the tier on or off is still a restart, refused by
+            // `MemoryTierExistenceChanged`.
+            .reloadable = Reloadable::Yes,
             .same = FieldEq<&NodeConfig::cacheMemoryBytes>(),
         },
         {
@@ -1734,6 +1815,10 @@ std::span<OptionSpec<NodeConfig> const> NodeOptions() noexcept
                            "Only means anything with --cache-dir: without a\n"
                            "path there is no disk tier for a budget to bound.",
             .yamlKey = "cache_disk",
+            // Reloadable since a tier can be resized live (`CacheTier::RestoreTierBudget`): a reload puts the new
+            // budget in force through the budget applier, which is also where it outranks a cluster override set
+            // against the old one (`BudgetOverrideApplier`).
+            .reloadable = Reloadable::Yes,
             .same = FieldEq<&NodeConfig::cacheDiskBytes>(),
         },
         {
@@ -1884,7 +1969,7 @@ std::span<OptionSpec<NodeConfig> const> NodeOptions() noexcept
         {
             .primary = "--requirepass",
             .arity = Arity::Value,
-            .operand = "=<secret>",
+            .operand = SecretOperand,
             .apply = AssignFrom<&NodeConfig::requirePass, ParseText>(),
             .description = "the password presented to the --upstream pace-kv,\n"
                            "and to nothing else: a scheduler admits this machine\n"
@@ -2249,6 +2334,13 @@ std::span<OptionSpec<NodeConfig> const> NodeOptions() noexcept
         { .kind = FileExclusion::Verb, .flag = "--uncordon", .reason = "lifts the running worker's cordon and exits" },
         { .kind = FileExclusion::Verb, .flag = "--cluster-status", .reason = "asks a running cluster a question and exits" },
         { .kind = FileExclusion::Verb, .flag = "--cluster-set", .reason = "changes a running cluster's settings and exits" },
+        { .kind = FileExclusion::Verb, .flag = "--cluster-name", .reason = "names a member of a running cluster and exits" },
+        { .kind = FileExclusion::Verb,
+          .flag = "--cluster-budget",
+          .reason = "overrides a member's cache budget in a running cluster and exits" },
+        { .kind = FileExclusion::Verb,
+          .flag = "--cluster-budget-clear",
+          .reason = "clears a member's cache budget override in a running cluster and exits" },
         { .kind = FileExclusion::Verb, .flag = "--cluster-admit", .reason = "admits a member and exits" },
         { .kind = FileExclusion::Verb,
           .flag = "--cluster-admit-learner",
@@ -2489,6 +2581,11 @@ std::vector<std::string_view> UnreloadableChanges(NodeConfig const& previous, No
     return changed;
 }
 
+bool MemoryTierExistenceChanged(NodeConfig const& previous, NodeConfig const& candidate) noexcept
+{
+    return (previous.cacheMemoryBytes == 0) != (candidate.cacheMemoryBytes == 0);
+}
+
 std::expected<void, ConfigError> ValidateNodeReloadable(NodeConfig const& previous, NodeConfig const& candidate)
 {
     // **A candidate is judged by the STARTUP rules as well**, which is the same
@@ -2508,6 +2605,18 @@ std::expected<void, ConfigError> ValidateNodeReloadable(NodeConfig const& previo
                                              .line = 0,
                                              .field = {},
                                              .context = std::format("not applied: {}", *rejection) });
+
+    // A memory tier exists only where `--cache-memory` is not zero, and the tier stack is built once: so its budget
+    // reloads, and its existence does not. Refused by name, as an unreloadable field is.
+    if (MemoryTierExistenceChanged(previous, candidate))
+        return std::unexpected(ConfigError {
+            .code = ConfigErrorCode::ImmutableChanged,
+            .source = {},
+            .line = 0,
+            .field = "--cache-memory",
+            .context = "not reloadable, so nothing was applied: --cache-memory may change its size live, but turning the "
+                       "memory tier on or off (to or from 0) takes a restart",
+        });
 
     // The immutability rule, asked SECOND because it is about the pair.
     auto const changed = UnreloadableChanges(previous, candidate);
@@ -2687,8 +2796,11 @@ ServiceSpec MakeNodeServiceSpec(std::filesystem::path const& exePath, NodeConfig
     emitIfPresent("machine-memory-budget", cfg.machineMemoryBudgetBytes);
     emitIfPresent("compile-estimate-default", cfg.compileEstimateDefaultBytes);
     emitIfExplicit("admin-listen", cfg.adminListen, cfg.adminListenExplicit);
+    emitIfExplicit("mcp-listen", cfg.mcpListen, cfg.mcpListenExplicit);
     if (cfg.dashboard)
         argv.emplace_back("--dashboard");
+    // On presence: absent is the default ceiling, and a registration replays only what was typed.
+    emitIfPresent("history-requesters", cfg.historyRequesters);
     // The PATH, never the secret it holds -- the same rule `--requirepass` is
     // refused outright by, one step less strict because a path is not a credential.
     emitPathIfSet("dashboard-token-file", cfg.dashboardTokenFile.string());
@@ -2747,7 +2859,7 @@ ServiceSpec MakeNodeServiceSpec(std::filesystem::path const& exePath, NodeConfig
     if (cfg.fleetPin.has_value())
         argv.push_back(std::format("--fleet-id={}", Cluster::FormatPinnedFleet(*cfg.fleetPin)));
     emitIfExplicit("drain-timeout", FormatDuration(cfg.drainTimeout), cfg.drainTimeoutExplicit);
-    emitIfExplicit("log-level", LogLevelName(cfg.logLevel), cfg.logLevelExplicit);
+    emitIfExplicit("log-level", NodeLogLevelName(cfg.logLevel), cfg.logLevelExplicit);
 
     // **Both spellings, because the DEFAULT is platform-dependent** (#496, #507).
     // Emitting only the positive one is sound while the default is false everywhere:
@@ -3007,9 +3119,23 @@ std::size_t CompileRequestMaxOf(NodeConfig const& cfg) noexcept
                                                   : WorkerMaxRequestBytes;
 }
 
+std::expected<std::size_t, std::string> CheckTierBudget(std::uint64_t bytes)
+{
+    if (bytes == 0)
+        return std::unexpected(std::string { TierOverrideCannotRemoveTier });
+    if (!std::in_range<std::size_t>(bytes))
+        return std::unexpected(std::format("a budget of {} bytes is more than this process can address", bytes));
+    return static_cast<std::size_t>(bytes);
+}
+
 std::uint64_t CompileEstimateDefaultOf(NodeConfig const& cfg) noexcept
 {
     return cfg.compileEstimateDefaultBytes.value_or(DefaultCompileEstimateBytes);
+}
+
+std::size_t HistoryKeysOf(NodeConfig const& cfg) noexcept
+{
+    return cfg.historyRequesters.value_or(Distributed::DefaultHistoryKeys);
 }
 
 std::size_t CompileByteBudgetOf(NodeConfig const& cfg, std::uint32_t slots) noexcept
@@ -4581,6 +4707,16 @@ std::optional<std::string> StartupPolicyRejection(NodeConfig const& cfg)
                      "map of every member's hostname, endpoint and capacity, and an operator who bound it to "
                      "the network is publishing that to whoever asks. A bare port binds loopback and needs no "
                      "credential." },
+        // MCP is never network-bound. Asked of the address the surface will actually take -- its own
+        // row's resolution -- for the reason the dashboard rule above gives: a copy of the defaulting
+        // here would judge an address the surface no longer binds. `IsLoopbackHost` takes no NAME, so
+        // `localhost` is refused too: a resolver is not something this decision may depend on.
+        { .refuses =
+              [](NodeConfig const& c) {
+                  auto const endpoints = RowFor(NodeSurface::Mcp).Resolve(c);
+                  return std::ranges::any_of(endpoints, [](SurfaceEndpoint const& e) { return !IsLoopbackHost(e.host); });
+              },
+          .message = McpListenNotLoopbackRefusal },
         // **A worker on a node that can never form**: with the consensus port closed there is no
         // formation runtime, no scheduler of its own and no fleet to join, so the worker would
         // register nowhere. The tier found that at start (`WorkerTier::Start`, "nowhere to

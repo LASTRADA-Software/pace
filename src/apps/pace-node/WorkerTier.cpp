@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "AdminEndpoint.hpp"
 #include "CacheTier.hpp"
+#include "InputsCapture.hpp"
 #include "NodeAnnounce.hpp"
 #include "NodeFormation.hpp"
 #include "NodeIoLoop.hpp"
@@ -12,10 +13,14 @@
 
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <format>
 #include <functional>
+#include <map>
+#include <mutex>
 #include <optional>
 #include <stop_token>
+#include <string_view>
 #include <utility>
 
 #include <CacheProtocol.hpp>
@@ -46,9 +51,50 @@ namespace
     /// a reinstalled compiler rejoins the fleet without anybody restarting a service.
     constexpr std::uint64_t SweepEveryBeats = 45;
 
+    /// The variable `node-mcp-e2e` sets to hold the capture walk until a file exists (`AwaitCaptureRelease`). Unset on
+    /// every production node, where the hold is not consulted at all.
+    constexpr std::string_view CaptureHoldVariable = "PACE_NODE_TEST_CAPTURE_HOLD";
+
+    /// How often a held capture looks for its release file. Only a held capture polls, and only in a test.
+    constexpr std::chrono::milliseconds CaptureHoldPoll { 100 };
+
     // The suspend's one dial must be able to fail and still leave the handler budget to return
     // in: a connect bound at or past the budget spends all of it on a scheduler that is not there.
     static_assert(SuspendDialTimeout < SuspendWithdrawBudget);
+
+    /// Wait, before the capture walk, for the file the end-to-end's hold variable names to exist; return at once when
+    /// the variable is unset, which is every production node.
+    ///
+    /// **A test seam, and stated as one**: `node-mcp-e2e` sets it to prove registration precedes the capture by STAGE
+    /// rather than by a wall-clock threshold -- with the walk held, the worker must still register. Read through the
+    /// injected host, and observed against the capture's stop token, so a held node still stops promptly.
+    /// @param host Where the variable and the file are read.
+    /// @param logger Where the hold engaging is said, once.
+    /// @param stop The capture thread's stop token.
+    /// @return False when the node was told to stop while held.
+    [[nodiscard]] bool AwaitCaptureRelease(Cc::IToolchainHost& host, ILogger& logger, std::stop_token const& stop)
+    {
+        auto const release = host.Environment(CaptureHoldVariable);
+        if (!release.has_value() || release->empty())
+            return true;
+        // Said, so a node left holding by a stray variable is explained in its own log rather than reading as a
+        // capture that never finishes.
+        logger.Logf(LogLevel::Warn,
+                    "{} is set: the toolchain capture walk is held until {} exists (a test seam; unset it in "
+                    "production)",
+                    CaptureHoldVariable,
+                    *release);
+        std::mutex parked;
+        std::condition_variable_any woken;
+        while (!host.ReadTextFile(*release).has_value())
+        {
+            std::unique_lock lock { parked };
+            static_cast<void>(woken.wait_for(lock, stop, CaptureHoldPoll, [] { return false; }));
+            if (stop.stop_requested())
+                return false;
+        }
+        return true;
+    }
 
     /// Tell `node-status` what a finished survey concluded.
     ///
@@ -223,7 +269,7 @@ std::expected<std::unique_ptr<WorkerTier>, NodeRefusal> WorkerTier::Start(Worker
     // Through `WorkerSlotsOf`, never `OfferableSlots` directly -- its header says which
     // way the other spelling fails (#206). Absent is a node running no worker, and it
     // gets no tier at all.
-    auto const slots = WorkerSlotsOf(parts.cfg, parts.capacity);
+    auto const slots = WorkerSlotsOf(parts.cfg, parts.capacity.Current());
     if (!slots.has_value())
         return std::unique_ptr<WorkerTier> {};
 
@@ -369,7 +415,9 @@ WorkerTier::WorkerTier(WorkerTierParts const& parts,
     _runtime { ToolchainReading { .state = CompileCacheWire::ToolchainState::Surveying,
                                   .served = 0,
                                   .discovered = static_cast<std::uint32_t>(_discovered.entries.size()) } },
-    _advertisedWire { Distributed::CapacityToWire(parts.capacity) },
+    _advertisedWire {},
+    _machineCapacity { parts.capacity },
+    _registeredCapacity { parts.capacity.Current() },
     _dialer { parts.schedulerDialer },
     _link { std::move(link) },
     _hostInbox { [this] { _capacity.WakeHeartbeat(); }, parts.suspendWait },
@@ -410,8 +458,37 @@ WorkerTier::WorkerTier(WorkerTierParts const& parts,
     // is held here, at the most the host query can return at all.
     static_assert(MaxHostNameBytes <= CompileCacheWire::MaxDisplayNameBytes,
                   "a scheduler must record any host name this node can send");
+    // Rebuilt from `_registeredCapacity` rather than kept from a second `Current()` in the initializer
+    // list: the two must describe one moment, or the first registration and node-status disagree.
+    _advertisedWire = Distributed::CapacityToWire(_registeredCapacity);
     _advertisedWire.version = AdvertisedVersion();
     _advertisedWire.displayName = parts.host.Facts().hostName;
+}
+
+bool WorkerTier::FollowCapacity(core::platform::IClock const& statusClock)
+{
+    auto now = _machineCapacity.Current();
+    if (now == _registeredCapacity)
+        return false;
+
+    // Rebuilt from the wire form, with the fields this record carries beside the capacity -- the
+    // version, the host name -- kept, since neither moved.
+    auto rebuilt = Distributed::CapacityToWire(now);
+    rebuilt.version = _advertisedWire.version;
+    rebuilt.displayName = _advertisedWire.displayName;
+    _advertisedWire = std::move(rebuilt);
+    _registeredCapacity = now;
+
+    // The same `(fingerprint, endpoint)` keys under the endpoint in force, so `AdoptRegistrars` withdraws
+    // nothing and the next round's REGISTER updates each registry entry in place. Republished for
+    // node-status, as an endpoint move is: until that round the rebuilt registrars hold no id.
+    AdoptRegistrars(RegistrarsAt(_toolchains, _registeredAs->Current()), _registrars, _withdrawals);
+    PublishRegistration(_runtime, statusClock, _registrars, 0);
+    _logger.Logf(LogLevel::Info,
+                 "this machine's capacity moved (reserved memory {}); re-registering {} toolchain(s) with it",
+                 FormatByteSize(static_cast<std::size_t>(now.reservedMemoryBytes)),
+                 _registrars.size());
+    return true;
 }
 
 std::string RegisteredToolchainLabel(ServedToolchain const& toolchain, ILogger& logger)
@@ -450,6 +527,7 @@ std::vector<Cc::WorkerRegistrar> WorkerTier::RegistrarsAt(std::map<std::string, 
         // node-wide (#194).
         auto perToolchain = _advertisedWire;
         perToolchain.toolchainLabel = RegisteredToolchainLabel(toolchain, _logger);
+        perToolchain.toolchainFamily = toolchain.family;
         built.emplace_back(fingerprint, advertised, _slots, Cc::AvailableCodecs(), perToolchain);
     }
     return built;
@@ -470,6 +548,32 @@ void WorkerTier::Serve(std::map<std::string, ServedToolchain> served)
     // AFTER the two calls above: this says the worker is serving, and it must not say so
     // while the compile port still holds the previous answer.
     PublishToolchains(_runtime, _toolchains.size(), _discovered.entries.size());
+    // What `FINGERPRINT-INPUTS` answers from: the same map, published whole for the reactor that reads it.
+    _runtime.PublishServedInputs(ServedInputsOf(_toolchains, _capture));
+}
+
+std::optional<std::map<std::string, ServedToolchain>> WorkerTier::AdoptCaptured(SurveyResult captured)
+{
+    _capture = InputsCaptureState::Concluded;
+    auto adoption = AdoptCapture(_toolchains, std::move(captured));
+    // Only inputs attach here: nothing this worker serves or registers is added, dropped or re-pointed, so the compile
+    // port and the registrations are untouched.
+    _toolchains = std::move(adoption.served);
+    _runtime.PublishServedInputs(ServedInputsOf(_toolchains, _capture));
+    auto const recorded =
+        std::ranges::count_if(_toolchains, [](auto const& entry) { return entry.second.inputs != nullptr; });
+    // The stage line the MCP end-to-end orders against registration, and the one an operator reads to learn whether
+    // toolchain_diff can explain this node yet.
+    _logger.Logf(
+        LogLevel::Info, "toolchain inputs captured: {} of {} served toolchain(s) recorded", recorded, _toolchains.size());
+    if (!adoption.refreshFromLiveConfig)
+        return std::nullopt;
+    // A cached fingerprint the walk no longer reproduces: re-derived from the LIVE configuration on this beat, never
+    // served from the capture's own map, which the startup configuration surveyed.
+    _logger.Log(LogLevel::Warn,
+                "the toolchain capture walk filed a served compiler under another fingerprint; re-surveying from the "
+                "configuration in force");
+    return std::move(adoption.captured);
 }
 
 void WorkerTier::FollowAnnouncedEndpoint(core::platform::IClock const& statusClock)
@@ -538,7 +642,15 @@ void WorkerTier::Heartbeat(std::stop_token const& stop,
                                  .prover = _prover,
                                  .lease = *_leaseState,
                                  .logger = _logger,
-                                 .reachability = reachability };
+                                 .reachability = reachability,
+                                 // The ceilings `node-status` names: the scheduler's own arithmetic over the
+                                 // capacity this worker's registrations carry (`FollowCapacity` moves it, once
+                                 // a beat, before the round) and the load this round sent.
+                                 .sampled = [this, &statusClock](Distributed::NodeLoad const& load) {
+                                     _runtime.PublishSlotCeilings(SlotCeilingsReading {
+                                         .ceilings = Distributed::SlotCeilingsFor(_registeredCapacity, _slots, load),
+                                         .sampledAt = statusClock.now() });
+                                 } };
 
     // The configuration snapshot this thread last surveyed against, so a reload is
     // noticed by COMPARISON rather than by a flag somebody else sets. Seeded BEFORE the
@@ -551,7 +663,17 @@ void WorkerTier::Heartbeat(std::stop_token const& stop,
     // ready, so a machine that takes minutes to identify its toolchains spends them
     // SERVING. The stop token is passed because a SIGTERM arriving mid-walk is caught,
     // and an unobservable walk would make the process wait it out before stopping.
-    auto surveyed = FingerprintToolchains(_discovered, *_machine.runner, *_machine.host, _toolchainClock, _logger, stop);
+    //
+    // It takes the fingerprint cache (`StartupSurveyPlan.initial`), so a warm start registers at once; the inputs
+    // `toolchain_diff` explains a fingerprint with come from the capture walk started below, on its own thread.
+    auto surveyed = FingerprintToolchains(_discovered,
+                                          *_machine.runner,
+                                          *_machine.host,
+                                          _toolchainClock,
+                                          _logger,
+                                          stop,
+                                          SurveyVoice::Announce,
+                                          StartupSurveyPlan.initial);
     switch (surveyed.outcome)
     {
         case SurveyOutcome::Served:
@@ -563,6 +685,7 @@ void WorkerTier::Heartbeat(std::stop_token const& stop,
             // ready line. Published first, so an operator asking what is wrong in the
             // window before the stop lands gets a real answer.
             PublishToolchains(_runtime, 0, _discovered.entries.size());
+            _runtime.PublishServedInputs(ServedInputsOf({}, _capture));
             _surveyFoundNothing = true;
             DaemonControls::Instance().RequestStop();
             return;
@@ -572,11 +695,32 @@ void WorkerTier::Heartbeat(std::stop_token const& stop,
             // periodic sweep surveys again, exactly as it does for a machine that loses
             // its last compiler while serving.
             PublishToolchains(_runtime, 0, _discovered.entries.size());
+            _runtime.PublishServedInputs(ServedInputsOf({}, _capture));
             break;
         case SurveyOutcome::Cancelled:
             // Already stopping, and interrupted rather than misconfigured.
             return;
     }
+
+    // The one walk per process that captures what each fingerprint was computed from, on a thread of its own: a
+    // tree walk holding THIS thread would hold every heartbeat for its length, and a registration the scheduler
+    // stops hearing from expires. Started after the first registration was queued, never by a request; declared
+    // here so returning from this function stops the walk and joins it.
+    InputsCapture<SurveyResult> capture;
+    capture.Start([this, discovered = _discovered](std::stop_token const& captureStop) {
+        // The end-to-end's hold, a no-op unless its variable names a file: what lets it prove registration does not
+        // wait on this walk without timing anything.
+        if (!AwaitCaptureRelease(*_machine.host, _logger, captureStop))
+            return SurveyResult { .outcome = SurveyOutcome::Cancelled, .served = {} };
+        return FingerprintToolchains(discovered,
+                                     *_machine.runner,
+                                     *_machine.host,
+                                     _toolchainClock,
+                                     _logger,
+                                     captureStop,
+                                     SurveyVoice::Routine,
+                                     StartupSurveyPlan.capture);
+    });
 
     std::uint64_t beat = 0;
     while (!stop.stop_requested())
@@ -605,7 +749,17 @@ void WorkerTier::Heartbeat(std::stop_token const& stop,
         // a change this beat was woken for is published before it is compared.
         _endpoints.Refresh();
         FollowAnnouncedEndpoint(statusClock);
-        auto const depth = RecheckDepthFor(reloaded, beat, SweepEveryBeats);
+        // And the capacity: a live cache-budget override re-derived it, and the registry and node-status must
+        // both move to the new figure, through the one registration.
+        (void) FollowCapacity(statusClock);
+        // The capture walk, once it has finished: asked, never waited for. A served compiler it filed under another
+        // fingerprint makes THIS beat's recheck unconditional, from the configuration in force.
+        auto carry = std::optional<std::map<std::string, ServedToolchain>> {};
+        if (auto captured = capture.Take(); captured.has_value())
+            carry = AdoptCaptured(*std::move(captured));
+
+        auto const depth =
+            carry.has_value() ? RecheckDepth::Unconditional : RecheckDepthFor(reloaded, beat, SweepEveryBeats);
         auto const voice = SurveyVoiceFor(reloaded, depth);
 
         auto* const discovery = liveCfg.toolchainDiscovery ? _machine.discovery.get() : nullptr;
@@ -613,6 +767,10 @@ void WorkerTier::Heartbeat(std::stop_token const& stop,
                 _toolchains, liveCfg, discovery, *_machine.runner, *_machine.host, _toolchainClock, _logger, depth, voice);
             refreshed.changed)
         {
+            // The capture rewrote the cache, so the re-survey above took its fingerprints from it and walked nothing:
+            // the capture's inputs, under the keys they digest to, are the record.
+            if (carry.has_value())
+                CarryInputsForward(*carry, refreshed.served);
             Serve(std::move(refreshed.served));
 
             // A worker that ends up serving nothing keeps running and says so rather than

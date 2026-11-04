@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <Pace/Cli/Duration.hpp>
 #include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Cluster/Roster.hpp>
 #include <Pace/Core/Ed25519.hpp>
 #include <Pace/Core/WireFields.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
@@ -30,6 +31,10 @@ using Pace::Testing::Unwrap;
 
 namespace
 {
+/// The bytes a member's budget overrides take in an encoded state when it has none: one empty field -- a four-byte
+/// length -- per tier, after its display name, the member's last fields.
+constexpr std::size_t NoBudgetBytes = EnumeratorCount<StorageTier> * sizeof(std::uint32_t);
+
 /// A command that states no key, spelled once so the cases below vary only what they are about.
 ///
 /// For a member admission this is the KEYLESS one, which `ValidateAgainst` refuses and `Apply`
@@ -508,7 +513,7 @@ TEST_CASE("A truncated snapshot is refused rather than half-read", "[cluster][st
 
 TEST_CASE("A state another build encoded is refused by its version while a command keeps its own", "[cluster][state][wire]")
 {
-    // The dissolve order a healing split replicates moved the state's version again -- and the
+    // The members' display names moved the state's version again -- and the
     // byte is pinned as well as the refusal, because a symbol both ends spell can only test the
     // NAME of a wire constant. The version is the first field's only byte, after that
     // field's u32 length prefix.
@@ -516,33 +521,33 @@ TEST_CASE("A state another build encoded is refused by its version while a comma
     Apply(state, Cmd(CommandKind::AddMember, "n1", "10.0.0.1:6675", "10.0.0.1:7000"));
     auto bytes = Encode(state);
     REQUIRE(bytes.size() > 4);
-    CHECK(bytes[4] == std::byte { 10 });
+    CHECK(bytes[4] == std::byte { 11 });
 
     // A version the next build might write. Refused BY NAME, both versions stated, and
     // never as `MalformedFrame`: those bytes are intact, and *damaged* is what gets a
     // healthy snapshot deleted. The previous build's LAYOUT is the case below this one.
-    bytes[4] = std::byte { 11 };
+    bytes[4] = std::byte { 12 };
     auto const newerState = DecodeState(bytes);
     REQUIRE_FALSE(newerState.has_value());
     CHECK(newerState.error().code == ConsensusErrorCode::UnsupportedVersion);
-    CHECK(newerState.error().context.contains("version 11"));
-    CHECK(newerState.error().context.contains("reads 10"));
+    CHECK(newerState.error().context.contains("version 12"));
+    CHECK(newerState.error().context.contains("reads 11"));
 
     // #178 moved the COMMAND layout as well -- two fields, a key and a role -- and #1555 moved
     // the version again with the layout untouched, because it changed what a verb MEANS: a
     // node whose own log holds an older entry refuses to start by name (#1542) rather than
-    // replay it as something its writer never meant.
+    // replay it as something its writer never meant. The display names moved it once more, with the state.
     auto command = Encode(Cmd(CommandKind::AddMember, "n1", "10.0.0.1:6675", "10.0.0.1:7000"));
     REQUIRE(command.size() > 4);
-    CHECK(command[4] == std::byte { 6 });
+    CHECK(command[4] == std::byte { 7 });
 
     // And a command another build encoded is refused by ITS version, by name, never as damage.
-    command[4] = std::byte { 7 };
+    command[4] = std::byte { 8 };
     auto const newer = DecodeCommand(command);
     REQUIRE_FALSE(newer.has_value());
     CHECK(newer.error().code == ConsensusErrorCode::UnsupportedVersion);
-    CHECK(newer.error().context.contains("command encoding version 7"));
-    CHECK(newer.error().context.contains("reads 6"));
+    CHECK(newer.error().context.contains("command encoding version 8"));
+    CHECK(newer.error().context.contains("reads 7"));
 }
 
 TEST_CASE("A state the previous build wrote is refused as another build's, never as damage",
@@ -564,6 +569,7 @@ TEST_CASE("A state the previous build wrote is refused as another build's, never
     //   six -- a decoder judging the arity first calls it damage;
     // - v8: six header fields like this build's, but a principal count and a roster version where
     //   this build has the revoked and dissolve counts -- a decoder reading fields first MISREADS it.
+    // v10, the last release's, is CONVERTED -- the case below this one.
     REQUIRE(Testing::PrincipalEraClusterStateVersion == 9);
     REQUIRE(Testing::PreviousClusterStateVersion == 8);
     for (auto const& [older, version]:
@@ -580,8 +586,63 @@ TEST_CASE("A state the previous build wrote is refused as another build's, never
         CHECK(refused.error().context.contains(std::format("version {}", version)));
         // The current version as a literal: it is private to the codec, and pinned by the
         // version case above.
-        CHECK(refused.error().context.contains("reads 10"));
+        CHECK(refused.error().context.contains("reads 11"));
+        CHECK(refused.error().context.contains("converts 10"));
     }
+}
+
+TEST_CASE("The last release's state is converted: every member read at its own stride and nameless with no override",
+          "[cluster][state][wire][identity]")
+{
+    // What the MSI upgrade from v0.6.0 found: a node that ran on that release holds a v10 snapshot of its own, and a
+    // build refusing it does not start at all. v10 is this build's header and groups with each member's first SIX
+    // fields, so the conversion reads the fields it lacks -- the display name and the overrides -- as absent.
+    //
+    // TWO members and a revoked key after them, from a builder pinned as a literal: read at this build's stride, the
+    // second member's id would land in the first one's name and the revoked key's id in an override, which refuses.
+    REQUIRE(Testing::NamelessClusterStateVersion == 10);
+    auto const decoded = DecodeState(Testing::EncodeNamelessClusterState());
+    INFO((decoded.has_value() ? std::string {} : decoded.error().context));
+    REQUIRE(decoded.has_value());
+    auto const& state = Unwrap(decoded);
+
+    REQUIRE(state.members.size() == 2);
+    CHECK(state.members[0].id == "n1");
+    CHECK(state.members[0].raftEndpoint == "10.0.0.1:6675");
+    CHECK(state.members[0].publicKey == KeyOf(0x11));
+    CHECK(state.members[1].id == "n2");
+    CHECK(state.members[1].raftEndpoint == "10.0.0.2:6675");
+    CHECK(state.members[1].publicKey == KeyOf(0x22));
+    for (auto const& member: state.members)
+    {
+        INFO(member.id);
+        CHECK(member.seat == MemberSeat::Voter);
+        CHECK(member.schedulerEndpointHistory == SchedulerEndpointHistory::NeverAnnounced);
+        CHECK(member.displayName.empty());
+        for (auto const& row: BudgetSlots)
+            CHECK_FALSE(BudgetOf(member, row.tier).has_value());
+    }
+    REQUIRE(state.revokedKeys.size() == 1);
+    CHECK(state.revokedKeys[0].id == "w1");
+    CHECK(state.revokedKeys[0].publicKey == KeyOf(0x33));
+    CHECK(state.settings.empty());
+    CHECK_FALSE(state.dissolveOrder.has_value());
+    CHECK(state.rosterVersion == 1);
+
+    // And it is written back at THIS build's version, so the conversion happens once.
+    auto const reencoded = Encode(state);
+    REQUIRE(reencoded.size() > 4);
+    CHECK(reencoded[4] == std::byte { 11 });
+    CHECK(Unwrap(DecodeState(reencoded)) == state);
+
+    // A v10 state is still held to its own arity: one field short of six per member is damage, not a conversion.
+    // The bytes held by name: the split's spans point into them.
+    auto const nameless = Testing::EncodeNamelessClusterState();
+    auto split = Unwrap(WireFields::SplitAll(nameless));
+    split.pop_back();
+    auto const truncated = DecodeState(WireFields::Encode(WireFields::FieldList { split }));
+    REQUIRE_FALSE(truncated.has_value());
+    CHECK(truncated.error().code == ConsensusErrorCode::MalformedFrame);
 }
 
 TEST_CASE("A command the previous build wrote is refused by its version before its arity is judged",
@@ -602,6 +663,8 @@ TEST_CASE("A command the previous build wrote is refused by its version before i
     // pinned here against the enumerators they stand for.
     REQUIRE(static_cast<std::uint8_t>(CommandKind::AddMember) == 0);
     REQUIRE(static_cast<std::uint8_t>(CommandKind::Forget) == 1);
+    //
+    // A v6 command, the last release's, is CONVERTED -- the case below this one.
     for (auto const& [older, version]:
          { std::pair { Testing::EncodeFourFieldClusterCommand(), Testing::FourFieldClusterCommandVersion },
            std::pair { Testing::EncodePreviousClusterCommand(), Testing::PreviousClusterCommandVersion } })
@@ -611,8 +674,51 @@ TEST_CASE("A command the previous build wrote is refused by its version before i
         REQUIRE_FALSE(refused.has_value());
         CHECK(refused.error().code == ConsensusErrorCode::UnsupportedVersion);
         CHECK(refused.error().context.contains(std::format("version {}", version)));
-        CHECK(refused.error().context.contains("reads 6"));
+        CHECK(refused.error().context.contains("reads 7"));
+        CHECK(refused.error().context.contains("converts 6"));
     }
+}
+
+TEST_CASE("The last release's command is converted: its seven fields are this build's first seven and the rest absent",
+          "[cluster][state][wire][identity]")
+{
+    // A node upgraded from v0.6.0 holds v6 entries in its own log, and refusing them keeps it from starting (#1542's
+    // refusal, met on the MSI upgrade). v6 is the first seven of this build's fields under the same verbs, so the
+    // fields it lacks -- the budget figures, the baseline, the stamp, the override id, the setter -- are absent.
+    REQUIRE(Testing::NamelessClusterCommandVersion == 6);
+    REQUIRE(static_cast<std::uint8_t>(CommandKind::Forget) == 1);
+    auto const key = KeyOf(0x44);
+    auto const decoded = DecodeCommand(Testing::EncodeNamelessClusterCommand("w2", key));
+    INFO((decoded.has_value() ? std::string {} : decoded.error().context));
+    REQUIRE(decoded.has_value());
+    CHECK(Unwrap(decoded)
+          == Command { .kind = CommandKind::Forget, .key = "w2", .value = {}, .schedulerEndpoint = {}, .publicKey = key });
+
+    // A verb the build that wrote v6 never had is no entry it wrote: refused rather than read as this build's, and as
+    // DAMAGE -- that build is known, and never wrote the pair -- so a held one reads as a damaged store, not an intact one.
+    REQUIRE(static_cast<std::uint8_t>(CommandKind::SetDisplayName) == 8);
+    for (auto const verb: { CommandKind::SetDisplayName, CommandKind::SetBudget, CommandKind::RecordBaseline })
+    {
+        INFO("verb " << static_cast<unsigned>(verb));
+        auto const refused = DecodeCommand(Testing::EncodeNamelessClusterCommandWithVerb(static_cast<std::uint8_t>(verb)));
+        REQUIRE_FALSE(refused.has_value());
+        CHECK(refused.error().code == ConsensusErrorCode::MalformedFrame);
+        CHECK(refused.error().context.contains("version 6"));
+    }
+    // ...while the last verb it did have still reads: the boundary is the table's, not one past it.
+    REQUIRE(static_cast<std::uint8_t>(CommandKind::DissolveInto) + 1
+            == static_cast<std::uint8_t>(CommandKind::SetDisplayName));
+    auto const lastKnown =
+        DecodeCommand(Testing::EncodeNamelessClusterCommandWithVerb(static_cast<std::uint8_t>(CommandKind::DissolveInto)));
+    INFO((lastKnown.has_value() ? std::string {} : lastKnown.error().context));
+    CHECK(lastKnown.has_value());
+
+    // And v6 is held to its own arity: this build's twelve fields under version 6 are damage, not a conversion.
+    auto current = Encode(Cmd(CommandKind::AddMember, "n1", "10.0.0.1:6675"));
+    current[4] = std::byte { Testing::NamelessClusterCommandVersion };
+    auto const wrongArity = DecodeCommand(current);
+    REQUIRE_FALSE(wrongArity.has_value());
+    CHECK(wrongArity.error().code == ConsensusErrorCode::MalformedFrame);
 }
 
 namespace
@@ -847,7 +953,7 @@ TEST_CASE("A snapshot whose scheduler endpoint history cannot be true is refused
     Apply(quiet, Cmd(CommandKind::AddMember, "n1", "10.0.0.1:6675"));
     auto bytes = Encode(quiet);
     REQUIRE(DecodeState(bytes).has_value());
-    bytes[bytes.size() - 1 - sizeof(std::uint32_t) - Ed25519PublicKeyBytes - 1 - sizeof(std::uint32_t)] =
+    bytes[bytes.size() - 1 - sizeof(std::uint32_t) - Ed25519PublicKeyBytes - 1 - sizeof(std::uint32_t) - NoBudgetBytes] =
         static_cast<std::byte>(EnumeratorCount<SchedulerEndpointHistory>);
     auto const unknown = DecodeState(bytes);
     REQUIRE_FALSE(unknown.has_value());
@@ -1140,9 +1246,13 @@ TEST_CASE("The retired cluster verbs keep their bytes and are refused by name", 
     CHECK(byteOf(CommandKind::AddLearner) == 5U);
     CHECK(byteOf(CommandKind::RetiredAdmitPrincipal) == 6U);
     CHECK(static_cast<unsigned>(CommandKind::DissolveInto) == 7U); // the raw enumerator: the anchor
-    // And nothing above it: the next verb is 8, and until then an 8 is a verb this build does
+    CHECK(static_cast<unsigned>(CommandKind::SetDisplayName) == 8U);
+    CHECK(static_cast<unsigned>(CommandKind::SetBudget) == 9U);
+    CHECK(static_cast<unsigned>(CommandKind::ClearBudget) == 10U);
+    CHECK(static_cast<unsigned>(CommandKind::RecordBaseline) == 11U);
+    // And nothing above it: the next verb is 12, and until then a 12 is a verb this build does
     // not know, skipped by name rather than applied as something else.
-    CHECK(static_cast<unsigned>(CommandKind::Last) == 8U);
+    CHECK(static_cast<unsigned>(CommandKind::Last) == 12U);
 
     // Refused by name at BOTH doors a command has. Its bytes, where every committed entry is
     // read -- as the verb it is, retired, never as one this build lacks and never as damage --
@@ -1332,9 +1442,11 @@ TEST_CASE("A member's seat survives a snapshot, and one this build cannot name i
     // The seat BYTE is pinned, not only the symbol: it is persisted, so a renumbering
     // that stayed consistent across this build would read every snapshot a fleet
     // already wrote as the other set. The last member's seat sits just before its key
-    // field -- a four-byte length and the 32-byte key -- which is the state's last field,
+    // field -- a four-byte length and the 32-byte key -- and its display name, an empty
+    // field of four length bytes, and its budget overrides, none, which are the state's last,
     // since there are no settings or revoked keys.
-    auto const seatAt = bytes.size() - 1 - sizeof(std::uint32_t) - Ed25519PublicKeyBytes;
+    auto const seatAt =
+        bytes.size() - 1 - sizeof(std::uint32_t) - Ed25519PublicKeyBytes - sizeof(std::uint32_t) - NoBudgetBytes;
     CHECK(bytes[seatAt] == std::byte { 1 });
     CHECK(static_cast<unsigned>(MemberSeat::Voter) == 0U);
     CHECK(static_cast<unsigned>(MemberSeat::Learner) == 1U);
@@ -1378,14 +1490,18 @@ TEST_CASE("A snapshot holding a member with no identity key, or the all-zero one
     // still can, since the field is a length-prefixed run like every other. A state holding
     // one is not one this build wrote, and read as it stands it would carry a member no forget
     // could revoke -- an address route that outlives every removal. It is refused as
-    // malformed, by name. Built from the bytes: n2's key is the state's last field, since
-    // there are no settings or revoked keys.
+    // malformed, by name. Built from the bytes: n2's key comes just before its display name and its
+    // budget overrides, which are the state's last fields, since there are no settings or revoked keys.
     ClusterState state;
     Apply(state, Keyed(CommandKind::AddMember, "n1", KeyOf(0x11), "10.0.0.1:6675"));
     Apply(state, Keyed(CommandKind::AddMember, "n2", KeyOf(0x12), "10.0.0.2:6675"));
     auto const keyed = Encode(state);
     auto fields = Unwrap(WireFields::SplitAll(keyed));
-    REQUIRE(fields.back().size() == Ed25519PublicKeyBytes);
+    constexpr auto Trailing = 1 + EnumeratorCount<StorageTier>; // the display name, then one override per tier
+    REQUIRE(fields.size() >= Trailing + 1);
+    auto& keyOfN2 = fields[fields.size() - Trailing - 1];
+    REQUIRE(keyOfN2.size() == Ed25519PublicKeyBytes);
+    REQUIRE(fields[fields.size() - Trailing].empty()); // n2's display name: nobody named it
 
     // WHAT DISTINGUISHES: the fields re-encoded as they stand decode, so the emptied key field
     // is the whole cause of the refusal below.
@@ -1395,7 +1511,7 @@ TEST_CASE("A snapshot holding a member with no identity key, or the all-zero one
     for (auto const keyField: { std::span<std::byte const> {}, std::span<std::byte const> { zero } })
     {
         INFO("key field of " << keyField.size() << " bytes");
-        fields.back() = keyField;
+        keyOfN2 = keyField;
         auto const refused = DecodeState(WireFields::Encode(WireFields::FieldList { fields }));
         REQUIRE_FALSE(refused.has_value());
         CHECK(refused.error().code == ConsensusErrorCode::MalformedFrame);
@@ -1411,11 +1527,11 @@ TEST_CASE("A command carries its key, and the layout before the role left is ref
     REQUIRE(decoded.has_value());
     CHECK(*decoded == member);
 
-    // Seven fields: the header, key, value, scheduler endpoint, public key, creation time, leader
-    // key. The sixth field of the layout before -- a principal's role -- is gone with the verb that
-    // carried it, so an eight-field command is not this build's arrangement.
+    // Twelve fields: the header, key, value, scheduler endpoint, public key, creation time, leader
+    // key, and the budget verbs' per-tier figures, baseline, leader's stamp, override id and setter. The sixth field of the
+    // layout before -- a principal's role -- is gone with the verb that carried it.
     auto const fields = Unwrap(WireFields::SplitAll(Encode(member)));
-    CHECK(fields.size() == 7);
+    CHECK(fields.size() == 12);
 
     // A command of the version-5 layout -- eight fields, the role sixth -- is refused by its
     // VERSION, by name, before its arity is judged: it is intact, and reading it as this layout
@@ -1442,6 +1558,11 @@ TEST_CASE("A command carries its key, and the layout before the role left is ref
                                                               WireFields::AsBytes(std::string_view {}),
                                                               WireFields::AsBytes(std::string_view {}),
                                                               std::span<std::byte const> { shortKey },
+                                                              WireFields::AsBytes(std::string_view {}),
+                                                              WireFields::AsBytes(std::string_view {}),
+                                                              WireFields::AsBytes(std::string_view {}),
+                                                              WireFields::AsBytes(std::string_view {}),
+                                                              WireFields::AsBytes(std::string_view {}),
                                                               WireFields::AsBytes(std::string_view {}),
                                                               WireFields::AsBytes(std::string_view {}) }));
     REQUIRE_FALSE(malformed.has_value());
@@ -1792,4 +1913,599 @@ TEST_CASE("The roster version moves with who may vouch for whom, and with nothin
     auto const decoded = DecodeState(Encode(state));
     REQUIRE(decoded.has_value());
     CHECK(Unwrap(decoded).rosterVersion == 6);
+}
+
+// --------------------------------------------------------------------------
+// Display names: a replicated label that decides nothing.
+
+namespace
+{
+/// @param id A member.
+/// @param name What to call it; empty clears.
+/// @return The `SetDisplayName` command.
+[[nodiscard]] Command Named(std::string id, std::string name)
+{
+    return Keyless(CommandKind::SetDisplayName, std::move(id), std::move(name));
+}
+
+/// A state recording voters `n1` and `n2` and learner `n3`, each under its own key and with a scheduler endpoint.
+/// @return The state.
+[[nodiscard]] ClusterState ThreeMembers()
+{
+    ClusterState state;
+    Apply(state, Cmd(CommandKind::AddMember, "n1", "10.0.0.1:6675", "10.0.0.1:6674"));
+    Apply(state, Cmd(CommandKind::AddMember, "n2", "10.0.0.2:6675", "10.0.0.2:6674"));
+    Apply(state, Cmd(CommandKind::AddLearner, "n3", {}, "10.0.0.3:6674"));
+    return state;
+}
+
+/// @param state A state.
+/// @param id A member it records.
+/// @return The member's display name.
+[[nodiscard]] std::string NameOf(ClusterState const& state, std::string_view id)
+{
+    auto const member = std::ranges::find(state.members, id, &ClusterMember::id);
+    REQUIRE(member != state.members.end());
+    return member->displayName;
+}
+
+/// Apply @p command after requiring the proposal be accepted against @p state.
+/// @param state The state.
+/// @param command The change.
+void Accepted(ClusterState& state, Command const& command)
+{
+    auto const allowed = ValidateAgainst(state, command);
+    INFO((allowed.has_value() ? std::string {} : allowed.error().context));
+    REQUIRE(allowed.has_value());
+    Apply(state, command);
+}
+} // namespace
+
+TEST_CASE("The display-name verb keeps its byte", "[cluster][state][wire][display-name]")
+{
+    // Transmitted and persisted: the byte a log entry keeps. Pinned on the raw enumerator.
+    CHECK(static_cast<std::uint8_t>(CommandKind::SetDisplayName) == 8);
+    CHECK(static_cast<std::uint8_t>(CommandKind::Last) == 12);
+}
+
+TEST_CASE("A display name survives a command's encoding and the state's snapshot", "[cluster][state][wire][display-name]")
+{
+    auto state = ThreeMembers();
+    Accepted(state, Named("n1", "office-pc"));
+    // Non-ASCII text a page can carry: "Büro" (C3 BC).
+    Accepted(state, Named("n2", "B\xC3\xBCro"));
+
+    auto const command = Named("n1", "office-pc");
+    auto const decodedCommand = DecodeCommand(Encode(command));
+    REQUIRE(decodedCommand.has_value());
+    CHECK(*decodedCommand == command);
+
+    auto const decoded = DecodeState(Encode(state));
+    REQUIRE(decoded.has_value());
+    CHECK(*decoded == state);
+    CHECK(NameOf(*decoded, "n1") == "office-pc");
+    CHECK(NameOf(*decoded, "n2") == "B\xC3\xBCro");
+    // A member nobody named carries none, and that survives too.
+    CHECK(NameOf(*decoded, "n3").empty());
+
+    // An empty name clears it.
+    Accepted(state, Named("n1", ""));
+    CHECK(NameOf(state, "n1").empty());
+    CHECK(NameOf(Unwrap(DecodeState(Encode(state))), "n1").empty());
+}
+
+TEST_CASE("A display name differing from another member's only in ASCII case is refused, by name",
+          "[cluster][state][display-name]")
+{
+    auto state = ThreeMembers();
+    Accepted(state, Named("n1", "Office-PC"));
+
+    auto const refused = RefusedAgainst(state, Named("n2", "office-pc"));
+    // WHICH refusal: its own code, naming the holder, and never the generic invalid change.
+    CHECK(refused.code == ConsensusErrorCode::DisplayNameTaken);
+    CHECK(refused.context.contains("n1 already answers to"));
+    CHECK(SubjectOf(refused.code) == RefusalSubject::Command);
+
+    // The guarantee as well as the courtesy: two renames judged against one state, the second committed after the
+    // first took the name, is dropped at commit.
+    auto racing = ThreeMembers();
+    REQUIRE(ValidateAgainst(racing, Named("n1", "lab")).has_value());
+    REQUIRE(ValidateAgainst(racing, Named("n2", "LAB")).has_value());
+    Apply(racing, Named("n1", "lab"));
+    Apply(racing, Named("n2", "LAB"));
+    CHECK(NameOf(racing, "n1") == "lab");
+    CHECK(NameOf(racing, "n2").empty());
+
+    // The member being renamed never holds its own name against itself: a case variant of its own name is allowed.
+    Accepted(state, Named("n1", "office-pc"));
+    CHECK(NameOf(state, "n1") == "office-pc");
+
+    // A name spelled like ANOTHER member's id is taken too: ids are matched first wherever a name is resolved, so
+    // the machine carrying it could never be named by it.
+    auto const asId = RefusedAgainst(state, Named("n2", "n3"));
+    CHECK(asId.code == ConsensusErrorCode::DisplayNameTaken);
+    CHECK(asId.context.contains("as its id"));
+}
+
+TEST_CASE("Display names above ASCII compare exactly, byte for byte", "[cluster][state][display-name]")
+{
+    // "Ärger" (C3 84) and "ärger" (C3 A4): one word to a person, two names to an ASCII-only fold -- deliberately, since
+    // folding Unicode would need tables this project does not carry. The ASCII letters beside them still fold.
+    auto state = ThreeMembers();
+    Accepted(state, Named("n1", "\xC3\x84rger"));
+    Accepted(state, Named("n2", "\xC3\xA4rger"));
+    CHECK(NameOf(state, "n2") == "\xC3\xA4rger");
+    CHECK(RefusedAgainst(state, Named("n3", "\xC3\x84RGER")).code == ConsensusErrorCode::DisplayNameTaken);
+}
+
+TEST_CASE("A display name that is not text every surface can render is refused, never repaired",
+          "[cluster][state][display-name]")
+{
+    SECTION("invalid UTF-8 is refused")
+    {
+        // A lone continuation byte, and an overlong '/'.
+        for (auto const& name: { std::string { "box\x80" }, std::string { "\xC0\xAF" } })
+        {
+            CAPTURE(name.size());
+            auto const reason = Refused(Named("n1", name));
+            CHECK(reason.contains("UTF-8"));
+        }
+    }
+    SECTION("a code point XML's Char production excludes is refused, though it is valid UTF-8")
+    {
+        // U+FFFE (EF BF BE) is well-formed UTF-8 and no markup may carry it: the fleet page and its SVG would not parse.
+        CHECK(Refused(Named("n1", "box\xEF\xBF\xBE")).contains("fleet page can carry"));
+    }
+    SECTION("a control byte is refused, the tab and the line break Char admits included")
+    {
+        for (auto const& name: { std::string { "a\tb" }, std::string { "a\nb" }, std::string { "a\x7F" } })
+            CHECK(Refused(Named("n1", name)).contains("control character"));
+    }
+    SECTION("past the byte bound is refused, and at it is accepted")
+    {
+        auto state = ThreeMembers();
+        CHECK(Refused(Named("n1", std::string(MaxDisplayNameBytes + 1, 'x'))).contains("at most 64 bytes"));
+        Accepted(state, Named("n1", std::string(MaxDisplayNameBytes, 'x')));
+    }
+    SECTION("a member the state does not record has nothing to name, and a commit for one is dropped")
+    {
+        auto state = ThreeMembers();
+        auto const refused = RefusedAgainst(state, Named("n9", "ghost"));
+        CHECK(refused.code == ConsensusErrorCode::InvalidConfiguration);
+        CHECK(refused.context.contains("no member"));
+        auto const before = state;
+        Apply(state, Named("n9", "ghost"));
+        CHECK(state == before);
+    }
+    SECTION("a display name carries no key and no scheduler endpoint")
+    {
+        auto keyed = Named("n1", "box");
+        keyed.publicKey = KeyOf(0x11);
+        CHECK(Refused(keyed).contains("carries no public key"));
+        auto withEndpoint = Named("n1", "box");
+        withEndpoint.schedulerEndpoint = "10.0.0.1:6674";
+        CHECK(Refused(withEndpoint).contains("no scheduler endpoint"));
+    }
+}
+
+TEST_CASE("A display name decides nothing: swapping two members' names changes no roster, route or redirect",
+          "[cluster][state][display-name][roster]")
+{
+    // The rule the hostname obeys: no admission, routing, key or redirect reads the name. WHAT DISTINGUISHES is the
+    // SWAP -- the same two labels on the other machines -- so a reader keying anything on a name answers differently.
+    auto named = ThreeMembers();
+    Accepted(named, Named("n1", "alpha"));
+    Accepted(named, Named("n2", "beta"));
+    auto swapped = named;
+    Accepted(swapped, Named("n1", "tmp"));
+    Accepted(swapped, Named("n2", "alpha"));
+    Accepted(swapped, Named("n1", "beta"));
+    REQUIRE(NameOf(swapped, "n1") == "beta");
+    REQUIRE(NameOf(swapped, "n2") == "alpha");
+
+    // Admission reads the roster (every key it holds, every seat), and naming never moved its version.
+    CHECK(ProjectRoster(swapped) == ProjectRoster(named));
+    CHECK(swapped.rosterVersion == named.rosterVersion);
+    CHECK(named.rosterVersion == ThreeMembers().rosterVersion);
+    for (auto const* const id: { "n1", "n2", "n3" })
+    {
+        INFO(id);
+        // Routing and the redirect read the endpoints; identity reads the key; the quorum reads the seat.
+        CHECK(swapped.SchedulerEndpointOf(id) == named.SchedulerEndpointOf(id));
+        CHECK(swapped.RaftEndpointOf(id) == named.RaftEndpointOf(id));
+        CHECK(LiveKeyOf(swapped, id) == LiveKeyOf(named, id));
+        CHECK(RecordedSeatOf(swapped, id) == RecordedSeatOf(named, id));
+        CHECK(swapped.HolderOf(Unwrap(LiveKeyOf(named, id))) == std::optional<std::string> { id });
+    }
+}
+
+TEST_CASE("A re-admission keeps a member's display name, and a forget removes it with the record",
+          "[cluster][state][display-name]")
+{
+    auto state = ThreeMembers();
+    Accepted(state, Named("n2", "build-box"));
+
+    // An announced move and a promotion are re-proposed records stating no name: the name stays.
+    Apply(state, Cmd(CommandKind::AddMember, "n2", "10.0.0.22:6675", "10.0.0.22:6674"));
+    CHECK(NameOf(state, "n2") == "build-box");
+    Apply(state, Keyless(CommandKind::AddLearner, "n2", "10.0.0.22:6675"));
+    CHECK(NameOf(state, "n2") == "build-box");
+
+    // A forget is one act: the record goes, its name with it, and the name is free again.
+    Apply(state, Cmd(CommandKind::Forget, "n2"));
+    CHECK(std::ranges::find(state.members, "n2", &ClusterMember::id) == state.members.end());
+    Accepted(state, Named("n1", "build-box"));
+}
+
+TEST_CASE("An admission under an id spelled like a display name clears the name, and the state stays readable",
+          "[cluster][state][wire][display-name]")
+{
+    // A label yields to an identity: rename a3f5 to office-pc, then a machine started with --node-id=office-pc is
+    // admitted through the real Apply path. The admission is never refused over a label; the name is cleared, and the
+    // state encodes and decodes -- a snapshot of it restores.
+    ClusterState state;
+    Apply(state, Cmd(CommandKind::AddMember, "a3f5", "10.0.0.1:6675"));
+    Accepted(state, Named("a3f5", "office-pc"));
+    auto const admission = Cmd(CommandKind::AddLearner, "office-pc", {}, "10.0.0.9:6674");
+    REQUIRE(ValidateAgainst(state, admission).has_value());
+    CHECK(DisplayNameYieldingTo(state, admission) == std::optional<std::string> { "a3f5" });
+    Apply(state, admission);
+    CHECK(NameOf(state, "a3f5").empty());
+    CHECK(std::ranges::contains(state.members, std::string_view { "office-pc" }, &ClusterMember::id));
+    auto const decoded = DecodeState(Encode(state));
+    REQUIRE(decoded.has_value());
+    CHECK(*decoded == state);
+
+    // Nothing yields to an admission whose id no name spells, nor to a re-admission of the holder itself.
+    CHECK_FALSE(DisplayNameYieldingTo(ThreeMembers(), Cmd(CommandKind::AddMember, "n9", "10.0.0.9:6675")).has_value());
+    CHECK_FALSE(DisplayNameYieldingTo(state, Named("a3f5", "x")).has_value());
+}
+
+TEST_CASE("A state carrying a name spelled like another member's id decodes: a decoder never refuses over a label",
+          "[cluster][state][wire][display-name]")
+{
+    // Written past `Apply` -- what a node may hold from before the clearing reached it. Well formed, so read, never
+    // refused: refusing it would keep a node from restoring or starting over a label that decides nothing.
+    auto state = ThreeMembers();
+    state.members[0].displayName = "n2";
+    auto const decoded = DecodeState(Encode(state));
+    REQUIRE(decoded.has_value());
+    CHECK(NameOf(*decoded, "n1") == "n2");
+}
+
+TEST_CASE("A snapshot holding a display name Apply never records is refused rather than half-believed",
+          "[cluster][state][wire][display-name]")
+{
+    auto const decodeWithNames = [](std::string const& first, std::string const& second) {
+        auto state = ThreeMembers();
+        // Written past `Apply`, which is the point: these are bytes a writer `Apply` constrains never produced.
+        state.members[0].displayName = first;
+        state.members[1].displayName = second;
+        return DecodeState(Encode(state));
+    };
+    CHECK(decodeWithNames("alpha", "beta").has_value());
+
+    auto const shared = decodeWithNames("Alpha", "alpha");
+    REQUIRE_FALSE(shared.has_value());
+    CHECK(shared.error().code == ConsensusErrorCode::MalformedFrame);
+    CHECK(shared.error().context.contains("one display name"));
+
+    auto const notText = decodeWithNames("a\nb", "beta");
+    REQUIRE_FALSE(notText.has_value());
+    CHECK(notText.error().code == ConsensusErrorCode::MalformedFrame);
+    CHECK(notText.error().context.contains("display name"));
+}
+
+// --------------------------------------------------------------------------
+// Budget overrides: a per-member figure the leader records and the member applies.
+
+namespace
+{
+constexpr std::uint64_t MiB = 1024ULL * 1024ULL;
+
+/// 2026-11-02T10:00:00Z, the leader's stamp the cases below record overrides at.
+constexpr std::int64_t SetAt = 1793613600;
+
+/// @param id A member.
+/// @param memory The memory tier's figure, or nothing.
+/// @param disk The disk tier's figure, or nothing.
+/// @param setBy Who set it.
+/// @return The `SetBudget` command.
+[[nodiscard]] Command Budget(std::string id,
+                             std::optional<std::uint64_t> memory,
+                             std::optional<std::uint64_t> disk = std::nullopt,
+                             std::string setBy = "n1")
+{
+    auto command = Keyless(CommandKind::SetBudget, std::move(id));
+    command.budgetBytes = { memory, disk };
+    command.setAtUnixSeconds = SetAt;
+    command.setBy = std::move(setBy);
+    return command;
+}
+
+/// @param id A member.
+/// @param tier Its tier.
+/// @param baseline What the member reports it had configured.
+/// @param overrideId The override it measured against: the index of the entry that set it.
+/// @return The `RecordBaseline` command.
+[[nodiscard]] Command Baseline(std::string id, StorageTier tier, std::uint64_t baseline, std::uint64_t overrideId)
+{
+    auto command = Keyless(CommandKind::RecordBaseline, std::move(id), std::string { TierName(tier) });
+    command.baselineBytes = baseline;
+    command.overrideId = overrideId;
+    return command;
+}
+
+/// @param id A member.
+/// @param tier Its tier.
+/// @param overrideId The override a member's drop names, or nothing for an operator's clear.
+/// @return The `ClearBudget` command.
+[[nodiscard]] Command Clear(std::string id, StorageTier tier, std::optional<std::uint64_t> overrideId = std::nullopt)
+{
+    auto command = Keyless(CommandKind::ClearBudget, std::move(id), std::string { TierName(tier) });
+    command.overrideId = overrideId;
+    return command;
+}
+
+/// Apply @p command as the entry at @p index, after requiring the proposal be accepted against @p state.
+/// @param state The state.
+/// @param command The change.
+/// @param index The entry's log index.
+void AcceptedAt(ClusterState& state, Command const& command, std::uint64_t index)
+{
+    auto const allowed = ValidateAgainst(state, command);
+    INFO((allowed.has_value() ? std::string {} : allowed.error().context));
+    REQUIRE(allowed.has_value());
+    Apply(state, command, index);
+}
+
+/// @param state A state.
+/// @param id A member it records.
+/// @param tier A tier.
+/// @return The member's override for that tier.
+[[nodiscard]] std::optional<BudgetOverride> BudgetIn(ClusterState const& state, std::string_view id, StorageTier tier)
+{
+    auto const member = std::ranges::find(state.members, id, &ClusterMember::id);
+    REQUIRE(member != state.members.end());
+    return BudgetOf(*member, tier);
+}
+} // namespace
+
+TEST_CASE("The budget verbs keep their bytes", "[cluster][state][wire][budget]")
+{
+    // Transmitted and persisted: the bytes a log entry keeps. Pinned on the raw enumerators.
+    CHECK(static_cast<std::uint8_t>(CommandKind::SetBudget) == 9);
+    CHECK(static_cast<std::uint8_t>(CommandKind::ClearBudget) == 10);
+    CHECK(static_cast<std::uint8_t>(CommandKind::RecordBaseline) == 11);
+}
+
+TEST_CASE("override set for a down node is recorded with baseline unset", "[cluster][state][budget]")
+{
+    // n3 is a learner that never announced an endpoint -- nothing the leader holds says it is up -- and the override
+    // is recorded all the same: the record is the state, and the member applies it when it returns.
+    auto state = ThreeMembers();
+    AcceptedAt(state, Budget("n3", 64 * MiB), 41);
+    auto const recorded = Unwrap(BudgetIn(state, "n3", StorageTier::Memory));
+    CHECK(recorded.bytes == 64 * MiB);
+    CHECK_FALSE(recorded.baseline.has_value());
+    CHECK(recorded.setAtUnixSeconds == SetAt);
+    CHECK(recorded.id == 41);
+    CHECK(recorded.setBy == "n1");
+    // The other tier is untouched, and so is every other member.
+    CHECK_FALSE(BudgetIn(state, "n3", StorageTier::Disk).has_value());
+    CHECK_FALSE(BudgetIn(state, "n1", StorageTier::Memory).has_value());
+}
+
+TEST_CASE("A two-tier override is one command, applied whole, both tiers identified by its entry",
+          "[cluster][state][budget]")
+{
+    auto state = ThreeMembers();
+    AcceptedAt(state, Budget("n2", 64 * MiB, 2048 * MiB), 17);
+    CHECK(Unwrap(BudgetIn(state, "n2", StorageTier::Memory)).id == 17);
+    CHECK(Unwrap(BudgetIn(state, "n2", StorageTier::Disk)).id == 17);
+    CHECK(Unwrap(BudgetIn(state, "n2", StorageTier::Disk)).bytes == 2048 * MiB);
+
+    // A zero for either tier refuses the whole command, and `Apply` drops it whole: no tier is half recorded.
+    auto const before = state;
+    CHECK(Refused(Budget("n2", 32 * MiB, 0)) == TierOverrideCannotRemoveTier);
+    Apply(state, Budget("n2", 32 * MiB, 0), 18);
+    CHECK(state == before);
+
+    // A command in no log has no entry to identify an override by, so it records nothing.
+    Apply(state, Budget("n2", 1 * MiB));
+    CHECK(state == before);
+}
+
+TEST_CASE("An override and its baseline survive a command's encoding and the state's snapshot",
+          "[cluster][state][wire][budget]")
+{
+    auto state = ThreeMembers();
+    AcceptedAt(state, Budget("n1", 64 * MiB, 2048 * MiB), 5);
+    AcceptedAt(state, Baseline("n1", StorageTier::Disk, 0, 5), 6); // a present zero: unbounded, a real value
+    auto setBeforeEpoch = Budget("n2", std::nullopt, 512 * MiB, "");
+    setBeforeEpoch.setAtUnixSeconds = -5; // a stamp before the epoch still round-trips, and nobody's key set it
+    AcceptedAt(state, setBeforeEpoch, 7);
+
+    for (auto const& command: { Budget("n1", 64 * MiB),
+                                Baseline("n1", StorageTier::Disk, 7, 5),
+                                Clear("n1", StorageTier::Disk),
+                                Clear("n1", StorageTier::Disk, 5) })
+        CHECK(Unwrap(DecodeCommand(Encode(command))) == command);
+
+    auto const decoded = Unwrap(DecodeState(Encode(state)));
+    CHECK(decoded == state);
+    CHECK(Unwrap(BudgetIn(decoded, "n1", StorageTier::Disk)).baseline == std::optional<std::uint64_t> { 0 });
+    CHECK_FALSE(Unwrap(BudgetIn(decoded, "n1", StorageTier::Memory)).baseline.has_value());
+    CHECK(Unwrap(BudgetIn(decoded, "n2", StorageTier::Disk)).setAtUnixSeconds == -5);
+    CHECK(Unwrap(BudgetIn(decoded, "n2", StorageTier::Disk)).setBy.empty());
+    CHECK(Unwrap(BudgetIn(decoded, "n1", StorageTier::Memory)).setBy == "n1");
+}
+
+TEST_CASE("An override names a member the state records, tiers this build knows, and never zero", "[cluster][state][budget]")
+{
+    auto state = ThreeMembers();
+    CHECK(RefusedAgainst(state, Budget("n9", MiB)).context.find("no member") != std::string::npos);
+    CHECK(Refused(Budget("n1", 0)) == TierOverrideCannotRemoveTier);
+    auto namedTier = Budget("n1", MiB);
+    namedTier.value = "memory"; // a set names its tiers by position, never by name
+    CHECK_FALSE(Validate(namedTier).has_value());
+    auto noStamp = Budget("n1", MiB);
+    noStamp.setAtUnixSeconds.reset();
+    CHECK_FALSE(Validate(noStamp).has_value());
+    auto noTier = Budget("n1", std::nullopt);
+    CHECK_FALSE(Validate(noTier).has_value());
+    // And no other verb carries a budget figure, an override id or a setter.
+    auto stray = Named("n1", "office-pc");
+    stray.budgetBytes[0] = MiB;
+    CHECK_FALSE(Validate(stray).has_value());
+    auto strayId = Named("n1", "office-pc");
+    strayId.overrideId = 3;
+    CHECK_FALSE(Validate(strayId).has_value());
+    auto straySetter = Clear("n1", StorageTier::Memory);
+    straySetter.setBy = "n2";
+    CHECK_FALSE(Validate(straySetter).has_value());
+    auto unknownTier = Clear("n1", StorageTier::Memory);
+    unknownTier.value = "ram";
+    CHECK(Refused(unknownTier).find("no cache tier") != std::string::npos);
+
+    // `Apply` is the guarantee: a committed zero or a member forgotten since is dropped, deterministically.
+    Apply(state, Budget("n1", 0), 3);
+    Apply(state, Budget("n9", MiB), 4);
+    CHECK(state == ThreeMembers());
+}
+
+TEST_CASE("RecordBaseline racing a SetBudget never attaches the old baseline to the new override",
+          "[cluster][state][budget]")
+{
+    auto state = ThreeMembers();
+    AcceptedAt(state, Budget("n2", 64 * MiB), 10);
+    // The member measures against the first override; before its report commits, an operator sets another -- the SAME
+    // figure in the same second, which only the entry's index tells apart.
+    auto const report = Baseline("n2", StorageTier::Memory, 256 * MiB, 10);
+    REQUIRE(ValidateAgainst(state, report).has_value());
+    AcceptedAt(state, Budget("n2", 64 * MiB), 11);
+
+    // Refused where somebody reads the answer, and dropped where nobody can.
+    CHECK(RefusedAgainst(state, report).context.find("another was set since") != std::string::npos);
+    Apply(state, report, 12);
+    auto const recorded = Unwrap(BudgetIn(state, "n2", StorageTier::Memory));
+    CHECK(recorded.id == 11);
+    CHECK_FALSE(recorded.baseline.has_value());
+
+    // The report naming the override that stands is recorded, and the first report wins.
+    AcceptedAt(state, Baseline("n2", StorageTier::Memory, 256 * MiB, 11), 13);
+    Apply(state, Baseline("n2", StorageTier::Memory, 1, 11), 14);
+    CHECK(Unwrap(BudgetIn(state, "n2", StorageTier::Memory)).baseline == std::optional { 256 * MiB });
+    CHECK(RefusedAgainst(state, Baseline("n2", StorageTier::Memory, 1, 11)).context.find("first report stands")
+          != std::string::npos);
+
+    // A new figure is a new override, whose baseline the member reports afresh.
+    AcceptedAt(state, Budget("n2", 16 * MiB), 15);
+    CHECK_FALSE(Unwrap(BudgetIn(state, "n2", StorageTier::Memory)).baseline.has_value());
+}
+
+TEST_CASE("A baseline for an override cleared meanwhile is a no-op", "[cluster][state][budget]")
+{
+    auto state = ThreeMembers();
+    AcceptedAt(state, Budget("n1", std::nullopt, 64 * MiB), 20);
+    auto const report = Baseline("n1", StorageTier::Disk, 128 * MiB, 20);
+    AcceptedAt(state, Clear("n1", StorageTier::Disk), 21);
+    auto const before = state;
+    Apply(state, report, 22);
+    CHECK(state == before);
+    CHECK_FALSE(BudgetIn(state, "n1", StorageTier::Disk).has_value());
+}
+
+TEST_CASE("A member's drop naming a stale override is a no-op, and an operator's clear removes whatever stands",
+          "[cluster][state][budget]")
+{
+    auto state = ThreeMembers();
+    CHECK(RefusedAgainst(state, Clear("n1", StorageTier::Memory)).context.find("nothing to clear") != std::string::npos);
+
+    AcceptedAt(state, Budget("n1", 64 * MiB), 30);
+    // The member drops the override its own later edit outranks -- but an operator set a newer one in between.
+    auto const drop = Clear("n1", StorageTier::Memory, 30);
+    AcceptedAt(state, Budget("n1", 48 * MiB), 31);
+    CHECK(RefusedAgainst(state, drop).context.find("another was set since") != std::string::npos);
+    auto const before = state;
+    Apply(state, drop, 32);
+    CHECK(state == before);
+    CHECK(Unwrap(BudgetIn(state, "n1", StorageTier::Memory)).bytes == 48 * MiB);
+
+    // The drop naming the override that stands removes it.
+    AcceptedAt(state, Clear("n1", StorageTier::Memory, 31), 33);
+    CHECK_FALSE(BudgetIn(state, "n1", StorageTier::Memory).has_value());
+
+    AcceptedAt(state, Budget("n1", 8 * MiB), 34);
+    AcceptedAt(state, Clear("n1", StorageTier::Memory), 35);
+    CHECK_FALSE(BudgetIn(state, "n1", StorageTier::Memory).has_value());
+}
+
+TEST_CASE("An override goes with a forgotten record, stays across a re-admission, and moves no roster version",
+          "[cluster][state][budget]")
+{
+    auto state = ThreeMembers();
+    auto const version = state.rosterVersion;
+    AcceptedAt(state, Budget("n1", 64 * MiB), 40);
+    AcceptedAt(state, Baseline("n1", StorageTier::Memory, 128 * MiB, 40), 41);
+    AcceptedAt(state, Clear("n1", StorageTier::Memory), 42);
+    AcceptedAt(state, Budget("n1", 64 * MiB), 43);
+    CHECK(state.rosterVersion == version);
+
+    // A promotion -- a re-admission stating its endpoints and no budget -- keeps both tiers.
+    Apply(state, Keyless(CommandKind::AddMember, "n3", "10.0.0.3:6675", "10.0.0.3:6674"));
+    AcceptedAt(state, Budget("n3", 2 * MiB, MiB), 44);
+    Apply(state, Keyless(CommandKind::AddLearner, "n3", {}, "10.0.0.3:6674"));
+    CHECK(Unwrap(BudgetIn(state, "n3", StorageTier::Disk)).bytes == MiB);
+    CHECK(Unwrap(BudgetIn(state, "n3", StorageTier::Memory)).bytes == 2 * MiB);
+    CHECK(Unwrap(BudgetIn(state, "n1", StorageTier::Memory)).bytes == 64 * MiB);
+
+    // A forget takes the record, and the override with it.
+    Apply(state, Cmd(CommandKind::Forget, "n3"));
+    CHECK(std::ranges::find(state.members, "n3", &ClusterMember::id) == state.members.end());
+}
+
+TEST_CASE("A snapshot holding an override Apply never records is refused by name", "[cluster][state][wire][budget]")
+{
+    auto state = ThreeMembers();
+    AcceptedAt(state, Budget("n1", 64 * MiB), 50);
+    auto const good = Encode(state);
+    REQUIRE(DecodeState(good).has_value());
+
+    // n1's memory override is the one non-empty nested record among the state's fields; rewrite it in place.
+    auto fields = Unwrap(WireFields::SplitAll(good));
+    auto const at = std::ranges::find_if(fields, [](std::span<std::byte const> field) {
+        auto const parts = WireFields::SplitAll(field);
+        return field.size() > 32 && parts.has_value() && parts->size() == 5;
+    });
+    REQUIRE(at != fields.end());
+    auto const index = static_cast<std::size_t>(std::distance(fields.begin(), at));
+    auto rebuild = [&fields, index](std::vector<std::byte> const& replacement) {
+        auto copy = std::vector<std::span<std::byte const>> { fields.begin(), fields.end() };
+        copy[index] = replacement;
+        return WireFields::Encode(WireFields::FieldList { copy });
+    };
+    auto const record = [](std::uint64_t bytes, std::string_view setBy) {
+        auto const figure = WireFields::ToBigEndian<std::uint64_t>(bytes);
+        auto const id = WireFields::ToBigEndian<std::uint64_t>(50);
+        auto const setAt = WireFields::ToBigEndian<std::uint64_t>(1);
+        return WireFields::Encode({ std::span<std::byte const> { figure },
+                                    std::span<std::byte const> { id },
+                                    std::span<std::byte const> { setAt },
+                                    std::span<std::byte const> {},
+                                    WireFields::AsBytes(setBy) });
+    };
+    REQUIRE(DecodeState(rebuild(record(64 * MiB, "n1"))).has_value()); // the rebuild itself decodes
+
+    auto const zeroed = DecodeState(rebuild(record(0, "n1")));
+    REQUIRE_FALSE(zeroed.has_value());
+    CHECK(zeroed.error().context.find("zero bytes") != std::string::npos);
+
+    auto const odd = DecodeState(rebuild(std::vector<std::byte>(9, std::byte { 1 })));
+    REQUIRE_FALSE(odd.has_value());
+    CHECK(odd.error().context.find("not a record of 5 fields") != std::string::npos);
+
+    auto const longSetter = DecodeState(rebuild(record(64 * MiB, std::string(CompileCacheWire::MaxIdBytes + 1, 'x'))));
+    REQUIRE_FALSE(longSetter.has_value());
+    CHECK(longSetter.error().context.find("past the") != std::string::npos);
 }

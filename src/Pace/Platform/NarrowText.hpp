@@ -132,6 +132,35 @@ struct NarrowTextPolicy
 [[nodiscard]] std::optional<std::wstring> WideTextFromUtf8(std::string_view text);
 #endif
 
+/// The WTF-8 form of UTF-16 code units: UTF-8 for every well-formed sequence, and each lone surrogate as the three
+/// bytes UTF-8's arithmetic gives its value.
+///
+/// The LENIENT sibling of `Utf8FromWideText`, for text that is a NAME the platform holds rather than text this
+/// process is about to act on. A Windows path read through a wide API can carry a lone surrogate, and refusing it
+/// (as the strict converter does) or substituting U+FFFD both lose the name: the first leaves a status answer with
+/// nothing to say, the second names a different file. WTF-8 keeps every unit, and since no strict UTF-8 reader
+/// accepts an encoded surrogate (`Core/Utf8.hpp`), a name that is not text still reads as bytes that are not text.
+///
+/// Declared on every platform and taking `char16_t`, because the arithmetic is the same everywhere and only a
+/// platform-neutral signature can be tested off Windows; `PathBytes` is the caller that reaches it with a
+/// Windows path's own units. A high surrogate pairs only with the low one directly after it; anything else -- a
+/// high followed by a non-low unit, a trailing high, a low with no high before it, a reversed pair -- is written
+/// unit by unit, and an unpaired high never consumes the unit after it.
+/// @param units UTF-16 code units, not necessarily well-formed.
+/// @return Their WTF-8 bytes (empty for empty input). Never refuses.
+[[nodiscard]] std::string Wtf8FromUtf16(std::u16string_view units);
+
+/// The bytes a path holds, as narrow text -- never throwing, and never substituting.
+///
+/// `path.string()` is the obvious spelling and the wrong one on Windows: it converts the UTF-16 the path holds to
+/// the narrow encoding and THROWS for a sequence that does not convert (a lone surrogate), turning whatever was
+/// rendering the path -- a status answer, a configuration listing -- into a failure. On POSIX a path IS its bytes,
+/// returned as they stand. On Windows its units go through `Wtf8FromUtf16`'s arithmetic, so a name that is not
+/// text travels as bytes that are not UTF-8, exactly as a POSIX path's stray bytes do, for the reader to mark.
+/// @param path A path.
+/// @return Its bytes.
+[[nodiscard]] std::string PathBytes(std::filesystem::path const& path);
+
 /// A `std::filesystem::path` from narrow bytes, without throwing.
 ///
 /// The one place this project turns the platform's refusal into an answer, and it

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <Pace/Cache/IStorage.hpp>
 #include <Pace/Core/Bytes.hpp>
+#include <Pace/Core/HostPort.hpp>
 #include <Pace/Core/Logger.hpp>
 #include <Pace/Core/Version.hpp>
 #include <Pace/Metrics/IMetricsSink.hpp>
@@ -20,6 +21,7 @@
 #include <optional>
 #include <ranges>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -971,4 +973,491 @@ TEST_CASE("AdminHttp: signals landing on the accept thread do not stop /healthz"
     INFO("response was: " << response.substr(0, 64));
     CHECK(response.starts_with("HTTP/1.1 200 OK\r\n"));
 #endif
+}
+
+namespace
+{
+
+/// A route that records what its handler was shown and answers `200 OK`.
+struct BodySeen
+{
+    int calls { 0 };
+    Pace::AdminMethod method { Pace::AdminMethod::Get };
+    std::string body;
+    std::string peerHost;
+};
+
+/// @param seen Where the handler records the request it was given.
+/// @param path The route's path.
+/// @param maxBodyBytes The route's body ceiling.
+/// @return A POST route that records into `seen`.
+Pace::AdminRoute RecordingPostRoute(std::shared_ptr<BodySeen> seen, std::string_view path, std::size_t maxBodyBytes)
+{
+    return Pace::AdminRoute {
+        .path = path,
+        .handler =
+            [seen = std::move(seen)](Pace::AdminRequest const& request) {
+                ++seen->calls;
+                seen->method = request.method;
+                seen->body = std::string { request.body };
+                seen->peerHost = request.peerHost;
+                return Pace::AdminResponse { .status = "200 OK", .body = "done" };
+            },
+        .method = Pace::AdminMethod::Post,
+        .maxBodyBytes = maxBodyBytes,
+    };
+}
+
+Pace::AdminRoute GetRoute(std::string_view path)
+{
+    return Pace::AdminRoute { .path = path, .handler = [](Pace::AdminRequest const&) {
+                                 return Pace::AdminResponse { .status = "200 OK", .body = "got" };
+                             } };
+}
+
+/// A socket reporting a fixed peer, as the accepted socket of a real listener does.
+class PeerSocket final: public core::net::testing::SocketDecorator
+{
+  public:
+    PeerSocket(core::net::ISocket& inner, std::string peer) noexcept:
+        SocketDecorator { inner },
+        _peer { std::move(peer) }
+    {
+    }
+
+    [[nodiscard]] std::string peerAddress() const override
+    {
+        return _peer;
+    }
+
+  private:
+    std::string _peer;
+};
+
+/// Hands up the head and one body byte in the first read, then one byte per read, each costing
+/// the clock `perRead`: a body that arrives, but too slowly.
+class BodyDribbleSocket final: public core::net::testing::SocketDecorator
+{
+  public:
+    BodyDribbleSocket(core::net::ISocket& inner,
+                      std::size_t firstRead,
+                      core::platform::ManualClock& clock,
+                      std::chrono::milliseconds perRead) noexcept:
+        SocketDecorator { inner },
+        _firstRead { firstRead },
+        _clock { clock },
+        _perRead { perRead }
+    {
+    }
+
+    [[nodiscard]] core::net::IoAwaitable read(std::span<std::byte> buffer) override
+    {
+        auto const limit = _first ? _firstRead : std::size_t { 1 };
+        if (!_first)
+            _clock.advance(_perRead);
+        _first = false;
+        return SocketDecorator::read(buffer.subspan(0, std::min(buffer.size(), limit)));
+    }
+
+  private:
+    bool _first { true };
+    std::size_t _firstRead;
+    core::platform::ManualClock& _clock;
+    std::chrono::milliseconds _perRead;
+};
+
+} // namespace
+
+TEST_CASE("admin POST route receives its body", "[admin][http][post]")
+{
+    auto const seen = std::make_shared<BodySeen>();
+    std::vector<Pace::AdminRoute> const routes { RecordingPostRoute(seen, "/x", 16) };
+    auto const response =
+        ExchangeWithRoutes("POST /x HTTP/1.1\r\nContent-Length: 5\r\nContent-Type: application/json\r\n\r\nhello", routes);
+    CHECK(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    CHECK(seen->calls == 1);
+    CHECK(seen->method == Pace::AdminMethod::Post);
+    CHECK(seen->body == "hello");
+}
+
+TEST_CASE("admin POST body that straddles the head read is reassembled", "[admin][http][post]")
+{
+    // The head and the first body bytes arrive together; the rest arrives later.
+    auto const seen = std::make_shared<BodySeen>();
+    std::vector<Pace::AdminRoute> const routes { RecordingPostRoute(seen, "/x", 4096) };
+    std::string const payload(3000, 'z');
+    auto const request = std::format("POST /x HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}", payload.size(), payload);
+    auto const response = ExchangeWithRoutes(request, routes);
+    CHECK(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    CHECK(seen->body == payload);
+}
+
+TEST_CASE("admin body over the route ceiling is 413 and the server keeps serving", "[admin][http][post]")
+{
+    auto const seen = std::make_shared<BodySeen>();
+    std::vector<Pace::AdminRoute> const routes { RecordingPostRoute(seen, "/x", 16), GetRoute("/y") };
+    auto const refused = ExchangeWithRoutes("POST /x HTTP/1.1\r\nContent-Length: 17\r\n\r\n01234567890123456", routes);
+    CHECK(refused.starts_with("HTTP/1.1 413 Content Too Large\r\n"));
+    CHECK(seen->calls == 0);
+    // The control: exactly the ceiling is served, so "refuses over" and "refuses all" differ.
+    auto const atCeiling = ExchangeWithRoutes("POST /x HTTP/1.1\r\nContent-Length: 16\r\n\r\n0123456789012345", routes);
+    CHECK(atCeiling.starts_with("HTTP/1.1 200 OK\r\n"));
+    CHECK(seen->body.size() == 16);
+    CHECK(ExchangeWithRoutes("GET /y HTTP/1.1\r\n\r\n", routes).starts_with("HTTP/1.1 200 OK\r\n"));
+}
+
+TEST_CASE("admin declared length is judged before the body is read", "[admin][http][post]")
+{
+    // The body never arrives, yet the answer is 413 rather than a wait: the ceiling is checked on
+    // the declared length. Content-Length is also saturating, not overflowing.
+    std::vector<Pace::AdminRoute> const routes { RecordingPostRoute(std::make_shared<BodySeen>(), "/x", 16) };
+    for (std::string_view const length: { "17", "99999999999999999999999999", "18446744073709551616" })
+    {
+        auto const response =
+            ExchangeWithRoutes(std::format("POST /x HTTP/1.1\r\nContent-Length: {}\r\n\r\n", length), routes);
+        INFO(length);
+        CHECK(response.starts_with("HTTP/1.1 413 Content Too Large\r\n"));
+    }
+}
+
+TEST_CASE("admin a bodyless route refuses a body", "[admin][http][post]")
+{
+    std::vector<Pace::AdminRoute> const routes { GetRoute("/y") };
+    CHECK(ExchangeWithRoutes("GET /y HTTP/1.1\r\nContent-Length: 3\r\n\r\nabc", routes)
+              .starts_with("HTTP/1.1 413 Content Too Large\r\n"));
+    CHECK(ExchangeWithRoutes("GET /y HTTP/1.1\r\nContent-Length: 0\r\n\r\n", routes).starts_with("HTTP/1.1 200 OK\r\n"));
+}
+
+TEST_CASE("admin POST without Content-Length is 411", "[admin][http][post]")
+{
+    auto const seen = std::make_shared<BodySeen>();
+    std::vector<Pace::AdminRoute> const routes { RecordingPostRoute(seen, "/x", 16) };
+    CHECK(ExchangeWithRoutes("POST /x HTTP/1.1\r\n\r\n", routes).starts_with("HTTP/1.1 411 Length Required\r\n"));
+    CHECK(seen->calls == 0);
+}
+
+TEST_CASE("admin malformed Content-Length is 400", "[admin][http][post]")
+{
+    std::vector<Pace::AdminRoute> const routes { RecordingPostRoute(std::make_shared<BodySeen>(), "/x", 16) };
+    for (std::string_view const length: { "", "-1", "+4", "0x10", "4 4", "abc", "4,4" })
+    {
+        auto const response =
+            ExchangeWithRoutes(std::format("POST /x HTTP/1.1\r\nContent-Length:{}\r\n\r\nabcd", length), routes);
+        INFO("length=" << length);
+        CHECK(response.starts_with("HTTP/1.1 400 Bad Request\r\n"));
+    }
+    // Two framing headers are how one message becomes two; refused even when they agree.
+    CHECK(ExchangeWithRoutes("POST /x HTTP/1.1\r\nContent-Length: 4\r\nContent-Length: 4\r\n\r\nabcd", routes)
+              .starts_with("HTTP/1.1 400 Bad Request\r\n"));
+}
+
+TEST_CASE("admin chunked transfer-encoding is refused 501", "[admin][http][post]")
+{
+    auto const seen = std::make_shared<BodySeen>();
+    std::vector<Pace::AdminRoute> const routes { RecordingPostRoute(seen, "/x", 64), GetRoute("/y") };
+    CHECK(ExchangeWithRoutes("POST /x HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n", routes)
+              .starts_with("HTTP/1.1 501 Not Implemented\r\n"));
+    // Alongside a Content-Length it is the smuggling shape; still refused, not resolved.
+    CHECK(ExchangeWithRoutes("POST /x HTTP/1.1\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\nhello", routes)
+              .starts_with("HTTP/1.1 501 Not Implemented\r\n"));
+    CHECK(ExchangeWithRoutes("GET /y HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n", routes)
+              .starts_with("HTTP/1.1 501 Not Implemented\r\n"));
+    CHECK(seen->calls == 0);
+}
+
+TEST_CASE("admin GET on a POST-only path is 405 with Allow: POST", "[admin][http][post]")
+{
+    std::vector<Pace::AdminRoute> const routes { RecordingPostRoute(std::make_shared<BodySeen>(), "/x", 16),
+                                                 GetRoute("/both") };
+    auto const response = ExchangeWithRoutes("GET /x HTTP/1.1\r\n\r\n", routes);
+    CHECK(response.starts_with("HTTP/1.1 405 Method Not Allowed\r\n"));
+    CHECK(response.contains("Allow: POST\r\n"));
+    // Both methods registered on one path are both advertised.
+    std::vector<Pace::AdminRoute> const both { GetRoute("/b"), RecordingPostRoute(std::make_shared<BodySeen>(), "/b", 4) };
+    CHECK(ExchangeWithRoutes("DELETE /b HTTP/1.1\r\n\r\n", both).contains("Allow: GET, POST\r\n"));
+    // The built-ins stay GET, and an unknown path is not a method problem.
+    CHECK(ExchangeWithRoutes("POST /healthz HTTP/1.1\r\nContent-Length: 0\r\n\r\n", routes).contains("Allow: GET\r\n"));
+    CHECK(ExchangeWithRoutes("POST /nope HTTP/1.1\r\nContent-Length: 0\r\n\r\n", routes)
+              .starts_with("HTTP/1.1 404 Not Found\r\n"));
+}
+
+TEST_CASE("admin body arriving slower than RequestTimeout is abandoned", "[admin][http][post][timeout]")
+{
+    using namespace std::chrono_literals;
+    auto const seen = std::make_shared<BodySeen>();
+    std::vector<Pace::AdminRoute> const routes { RecordingPostRoute(seen, "/x", 64) };
+    std::string const head = "POST /x HTTP/1.1\r\nContent-Length: 10\r\n\r\n";
+    std::string const request = head + "0123456789";
+
+    auto const serve = [&](std::chrono::milliseconds perRead) {
+        auto pair = core::net::testing::InMemorySocketPair::create();
+        REQUIRE(core::async::syncRun(WriteString(pair.client.get(), request)));
+        REQUIRE(Pace::Testing::ShutdownWrite(*pair.client).has_value());
+        core::platform::ManualClock clock;
+        BodyDribbleSocket dribble { *pair.server, head.size() + 1, clock, perRead };
+        Pace::AtomicMetricsSink metrics;
+        auto provider = [] {
+            return Pace::MetricsSnapshot { .storage = std::nullopt, .host = std::nullopt, .uptime = Pace::Uptime { 1s } };
+        };
+        core::async::syncRun(Pace::ServeAdminHttp(&dribble, &metrics, provider, &clock, routes));
+        // Closed on the pipe under the decorator: the decorator hands up ONE byte per read, which
+        // would end the linger with the abandoned body still unread -- a reset that destroys the
+        // 408 in this pipe's Windows-style model, an artefact of the dribble and not of the server.
+        CloseAsServed(pair.server.get());
+        return core::async::syncRun(ReadAvailable(pair.client.get()));
+    };
+
+    // Nine more bytes at 1 s each: past RequestTimeout (2 s) long before the body completes.
+    auto const slow = serve(1s);
+    INFO(slow);
+    CHECK(slow.starts_with("HTTP/1.1 408 Request Timeout\r\n"));
+    CHECK(seen->calls == 0);
+    // The control: the same bytes with a free clock are served, so the 408 is the clock's.
+    CHECK(serve(0ms).starts_with("HTTP/1.1 200 OK\r\n"));
+    CHECK(seen->body == "0123456789");
+}
+
+TEST_CASE("admin body cut short by the peer is 400, not served", "[admin][http][post]")
+{
+    auto const seen = std::make_shared<BodySeen>();
+    std::vector<Pace::AdminRoute> const routes { RecordingPostRoute(seen, "/x", 64) };
+    CHECK(ExchangeWithRoutes("POST /x HTTP/1.1\r\nContent-Length: 10\r\n\r\nabc", routes)
+              .starts_with("HTTP/1.1 400 Bad Request\r\n"));
+    CHECK(seen->calls == 0);
+}
+
+TEST_CASE("admin pipelined bytes after the body are ignored, not executed", "[admin][http][post]")
+{
+    auto const seen = std::make_shared<BodySeen>();
+    auto const other = std::make_shared<BodySeen>();
+    std::vector<Pace::AdminRoute> const routes { RecordingPostRoute(seen, "/x", 16),
+                                                 RecordingPostRoute(other, "/other", 16) };
+    auto const response = ExchangeWithRoutes(
+        "POST /x HTTP/1.1\r\nContent-Length: 2\r\n\r\nhiPOST /other HTTP/1.1\r\nContent-Length: 1\r\n\r\nz", routes);
+    CHECK(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    CHECK(seen->body == "hi");
+    CHECK(other->calls == 0);
+    // Exactly one response was written.
+    CHECK(response.find("HTTP/1.1", 1) == std::string::npos);
+}
+
+TEST_CASE("admin handler receives the peer host and the MCP headers", "[admin][http][post]")
+{
+    auto const seen = std::make_shared<BodySeen>();
+    std::string header;
+    std::vector<Pace::AdminRoute> routes { RecordingPostRoute(seen, "/x", 16) };
+    routes.front().handler = [&header, inner = routes.front().handler](Pace::AdminRequest const& request) {
+        header = std::format("{}|{}|{}|{}|{}|{}",
+                             request.Header(Pace::AdminHeader::ContentType),
+                             request.Header(Pace::AdminHeader::Origin),
+                             request.Header(Pace::AdminHeader::Accept),
+                             request.Header(Pace::AdminHeader::McpProtocolVersion),
+                             request.Header(Pace::AdminHeader::McpMethod),
+                             request.Header(Pace::AdminHeader::McpName));
+        return inner(request);
+    };
+    auto pair = core::net::testing::InMemorySocketPair::create();
+    REQUIRE(core::async::syncRun(WriteString(
+        pair.client.get(),
+        "POST /x HTTP/1.1\r\nContent-Length: 1\r\ncontent-type: application/json\r\nORIGIN: http://localhost\r\n"
+        "Accept: text/event-stream\r\nMCP-Protocol-Version: 2026-07-28\r\nMcp-Method: tools/call\r\nMcp-Name: t\r\n\r\n{")));
+    REQUIRE(Pace::Testing::ShutdownWrite(*pair.client).has_value());
+    PeerSocket peer { *pair.server, "203.0.113.9" };
+    Pace::AtomicMetricsSink metrics;
+    core::platform::SteadyClock clock;
+    auto provider = [] {
+        return Pace::MetricsSnapshot {};
+    };
+    core::async::syncRun(Pace::ServeAdminHttp(&peer, &metrics, provider, &clock, routes));
+    CloseAsServed(&peer);
+    CHECK(seen->peerHost == "203.0.113.9");
+    CHECK(header == "application/json|http://localhost|text/event-stream|2026-07-28|tools/call|t");
+}
+
+TEST_CASE("admin a handler that throws costs a 500, not the process", "[admin][http][post]")
+{
+    std::vector<Pace::AdminRoute> routes { GetRoute("/boom") };
+    routes.front().handler = [](Pace::AdminRequest const&) -> Pace::AdminResponse {
+        throw std::runtime_error { "x" };
+    };
+    CHECK(ExchangeWithRoutes("GET /boom HTTP/1.1\r\n\r\n", routes).starts_with("HTTP/1.1 500 Internal Server Error\r\n"));
+}
+
+namespace
+{
+
+/// One request through a whole `AdminHttpServer::Run` shaped by @p profile, over an in-memory listener.
+/// @param request The raw request.
+/// @param routes The caller routes.
+/// @param profile The instance's shape.
+/// @param logger Where the server logs.
+/// @return The raw response.
+[[nodiscard]] std::string ExchangeThroughProfile(std::string_view request,
+                                                 std::vector<Pace::AdminRoute> routes,
+                                                 Pace::AdminServerProfile profile,
+                                                 Pace::ILogger& logger)
+{
+    core::net::testing::InMemoryListener listener;
+    Pace::AtomicMetricsSink metrics;
+    core::platform::SteadyClock clock;
+    core::net::AcceptLoopHealth acceptLoops;
+    Pace::AdminHttpServer server { listener,
+                                   metrics,
+                                   [] { return Pace::MetricsSnapshot {}; },
+                                   logger,
+                                   clock,
+                                   acceptLoops,
+                                   Pace::DefaultDrainWait(),
+                                   std::move(routes),
+                                   nullptr,
+                                   Pace::EverySurface,
+                                   profile };
+    auto client = listener.connectClient();
+    REQUIRE(core::async::syncRun(WriteString(client.get(), request)));
+    REQUIRE(Pace::Testing::ShutdownWrite(*client).has_value());
+    listener.close();
+    core::async::syncRun(server.Run());
+    server.Shutdown();
+    return core::async::syncRun(ReadAvailable(client.get()));
+}
+
+} // namespace
+
+TEST_CASE("admin a profile without built-in routes serves only its own", "[admin][http][profile]")
+{
+    // A second surface on this HTTP code must not grow a scrape endpoint by reuse: with the built-ins
+    // off, `/metrics` and `/healthz` are paths like any other, and the caller's route still answers.
+    Pace::NullLogger logger;
+    Pace::AdminServerProfile const bare { .surface = "probe", .builtIns = Pace::AdminBuiltInRoutes::None };
+    CHECK(ExchangeThroughProfile("GET /metrics HTTP/1.1\r\n\r\n", { GetRoute("/x") }, bare, logger)
+              .starts_with("HTTP/1.1 404 Not Found\r\n"));
+    CHECK(ExchangeThroughProfile("GET /healthz HTTP/1.1\r\n\r\n", { GetRoute("/x") }, bare, logger)
+              .starts_with("HTTP/1.1 404 Not Found\r\n"));
+    CHECK(ExchangeThroughProfile("GET /x HTTP/1.1\r\n\r\n", { GetRoute("/x") }, bare, logger)
+              .starts_with("HTTP/1.1 200 OK\r\n"));
+
+    SECTION("and the default profile keeps them: the control")
+    {
+        CHECK(ExchangeThroughProfile("GET /healthz HTTP/1.1\r\n\r\n", { GetRoute("/x") }, {}, logger)
+                  .starts_with("HTTP/1.1 200 OK\r\n"));
+    }
+}
+
+TEST_CASE("admin a profile's request cap and surface name are the ones the loop uses", "[admin][http][profile]")
+{
+    // A cap of zero refuses every connection, which is the one arrangement that shows the loop reads
+    // the profile's figure rather than the admin surface's thirty-two -- and names the profile's
+    // surface while doing it.
+    Pace::NullLogger logger;
+    auto const refused = ExchangeThroughProfile(
+        "GET /x HTTP/1.1\r\n\r\n", { GetRoute("/x") }, { .surface = "probe", .maxConcurrentRequests = 0 }, logger);
+    INFO("response was: " << refused);
+    CHECK(refused.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
+    CHECK(refused.contains("probe: too many concurrent reqs"));
+
+    SECTION("and the accept loop reports under that name")
+    {
+        Pace::CapturingLogger capturing { Pace::LogLevel::Debug };
+        core::net::testing::InMemoryListener inner;
+        core::net::testing::FailingListener listener {
+            inner, core::net::testing::repeatedFailures(core::net::NetErrorCode::ConnReset, 1)
+        };
+        Pace::AtomicMetricsSink metrics;
+        core::platform::SteadyClock clock;
+        core::net::AcceptLoopHealth acceptLoops;
+        Pace::AdminHttpServer server { listener,
+                                       metrics,
+                                       [] { return Pace::MetricsSnapshot {}; },
+                                       capturing,
+                                       clock,
+                                       acceptLoops,
+                                       Pace::DefaultDrainWait(),
+                                       {},
+                                       nullptr,
+                                       Pace::EverySurface,
+                                       { .surface = "probe" } };
+        auto client = inner.connectClient();
+        REQUIRE(Pace::Testing::ShutdownWrite(*client).has_value());
+        inner.close();
+        core::async::syncRun(server.Run());
+        server.Shutdown();
+        auto const records = capturing.Snapshot();
+        CHECK(std::ranges::any_of(records, [](Pace::CapturingLogger::Record const& record) {
+            return record.message.contains("probe: an accept failed");
+        }));
+        CHECK_FALSE(std::ranges::any_of(
+            records, [](Pace::CapturingLogger::Record const& record) { return record.message.contains("admin:"); }));
+    }
+}
+
+namespace
+{
+
+/// One POST through `AdminHttpServer::Run` over a real listener bound at @p bindHost, dialled at
+/// @p dialHost, returning the `peerHost` its route was shown -- or nothing when this platform will
+/// not bind or dial that family.
+[[nodiscard]] std::optional<std::string> PeerHostOverRealSocket(std::string_view bindHost, std::string_view dialHost)
+{
+    using namespace std::chrono_literals;
+    auto listener = Pace::BlockingListener::Bind(std::string { bindHost }, 0);
+    REQUIRE(listener != nullptr);
+    if (!listener->IsBound())
+        return std::nullopt;
+    listener->SetTimeouts(Pace::AdminHttpServer::AcceptPoll, Pace::AdminHttpServer::RequestTimeout);
+    auto const port = listener->boundPort();
+
+    auto const seen = std::make_shared<BodySeen>();
+    Pace::NullLogger logger;
+    Pace::AtomicMetricsSink metrics;
+    core::platform::SteadyClock clock;
+    core::net::AcceptLoopHealth acceptLoops;
+    Pace::AdminHttpServer server { *listener,
+                                   metrics,
+                                   [] { return Pace::MetricsSnapshot {}; },
+                                   logger,
+                                   clock,
+                                   acceptLoops,
+                                   Pace::DefaultDrainWait(),
+                                   { RecordingPostRoute(seen, "/x", 16) } };
+    std::jthread acceptThread { [&server] { core::async::syncRun(server.Run()); } };
+    // Declared after the thread, so it runs first: the loop is asked to stop before the join, and a
+    // failed assertion below cannot leave the join waiting on a loop nobody stopped.
+    auto const requestStop = [](Pace::AdminHttpServer* admin) {
+        admin->RequestStop();
+    };
+    std::unique_ptr<Pace::AdminHttpServer, decltype(requestStop)> const stopFirst { &server, requestStop };
+
+    core::net::BlockingConnector connector;
+    auto client = core::async::syncRun(
+        connector.connect(std::string { dialHost }, port, core::net::DialOptions { .connectTimeout = 5s }));
+    if (!client.has_value())
+        return std::nullopt;
+    REQUIRE(core::async::syncRun(WriteString(client->get(), "POST /x HTTP/1.1\r\nContent-Length: 1\r\n\r\n{")));
+    auto const response = core::async::syncRun(ReadAvailable(client->get()));
+    INFO("response was: " << response.substr(0, 64));
+    REQUIRE(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    REQUIRE(seen->calls == 1);
+    return seen->peerHost;
+}
+
+} // namespace
+
+TEST_CASE("admin a real loopback connection's peerHost is the kernel's loopback literal", "[admin][http][peer]")
+{
+    // What a route deciding on WHO is asking actually reads, off a real socket rather than a fake:
+    // `inet_ntop`'s host, no port and no brackets. The MCP surface admits on exactly this string.
+    auto const peer = PeerHostOverRealSocket("127.0.0.1", "127.0.0.1");
+    if (!peer.has_value())
+        SKIP("this platform would not bind or dial an IPv4 loopback listener");
+    CHECK(*peer == "127.0.0.1");
+    CHECK(Pace::IsLoopbackHost(*peer));
+}
+
+TEST_CASE("admin a real IPv6 loopback connection's peerHost is ::1, unbracketed", "[admin][http][peer]")
+{
+    auto const peer = PeerHostOverRealSocket("::1", "::1");
+    if (!peer.has_value())
+        SKIP("this host has no IPv6 loopback to bind or dial");
+    CHECK(*peer == "::1");
+    CHECK(Pace::IsLoopbackHost(*peer));
 }

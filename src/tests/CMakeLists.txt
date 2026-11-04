@@ -4814,6 +4814,20 @@ else()
         TIMEOUT 600
     )
 
+    # The MCP surface over a real `--mcp-listen` port, spoken to the way a client does: both
+    # eras answered, no scrape endpoint on the port, and a network address refused at startup.
+    # Skips 77 without curl or python3, which are the client and the JSON judge.
+    add_test(
+        NAME "node-mcp-e2e"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/node-mcp-e2e.sh"
+            --node "$<TARGET_FILE:pace-node>"
+    )
+    set_tests_properties("node-mcp-e2e" PROPERTIES
+        LABELS "smoke"
+        SKIP_RETURN_CODE 77
+        TIMEOUT 300
+    )
+
     add_test(
         NAME "fleet-dashboard-e2e"
         COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/fleet-dashboard-e2e.sh"
@@ -4868,6 +4882,44 @@ else()
             TIMEOUT 600
         )
     endif()
+
+    # The MCP enrollment tools against a real leader and two real joiners: the `decision` field
+    # read back after an approve and a reject, and a learner refused the control verbs by name.
+    # Binds this host's primary IPv4 address (a fleet on loopback admits no joiner) and skips 77
+    # on a host with none, or without curl or python3.
+    add_test(
+        NAME "node-mcp-enrollment-e2e"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/node-mcp-enrollment-e2e.sh"
+            --node "$<TARGET_FILE:pace-node>"
+    )
+    set_tests_properties("node-mcp-enrollment-e2e" PROPERTIES
+        LABELS "smoke"
+        SKIP_RETURN_CODE 77
+        TIMEOUT 300
+    )
+endif()
+
+# ---------------------------------------------------------------------------
+# Hostile input against the node's MCP surface, and what it must not disturb: `/healthz` on the
+# admin surface and a `pace-cc` FETCH from the node's cache tier answer throughout, and the node
+# stops cleanly. Registered here rather than in the node block above because it names two
+# executables, so it needs both targets. Skips 77 without curl, python3 or a C++ compiler.
+if(NOT TARGET pace-node OR NOT TARGET pace-cc)
+    message(STATUS "node-mcp-hostile-e2e: compile node or launcher not built — skipping")
+elseif(WIN32)
+    message(STATUS "node-mcp-hostile-e2e: POSIX-only fixture — skipping on Windows")
+else()
+    add_test(
+        NAME "node-mcp-hostile-e2e"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/node-mcp-hostile-e2e.sh"
+            --node "$<TARGET_FILE:pace-node>"
+            --launcher "$<TARGET_FILE:pace-cc>"
+    )
+    set_tests_properties("node-mcp-hostile-e2e" PROPERTIES
+        LABELS "smoke"
+        SKIP_RETURN_CODE 77
+        TIMEOUT 180
+    )
 endif()
 
 # ---------------------------------------------------------------------------
@@ -8124,12 +8176,36 @@ if(TARGET PaceTest)
         # the assertion that could not have failed while this ticket was open: 69
         # cases ran, and 69 is non-zero.
         #
-        # 275 = 204 (CompileCacheWire) + 26 (RaftWire) + 17 (ClusterState)
-        #     + 23 (DiscoveryWire) + 1 (RaftTypes) + 1 (SchedulerService)
-        #     + 1 (MachineTicket) + 1 (MachineStanding) + 1 (IdentityKeyLabel).
-        # The first four files are wholly wire subject and are the scan's table; the
-        # last five carry wire cases among others, which is why the scan cannot cover
-        # them and why this number is the only thing that watches them.
+        # 309 = 213 (CompileCacheWire) + 26 (RaftWire) + 27 (ClusterState)
+        #     + 23 (DiscoveryWire) + 9 (FingerprintInputsWire) + 6 (NodeStatusDetailWire)
+        #     + 1 (RaftTypes) + 1 (SchedulerService) + 1 (MachineTicket)
+        #     + 1 (MachineStanding) + 1 (IdentityKeyLabel), read off `PaceTest "[wire]"
+        #     --list-tests --verbosity high`. CompileCacheWire, RaftWire, DiscoveryWire,
+        #     RaftTypes and FingerprintInputsWire are wholly wire subject and are the scan's
+        #     table; the rest carry wire cases among others, which is why the scan cannot
+        #     cover them and why this number is the only thing that watches them.
+        #
+        # What moved it from 277 to 283: "A capacity record carries the toolchain family
+        # as its eleventh field" in CompileCacheWire (+1), and NodeStatusDetailWire, a new
+        # file of five wire cases (+5). From 283 to 291: FingerprintInputsWire, a new file
+        # of eight wire cases -- the FINGERPRINT-INPUTS opcode byte and row, and its
+        # request, page and index grammars (+8). From 291 to 292: the 0x34
+        # fingerprint-inputs-unrecorded byte pin in FingerprintInputsWire (+1). From 292
+        # to 296: the MEMBER-EDIT opcode, edit and frame in CompileCacheWire (+1), and in
+        # ClusterState the SetDisplayName verb byte, a display name's round trip through a
+        # command and a snapshot, and a snapshot holding a name Apply never records (+3). From
+        # 296 to 298, in ClusterState: an admission under an id a display name spells clears
+        # the name and the state stays readable, and a state carrying that collision decodes
+        # (+2). From 298 to 300, in CompileCacheWire: the FLEET-TEXT node selector as the
+        # request's fifth field, and a history bucket's absence mask as its optional fourth
+        # (+2). From 300 to 301, in CompileCacheWire: ADMIT and LEASE carry the ask
+        # origin as their last byte, pinned (+1). From 301 to 305: the budget edits' values in
+        # CompileCacheWire (+1), and in ClusterState the budget verbs' bytes, an override and its
+        # baseline through a command and a snapshot, and a snapshot holding an override Apply never
+        # records (+3). From 305 to 306: the MEMBER-REPORT opcode, report bytes and frame in
+        # CompileCacheWire (+1). From 306 to 307: a budget row whose note is over its ceiling, or whose
+        # figure is the wrong width, refused, in NodeStatusDetailWire (+1). From 307 to 309, in
+        # ClusterState: the last release's state and its command are read and converted (+2).
         #
         # `[(]` rather than `\(`: CMake reads `\(` in a quoted argument as an escape
         # and stores a bare `(`, which its regex engine then takes as a capture group
@@ -8141,7 +8217,7 @@ if(TARGET PaceTest)
         # anything matches nothing. No `SKIP_RETURN_CODE` here: every selected case
         # must PASS for the count to be the count, so a run that skipped is a failure
         # of this check, never a state to report.
-        PASS_REGULAR_EXPRESSION "All tests passed [(][0-9]+ assertions in 275 test cases[)]"
+        PASS_REGULAR_EXPRESSION "All tests passed [(][0-9]+ assertions in 309 test cases[)]"
         LABELS "hygiene"
         TIMEOUT 300
     )

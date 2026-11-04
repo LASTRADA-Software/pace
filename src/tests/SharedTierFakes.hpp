@@ -41,7 +41,7 @@ class HookedStorage final: public IStorage
 {
   public:
     /// @param inner The store; owned.
-    /// @param hook Run once, at the next `Get` or `Set`, and then cleared; must outlive this.
+    /// @param hook Run once, at the next `Get`, `Set` or `EvictStep`, and then cleared; must outlive this.
     HookedStorage(std::unique_ptr<IStorage> inner, std::function<void()>& hook) noexcept:
         _inner { std::move(inner) },
         _hook { hook }
@@ -184,6 +184,19 @@ class HookedStorage final: public IStorage
     PurgeOutcome PurgeExpired(core::platform::SteadyTimePoint now, PurgeBudget budget) override
     {
         return _inner->PurgeExpired(now, budget);
+    }
+
+    std::optional<std::size_t> ResizeTier(StorageTier tier, std::size_t newMaxBytes) override
+    {
+        return _inner->ResizeTier(tier, newMaxBytes);
+    }
+
+    /// Runs the hook too, so a case can make one eviction step fail -- an exception on the driver's thread.
+    /// @return The inner store's answer.
+    EvictStepOutcome EvictStep() override
+    {
+        RunHook();
+        return _inner->EvictStep();
     }
 
     void Resize(std::size_t newMaxBytes) override

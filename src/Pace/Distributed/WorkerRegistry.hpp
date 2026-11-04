@@ -87,6 +87,11 @@ struct WorkerInfo
     /// override is never probed, so there is no banner to read a label out of.
     std::string toolchainLabel {};
 
+    /// Which compiler family the toolchain belongs to, as the node derived it from the banner
+    /// (`CompileCacheWire::CapacityFields::toolchainFamily`): what the upgrade report groups versions by. Empty
+    /// means it did not say, and such an entry joins no family. Advice only -- per entry, like the label.
+    std::string toolchainFamily {};
+
     /// What a person calls this machine, e.g. `buildnode-3`. Empty means it did not say.
     ///
     /// **Advisory, and never a key** (#1024). `id`, `fingerprint` and `endpoint` decide
@@ -194,6 +199,12 @@ struct WorkerReport
     /// this struct: handed an instant, a consumer subtracts `steady_clock::now()`,
     /// which is right in production and silently wrong under every `core::platform::ManualClock`.
     std::optional<std::chrono::milliseconds> lastPickedAge {};
+
+    /// The id of the cluster member whose identity key this entry's REGISTER connection PROVED
+    /// (`WorkerInfo::identityKey`); empty when it proved none, no member holds that key, or this
+    /// node holds no cluster state. Filled by `CollectFleet`, never by the registry, and never from
+    /// the endpoint the entry registered with, which is the machine's own unverified claim.
+    std::string memberId {};
 };
 
 /// One live MACHINE, grouped as an operator means "node".
@@ -271,6 +282,23 @@ struct NodeReport
     /// What a person calls the machine, from the contributing entry. Empty means it
     /// did not say -- see `WorkerInfo::displayName`, and note it decides nothing.
     std::string displayName {};
+    /// The identity key the machine's connection PROVED, raw: the contributing worker entry's
+    /// (`WorkerInfo::identityKey`), or for a machine running no worker the key its last
+    /// NODE-ANNOUNCE proved. Empty when none was recorded.
+    ///
+    /// What the fleet page joins a machine to its replicated member record BY -- for the display
+    /// name alone, which decides nothing -- because the key is the one fact both hold that no
+    /// caller states: an endpoint is the machine's own claim, a key is what it proved.
+    std::string identityKey {};
+    /// The display name the cluster RECORDS for the member holding `identityKey`
+    /// (`Cluster::ClusterMember::displayName`); empty when the cluster names it nothing or this
+    /// node holds no cluster state. Filled by `CollectFleet`, never by the registry, which holds
+    /// no replicated state.
+    std::string replicatedName {};
+    /// The id of the member holding `identityKey`, from the same join as `replicatedName`; empty
+    /// when none does. What names this machine as a member anywhere a reader asks -- by the key it
+    /// PROVED, never by the endpoint it claimed.
+    std::string memberId {};
     /// What the machine last said is wrong with it (#1364), or ABSENT when it said nothing --
     /// a node too old to carry conditions, or one whose announcements have stopped reaching
     /// this leader while a worker entry keeps its row alive.
@@ -346,6 +374,10 @@ struct WorkerRegistration
     /// What a person calls the toolchain, e.g. `cl 19.44.35207`; empty means it did
     /// not say. Display only -- see `WorkerInfo::toolchainLabel` (#194).
     std::string_view toolchainLabel {};
+
+    /// Which compiler family the toolchain belongs to; empty means it did not say. Advice only -- see
+    /// `WorkerInfo::toolchainFamily`.
+    std::string_view toolchainFamily {};
 
     /// What a person calls the machine; empty means it did not say. Advisory only --
     /// see `WorkerInfo::displayName` (#1024).
@@ -584,11 +616,13 @@ class WorkerRegistry
     /// @param version What software it runs; empty means it did not say.
     /// @param conditions What it says is wrong with it; absent when it said nothing. Replaced
     ///        wholesale, so a live condition that cleared is clear here on the next announcement.
+    /// @param identityKey The key the announcing connection proved, raw; empty when none.
     void NoteNodePresent(std::string endpoint,
                          NodeCapacity const& capacity,
                          NodeLoad const& load,
                          std::string version,
-                         std::optional<std::vector<CompileCacheWire::NodeConditionFields>> conditions = std::nullopt);
+                         std::optional<std::vector<CompileCacheWire::NodeConditionFields>> conditions = std::nullopt,
+                         std::string identityKey = {});
 
     /// Drop one registration because the worker says it no longer serves it.
     ///
@@ -726,6 +760,7 @@ class WorkerRegistry
         NodeLoad load {};
         std::string version {};
         std::optional<std::vector<CompileCacheWire::NodeConditionFields>> conditions {};
+        std::string identityKey {};
         core::platform::SteadyTimePoint lastSeen {};
     };
     std::map<std::string, Presence> _present;

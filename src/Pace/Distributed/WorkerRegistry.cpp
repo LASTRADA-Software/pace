@@ -74,6 +74,7 @@ std::string WorkerRegistry::Register(WorkerRegistration const& registration)
         // kept its fingerprint pinned, and a label held over would name the compiler
         // that is no longer there.
         existing->second.info.toolchainLabel = std::string { registration.toolchainLabel };
+        existing->second.info.toolchainFamily = std::string { registration.toolchainFamily };
         existing->second.info.displayName = std::string { registration.displayName };
         // Refreshed whole for `version`'s reason, and because a re-registration is a
         // statement of where the worker is NOW: a VPN reconnect is one way to get here.
@@ -131,6 +132,7 @@ std::string WorkerRegistry::Register(WorkerRegistration const& registration)
                                  .endpoint = std::string { registration.endpoint },
                                  .version = std::string { registration.version },
                                  .toolchainLabel = std::string { registration.toolchainLabel },
+                                 .toolchainFamily = std::string { registration.toolchainFamily },
                                  .displayName = std::string { registration.displayName },
                                  .slots = OfferableSlots(registration.capacity, RequestedSlots(registration)),
                                  .inFlight = 0,
@@ -508,7 +510,8 @@ void WorkerRegistry::NoteNodePresent(std::string endpoint,
                                      NodeCapacity const& capacity,
                                      NodeLoad const& load,
                                      std::string version,
-                                     std::optional<std::vector<CompileCacheWire::NodeConditionFields>> conditions)
+                                     std::optional<std::vector<CompileCacheWire::NodeConditionFields>> conditions,
+                                     std::string identityKey)
 {
     std::scoped_lock const guard { _mutex };
     auto& slot = _present[std::move(endpoint)];
@@ -516,6 +519,7 @@ void WorkerRegistry::NoteNodePresent(std::string endpoint,
     slot.load = load;
     slot.version = std::move(version);
     slot.conditions = std::move(conditions);
+    slot.identityKey = std::move(identityKey);
     slot.lastSeen = _clock.now();
 }
 
@@ -532,6 +536,11 @@ std::vector<NodeReport> WorkerRegistry::NodeReports() const
         NodeReport report;
         core::platform::SteadyTimePoint lastSeen {};
         bool contributorSaysCache { false };
+        /// Whether the entries folded into this row proved DIFFERENT identity keys (one proving none counts). Then
+        /// the row is no one machine's account and its key is left empty, never one contributor's -- the rule the
+        /// MCP `toolchains` tool applies to the same registrations.
+        bool keysDisagree { false };
+        std::string firstKey {}; ///< The key the row's first contributor proved, which `keysDisagree` compares with.
     };
     std::map<std::string, Candidate> byEndpoint;
 
@@ -550,13 +559,19 @@ std::vector<NodeReport> WorkerRegistry::NodeReports() const
                                                                       .fleetJobsInFlight = entry.info.inFlight,
                                                                       .heartbeatAge = AgeOf(entry.lastSeen, now),
                                                                       .version = entry.info.version,
-                                                                      .displayName = entry.info.displayName },
+                                                                      .displayName = entry.info.displayName,
+                                                                      .identityKey = entry.info.identityKey },
                                                .lastSeen = entry.lastSeen,
-                                               .contributorSaysCache = SaysAnything(entry.info.load.cache) });
+                                               .contributorSaysCache = SaysAnything(entry.info.load.cache),
+                                               .keysDisagree = false,
+                                               .firstKey = entry.info.identityKey });
         if (inserted)
             continue;
 
         auto& held = slot->second;
+        // Compared against the FIRST contributor's key, which the "better" choice below may overwrite: any entry
+        // differing from any other makes the row disagree, whichever of them ends up contributing.
+        held.keysDisagree = held.keysDisagree || entry.info.identityKey != held.firstKey;
 
         // The only field that ADDS across a machine's sibling entries is the list
         // of toolchains, because that is the one thing the entries genuinely differ
@@ -597,10 +612,17 @@ std::vector<NodeReport> WorkerRegistry::NodeReports() const
             // the whole row one entry's account rather than a blend of several.
             held.report.version = entry.info.version;
             held.report.displayName = entry.info.displayName;
+            held.report.identityKey = entry.info.identityKey;
             held.lastSeen = entry.lastSeen;
             held.contributorSaysCache = saysCache;
         }
     }
+
+    // A row whose registrations proved different keys is not ONE proven machine: no key, so nothing joins it to a
+    // member (`CollectFleet`), rather than whichever contributor happened to win the choice above.
+    for (auto& [endpoint, candidate]: byEndpoint)
+        if (candidate.keysDisagree)
+            candidate.report.identityKey.clear();
 
     // Every machine that announced itself, for the endpoints no live worker covers. The
     // worker entries WIN where both exist: they carry what can be leased, and a machine that
@@ -620,7 +642,13 @@ std::vector<NodeReport> WorkerRegistry::NodeReports() const
             // exception is forced: `NodeAnnounce` is the only verb that carries a machine's
             // conditions (#1364), so a worker entry has none to offer and the row would read
             // ABSENT on every machine that runs a worker. Nothing else is taken from here.
-            held->second.report.conditions = presence.conditions;
+            //
+            // And only from the SAME proven machine: an endpoint is a claim, so an announcement attaches its
+            // conditions to a worker-owned row only when the key that announcement proved is the row's own, both
+            // non-empty. Conservative by choice: a row with no key (unproven, or registrations that disagree) takes
+            // none and reads ABSENT -- "said nothing" -- rather than another machine's conditions under its name.
+            if (!presence.identityKey.empty() && presence.identityKey == held->second.report.identityKey)
+                held->second.report.conditions = presence.conditions;
             continue;
         }
 
@@ -637,9 +665,13 @@ std::vector<NodeReport> WorkerRegistry::NodeReports() const
                                                               .heartbeatAge = AgeOf(presence.lastSeen, now),
                                                               .version = presence.version,
                                                               .displayName = {},
+                                                              .identityKey = presence.identityKey,
+                                                              .replicatedName = {},
                                                               .conditions = presence.conditions },
                                        .lastSeen = presence.lastSeen,
-                                       .contributorSaysCache = SaysAnything(presence.load.cache) });
+                                       .contributorSaysCache = SaysAnything(presence.load.cache),
+                                       .keysDisagree = false,
+                                       .firstKey = presence.identityKey });
     }
 
     std::vector<NodeReport> out;

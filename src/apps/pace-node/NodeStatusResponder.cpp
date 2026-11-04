@@ -1,18 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
+#include "BudgetOverrideApplier.hpp"
+#include "EffectiveConfig.hpp"
 #include "MembershipGate.hpp"
 #include "NodeIdentity.hpp"
+#include "NodeNameResolver.hpp"
 #include "NodeStatusResponder.hpp"
 #include "NodeSurfaces.hpp"
 
+#include <Pace/Cache/StorageTier.hpp>
 #include <Pace/Cluster/FleetPin.hpp>
 #include <Pace/Core/Ed25519.hpp>
 #include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/PeerText.hpp>
 #include <Pace/Distributed/MachineStanding.hpp>
 #include <Pace/Distributed/MembershipWire.hpp>
+#include <Pace/Platform/NarrowText.hpp>
 #include <Pace/Protocol/SurfaceRefusal.hpp>
 
 #include <algorithm>
 #include <array>
+#include <format>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -230,6 +237,44 @@ namespace
                                                                              .rationale = row.policy.rationale };
                                                }),
                   "every endpoint refusal row must state either a counter or a rationale, and not both");
+
+    /// How one limit's ceiling is read out of `Distributed::SlotCeilings`: a row per `SlotLimit`, so a limit
+    /// added there without a reader here is a build failure rather than a ceiling `node-status` never names.
+    struct CeilingReaderRow
+    {
+        Distributed::SlotLimit limit;                                           ///< The limit.
+        std::optional<std::uint32_t> (*read)(Distributed::SlotCeilings const&); ///< Its ceiling, or absent.
+    };
+
+    constexpr EnumTable<Distributed::SlotLimit, CeilingReaderRow> CeilingReaders { {
+        { .limit = Distributed::SlotLimit::Registered,
+          .read = [](Distributed::SlotCeilings const& c) { return std::optional { c.registered }; } },
+        { .limit = Distributed::SlotLimit::ExternalCpu,
+          .read = [](Distributed::SlotCeilings const& c) { return c.byExternalCpu; } },
+        { .limit = Distributed::SlotLimit::Memory, .read = [](Distributed::SlotCeilings const& c) { return c.byMemory; } },
+        { .limit = Distributed::SlotLimit::Scratch, .read = [](Distributed::SlotCeilings const& c) { return c.byScratch; } },
+        { .limit = Distributed::SlotLimit::CompileBudget,
+          .read = [](Distributed::SlotCeilings const& c) { return c.byCompileBudget; } },
+        // A cordon is a decision, not a resource: a ceiling of zero while it binds, and no ceiling otherwise --
+        // `SlotCeilingsFor` applies it last and names it on every tie, so binding is exactly *cordoned*.
+        { .limit = Distributed::SlotLimit::Cordoned,
+          .read =
+              [](Distributed::SlotCeilings const& c) {
+                  return c.binding == Distributed::SlotLimit::Cordoned ? std::optional { std::uint32_t { 0 } }
+                                                                       : std::nullopt;
+              } },
+    } };
+    static_assert(RowsInEnumeratorOrder(CeilingReaders, &CeilingReaderRow::limit),
+                  "CeilingReaders must hold one row per SlotLimit, in enumerator order");
+
+    /// @param ceilings What `SlotCeilingsFor` computed.
+    /// @param limit One limit.
+    /// @return Its ceiling, or absent where it did not apply.
+    [[nodiscard]] std::optional<std::uint32_t> CeilingSlots(Distributed::SlotCeilings const& ceilings,
+                                                            Distributed::SlotLimit limit)
+    {
+        return CeilingReaders[static_cast<std::size_t>(limit)].read(ceilings);
+    }
 } // namespace
 
 std::vector<std::byte> NodeStatusResponder::RefusalReply(CompileCacheWire::PrePayloadDecision decision,
@@ -359,9 +404,17 @@ core::async::Task<FrameReply> NodeStatusResponder::Answer(std::span<std::byte co
 
     switch (static_cast<CompileCacheWire::Op>(header->opRaw))
     {
-        case CompileCacheWire::Op::NodeStatus:
+        case CompileCacheWire::Op::NodeStatus: {
+            auto fields = _identity.Describe();
+            // The configuration in force is told only to a caller a route IDENTIFIES -- this machine, a proven key,
+            // a verified ticket -- never to one `--fleet-open` admitted alone, who could be anybody on the network.
+            // Withheld rather than refused: the rest of the record is what every member may read, and absent says
+            // *not told*, which is not *has none*. The same fold every surface enforces, never a second check.
+            if (!Distributed::RestsOnIdentifiedCaller(Distributed::ExplainConnection(_membership, peer)))
+                fields.runtime.effectiveConfig.reset();
             co_return CompileCacheWire::EncodeReply(CompileCacheWire::Status::Ok,
-                                                    CompileCacheWire::EncodeNodeStatus(_identity.Describe()));
+                                                    CompileCacheWire::EncodeNodeStatus(fields));
+        }
         case CompileCacheWire::Op::NodeMetrics: {
             // The reading `/metrics` renders -- every counter and every block of the snapshot beside
             // them -- in the encoding a live-stats cache subject streams (#1406). ONE capture, so the
@@ -371,6 +424,26 @@ core::async::Task<FrameReply> NodeStatusResponder::Answer(std::span<std::byte co
             if (!capture.has_value())
                 co_return Cc::RefuseWithoutCounter(NodeIsStopping, "this node is stopping");
             co_return CompileCacheWire::EncodeReply(CompileCacheWire::Status::Ok, capture->body);
+        }
+        case CompileCacheWire::Op::FingerprintInputs: {
+            // A banner and an include tree describe the host, so they are told only where the configuration is: to a
+            // caller a route IDENTIFIES, never to one `--fleet-open` admitted alone. Refused rather than withheld --
+            // the reply is nothing BUT the detail -- and uncounted, as `explain-admission`'s machine form is.
+            if (!Distributed::RestsOnIdentifiedCaller(Distributed::ExplainConnection(_membership, peer)))
+                co_return Cc::RefuseWithoutCounter(
+                    { .code = CompileCacheWire::ErrorCode::IdentifiedCallerRequired,
+                      .rationale = "a diagnostic question, answered with its remedy; the event an operator watches for "
+                                   "an unidentified caller is the control verbs' refusal, and this one changes nothing" },
+                    "fingerprint-inputs describes this machine's toolchains, so it is answered to a caller this node can "
+                    "identify: from this machine, with a proven key, or with the machine ticket a fleet node mints");
+            if (_fingerprintInputs == nullptr)
+                co_return Cc::RefuseWithoutCounter(
+                    { .code = CompileCacheWire::NoCompileWorker::Code,
+                      .rationale = "a node built without the fingerprint-inputs answerer serves no toolchain to explain" },
+                    std::format("{}, so it holds no fingerprint inputs", CompileCacheWire::NoCompileWorker::Stem));
+            auto const payload = frame.subspan(CompileCacheWire::RequestHeaderSize);
+            co_return _fingerprintInputs->Answer(payload.size() == header->payloadLength ? std::optional { payload }
+                                                                                         : std::nullopt);
         }
         case CompileCacheWire::Op::ExplainAdmission: {
             auto const payload = frame.subspan(CompileCacheWire::RequestHeaderSize);
@@ -410,8 +483,93 @@ ConfiguredNodeStatus::ConfiguredNodeStatus(NodeConfig const& cfg,
     _version { std::move(version) },
     _nodeId { std::move(nodeId) },
     _components { components },
-    _sources { sources }
+    _sources { std::move(sources) }
 {
+}
+
+void ConfiguredNodeStatus::DescribeDetail(CompileCacheWire::NodeRuntimeFields& runtime) const
+{
+    // The ceilings the last heartbeat's load put on the slots, named through the scheduler's own table so the
+    // name a reader sees is the one a fleet page prints for the same limit. Absent before the first heartbeat
+    // has sampled the host: a reading nobody took is not a worker bound by nothing.
+    if (auto const reading = _sources.runtime != nullptr ? _sources.runtime->SlotCeilings() : std::nullopt)
+    {
+        auto record = CompileCacheWire::NodeSlotCeilingsFields {
+            .ceilings = {},
+            .available = reading->ceilings.available,
+            .binding = std::string { Distributed::TraitsFor(reading->ceilings.binding).name },
+            .sampledSecondsAgo = static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::seconds>(_clock.now() - reading->sampledAt).count()),
+        };
+        for (auto const& row: Distributed::SlotLimitTable)
+            record.ceilings.push_back(CompileCacheWire::NodeSlotCeilingFields {
+                .name = std::string { row.name }, .slots = CeilingSlots(reading->ceilings, row.limit) });
+        runtime.slotCeilings = std::move(record);
+    }
+
+    // Each tier the cache has, positionally by `StorageTier`, from the storage's own snapshot; a tier the cache
+    // lacks stays a disengaged position, never a tier of zeroes.
+    if (_sources.cacheTiers != nullptr)
+    {
+        auto const snapshot = _sources.cacheTiers->SnapshotTiers();
+        auto tiers = CompileCacheWire::NodeTiersFields {};
+        tiers.reserve(StorageTierTable.size());
+        for (auto const& row: StorageTierTable)
+        {
+            auto const& stats = snapshot[static_cast<std::size_t>(row.tier)];
+            if (!stats.has_value())
+            {
+                tiers.emplace_back();
+                continue;
+            }
+            tiers.emplace_back(
+                CompileCacheWire::NodeTierFields { .entries = static_cast<std::uint64_t>(stats->itemCount),
+                                                   .bytesUsed = static_cast<std::uint64_t>(stats->bytesUsed),
+                                                   .bytesLimit = static_cast<std::uint64_t>(stats->bytesLimit),
+                                                   .hits = stats->getHits,
+                                                   .misses = stats->getMisses });
+        }
+        runtime.tiers = std::move(tiers);
+    }
+
+    // The configuration IN FORCE, read now: a reload accepted a second ago shows. Every credential is redacted
+    // here, before the record exists, so no reader of this reply -- local or another member -- can see one.
+    if (_sources.config != nullptr)
+        runtime.effectiveConfig = EffectiveConfigOf(_sources.config->Current());
+
+    // Every tier's budget as the applier last left it -- in force, from where, against which baseline -- with what
+    // is still over it read off the store NOW, and the setter's display name off the state applied NOW: one row per
+    // tier the node has or the cluster records an override for. ABSENT where nothing applies budgets.
+    if (_sources.budgets != nullptr)
+    {
+        auto const snapshot = _sources.cacheTiers != nullptr ? _sources.cacheTiers->SnapshotTiers() : TieredStorageStats {};
+        auto const state = _sources.cluster != nullptr ? _sources.cluster->AppliedState() : std::nullopt;
+        auto rows = std::vector<CompileCacheWire::NodeBudgetOverrideFields> {};
+        for (auto const& status: _sources.budgets->BudgetStatus())
+        {
+            auto const& stats = snapshot[static_cast<std::size_t>(status.tier)];
+            auto row = CompileCacheWire::NodeBudgetOverrideFields {
+                .tier = static_cast<std::uint8_t>(status.tier),
+                .bytes = status.effective,
+                .baselineBytes = status.recorded.has_value() ? status.recorded->baseline : std::nullopt,
+                .source = std::string { BudgetSourceName(status.source) },
+                .configuredBytes = status.configured,
+                .overrideBytes = status.recorded.transform([](Cluster::BudgetOverride const& o) { return o.bytes; }),
+                .setAtUnixSeconds =
+                    status.recorded.transform([](Cluster::BudgetOverride const& o) { return o.setAtUnixSeconds; }),
+                .setBy = status.recorded.has_value() ? status.recorded->setBy : std::string {},
+                .setByName = {},
+                .excessBytes = stats.has_value() && status.effective.has_value()
+                                   ? std::optional { static_cast<std::uint64_t>(IStorage::BytesOverBudget(stats)) }
+                                   : std::nullopt,
+                .note = BoundedPeerText(status.note, CompileCacheWire::MaxBudgetOverrideNoteBytes),
+            };
+            if (state.has_value() && !row.setBy.empty())
+                row.setByName = DisplayNameIn(*state, row.setBy).value_or(std::string {});
+            rows.push_back(std::move(row));
+        }
+        runtime.budgetOverrides = std::move(rows);
+    }
 }
 
 CompileCacheWire::NodeStatusFields ConfiguredNodeStatus::Describe() const
@@ -432,6 +590,7 @@ CompileCacheWire::NodeStatusFields ConfiguredNodeStatus::Describe() const
         { .surface = NodeSurface::Admin, .tag = CompileCacheWire::WireSurface::Admin },
         { .surface = NodeSurface::Raft, .tag = CompileCacheWire::WireSurface::Raft },
         { .surface = NodeSurface::Discovery, .tag = CompileCacheWire::WireSurface::Discovery },
+        { .surface = NodeSurface::Mcp, .tag = CompileCacheWire::WireSurface::Mcp },
     };
 
     // **There is deliberately no `--tls` boolean to read.** TLS is on by naming material
@@ -582,10 +741,12 @@ CompileCacheWire::NodeStatusFields ConfiguredNodeStatus::Describe() const
     // Where this node keeps its identity, and why there. One machine can hold two identities --
     // the service's in the machine-wide directory and a hand-started node's in the account's
     // own -- and an operator who finds both needs the reason beside each path to tell them
-    // apart. Both or neither, like the fields say.
+    // apart. Both or neither, like the fields say. Through `PathBytes`, never `path.string()`, which on Windows
+    // throws for a path that does not convert and would turn this answer into a failure: the bytes travel, and
+    // the reader marks what is not text.
     if (auto chosen = ChosenStateDirectory(_cfg); chosen.has_value())
     {
-        fields.runtime.stateDirectory = chosen->path.string();
+        fields.runtime.stateDirectory = PathBytes(chosen->path);
         fields.runtime.stateDirectoryReason = std::string { DescribeStateDirectoryOrigin(chosen->origin) };
     }
 
@@ -628,6 +789,16 @@ CompileCacheWire::NodeStatusFields ConfiguredNodeStatus::Describe() const
     // like everything above, so an apply that moves the setting shows on the next answer.
     if (_sources.sharedCache != nullptr)
         fields.runtime.sharedCache = _sources.sharedCache->Report();
+
+    // The two halves of the name a surface shows (`Distributed::NameShown`): the display name the applied state records
+    // for this node, read per request so a rename shows on the next answer, and what the machine calls itself.
+    if (auto const state = _sources.cluster != nullptr ? _sources.cluster->AppliedState() : std::nullopt;
+        state.has_value() && !fields.nodeId.empty())
+        fields.runtime.displayName = DisplayNameIn(*state, fields.nodeId);
+    if (!_sources.hostName.empty())
+        fields.runtime.hostName = _sources.hostName;
+
+    DescribeDetail(fields.runtime);
 
     for (auto const& mapping: mappings)
     {

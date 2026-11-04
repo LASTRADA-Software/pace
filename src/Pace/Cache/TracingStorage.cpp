@@ -379,6 +379,16 @@ void TracingStorage::Resize(std::size_t newMaxBytes)
     _inner.Resize(newMaxBytes);
 }
 
+std::optional<std::size_t> TracingStorage::ResizeTier(StorageTier tier, std::size_t newMaxBytes)
+{
+    return _inner.ResizeTier(tier, newMaxBytes);
+}
+
+IStorage::EvictStepOutcome TracingStorage::EvictStep()
+{
+    return _inner.EvictStep();
+}
+
 StorageStats TracingStorage::Snapshot() const noexcept
 {
     return _inner.Snapshot();

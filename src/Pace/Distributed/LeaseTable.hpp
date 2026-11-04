@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <Pace/Distributed/AdmissionQueue.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <chrono>
@@ -43,6 +44,25 @@ struct Lease
     /// different clock -- two derivations of one fact, which the caching principle in
     /// AGENT.md names as the thing a wider return value prevents.
     std::chrono::milliseconds lifetime { 0 };
+
+    /// The admission ticket this lease was granted for, or nothing for a `Lease` verb's grant.
+    ///
+    /// What lets a report join a running compile to its lease EXACTLY, never by guessing from
+    /// the cache key: two tickets may miss one key and each holds a lease of its own. Leader
+    /// memory only -- never replicated, and never part of the signed token, which covers what
+    /// the worker must check and nothing a report needs.
+    std::optional<Ticket> ticket {};
+};
+
+/// One live lease that an admission ticket holds, as a report joins it to its ticket.
+///
+/// Carries the remaining lifetime rather than the instant it lapses, for the reason
+/// `LeaseReport` carries an age: a duration cannot be subtracted from the wrong clock.
+struct TicketLease
+{
+    Ticket ticket {};                       ///< The admission ticket the lease was granted for.
+    std::string workerId;                   ///< The worker it was leased to.
+    std::chrono::milliseconds expiresIn {}; ///< What is left of its lifetime, as of the reading.
 };
 
 /// One outstanding lease, as a diagnostic rather than as an authorization.
@@ -237,13 +257,27 @@ class LeaseTable
     /// @return The lease when granted; nullopt when another client holds one.
     [[nodiscard]] std::optional<Lease> Acquire(std::string_view key,
                                                std::string_view workerId,
-                                               std::chrono::milliseconds lifetime);
+                                               std::chrono::milliseconds lifetime)
+    {
+        return Acquire(key, workerId, lifetime, std::nullopt);
+    }
 
     /// @copydoc Acquire
     [[nodiscard]] std::optional<Lease> Acquire(std::string_view key, std::string_view workerId)
     {
-        return Acquire(key, workerId, _leaseTimeout);
+        return Acquire(key, workerId, _leaseTimeout, std::nullopt);
     }
+
+    /// Take a lease for an admission ticket: `Acquire`, with the ticket recorded on the lease.
+    /// @param key The table's key for the lease.
+    /// @param workerId The worker the job will go to.
+    /// @param lifetime How long this grant lives.
+    /// @param ticket The admission ticket it is granted for; nothing for a `Lease` verb's grant.
+    /// @return The lease when granted; nullopt when another client holds one.
+    [[nodiscard]] std::optional<Lease> Acquire(std::string_view key,
+                                               std::string_view workerId,
+                                               std::chrono::milliseconds lifetime,
+                                               std::optional<Ticket> ticket);
 
     /// Look up a lease by its token, without consuming it.
     ///
@@ -335,6 +369,14 @@ class LeaseTable
     /// @return The listing. Expired entries are excluded from both halves even
     ///         while they are still present in the table.
     [[nodiscard]] LeaseListing LiveLeases(std::size_t limit) const;
+
+    /// Every live lease an admission ticket holds, with what is left of its lifetime.
+    ///
+    /// Unbounded, unlike `LiveLeases`, because its caller joins it to the ticket list rather
+    /// than showing it: a lease left out would read as a running compile with no lease. A
+    /// `Lease` verb's grant names no ticket and is not listed.
+    /// @return The leases, in no particular order; expired entries are excluded.
+    [[nodiscard]] std::vector<TicketLease> LiveTicketLeases() const;
 
   private:
     struct Entry

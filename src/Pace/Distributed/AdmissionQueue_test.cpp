@@ -7,6 +7,7 @@
 #include <map>
 #include <ranges>
 
+#include <core/platform/Clock.hpp>
 #include <tests/Unwrap.hpp>
 
 using Pace::Testing::Unwrap;
@@ -33,9 +34,10 @@ class FakePlacement final: public IPlacementSource
 
 struct Fixture
 {
+    core::platform::ManualClock clock;
     PeakEstimates estimates { 3 * GiB, 64 };
     FakePlacement placement;
-    AdmissionQueue queue { estimates, placement };
+    AdmissionQueue queue { clock, estimates, placement };
 
     /// Enqueues a request of `bytes`, the figure being taught to the estimator under its own key.
     Ticket Add(AdmitKind kind, std::string caller, std::uint64_t bytes, std::string fingerprint = {})
@@ -463,9 +465,10 @@ TEST_CASE("AdmissionQueue.dedup-only-same-cache", "[distributed][admission]")
         CHECK(f.queue.Pump().size() == 2); // default: only the same machine shares a cache
     }
 
+    core::platform::ManualClock clock;
     PeakEstimates estimates { 3 * GiB, 64 };
     FakePlacement placement;
-    AdmissionQueue queue { estimates, placement, [](MachineId const&, MachineId const&) { return true; } };
+    AdmissionQueue queue { clock, estimates, placement, [](MachineId const&, MachineId const&) { return true; } };
     queue.ReportMachine("a", Report(8 * GiB, 4));
     queue.ReportMachine("b", Report(8 * GiB, 4));
     for (auto const* machine: { "a", "b" })

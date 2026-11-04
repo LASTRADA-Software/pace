@@ -1132,7 +1132,9 @@ class NoReadings final: public ILiveStatsSources
         return {};
     }
     [[nodiscard]] std::expected<FleetTextDocument, FleetTextDeclined> FleetText(std::string_view /*section*/,
-                                                                                std::string_view /*range*/) const override
+                                                                                std::string_view /*range*/,
+                                                                                CompileCacheWire::FleetTextFormat /*format*/,
+                                                                                std::string_view /*node*/) const override
     {
         return std::unexpected(FleetTextDeclined { .refusal = FleetTextRefusal::NoFleet, .detail = {} });
     }

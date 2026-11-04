@@ -1,0 +1,318 @@
+// SPDX-License-Identifier: Apache-2.0
+#include <Pace/Protocol/CompileCacheWire.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include <tests/Unwrap.hpp>
+
+using namespace Pace;
+using namespace Pace::CompileCacheWire;
+using Pace::Testing::Unwrap;
+
+namespace
+{
+
+/// @param values Byte values.
+/// @return Them as bytes.
+[[nodiscard]] std::vector<std::byte> Bytes(std::initializer_list<int> values)
+{
+    auto out = std::vector<std::byte> {};
+    out.reserve(values.size());
+    for (auto const value: values)
+        out.push_back(static_cast<std::byte>(value));
+    return out;
+}
+
+/// A runtime record whose four detail positions are all engaged, every value distinct.
+[[nodiscard]] NodeRuntimeFields EveryDetail()
+{
+    auto runtime = NodeRuntimeFields {};
+    runtime.slotCeilings = NodeSlotCeilingsFields {
+        .ceilings = { NodeSlotCeilingFields { .name = "registered", .slots = 8 },
+                      NodeSlotCeilingFields { .name = "memory", .slots = 3 },
+                      NodeSlotCeilingFields { .name = "cordoned", .slots = std::nullopt } },
+        .available = 3,
+        .binding = "memory",
+        .sampledSecondsAgo = 11,
+    };
+    runtime.tiers = NodeTiersFields {
+        NodeTierFields { .entries = 5, .bytesUsed = 600, .bytesLimit = 0, .hits = 70, .misses = 9 },
+        std::nullopt,
+    };
+    runtime.effectiveConfig = std::vector {
+        NodeSettingFields { .name = "--slots", .kind = WireSettingValue::Unset, .text = {} },
+        NodeSettingFields { .name = "--listen-node", .kind = WireSettingValue::Value, .text = {} },
+        NodeSettingFields { .name = "--requirepass", .kind = WireSettingValue::Redacted, .text = {} },
+        NodeSettingFields { .name = "--toolchain", .kind = WireSettingValue::Omitted, .text = "3 more" },
+    };
+    // One override in force with everything engaged, and one tier the node lacks, an override recorded for it, every
+    // optional absent: a decoder that read an absent figure as zero, or dropped a text, fails the round trip.
+    runtime.budgetOverrides = std::vector {
+        NodeBudgetOverrideFields { .tier = 0,
+                                   .bytes = std::uint64_t { 1024 },
+                                   .baselineBytes = std::uint64_t { 0 },
+                                   .source = "cluster",
+                                   .configuredBytes = 4096,
+                                   .overrideBytes = std::uint64_t { 1024 },
+                                   .setAtUnixSeconds = std::int64_t { 1'767'225'600 },
+                                   .setBy = "voter-1",
+                                   .setByName = "build box",
+                                   .excessBytes = std::uint64_t { 0 },
+                                   .note = {} },
+        NodeBudgetOverrideFields { .tier = 1,
+                                   .bytes = std::nullopt,
+                                   .baselineBytes = std::nullopt,
+                                   .source = "configured",
+                                   .configuredBytes = 0,
+                                   .overrideBytes = std::uint64_t { 512 },
+                                   .setAtUnixSeconds = std::nullopt,
+                                   .setBy = {},
+                                   .setByName = {},
+                                   .excessBytes = std::nullopt,
+                                   .note = "not applied: this node has no disk tier" },
+    };
+    runtime.displayName = "office-pc";
+    runtime.hostName = "buildhost-7";
+    return runtime;
+}
+
+} // namespace
+
+TEST_CASE("A setting's value kind travels as its pinned byte", "[wire][node-status][node-status-detail]")
+{
+    // The BYTES, beside the names both ends spell: a consistent renumbering keeps every in-tree test agreeing
+    // while a deployed reader prints a redaction as a value.
+    CHECK(static_cast<std::uint8_t>(WireSettingValue::Value) == 0x01);
+    CHECK(static_cast<std::uint8_t>(WireSettingValue::Unset) == 0x02);
+    CHECK(static_cast<std::uint8_t>(WireSettingValue::Redacted) == 0x03);
+    CHECK(static_cast<std::uint8_t>(WireSettingValue::Omitted) == 0x04);
+    CHECK(RedactedSettingText == "<redacted>");
+}
+
+TEST_CASE("The NODE-STATUS runtime record's positions 26 to 29 hold exactly these bytes",
+          "[wire][node-status][node-status-detail]")
+{
+    auto runtime = NodeRuntimeFields {};
+    runtime.slotCeilings = NodeSlotCeilingsFields { .ceilings = { NodeSlotCeilingFields { .name = "r", .slots = 2 },
+                                                                  NodeSlotCeilingFields { .name = "c", .slots = {} } },
+                                                    .available = 2,
+                                                    .binding = "r",
+                                                    .sampledSecondsAgo = 4 };
+    runtime.tiers =
+        NodeTiersFields { std::nullopt,
+                          NodeTierFields { .entries = 1, .bytesUsed = 2, .bytesLimit = 3, .hits = 4, .misses = 5 } };
+    runtime.effectiveConfig =
+        std::vector { NodeSettingFields { .name = "-a", .kind = WireSettingValue::Value, .text = "v" } };
+    runtime.budgetOverrides = std::vector<NodeBudgetOverrideFields> {};
+    // Held, so the spans the split hands back view bytes that outlive them.
+    auto const encoded = EncodeNodeRuntime(runtime);
+    auto const parts = WireFields::SplitAll(encoded);
+    REQUIRE(parts.has_value());
+    REQUIRE(Unwrap(parts).size() == 32);
+    auto const at = [&parts](std::size_t index) {
+        return Unwrap(parts)[index];
+    };
+
+    // clang-format off
+    CHECK(std::ranges::equal(at(26), Bytes({
+        0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x02,                         // available
+        0x00, 0x00, 0x00, 0x01, 'r',                                            // binding
+        0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, // seconds since sampled
+        0x00, 0x00, 0x00, 0x0d,                                                 // ceiling "r": 2
+            0x00, 0x00, 0x00, 0x01, 'r', 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x02,
+        0x00, 0x00, 0x00, 0x09,                                                 // ceiling "c": did not apply
+            0x00, 0x00, 0x00, 0x01, 'c', 0x00, 0x00, 0x00, 0x00 })));
+    CHECK(std::ranges::equal(at(27), Bytes({
+        0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x02,                         // two positions
+        0x00, 0x00, 0x00, 0x00,                                                 // tier 0: absent
+        0x00, 0x00, 0x00, 0x3c,                                                 // tier 1: five u64s
+            0x00, 0x00, 0x00, 0x08, 0, 0, 0, 0, 0, 0, 0, 1,
+            0x00, 0x00, 0x00, 0x08, 0, 0, 0, 0, 0, 0, 0, 2,
+            0x00, 0x00, 0x00, 0x08, 0, 0, 0, 0, 0, 0, 0, 3,
+            0x00, 0x00, 0x00, 0x08, 0, 0, 0, 0, 0, 0, 0, 4,
+            0x00, 0x00, 0x00, 0x08, 0, 0, 0, 0, 0, 0, 0, 5 })));
+    CHECK(std::ranges::equal(at(28), Bytes({
+        0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x01,                         // one setting
+        0x00, 0x00, 0x00, 0x10,                                                 // the setting
+            0x00, 0x00, 0x00, 0x02, '-', 'a',                                   // name
+            0x00, 0x00, 0x00, 0x01, 0x01,                                       // kind: Value
+            0x00, 0x00, 0x00, 0x01, 'v' })));                                   // text
+    // An engaged EMPTY list -- no overrides -- is its count alone, never zero length.
+    CHECK(std::ranges::equal(at(29), Bytes({ 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00 })));
+    // clang-format on
+    // Positions 30 and 31, the display name and the host name: zero length, absent, when not stated.
+    CHECK(at(30).empty());
+    CHECK(at(31).empty());
+}
+
+TEST_CASE("The four detail records round-trip whole, and a record with none of them says nothing",
+          "[wire][node-status][node-status-detail]")
+{
+    auto const sent = EveryDetail();
+    auto const back = DecodeNodeRuntime(EncodeNodeRuntime(sent));
+    REQUIRE(back.has_value());
+    CHECK(Unwrap(back).slotCeilings == sent.slotCeilings);
+    CHECK(Unwrap(back).tiers == sent.tiers);
+    CHECK(Unwrap(back).effectiveConfig == sent.effectiveConfig);
+    CHECK(Unwrap(back).budgetOverrides == sent.budgetOverrides);
+    // And the two halves of the name a surface shows, positions 30 and 31.
+    CHECK(Unwrap(back).displayName == std::optional<std::string> { "office-pc" });
+    CHECK(Unwrap(back).hostName == std::optional<std::string> { "buildhost-7" });
+
+    // ABSENT, all four, from a sender that stated none -- never a record of zeroes or an empty list.
+    auto const silent = DecodeNodeRuntime(EncodeNodeRuntime(NodeRuntimeFields {}));
+    REQUIRE(silent.has_value());
+    CHECK_FALSE(Unwrap(silent).slotCeilings.has_value());
+    CHECK_FALSE(Unwrap(silent).tiers.has_value());
+    CHECK_FALSE(Unwrap(silent).effectiveConfig.has_value());
+    CHECK_FALSE(Unwrap(silent).budgetOverrides.has_value());
+    CHECK_FALSE(Unwrap(silent).displayName.has_value());
+    CHECK_FALSE(Unwrap(silent).hostName.has_value());
+
+    // An OLDER sender's record: thirty fields, positions 30 and 31 never written. Both halves of the name come back
+    // ABSENT -- never empty-engaged -- while everything that sender did state survives, the detail records included.
+    auto const current = EncodeNodeRuntime(sent); // SplitAll's fields borrow it, so it outlives them.
+    auto older = Unwrap(WireFields::SplitAll(current));
+    REQUIRE(older.size() == 32);
+    older.resize(30);
+    auto const fromOlder = DecodeNodeRuntime(WireFields::Encode(WireFields::FieldList { older }));
+    REQUIRE(fromOlder.has_value());
+    CHECK_FALSE(Unwrap(fromOlder).displayName.has_value());
+    CHECK_FALSE(Unwrap(fromOlder).hostName.has_value());
+    CHECK(Unwrap(fromOlder).budgetOverrides == sent.budgetOverrides);
+    CHECK(Unwrap(fromOlder).effectiveConfig == sent.effectiveConfig);
+
+    // And an engaged empty override list -- *no overrides* -- comes back engaged and empty.
+    auto none = NodeRuntimeFields {};
+    none.budgetOverrides = std::vector<NodeBudgetOverrideFields> {};
+    auto const noneBack = DecodeNodeRuntime(EncodeNodeRuntime(none));
+    REQUIRE(noneBack.has_value());
+    CHECK(Unwrap(noneBack).budgetOverrides == std::optional { std::vector<NodeBudgetOverrideFields> {} });
+}
+
+TEST_CASE("A budget row whose note is over its ceiling, or whose figure is the wrong width, is refused",
+          "[wire][node-status][node-status-detail][budget]")
+{
+    auto const good = NodeBudgetOverrideFields { .tier = 0, .source = "configured", .configuredBytes = 1 };
+    auto parsed = std::optional<std::vector<NodeBudgetOverrideFields>> {};
+    REQUIRE(ReadNodeBudgetOverrides(EncodeNodeBudgetOverrides(std::array { good }), parsed));
+    CHECK(parsed == std::optional { std::vector { good } });
+
+    auto loud = good;
+    loud.note = std::string(MaxBudgetOverrideNoteBytes + 1, 'x');
+    parsed.reset();
+    CHECK_FALSE(ReadNodeBudgetOverrides(EncodeNodeBudgetOverrides(std::array { loud }), parsed));
+    CHECK_FALSE(parsed.has_value());
+
+    // A row whose in-force figure is three bytes wide: neither absent nor a figure.
+    auto const figure = std::array { std::byte { 1 }, std::byte { 2 }, std::byte { 3 } };
+    auto const tier = std::array { std::byte { 0 } };
+    auto const configured = WireFields::ToBigEndian<std::uint64_t>(1);
+    auto const empty = std::span<std::byte const> {};
+    auto const row = WireFields::Encode({ std::span<std::byte const> { tier },
+                                          std::span<std::byte const> { figure },
+                                          empty,
+                                          empty,
+                                          std::span<std::byte const> { configured },
+                                          empty,
+                                          empty,
+                                          empty,
+                                          empty,
+                                          empty,
+                                          empty });
+    CHECK_FALSE(ReadNodeBudgetOverrides(CompileCacheWire::Detail::EncodeCountedList({ row }), parsed));
+}
+
+TEST_CASE("A detail record this build cannot read refuses the reply, and an unnamed setting kind is skipped",
+          "[wire][node-status][node-status-detail]")
+{
+    auto const replaced = [](std::size_t position, std::vector<std::byte> const& record) {
+        auto emitted = EncodeNodeRuntime(NodeRuntimeFields {});
+        auto parts = Unwrap(WireFields::SplitAll(emitted));
+        REQUIRE(parts.size() == 32);
+        parts[position] = record;
+        return DecodeNodeRuntime(WireFields::Encode(WireFields::FieldList { parts }));
+    };
+    auto const setting = [](std::string_view name, std::uint8_t kind, std::string_view text) {
+        auto const kindByte = std::array { static_cast<std::byte>(kind) };
+        return WireFields::Encode({ AsBytes(name), std::span<std::byte const> { kindByte }, AsBytes(text) });
+    };
+
+    SECTION("a redaction that carries text refuses the record: no reader may print bytes beside it")
+    {
+        auto const row = setting("--requirepass", 0x03, "hunter2");
+        CHECK_FALSE(replaced(28, CompileCacheWire::Detail::EncodeCountedList({ row })).has_value());
+    }
+    SECTION("an unset setting that carries text refuses the record")
+    {
+        auto const row = setting("--slots", 0x02, "4");
+        CHECK_FALSE(replaced(28, CompileCacheWire::Detail::EncodeCountedList({ row })).has_value());
+    }
+    SECTION("a kind byte this build does not name skips that setting and keeps its neighbour")
+    {
+        auto const unknown = setting("--future", 0x7F, "x");
+        auto const known = setting("--slots", 0x01, "4");
+        auto const back = replaced(28, CompileCacheWire::Detail::EncodeCountedList({ unknown, known }));
+        REQUIRE(back.has_value());
+        CHECK(Unwrap(back).effectiveConfig
+              == std::optional {
+                  std::vector { NodeSettingFields { .name = "--slots", .kind = WireSettingValue::Value, .text = "4" } } });
+    }
+    SECTION("a binding that names no ceiling the record carries refuses the record")
+    {
+        auto record = EncodeNodeSlotCeilings(NodeSlotCeilingsFields {
+            .ceilings = { NodeSlotCeilingFields { .name = "registered", .slots = 4 } },
+            .available = 4,
+            .binding = "memory",
+            .sampledSecondsAgo = 0,
+        });
+        CHECK_FALSE(replaced(26, record).has_value());
+    }
+    SECTION("a tier short of its five fields refuses the record")
+    {
+        auto const one = WireFields::ToBigEndian<std::uint64_t>(1);
+        auto const tier = WireFields::Encode({ std::span<std::byte const> { one }, std::span<std::byte const> { one } });
+        CHECK_FALSE(replaced(27, CompileCacheWire::Detail::EncodeCountedList({ tier })).has_value());
+    }
+    SECTION("a tier or setting count disagreeing with its rows refuses the record")
+    {
+        auto const two = WireFields::ToBigEndian<std::uint32_t>(2);
+        auto const row = setting("--slots", 0x01, "4");
+        CHECK_FALSE(
+            replaced(28, WireFields::Encode({ std::span<std::byte const> { two }, std::span<std::byte const> { row } }))
+                .has_value());
+        CHECK_FALSE(replaced(27, WireFields::Encode({ std::span<std::byte const> { two } })).has_value());
+    }
+    SECTION("an override count disagreeing with its rows refuses the record")
+    {
+        auto const two = WireFields::ToBigEndian<std::uint32_t>(2);
+        CHECK_FALSE(replaced(29, WireFields::Encode({ std::span<std::byte const> { two } })).has_value());
+    }
+}
+
+TEST_CASE("An engaged empty tier list or configuration is not an absent one", "[wire][node-status][node-status-detail]")
+{
+    // Says it holds none and does not say are two answers, so each round-trips as itself.
+    auto empty = NodeRuntimeFields {};
+    empty.tiers = NodeTiersFields {};
+    empty.effectiveConfig = std::vector<NodeSettingFields> {};
+    auto const back = DecodeNodeRuntime(EncodeNodeRuntime(empty));
+    REQUIRE(back.has_value());
+    CHECK(Unwrap(back).tiers == std::optional { NodeTiersFields {} });
+    CHECK(Unwrap(back).effectiveConfig == std::optional { std::vector<NodeSettingFields> {} });
+
+    auto const absent = DecodeNodeRuntime(EncodeNodeRuntime(NodeRuntimeFields {}));
+    REQUIRE(absent.has_value());
+    CHECK_FALSE(Unwrap(absent).tiers.has_value());
+    CHECK_FALSE(Unwrap(absent).effectiveConfig.has_value());
+}

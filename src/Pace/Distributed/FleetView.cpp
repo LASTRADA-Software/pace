@@ -3,12 +3,14 @@
 #include <Pace/Core/Ed25519.hpp>
 #include <Pace/Core/EnumTable.hpp>
 #include <Pace/Core/FigureText.hpp>
+#include <Pace/Core/Json.hpp>
 #include <Pace/Core/MachineName.hpp>
 #include <Pace/Core/NumericText.hpp>
 #include <Pace/Distributed/FleetChart.hpp>
 #include <Pace/Distributed/FleetText.hpp>
 #include <Pace/Distributed/FleetView.hpp>
 #include <Pace/Distributed/NodePolicy.hpp>
+#include <Pace/Distributed/ShownName.hpp>
 #include <Pace/Metrics/MetricsCatalog.hpp>
 
 #include <algorithm>
@@ -31,6 +33,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 
@@ -173,17 +176,12 @@ namespace
 
     // ---------------------------------------------------------------- helpers
 
-    /// The two escapes live in `FleetText.hpp` so the chart renderer shares them
-    /// rather than carrying a third copy. Named as they were here, so no call site
-    /// moves.
+    /// The markup escape lives in `Core/Markup.hpp` so the chart renderer shares it
+    /// rather than carrying a second copy; a JSON string is written by the tree's one
+    /// JSON escaper, `Json::AppendString`. Named as it was here, so no call site moves.
     [[nodiscard]] std::string EscapeHtml(std::string_view text)
     {
         return EscapeMarkup(text);
-    }
-
-    void AppendJsonString(std::string& out, std::string_view text)
-    {
-        AppendJsonText(out, text);
     }
 
     /// How a human surface dresses one slot limit: the page's chip class, and the tone every other
@@ -281,7 +279,7 @@ namespace
                 out += WriteMachineFigure(cell.share, FigureFormat::Percent);
                 break;
             case FleetCell::Kind::Text:
-                AppendJsonString(out, cell.text);
+                Json::AppendString(out, cell.text);
                 break;
         }
     }
@@ -305,32 +303,161 @@ namespace
         return FleetCell::OfShare(static_cast<double>(*cache.hits) / static_cast<double>(total));
     }
 
+    // ------------------------------------------------------------ the name
+
+    /// @param shown A row's name.
+    /// @return The `name` cell: absent when nobody named the machine, never blank.
+    [[nodiscard]] FleetCell NameCell(ShownName const& shown)
+    {
+        return shown.text.empty() ? FleetCell::Nothing() : FleetCell::Of(std::string { shown.text });
+    }
+
+    /// @param shown A row's name.
+    /// @return The `name-source` cell: absent exactly where the name is.
+    [[nodiscard]] FleetCell NameSourceCell(ShownName const& shown)
+    {
+        if (!shown.source.has_value())
+            return FleetCell::Nothing();
+        return FleetCell::Of(std::string { NameSourceWord(*shown.source) });
+    }
+
+    /// What the `name` column says in a header, for both tables.
+    constexpr std::string_view NameHelp =
+        "What an operator calls this machine: the display name the cluster records for it, else the name the machine "
+        "reports for itself. A label: nothing routes, admits or dispatches by it. Absent when neither says.";
+
+    /// What the `name-source` column says in a header, for both tables.
+    constexpr std::string_view NameSourceHelp =
+        "Where the name came from: replicated (an operator named it, and every node agrees) or self-reported (what "
+        "the machine calls itself). Absent when there is no name.";
+
+    /// @param memberId A row's member id, as `CollectFleet` joined it.
+    /// @return The `node-id` cell: absent when no member holds the key the row's connection proved, never blank.
+    [[nodiscard]] FleetCell MemberIdCell(std::string const& memberId)
+    {
+        return memberId.empty() ? FleetCell::Nothing() : FleetCell::Of(memberId);
+    }
+
+    /// What the `node-id` column says in a header, for the machine and worker tables.
+    constexpr std::string_view NodeIdHelp =
+        "The cluster member this machine is: the one holding the identity key its connection proved, never matched by "
+        "the endpoint it claims. Absent when it proved no key, no member holds it, or this node holds no cluster state.";
+
     // ------------------------------------------------------------ the tables
 
+    /// One member row: the record, and what the machine holding the member's key calls itself -- which only the
+    /// fleet's machine rows know, so the join is made once, by `MemberRowsOf`, before any renderer reads a column.
+    struct MemberRow
+    {
+        Cluster::ClusterMember member; ///< What the cluster records.
+        std::string selfReportedName;  ///< What the machine proving the member's key calls itself; empty when none.
+    };
+
     /// What a member row shows.
-    constexpr std::array<FleetColumn<Cluster::ClusterMember>, 4> MemberColumns {
-        FleetColumn<Cluster::ClusterMember> {
-            .name = "id",
-            .help = "The member's stable identity: what consensus counts.",
+    /// @tparam Tier A cache tier.
+    /// @param row A member row.
+    /// @return The cell a member row shows for that tier's recorded budget override: its bytes, absent when none.
+    template <StorageTier Tier>
+    [[nodiscard]] FleetCell BudgetCell(MemberRow const& row)
+    {
+        auto const& budget = Cluster::BudgetOf(row.member, Tier);
+        return budget.has_value() ? FleetCell::Of(budget->bytes) : FleetCell::Nothing();
+    }
+
+    /// @tparam Tier A cache tier.
+    /// @param row A member row.
+    /// @return Who recorded that tier's override (`BudgetOverride::setBy`); absent when there is no override or no
+    ///         member was attributed.
+    template <StorageTier Tier>
+    [[nodiscard]] FleetCell BudgetSetByCell(MemberRow const& row)
+    {
+        auto const& budget = Cluster::BudgetOf(row.member, Tier);
+        return budget.has_value() && !budget->setBy.empty() ? FleetCell::Of(budget->setBy) : FleetCell::Nothing();
+    }
+
+    /// @tparam Tier A cache tier.
+    /// @param row A member row.
+    /// @return The baseline the member reported for that tier's override; absent when there is no override or it has
+    ///         not reported one yet. A present zero is a real configuration (unbounded).
+    template <StorageTier Tier>
+    [[nodiscard]] FleetCell BudgetBaselineCell(MemberRow const& row)
+    {
+        auto const& budget = Cluster::BudgetOf(row.member, Tier);
+        return budget.has_value() && budget->baseline.has_value() ? FleetCell::Of(*budget->baseline) : FleetCell::Nothing();
+    }
+
+    /// @tparam Tier A cache tier.
+    /// @param row A member row.
+    /// @return When the leader recorded that tier's override, by its own clock, as UTC text; absent with no override.
+    template <StorageTier Tier>
+    [[nodiscard]] FleetCell BudgetSetAtCell(MemberRow const& row)
+    {
+        auto const& budget = Cluster::BudgetOf(row.member, Tier);
+        if (!budget.has_value())
+            return FleetCell::Nothing();
+        return FleetCell::Of(std::format("{:%Y-%m-%dT%H:%M:%SZ}",
+                                         std::chrono::sys_seconds { std::chrono::seconds { budget->setAtUnixSeconds } }));
+    }
+
+    /// What the override baseline columns say in a header.
+    constexpr std::string_view BudgetBaselineHelp =
+        "What the member had configured for the tier when it first applied the override, reported by the member itself. "
+        "Absent until it reports one -- an override set while it was down -- or when there is no override. Once its "
+        "configuration differs from this, its own edit is the later change and the override is dropped.";
+
+    /// What the override time columns say in a header.
+    constexpr std::string_view BudgetSetAtHelp =
+        "When the leader recorded the override, by the leader's clock, in UTC: for display only -- nothing compares it "
+        "with another machine's clock. Absent when there is no override.";
+
+    /// What the override setter columns say in a header.
+    constexpr std::string_view BudgetSetByHelp =
+        "Who recorded the override: the machine the operator acted from, never a person -- the member whose identity key "
+        "the connection proved, or whose key signed the machine ticket it presented, or the leader itself for a caller "
+        "on the leader's own machine. Absent when there is no override, or when nothing identified the caller "
+        "(--fleet-open alone).";
+
+    /// What the override columns say in a header.
+    constexpr std::string_view BudgetHelp =
+        "The cache budget the cluster records for this member's tier, overriding the machine's own flag: recorded by "
+        "the leader, applied by the member. Absent when none is recorded. Recorded is not applied: the member's "
+        "status says what it runs with.";
+
+    constexpr std::array<FleetColumn<MemberRow>, 14> MemberColumns {
+        FleetColumn<MemberRow> { .name = "id",
+                                 .help = "The member's stable identity: what consensus counts.",
+                                 .format = CellFormat::Text,
+                                 .keep = ColumnKeep::Identity,
+                                 .project = [](MemberRow const& r) { return FleetCell::Of(r.member.id); } },
+        // Right after the id it annotates, as on a machine row: the pair an operator reads together.
+        FleetColumn<MemberRow> {
+            .name = "name",
+            .help = NameHelp,
             .format = CellFormat::Text,
-            .keep = ColumnKeep::Identity,
-            .project = [](Cluster::ClusterMember const& m) { return FleetCell::Of(m.id); } },
-        FleetColumn<Cluster::ClusterMember> {
-            .name = "raft-endpoint",
-            .help = "Where its consensus port answers. Always present.",
+            .project = [](MemberRow const& r) { return NameCell(NameShown(r.member.displayName, r.selfReportedName)); } },
+        FleetColumn<MemberRow> {
+            .name = "name-source",
+            .help = NameSourceHelp,
             .format = CellFormat::Text,
-            .project = [](Cluster::ClusterMember const& m) { return FleetCell::Of(m.raftEndpoint); } },
-        FleetColumn<Cluster::ClusterMember> {
-            .name = "scheduler-endpoint",
-            .help = "Where this member's 0xFC port answers. Absent until it has announced one.",
-            .format = CellFormat::Text,
-            // Absent, not an empty string presented as a fact: a member that has
-            // announced none has not said, which is a state rather than a fault.
+            .keep = ColumnKeep::Detail,
             .project =
-                [](Cluster::ClusterMember const& m) {
-                    return m.schedulerEndpoint.empty() ? FleetCell::Nothing() : FleetCell::Of(m.schedulerEndpoint);
-                } },
-        FleetColumn<Cluster::ClusterMember> {
+                [](MemberRow const& r) { return NameSourceCell(NameShown(r.member.displayName, r.selfReportedName)); } },
+        FleetColumn<MemberRow> { .name = "raft-endpoint",
+                                 .help = "Where its consensus port answers. Always present.",
+                                 .format = CellFormat::Text,
+                                 .project = [](MemberRow const& r) { return FleetCell::Of(r.member.raftEndpoint); } },
+        FleetColumn<MemberRow> { .name = "scheduler-endpoint",
+                                 .help = "Where this member's 0xFC port answers. Absent until it has announced one.",
+                                 .format = CellFormat::Text,
+                                 // Absent, not an empty string presented as a fact: a member that has
+                                 // announced none has not said, which is a state rather than a fault.
+                                 .project =
+                                     [](MemberRow const& r) {
+                                         return r.member.schedulerEndpoint.empty()
+                                                    ? FleetCell::Nothing()
+                                                    : FleetCell::Of(r.member.schedulerEndpoint);
+                                     } },
+        FleetColumn<MemberRow> {
             .name = "scheduler-endpoint-state",
             .help = "Whether that endpoint is announced, never announced, or cleared by a record re-proposed with "
                     "none; it returns when the member next announces.",
@@ -339,10 +466,74 @@ namespace
             // cell, so that cell stays an address or absent in the JSON (#1340). Spelled
             // from the table `--cluster-status` and `cluster-members` read too.
             .project =
-                [](Cluster::ClusterMember const& m) {
-                    return FleetCell::Of(std::string { Cluster::SchedulerEndpointStateName(m) });
+                [](MemberRow const& r) {
+                    return FleetCell::Of(std::string { Cluster::SchedulerEndpointStateName(r.member) });
                 } },
+        // The replicated record, so every node renders the same figure; whether the member applied it, and against
+        // which baseline, is the member's own status.
+        FleetColumn<MemberRow> { .name = "memory-override",
+                                 .help = BudgetHelp,
+                                 .format = CellFormat::Bytes,
+                                 .keep = ColumnKeep::Detail,
+                                 .project = &BudgetCell<StorageTier::Memory> },
+        FleetColumn<MemberRow> { .name = "disk-override",
+                                 .help = BudgetHelp,
+                                 .format = CellFormat::Bytes,
+                                 .keep = ColumnKeep::Detail,
+                                 .project = &BudgetCell<StorageTier::Disk> },
+        FleetColumn<MemberRow> { .name = "memory-override-by",
+                                 .help = BudgetSetByHelp,
+                                 .format = CellFormat::Text,
+                                 .keep = ColumnKeep::Detail,
+                                 .project = &BudgetSetByCell<StorageTier::Memory> },
+        FleetColumn<MemberRow> { .name = "disk-override-by",
+                                 .help = BudgetSetByHelp,
+                                 .format = CellFormat::Text,
+                                 .keep = ColumnKeep::Detail,
+                                 .project = &BudgetSetByCell<StorageTier::Disk> },
+        FleetColumn<MemberRow> { .name = "memory-override-baseline",
+                                 .help = BudgetBaselineHelp,
+                                 .format = CellFormat::Bytes,
+                                 .keep = ColumnKeep::Detail,
+                                 .project = &BudgetBaselineCell<StorageTier::Memory> },
+        FleetColumn<MemberRow> { .name = "disk-override-baseline",
+                                 .help = BudgetBaselineHelp,
+                                 .format = CellFormat::Bytes,
+                                 .keep = ColumnKeep::Detail,
+                                 .project = &BudgetBaselineCell<StorageTier::Disk> },
+        FleetColumn<MemberRow> { .name = "memory-override-set-at",
+                                 .help = BudgetSetAtHelp,
+                                 .format = CellFormat::Text,
+                                 .keep = ColumnKeep::Detail,
+                                 .project = &BudgetSetAtCell<StorageTier::Memory> },
+        FleetColumn<MemberRow> { .name = "disk-override-set-at",
+                                 .help = BudgetSetAtHelp,
+                                 .format = CellFormat::Text,
+                                 .keep = ColumnKeep::Detail,
+                                 .project = &BudgetSetAtCell<StorageTier::Disk> },
     };
+
+    /// The member rows of @p snapshot: each record joined, by the identity key it holds, to what the machine proving
+    /// that key calls itself. Empty when the node runs no cluster.
+    /// @param snapshot The fleet.
+    /// @return The rows, in the state's (id) order.
+    [[nodiscard]] std::vector<MemberRow> MemberRowsOf(FleetSnapshot const& snapshot)
+    {
+        auto rows = std::vector<MemberRow> {};
+        if (!snapshot.cluster.has_value())
+            return rows;
+        rows.reserve(snapshot.cluster->members.size());
+        for (auto const& member: snapshot.cluster->members)
+        {
+            auto const key = AsStringView(std::span<std::byte const> { member.publicKey });
+            auto const* const machine = core::findIfOrNull(snapshot.nodes, [key](NodeReport const& node) {
+                return !node.identityKey.empty() && node.identityKey == key;
+            });
+            rows.push_back(MemberRow { .member = member,
+                                       .selfReportedName = machine != nullptr ? machine->displayName : std::string {} });
+        }
+        return rows;
+    }
 
     /// What a revoked-key row shows: whose it was, and the key.
     ///
@@ -440,6 +631,134 @@ namespace
     [[nodiscard]] std::vector<AdmissionMachineRow> BudgetRowsOf(FleetSnapshot const& snapshot)
     {
         return snapshot.admission.has_value() ? snapshot.admission->machines : std::vector<AdmissionMachineRow> {};
+    }
+
+    /// A machine id as the queue holds it -- the identity key's raw bytes -- spelled as every
+    /// other surface spells a key, or absent when it is not one.
+    /// @param machine The raw bytes.
+    /// @return The cell.
+    [[nodiscard]] FleetCell MachineKeyCell(std::string_view machine)
+    {
+        if (machine.size() != Ed25519PublicKeyBytes)
+            return FleetCell::Nothing();
+        Ed25519PublicKey key {};
+        std::ranges::transform(machine, key.begin(), [](char byte) { return static_cast<std::byte>(byte); });
+        return FleetCell::Of(FormatEd25519PublicKey(key));
+    }
+
+    /// A duration a row may not have, in milliseconds, or the absence it already carries.
+    /// @param value The duration.
+    /// @return The cell.
+    [[nodiscard]] FleetCell MaybeMillis(std::optional<std::chrono::milliseconds> const& value)
+    {
+        // Never negative on the wire: a remainder past zero is a lease about to be swept, and the
+        // unsigned cell would otherwise wrap it into a huge number.
+        return value.has_value() ? FleetCell::Of(static_cast<std::uint64_t>(std::max<std::int64_t>(value->count(), 0)))
+                                 : FleetCell::Nothing();
+    }
+
+    /// What a compile row shows: one admission ticket, joined to its lease by the ticket id.
+    ///
+    /// Text a peer chose -- the source path, the tree and the toolchain label -- is rendered as sent;
+    /// `Json::AppendString` and `EscapeHtml` make it safe where it lands. Every cell the join could
+    /// not establish is ABSENT, never an empty string or a zero.
+    constexpr std::array<FleetColumn<FleetCompile>, 11> CompileColumns {
+        FleetColumn<FleetCompile> {
+            .name = "ticket",
+            .help = "The admission ticket: what the leader calls this compile from queue to settle.",
+            .format = CellFormat::Count,
+            .keep = ColumnKeep::Identity,
+            .project = [](FleetCompile const& c) { return FleetCell::Of(std::uint64_t { c.compile.ticket.ticket }); } },
+        FleetColumn<FleetCompile> { .name = "requester",
+                                    .help = "The machine that missed, by its display name.",
+                                    .format = CellFormat::Text,
+                                    .keep = ColumnKeep::Vital,
+                                    .project = [](FleetCompile const& c) { return FleetCell::Of(c.requester); } },
+        FleetColumn<FleetCompile> {
+            .name = "requester-key",
+            .help = "The requesting machine's identity key, exactly. Absent when the queue holds an id that is no key.",
+            .format = CellFormat::Text,
+            .keep = ColumnKeep::Detail,
+            .project = [](FleetCompile const& c) { return MachineKeyCell(c.compile.ticket.caller); } },
+        FleetColumn<FleetCompile> {
+            .name = "source",
+            .help = "The source file, as the requester stated it.",
+            .format = CellFormat::Text,
+            .keep = ColumnKeep::Vital,
+            .project = [](FleetCompile const& c) { return FleetCell::Of(c.compile.ticket.sourcePath); } },
+        FleetColumn<FleetCompile> {
+            .name = "fingerprint",
+            .help = "The toolchain fingerprint the request named. Absent for a local-only request that did not know it.",
+            .format = CellFormat::Text,
+            .keep = ColumnKeep::Detail,
+            .project =
+                [](FleetCompile const& c) {
+                    return c.compile.ticket.fingerprint.empty() ? FleetCell::Nothing()
+                                                                : FleetCell::Of(c.compile.ticket.fingerprint);
+                } },
+        FleetColumn<FleetCompile> { .name = "toolchain",
+                                    .help = "What the client calls the toolchain. Absent when it named none.",
+                                    .format = CellFormat::Text,
+                                    .keep = ColumnKeep::Useful,
+                                    .project =
+                                        [](FleetCompile const& c) {
+                                            return c.compile.toolchainLabel.empty()
+                                                       ? FleetCell::Nothing()
+                                                       : FleetCell::Of(c.compile.toolchainLabel);
+                                        } },
+        FleetColumn<FleetCompile> {
+            .name = "tree",
+            .help = "The build tree the client compiles for, as it labelled itself.",
+            .format = CellFormat::Text,
+            .keep = ColumnKeep::Useful,
+            .project = [](FleetCompile const& c) { return FleetCell::Of(c.compile.ticket.treeLabel); } },
+        FleetColumn<FleetCompile> {
+            .name = "state",
+            .help = "queued: waiting for memory or a slot. waiting: waiting on an identical compile to store its "
+                    "result. running: granted and not yet settled.",
+            .format = CellFormat::Text,
+            .keep = ColumnKeep::Vital,
+            .project =
+                [](FleetCompile const& c) {
+                    return FleetCell::Of(
+                        std::string { TicketStateTable[static_cast<std::size_t>(c.compile.ticket.state)].key });
+                } },
+        FleetColumn<FleetCompile> { .name = "age",
+                                    .help = "Since the request was queued, any wait included.",
+                                    .format = CellFormat::Millis,
+                                    .keep = ColumnKeep::Vital,
+                                    .project =
+                                        [](FleetCompile const& c) {
+                                            return FleetCell::Of(static_cast<std::uint64_t>(c.compile.ticket.age.count()));
+                                        } },
+        FleetColumn<FleetCompile> {
+            .name = "worker",
+            .help = "The worker running it, or local when it runs on the requester itself. Absent while it is queued, "
+                    "and for a running compile whose lease is gone.",
+            .format = CellFormat::Text,
+            .keep = ColumnKeep::Vital,
+            .project =
+                [](FleetCompile const& c) {
+                    return c.compile.worker.has_value() ? FleetCell::Of(*c.compile.worker) : FleetCell::Nothing();
+                } },
+        FleetColumn<FleetCompile> {
+            .name = "lease-expires-in",
+            .help = "What is left of the worker lease. Absent where there is no lease: queued, or run locally.",
+            .format = CellFormat::Millis,
+            .keep = ColumnKeep::Useful,
+            .project = [](FleetCompile const& c) { return MaybeMillis(c.compile.leaseExpiresIn); } },
+    };
+
+    /// What the compile section says about its own completeness on the page.
+    /// @param section The section.
+    /// @return The header's meta line.
+    [[nodiscard]] std::string CompileMeta(CompileSection const& section)
+    {
+        auto const total = section.rows.size() + section.truncated;
+        auto const shown = std::min(section.rows.size(), DashboardCompileRows);
+        if (shown < total)
+            return std::format("the {} oldest of {}", shown, total);
+        return "oldest first";
     }
 
     /// One row of the conditions section: a machine, and one condition it reported (#1364).
@@ -554,26 +873,33 @@ namespace
     };
 
     /// What a node row shows, before its per-tier cache columns.
-    constexpr std::array<FleetColumn<NodeReport>, 12> NodeColumns {
+    constexpr std::array<FleetColumn<NodeReport>, 14> NodeColumns {
         FleetColumn<NodeReport> { .name = "endpoint",
                                   .help = "host:port the machine answers on.",
                                   .format = CellFormat::Text,
                                   .keep = ColumnKeep::Identity,
                                   .project = [](NodeReport const& n) { return FleetCell::Of(n.endpoint); } },
-        FleetColumn<NodeReport> { .name = "name",
-                                  .help = "What this machine calls itself, as an operator would recognise it. Advisory: "
-                                          "nothing routes, admits or dispatches by it, and it need not be unique. Absent "
-                                          "when the node predates the field or would not say.",
+        FleetColumn<NodeReport> {
+            .name = "name",
+            .help = NameHelp,
+            .format = CellFormat::Text,
+            // Second, right after the endpoint it annotates, because that is the pair
+            // an operator reads together: the address is what a machine ANSWERS on and
+            // this is what they call it when they go and look at it. Absent rather than
+            // blank, for the reason `version` gives below -- a node too old to say is
+            // not a node with nothing interesting about it.
+            .project = [](NodeReport const& n) { return NameCell(NameShown(n.replicatedName, n.displayName)); } },
+        FleetColumn<NodeReport> {
+            .name = "name-source",
+            .help = NameSourceHelp,
+            .format = CellFormat::Text,
+            .keep = ColumnKeep::Detail,
+            .project = [](NodeReport const& n) { return NameSourceCell(NameShown(n.replicatedName, n.displayName)); } },
+        FleetColumn<NodeReport> { .name = "node-id",
+                                  .help = NodeIdHelp,
                                   .format = CellFormat::Text,
-                                  // Second, right after the endpoint it annotates, because that is the pair
-                                  // an operator reads together: the address is what a machine ANSWERS on and
-                                  // this is what they call it when they go and look at it. Absent rather than
-                                  // blank, for the reason `version` gives below -- a node too old to say is
-                                  // not a node with nothing interesting about it.
-                                  .project =
-                                      [](NodeReport const& n) {
-                                          return n.displayName.empty() ? FleetCell::Nothing() : FleetCell::Of(n.displayName);
-                                      } },
+                                  .keep = ColumnKeep::Detail,
+                                  .project = [](NodeReport const& n) { return MemberIdCell(n.memberId); } },
         FleetColumn<NodeReport> {
             .name = "version",
             .help = "Which build of pace-node this machine is running. Absent "
@@ -668,7 +994,7 @@ namespace
     };
 
     /// What a worker row shows.
-    constexpr std::array<FleetColumn<WorkerReport>, 11> WorkerColumns {
+    constexpr std::array<FleetColumn<WorkerReport>, 13> WorkerColumns {
         FleetColumn<WorkerReport> { .name = "id",
                                     .help = "The id this leader assigned at registration.",
                                     .format = CellFormat::Text,
@@ -698,10 +1024,28 @@ namespace
                 [](WorkerReport const& w) {
                     return w.info.toolchainLabel.empty() ? FleetCell::Nothing() : FleetCell::Of(w.info.toolchainLabel);
                 } },
+        // Read off the BANNER by the node (`Cc::ToolchainFamily`), never off the label's tool name: Apple clang
+        // installed as `gcc` is labelled `gcc 17.0.0` and is `apple-clang` here. What the upgrade report groups
+        // versions by, so absent stays absent -- a toolchain without one joins no family.
+        FleetColumn<WorkerReport> {
+            .name = "family",
+            .help = "Which compiler family this toolchain is, read from its banner: versions are compared within one "
+                    "and never across. Absent when the node read no banner or knows no family for the driver.",
+            .format = CellFormat::Text,
+            .keep = ColumnKeep::Detail,
+            .project =
+                [](WorkerReport const& w) {
+                    return w.info.toolchainFamily.empty() ? FleetCell::Nothing() : FleetCell::Of(w.info.toolchainFamily);
+                } },
         FleetColumn<WorkerReport> { .name = "endpoint",
                                     .help = "host:port a client is sent to.",
                                     .format = CellFormat::Text,
                                     .project = [](WorkerReport const& w) { return FleetCell::Of(w.info.endpoint); } },
+        FleetColumn<WorkerReport> { .name = "node-id",
+                                    .help = NodeIdHelp,
+                                    .format = CellFormat::Text,
+                                    .keep = ColumnKeep::Detail,
+                                    .project = [](WorkerReport const& w) { return MemberIdCell(w.memberId); } },
         FleetColumn<WorkerReport> { .name = "slots",
                                     .help = "Concurrent compiles it registered with.",
                                     .format = CellFormat::Count,
@@ -821,9 +1165,20 @@ namespace
     /// @return The header's meta line.
     [[nodiscard]] std::string OutstandingLeaseMeta(FleetSnapshot const& snapshot)
     {
-        if (snapshot.outstandingLeases.size() < snapshot.liveLeases)
-            return std::format("the {} oldest of {}", snapshot.outstandingLeases.size(), snapshot.liveLeases);
+        // The page shows `OutstandingLeaseRows` of what the snapshot holds, which may be more.
+        auto const shown = std::min(snapshot.outstandingLeases.size(), OutstandingLeaseRows);
+        if (shown < snapshot.liveLeases)
+            return std::format("the {} oldest of {}", shown, snapshot.liveLeases);
         return "oldest first";
+    }
+
+    /// The leases a human surface lists: the oldest `OutstandingLeaseRows` the snapshot holds.
+    /// @param snapshot What to read; must outlive the span.
+    /// @return The window.
+    [[nodiscard]] std::span<LeaseHolding const> ShownLeases(FleetSnapshot const& snapshot) noexcept
+    {
+        return std::span { snapshot.outstandingLeases }.first(
+            std::min(snapshot.outstandingLeases.size(), OutstandingLeaseRows));
     }
 
     /// The per-tier cache columns, rendered once per tier a member actually runs.
@@ -939,7 +1294,8 @@ namespace
     {
         auto whole = ColumnNamesAreKebab(MemberColumns) && ColumnNamesAreKebab(NodeColumns)
                      && ColumnNamesAreKebab(WorkerColumns) && ColumnNamesAreKebab(LeaseColumns)
-                     && ColumnNamesAreKebab(ConditionColumns) && IsKebabName(TierEndpointColumn);
+                     && ColumnNamesAreKebab(ConditionColumns) && ColumnNamesAreKebab(CompileColumns)
+                     && IsKebabName(TierEndpointColumn);
         for (auto const& tier: StorageTierTable)
             for (auto const& column: TierColumns)
                 whole = whole && IsKebabJoin({ tier.name, TierColumnSeparator, column.suffix });
@@ -947,6 +1303,8 @@ namespace
             whole && std::ranges::all_of(FleetSectionTable, [](FleetSectionRow const& row) { return IsKebabName(row.key); });
         whole =
             whole && std::ranges::all_of(LeaseOutcomeTable, [](LeaseOutcomeRow const& row) { return IsKebabName(row.key); });
+        whole =
+            whole && std::ranges::all_of(TicketStateTable, [](TicketStateRow const& row) { return IsKebabName(row.key); });
         whole =
             whole && std::ranges::all_of(FleetSeriesTable, [](FleetSeriesRow const& row) { return IsKebabName(row.key); });
         return whole;
@@ -1127,35 +1485,49 @@ namespace
         return out.empty() ? std::string { "unknown" } : out;
     }
 
-    /// A machine's display name: the one its worker registered with, else the short form of its key.
+    /// A machine's display name: the one the cluster records for the member holding its key, else the one its worker
+    /// registered with, else the short form of its key -- `NameShown`'s preference, with the key as the last resort.
     /// @param key The machine's identity key.
     /// @param workers The registry entries, which carry the key and the name.
+    /// @param cluster The replicated state, or null on a node that holds none.
     /// @return The name; never empty.
-    [[nodiscard]] std::string MachineNameOf(std::string_view key, std::vector<WorkerReport> const& workers)
+    [[nodiscard]] std::string MachineNameOf(std::string_view key,
+                                            std::vector<WorkerReport> const& workers,
+                                            Cluster::ClusterState const* cluster)
     {
-        auto const named = std::ranges::find_if(workers, [key](WorkerReport const& worker) {
-            return worker.info.identityKey == key && !worker.info.displayName.empty();
+        auto const* const member =
+            cluster == nullptr ? nullptr
+                               : core::findIfOrNull(cluster->members, [key](Cluster::ClusterMember const& candidate) {
+                                     return AsStringView(std::span<std::byte const> { candidate.publicKey }) == key;
+                                 });
+        auto const* const worker = core::findIfOrNull(workers, [key](WorkerReport const& candidate) {
+            return candidate.info.identityKey == key && !candidate.info.displayName.empty();
         });
-        return named != workers.end() ? named->info.displayName : ShortMachineName(key);
+        auto const shown =
+            NameShown(member != nullptr ? std::string_view { member->displayName } : std::string_view {},
+                      worker != nullptr ? std::string_view { worker->info.displayName } : std::string_view {});
+        return shown.text.empty() ? ShortMachineName(key) : std::string { shown.text };
     }
 
     /// The queue's own view, with machines named for a person and the rows put in a stable order.
     /// @param view The queue, or none when this node leads none.
     /// @param workers Where the names come from.
+    /// @param cluster The replicated state, or null on a node that holds none.
     /// @return The section, or none.
     [[nodiscard]] std::optional<AdmissionSection> AdmissionSectionOf(std::optional<QueueView> const& view,
-                                                                     std::vector<WorkerReport> const& workers)
+                                                                     std::vector<WorkerReport> const& workers,
+                                                                     Cluster::ClusterState const* cluster)
     {
         if (!view.has_value())
             return std::nullopt;
         AdmissionSection section { .depth = view->depth, .clients = {}, .machines = {} };
         for (auto const& client: view->clients)
-            section.clients.push_back(AdmissionClientRow { .machine = MachineNameOf(client.machine, workers),
+            section.clients.push_back(AdmissionClientRow { .machine = MachineNameOf(client.machine, workers, cluster),
                                                            .tree = client.tree,
                                                            .running = client.running,
                                                            .queued = client.queued });
         for (auto const& machine: view->machines)
-            section.machines.push_back(AdmissionMachineRow { .machine = MachineNameOf(machine.machine, workers),
+            section.machines.push_back(AdmissionMachineRow { .machine = MachineNameOf(machine.machine, workers, cluster),
                                                              .chargedBytes = machine.chargedBytes,
                                                              .inUseBytes = machine.inUseBytes,
                                                              .budgetBytes = machine.budgetBytes });
@@ -1163,6 +1535,38 @@ namespace
             return std::tie(a.machine, a.tree) < std::tie(b.machine, b.tree);
         });
         std::ranges::sort(section.machines, {}, &AdmissionMachineRow::machine);
+        return section;
+    }
+
+    /// The scheduler's joined tickets, oldest first, counted in full and listed up to the ceiling.
+    /// @param tickets The rows, or none when this node leads no queue.
+    /// @param workers Where the requesters' names come from.
+    /// @param cluster The replicated state, or null on a node that holds none.
+    /// @return The section, or none.
+    [[nodiscard]] std::optional<CompileSection> CompileSectionOf(std::optional<std::vector<CompileRow>> tickets,
+                                                                 std::vector<WorkerReport> const& workers,
+                                                                 Cluster::ClusterState const* cluster)
+    {
+        if (!tickets.has_value())
+            return std::nullopt;
+        CompileSection section;
+        // Counted BEFORE the cut, over every ticket: a reader totalling the listed rows of a truncated
+        // list would otherwise undercount exactly when the fleet is busiest.
+        for (auto const& row: *tickets)
+            ++section.totals[static_cast<std::size_t>(row.ticket.state)];
+        // Oldest first, the ticket breaking a tie so a document is reproducible: tickets are minted in
+        // enqueue order, and two in one clock tick are ordinary on a wide build.
+        std::ranges::sort(*tickets, [](CompileRow const& a, CompileRow const& b) {
+            return a.ticket.age != b.ticket.age ? a.ticket.age > b.ticket.age : a.ticket.ticket < b.ticket.ticket;
+        });
+        auto const keep = std::min(tickets->size(), FleetJsonCompileCeiling);
+        section.truncated = tickets->size() - keep;
+        section.rows.reserve(keep);
+        for (auto& row: *tickets | std::views::take(keep))
+        {
+            auto requester = MachineNameOf(row.ticket.caller, workers, cluster);
+            section.rows.push_back(FleetCompile { .compile = std::move(row), .requester = std::move(requester) });
+        }
         return section;
     }
 } // namespace
@@ -1180,7 +1584,8 @@ FleetSnapshot CollectFleet(FleetSources const& sources)
 
     // Both halves from ONE call, so the count and the listing cannot disagree about
     // how much was left out -- see `LeaseListing`.
-    auto const held = sources.scheduler->OutstandingLeases(OutstandingLeaseRows);
+    // Up to the JSON's ceiling; the page and the text document show the oldest `OutstandingLeaseRows` of them.
+    auto const held = sources.scheduler->OutstandingLeases(FleetJsonLeaseCeiling);
     snapshot.liveLeases = held.total;
 
     // Joined against `snapshot.workers`, which is already in hand -- so the address
@@ -1207,7 +1612,29 @@ FleetSnapshot CollectFleet(FleetSources const& sources)
     // has no replicated state at all, which is not the same claim as a cluster that
     // has agreed on nobody.
     if (sources.cluster != nullptr)
+    {
         snapshot.cluster = sources.cluster->ClusterState();
+        // Each machine's member id and replicated name, joined by the key it PROVED -- never by the endpoint it
+        // registered with, which is its own unverified claim and would let one machine be named as another. Labels
+        // alone, which decide nothing; the member rows make the converse join from the same two facts
+        // (`MemberRowsOf`).
+        auto const holderOf = [&members = snapshot.cluster->members](std::string_view key) {
+            return core::findIfOrNull(members, [key](Cluster::ClusterMember const& candidate) {
+                return !key.empty() && AsStringView(std::span<std::byte const> { candidate.publicKey }) == key;
+            });
+        };
+        for (auto& node: snapshot.nodes)
+        {
+            auto const* const member = holderOf(node.identityKey);
+            node.memberId = member != nullptr ? member->id : std::string {};
+            node.replicatedName = member != nullptr ? member->displayName : std::string {};
+        }
+        for (auto& worker: snapshot.workers)
+        {
+            auto const* const member = holderOf(worker.info.identityKey);
+            worker.memberId = member != nullptr ? member->id : std::string {};
+        }
+    }
 
     if (sources.metrics != nullptr)
     {
@@ -1220,7 +1647,11 @@ FleetSnapshot CollectFleet(FleetSources const& sources)
     for (auto const& tier: StorageTierTable)
         snapshot.tiersPresent[static_cast<std::size_t>(tier.tier)] = AnyNodeHasTier(snapshot.nodes, tier.tier);
 
-    snapshot.admission = AdmissionSectionOf(sources.scheduler->AdmissionDetailNow(), snapshot.workers);
+    // ONE read for both sections, so the queue's depth and the compile totals beside it are one sample.
+    auto report = sources.scheduler->AdmissionReportNow();
+    auto const* const cluster = snapshot.cluster.has_value() ? &*snapshot.cluster : nullptr;
+    snapshot.admission = AdmissionSectionOf(report.queue, snapshot.workers, cluster);
+    snapshot.compiles = CompileSectionOf(std::move(report.compiles), snapshot.workers, cluster);
 
     return snapshot;
 }
@@ -1272,7 +1703,7 @@ namespace
     template <typename Subject, std::size_t N>
     void AppendTextRows(std::string& out,
                         std::array<FleetColumn<Subject>, N> const& columns,
-                        std::vector<Subject> const& subjects)
+                        std::type_identity_t<std::span<Subject const>> subjects)
     {
         bool firstCell = true;
         for (auto const& column: columns)
@@ -1299,7 +1730,7 @@ namespace
     template <typename Subject, std::size_t N>
     void AppendJsonRows(std::string& out,
                         std::array<FleetColumn<Subject>, N> const& columns,
-                        std::vector<Subject> const& subjects)
+                        std::type_identity_t<std::span<Subject const>> subjects)
     {
         out += '[';
         bool firstRow = true;
@@ -1313,7 +1744,7 @@ namespace
             {
                 if (!std::exchange(firstCell, false))
                     out += ',';
-                AppendJsonString(out, column.name);
+                Json::AppendString(out, column.name);
                 out += ':';
                 AppendCellAsJson(out, column.project(subject));
             }
@@ -1473,7 +1904,7 @@ namespace
     template <typename Subject, std::size_t N>
     void AppendHtmlRows(std::string& out,
                         std::array<FleetColumn<Subject>, N> const& columns,
-                        std::vector<Subject> const& subjects)
+                        std::type_identity_t<std::span<Subject const>> subjects)
     {
         out += "<table><thead><tr>";
         for (auto const& column: columns)
@@ -1496,6 +1927,141 @@ namespace
     }
 } // namespace
 
+namespace
+{
+    /// Append one series of a keyed view: a number per observed bucket, `null` where nobody was counting.
+    /// @param out The document.
+    /// @param buckets The series.
+    void AppendKeyedBuckets(std::string& out, std::vector<std::optional<std::uint64_t>> const& buckets)
+    {
+        out += '[';
+        auto first = true;
+        for (auto const& bucket: buckets)
+        {
+            if (!std::exchange(first, false))
+                out += ',';
+            if (bucket.has_value())
+                out += std::format("{}", *bucket);
+            else
+                out += "null";
+        }
+        out += ']';
+    }
+
+    /// The member whose identity key spells @p keyText, or null: how a requester row names its machine, by the key
+    /// it PROVED and never by an endpoint.
+    /// @param snapshot The fleet, with the applied state it read.
+    /// @param keyText An identity key's text (`FormatEd25519PublicKey`).
+    /// @return The member, or null when the state holds no member with that key.
+    [[nodiscard]] Cluster::ClusterMember const* MemberWithKeyText(FleetSnapshot const& snapshot, std::string_view keyText)
+    {
+        if (!snapshot.cluster.has_value())
+            return nullptr;
+        return core::findIfOrNull(snapshot.cluster->members, [keyText](Cluster::ClusterMember const& member) {
+            return FormatEd25519PublicKey(member.publicKey) == keyText;
+        });
+    }
+
+    /// Append one keyed history's section: `null` when absent, else the window, its observed buckets, every key with
+    /// counts in it, and `other` once anything was folded.
+    ///
+    /// snake_case throughout, because the MCP `history` tool returns this object exactly as written: one derivation,
+    /// two readers, and no projection between them to drift. A requester names its machine by node id AND display
+    /// name, each `null` when the applied state holds no member with that key or the member has no name -- never
+    /// guessed, and never an endpoint.
+    /// @param out The document.
+    /// @param snapshot The fleet, for the names.
+    /// @param dimension Which keyed history.
+    /// @param view Its view, or absent.
+    void AppendKeyedJson(std::string& out,
+                         FleetSnapshot const& snapshot,
+                         KeyedDimension dimension,
+                         std::optional<KeyedView> const& view)
+    {
+        auto const& row = KeyedDimensionOf(dimension);
+        Json::AppendString(out, row.section);
+        out += ':';
+        if (!view.has_value())
+        {
+            out += "null";
+            return;
+        }
+        auto const& range = FleetRangeTable[static_cast<std::size_t>(view->range)];
+        out += "{\"counts\":";
+        Json::AppendString(out, KeyedCountsWhat);
+        out += ",\"range\":";
+        Json::AppendString(out, range.key);
+        out += std::format(R"(,"bucket_seconds":{},"bucket_starts_ms":[)",
+                           std::chrono::duration_cast<std::chrono::seconds>(range.bucket).count());
+        auto firstStart = true;
+        for (auto const start: view->bucketStarts)
+            out += std::format("{}{}", std::exchange(firstStart, false) ? "" : ",", start);
+        // Coverage as the slot series state it: minutes counted per bucket against a full bucket's, so an hour the
+        // leader watched for one minute reads 1 of 60 rather than passing for a whole hour's count, and the window's
+        // own figure beside the total -- a total over part of a window is that part's.
+        out += R"(],"coverage":[)";
+        auto firstCoverage = true;
+        for (auto const minutes: view->coverage)
+            out += std::format("{}{}", std::exchange(firstCoverage, false) ? "" : ",", minutes);
+        out += std::format(R"(],"full_coverage":{},"observed_minutes":{},"window_minutes":{},"coverage_since_ms":)",
+                           view->fullCoverage,
+                           view->observedMinutes,
+                           view->windowMinutes);
+        out += view->coverageSince.has_value() ? std::format("{}", *view->coverageSince) : std::string { "null" };
+        out += std::format(R"(,"keys_kept_max":{},"total":{},"keys":[)", view->maxKeys, view->total);
+        auto firstKey = true;
+        for (auto const& key: view->keys)
+        {
+            if (!std::exchange(firstKey, false))
+                out += ',';
+            out += '{';
+            Json::AppendString(out, row.keyField);
+            out += ':';
+            Json::AppendString(out, key.key);
+            if (row.namesMachines)
+            {
+                auto const* const member = MemberWithKeyText(snapshot, key.key);
+                out += R"(,"node_id":)";
+                if (member != nullptr)
+                    Json::AppendString(out, member->id);
+                else
+                    out += "null";
+                out += R"(,"display_name":)";
+                if (member != nullptr && !member->displayName.empty())
+                    Json::AppendString(out, member->displayName);
+                else
+                    out += "null";
+            }
+            out += std::format(R"(,"total":{},"earlier_counts":)", key.total);
+            Json::AppendString(out, EarlierCountsWord(key.earlier));
+            out += R"(,"buckets":)";
+            AppendKeyedBuckets(out, key.buckets);
+            out += '}';
+        }
+        out += R"(],"other":)";
+        if (view->other.has_value())
+        {
+            out += std::format(R"({{"keys_folded":{},"noun":)", view->other->keysFolded);
+            Json::AppendString(out, row.noun);
+            out += std::format(R"(,"total":{},"buckets":)", view->other->total);
+            AppendKeyedBuckets(out, view->other->buckets);
+            out += '}';
+        }
+        else
+            out += "null";
+        out += R"(,"unattributed":)";
+        if (view->unattributed.has_value())
+        {
+            out += std::format(R"({{"total":{},"buckets":)", view->unattributed->total);
+            AppendKeyedBuckets(out, view->unattributed->buckets);
+            out += '}';
+        }
+        else
+            out += "null";
+        out += '}';
+    }
+} // namespace
+
 std::string RenderFleetJson(FleetSnapshot const& snapshot, FleetHistoryView const& history)
 {
     std::string out;
@@ -1504,22 +2070,22 @@ std::string RenderFleetJson(FleetSnapshot const& snapshot, FleetHistoryView cons
 
     // FIRST, so a reader that streams can decide what it is reading before it reaches a
     // value whose meaning the generation settles.
-    AppendJsonString(out, "schema");
+    Json::AppendString(out, "schema");
     out += std::format(":{},", FleetJsonSchema);
 
-    AppendJsonString(out, "role");
+    Json::AppendString(out, "role");
     out += ':';
-    AppendJsonString(out, RoleName(snapshot.role));
+    Json::AppendString(out, RoleName(snapshot.role));
 
     out += ',';
-    AppendJsonString(out, "leader");
+    Json::AppendString(out, "leader");
     out += ':';
     // Absent, not an empty string: while an election is in progress there is
     // nobody to name, which is a different fact from a leader whose address is "".
     if (snapshot.leaderEndpoint.empty())
         out += "null";
     else
-        AppendJsonString(out, snapshot.leaderEndpoint);
+        Json::AppendString(out, snapshot.leaderEndpoint);
 
     // The headline figures, keyed by the name each `KpiTable` row carries (#1302).
     //
@@ -1542,10 +2108,10 @@ std::string RenderFleetJson(FleetSnapshot const& snapshot, FleetHistoryView cons
     AppendKpiJson(out, snapshot, history);
 
     out += ',';
-    AppendJsonString(out, "members");
+    Json::AppendString(out, "members");
     out += ':';
     if (snapshot.cluster.has_value())
-        AppendJsonRows(out, MemberColumns, snapshot.cluster->members);
+        AppendJsonRows(out, MemberColumns, MemberRowsOf(snapshot));
     else
         out += "null"; // Runs no cluster at all -- not "a cluster with no members".
 
@@ -1553,12 +2119,12 @@ std::string RenderFleetJson(FleetSnapshot const& snapshot, FleetHistoryView cons
     // reported none (#1364) -- so *absent* and *nothing raised* are two shapes a consumer can
     // tell apart without knowing which states are quiet.
     out += ',';
-    AppendJsonString(out, "conditions");
+    Json::AppendString(out, "conditions");
     out += ':';
     AppendJsonRows(out, ConditionColumns, ConditionRowsOf(snapshot));
 
     out += ',';
-    AppendJsonString(out, "revoked");
+    Json::AppendString(out, "revoked");
     out += ':';
     if (snapshot.cluster.has_value())
         AppendJsonRows(out, RevokedColumns, snapshot.cluster->revokedKeys);
@@ -1567,7 +2133,7 @@ std::string RenderFleetJson(FleetSnapshot const& snapshot, FleetHistoryView cons
 
     // The compile queue (#1728): `null` where this node leads none, never a queue of zero.
     out += ',';
-    AppendJsonString(out, "admission");
+    Json::AppendString(out, "admission");
     out += ':';
     if (snapshot.admission.has_value())
     {
@@ -1581,14 +2147,14 @@ std::string RenderFleetJson(FleetSnapshot const& snapshot, FleetHistoryView cons
         out += "null";
 
     out += ',';
-    AppendJsonString(out, "nodes");
+    Json::AppendString(out, "nodes");
     out += ':';
     AppendJsonRows(out, NodeColumns, snapshot.nodes);
 
     // The per-tier columns travel as their own object per node, so a tier no
     // member runs contributes no key at all rather than a null nobody asked for.
     out += ',';
-    AppendJsonString(out, "node-tiers");
+    Json::AppendString(out, "node-tiers");
     out += ":[";
     bool firstNode = true;
     for (auto const& node: snapshot.nodes)
@@ -1596,9 +2162,9 @@ std::string RenderFleetJson(FleetSnapshot const& snapshot, FleetHistoryView cons
         if (!std::exchange(firstNode, false))
             out += ',';
         out += '{';
-        AppendJsonString(out, TierEndpointColumn);
+        Json::AppendString(out, TierEndpointColumn);
         out += ':';
-        AppendJsonString(out, node.endpoint);
+        Json::AppendString(out, node.endpoint);
         for (auto const& tier: StorageTierTable)
         {
             if (!snapshot.tiersPresent[static_cast<std::size_t>(tier.tier)])
@@ -1606,7 +2172,7 @@ std::string RenderFleetJson(FleetSnapshot const& snapshot, FleetHistoryView cons
             for (auto const& column: TierColumns)
             {
                 out += ',';
-                AppendJsonString(out, TierColumnName(tier.tier, column.suffix));
+                Json::AppendString(out, TierColumnName(tier.tier, column.suffix));
                 out += ':';
                 AppendCellAsJson(out, column.project(node, tier.tier));
             }
@@ -1616,25 +2182,25 @@ std::string RenderFleetJson(FleetSnapshot const& snapshot, FleetHistoryView cons
     out += ']';
 
     out += ',';
-    AppendJsonString(out, "workers");
+    Json::AppendString(out, "workers");
     out += ':';
     AppendJsonRows(out, WorkerColumns, snapshot.workers);
 
     out += ',';
-    AppendJsonString(out, "leases");
+    Json::AppendString(out, "leases");
     out += ":{";
     for (auto const index: std::views::iota(std::size_t { 0 }, LeaseOutcomeTable.size()))
     {
         if (index != 0)
             out += ',';
-        AppendJsonString(out, LeaseOutcomeTable[index].key);
+        Json::AppendString(out, LeaseOutcomeTable[index].key);
         out += ':';
         out += std::format("{}", CountAt(snapshot, index));
     }
     out += '}';
 
     out += ',';
-    AppendJsonString(out, "leases-outstanding");
+    Json::AppendString(out, "leases-outstanding");
     out += std::format(":{}", snapshot.liveLeases);
 
     // A separate key from the count above rather than a replacement for it, and its
@@ -1643,12 +2209,59 @@ std::string RenderFleetJson(FleetSnapshot const& snapshot, FleetHistoryView cons
     // reader comparing the two sees the truncation instead of having to know about
     // it.
     out += ',';
-    AppendJsonString(out, "leases-outstanding-oldest");
+    Json::AppendString(out, "leases-outstanding-oldest");
     out += ':';
     AppendJsonRows(out, LeaseColumns, snapshot.outstandingLeases);
+    // How many live leases the list above leaves out, past `FleetJsonLeaseCeiling`: a cut-short list
+    // says so in a number, never by a reader comparing two keys.
     out += ',';
-    AppendJsonString(out, "registrations");
+    Json::AppendString(out, "leases-outstanding-truncated");
+    out += std::format(":{}", snapshot.liveLeases - std::min(snapshot.liveLeases, snapshot.outstandingLeases.size()));
+
+    // Every compile in progress (#1728): the admission tickets, each running one joined to its lease by
+    // ticket id. `null` -- all three keys -- where this node leads no queue, never an empty fleet.
+    out += ',';
+    Json::AppendString(out, "compiles");
+    out += ':';
+    if (snapshot.compiles.has_value())
+        AppendJsonRows(out, CompileColumns, snapshot.compiles->rows);
+    else
+        out += "null";
+    out += ',';
+    Json::AppendString(out, "compiles-truncated");
+    out += ':';
+    if (snapshot.compiles.has_value())
+        out += std::format("{}", snapshot.compiles->truncated);
+    else
+        out += "null";
+    // The totals over EVERY ticket, keyed by `TicketStateTable`: a reader never sums a truncated list.
+    out += ',';
+    Json::AppendString(out, "compile-totals");
+    out += ':';
+    if (snapshot.compiles.has_value())
+    {
+        out += '{';
+        for (auto const& row: TicketStateTable)
+        {
+            if (row.state != TicketView::State {})
+                out += ',';
+            Json::AppendString(out, row.key);
+            out += std::format(":{}", snapshot.compiles->totals[static_cast<std::size_t>(row.state)]);
+        }
+        out += '}';
+    }
+    else
+        out += "null";
+    out += ',';
+    Json::AppendString(out, "registrations");
     out += std::format(":{}", snapshot.registrations);
+
+    // The keyed compile histories (who asked, which toolchain): `null` where this node keeps none or does not lead.
+    for (auto const& row: KeyedDimensionTable)
+    {
+        out += ',';
+        AppendKeyedJson(out, snapshot, row.dimension, history.keyed[static_cast<std::size_t>(row.dimension)]);
+    }
 
     out += '}';
     return out;
@@ -1739,17 +2352,14 @@ namespace
                 AppendTextRows(out, WorkerColumns, snapshot.workers);
                 return;
             case FleetSection::Leases:
-                AppendTextRows(out, LeaseColumns, snapshot.outstandingLeases);
+                AppendTextRows(out, LeaseColumns, ShownLeases(snapshot));
                 return;
             case FleetSection::Members:
                 // An empty vector where the node runs no cluster at all, which is a
                 // different fact -- but one the JSON spells `null` and a TSV table has
                 // no room for, so the marker line in the full document is what carries
                 // it: a reader sees the section, its header, and no rows.
-                AppendTextRows(out,
-                               MemberColumns,
-                               snapshot.cluster.has_value() ? snapshot.cluster->members
-                                                            : std::vector<Cluster::ClusterMember> {});
+                AppendTextRows(out, MemberColumns, MemberRowsOf(snapshot));
                 return;
             case FleetSection::Revoked:
                 // Empty where the node runs no cluster, exactly as `Members` is: the marker
@@ -1930,6 +2540,13 @@ std::optional<FleetRowUnitColumns> FleetRowUnitColumnsFor(FleetSection section) 
 std::optional<CellFormat> FleetColumnFormat(FleetSection section, std::string_view name)
 {
     return FactsOf(section, name).transform([](ColumnFacts const& facts) -> CellFormat { return facts.format; });
+}
+
+std::optional<CellFormat> FleetCompileColumnFormat(std::string_view name)
+{
+    auto const* const column = core::findIfOrNull(
+        CompileColumns, [name](FleetColumn<FleetCompile> const& candidate) { return candidate.name == name; });
+    return column == nullptr ? std::nullopt : std::optional<CellFormat> { column->format };
 }
 
 std::optional<ColumnKeep> FleetColumnKeep(FleetSection section, std::string_view name)
@@ -2682,7 +3299,7 @@ footer { margin-top:2.4rem; padding-top:1rem; border-top:1px solid var(--line);
     /// @param history The window the history-derived figures answer for.
     void AppendKpiJson(std::string& out, FleetSnapshot const& snapshot, FleetHistoryView const& history)
     {
-        AppendJsonString(out, "kpi");
+        Json::AppendString(out, "kpi");
         out += ":{";
         bool firstKpi = true;
         for (auto const& row: KpiTable)
@@ -2690,19 +3307,19 @@ footer { margin-top:2.4rem; padding-top:1rem; border-top:1px solid var(--line);
             if (!std::exchange(firstKpi, false))
                 out += ',';
             auto const readout = row.project(snapshot, history);
-            AppendJsonString(out, row.key);
+            Json::AppendString(out, row.key);
             out += ":{";
-            AppendJsonString(out, "value");
+            Json::AppendString(out, "value");
             out += ':';
             AppendCellAsJson(out, readout.value);
             out += ',';
             // The scale, because the key alone cannot say whether 853 is a count or
             // eight-hundred-and-fifty-three thousandths.
-            AppendJsonString(out, "unit");
+            Json::AppendString(out, "unit");
             out += ':';
-            AppendJsonString(out, CellFormatTable[static_cast<std::size_t>(readout.format)].name);
+            Json::AppendString(out, CellFormatTable[static_cast<std::size_t>(readout.format)].name);
             out += ',';
-            AppendJsonString(out, "of");
+            Json::AppendString(out, "of");
             out += ':';
             AppendCellAsJson(out, readout.of);
             out += '}';
@@ -3102,10 +3719,10 @@ namespace
 
         for (auto const& [node, rows]: asking)
         {
+            auto const shown = NameShown(node->replicatedName, node->displayName);
             out += std::format(R"(<div class="machine-conditions"><h3>{}{}</h3>)",
                                EscapeHtml(node->endpoint),
-                               node->displayName.empty() ? std::string {}
-                                                         : std::format(" &middot; {}", EscapeHtml(node->displayName)));
+                               shown.text.empty() ? std::string {} : std::format(" &middot; {}", EscapeHtml(shown.text)));
             for (auto const& row: *rows)
                 if (CompileCacheWire::AsksForAttention(row))
                     AppendRaisedCondition(out, row);
@@ -3140,6 +3757,36 @@ namespace
                            rows.size());
         AppendHtmlRows(out, ConditionColumns, rows);
         out += "</div></details></div></section>";
+    }
+    /// Append the page's Compiles section: every compile in progress, one row per admission ticket,
+    /// joined to its worker lease by ticket id, the oldest `DashboardCompileRows` of them.
+    /// @param out Appended to.
+    /// @param snapshot What to read.
+    void AppendCompilesHtml(std::string& out, FleetSnapshot const& snapshot)
+    {
+        auto const noCompiles = std::vector<FleetCompile> {};
+        auto const& compileRows = snapshot.compiles.has_value() ? snapshot.compiles->rows : noCompiles;
+        out += std::format(R"(<section><div class="sec-head"><h2>Compiles</h2><span class="rule"></span>)"
+                           R"(<span class="meta">{}</span></div><div class="panel wrap">)",
+                           EscapeHtml(snapshot.compiles.has_value() ? CompileMeta(*snapshot.compiles) : "no queue"));
+        AppendHtmlRows(
+            out, CompileColumns, std::span { compileRows }.first(std::min(compileRows.size(), DashboardCompileRows)));
+        out += "</div>";
+        if (snapshot.compiles.has_value())
+        {
+            // The totals walk `TicketStateTable`, so a state added there reaches this line as a row.
+            out += R"(<p class="note">)";
+            for (auto const& row: TicketStateTable)
+                out += std::format("{}{} {}",
+                                   row.state == TicketView::State {} ? "" : ", ",
+                                   snapshot.compiles->totals[static_cast<std::size_t>(row.state)],
+                                   EscapeHtml(row.key));
+            out += ".</p>";
+        }
+        else
+            out += R"(<p class="note">This node leads no compile queue, so it knows of no compiles: )"
+                   R"(not a fleet with nothing compiling.</p>)";
+        out += "</section>";
     }
 } // namespace
 
@@ -3299,7 +3946,7 @@ std::string RenderFleetHtml(FleetSnapshot const& snapshot, FleetHistoryView cons
     out += std::format(R"(<section><div class="sec-head"><h2>Leases outstanding</h2><span class="rule"></span>)"
                        R"(<span class="meta">{}</span></div><div class="panel wrap">)",
                        EscapeHtml(OutstandingLeaseMeta(snapshot)));
-    AppendHtmlRows(out, LeaseColumns, snapshot.outstandingLeases);
+    AppendHtmlRows(out, LeaseColumns, ShownLeases(snapshot));
     out += "</div>";
     out += R"(<p class="note">A client hands its lease back when the job ends, however it ended, so one that has )"
            R"(been outstanding for minutes is not waiting to age out: it is a client that died mid-build, and the )"
@@ -3394,7 +4041,7 @@ std::string RenderFleetHtml(FleetSnapshot const& snapshot, FleetHistoryView cons
     if (snapshot.cluster.has_value())
     {
         out += R"(<div class="panel wrap">)";
-        AppendHtmlRows(out, MemberColumns, snapshot.cluster->members);
+        AppendHtmlRows(out, MemberColumns, MemberRowsOf(snapshot));
         out += "</div>";
     }
     else
@@ -3441,6 +4088,8 @@ std::string RenderFleetHtml(FleetSnapshot const& snapshot, FleetHistoryView cons
         out += R"(<p class="note">This node leads no compile queue, so there is nothing to show: )"
                R"(not a queue of zero.</p>)";
     out += "</section>";
+
+    AppendCompilesHtml(out, snapshot);
 
     out += R"(<footer>/metrics remains the source of truth for anything alertable)";
     if (refreshSeconds != 0)

@@ -4,6 +4,7 @@
 #include <Pace/Distributed/PeakEstimates.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -15,6 +16,8 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+#include <core/platform/Clock.hpp>
 
 namespace Pace::Distributed
 {
@@ -110,6 +113,37 @@ struct MachineLedgerView
     std::optional<std::uint64_t> budgetBytes; ///< Its own stated budget; absent until it reports one.
 };
 
+/// One ticket the queue holds, as a report reads it: who asked, for what, and where it stands.
+///
+/// Every ticket from enqueue until it is settled, abandoned or answered -- so the set of these is
+/// the complete set of cache misses in progress, local compiles included. Copied out, never a
+/// view: a report outlives the lock it was read under.
+struct TicketView
+{
+    /// Where a ticket stands.
+    ///
+    /// **Private**: never transmitted and never persisted -- a report renders it as a WORD -- so it
+    /// carries no explicit values.
+    enum class State : std::uint8_t
+    {
+        Queued,  ///< Waiting for memory and a slot: one of `Depth()`.
+        Waiting, ///< Waiting on an identical storable compile in flight, or woken by its store and not yet answered.
+        Running, ///< Granted and not yet settled.
+        Last,    ///< Not a state, and has no row: the length of a table keyed by one.
+    };
+
+    Ticket ticket {};                 ///< The ticket.
+    MachineId caller;                 ///< The machine the request came from.
+    std::string sourcePath;           ///< The source file, as the requester stated it.
+    std::string fingerprint;          ///< The toolchain; empty for a local-only request with an unknown one.
+    std::string treeLabel;            ///< The build tree's label, as the client stated it; possibly empty.
+    State state {};                   ///< Where it stands.
+    std::chrono::milliseconds age {}; ///< Since it was enqueued, a refusal's requeue included.
+    /// The worker it was granted on, for a `Running` ticket placed on one; nothing for every other
+    /// ticket, a running one granted on its own caller included.
+    std::optional<Placement> placement;
+};
+
 /// Everything a fleet report shows of the queue, read at one moment.
 struct QueueView
 {
@@ -149,11 +183,15 @@ class AdmissionQueue
     /// Whether two machines read and write one compile cache.
     using SharesCache = std::function<bool(MachineId const&, MachineId const&)>;
 
+    /// @param clock Stamps each ticket's enqueue, for `Tickets()`'s ages; must outlive the queue.
     /// @param estimates Read at enqueue time; the figure is stored on the entry.
     /// @param placement Who can run a toolchain.
     /// @param sharesCache Whether a compile on one machine stores what the other would look up;
     ///                    empty means only the same machine does.
-    AdmissionQueue(PeakEstimates& estimates, IPlacementSource const& placement, SharesCache sharesCache = {});
+    AdmissionQueue(core::platform::IClock& clock,
+                   PeakEstimates& estimates,
+                   IPlacementSource const& placement,
+                   SharesCache sharesCache = {});
 
     /// @param request The compile to queue.
     /// @return Its ticket.
@@ -203,6 +241,13 @@ class AdmissionQueue
     ///         charge against its budget. Order is unspecified; the caller names and sorts.
     [[nodiscard]] QueueView Snapshot() const;
 
+    /// Every ticket the queue holds, read at one moment: queued, waiting on a store, and granted.
+    ///
+    /// Granted tickets a demotion kept (`LoseLeadership`) are still listed: their compiles are
+    /// still running. Ages are measured against ONE clock reading.
+    /// @return One view per ticket, in no particular order; the caller sorts.
+    [[nodiscard]] std::vector<TicketView> Tickets() const;
+
   private:
     struct Entry
     {
@@ -211,6 +256,7 @@ class AdmissionQueue
         std::uint64_t chargedBytes {}; ///< The estimate taken at enqueue.
         std::uint32_t refusals {};     ///< Worker refusals so far.
         std::int64_t order {};         ///< Queue position key: the ticket, or below every key for a refused one.
+        core::platform::SteadyTimePoint enqueuedAt {}; ///< When `Enqueue` took it; kept across a requeue.
     };
 
     /// What this ledger has charged a machine, beside its own report.
@@ -228,6 +274,14 @@ class AdmissionQueue
         MachineId machine;
         std::uint64_t bytes {};
         Entry entry;
+        std::optional<Placement> placement; ///< The worker it was granted on; nothing when granted on its caller.
+    };
+
+    /// A waiter its owner's store woke, held with its request until the next `Pump()` answers it.
+    struct StoredWaiter
+    {
+        Decision decision; ///< The `Stored` answer.
+        Entry entry;       ///< What it asked, for `Tickets()`.
     };
 
     /// A granted storable compile and the requests waiting for its store.
@@ -275,6 +329,17 @@ class AdmissionQueue
     /// @return What it held, or nothing when the ticket holds no charge.
     [[nodiscard]] std::optional<Charge> Free(Ticket ticket);
 
+    /// One entry as a report reads it.
+    /// @param entry The entry.
+    /// @param state Where it stands.
+    /// @param now The one clock reading of the report.
+    /// @param placement Its worker, for a granted one.
+    /// @return The view.
+    [[nodiscard]] static TicketView ViewOf(Entry const& entry,
+                                           TicketView::State state,
+                                           core::platform::SteadyTimePoint now,
+                                           std::optional<Placement> placement);
+
     /// Puts entries back in the queue at their original FIFO place.
     void Requeue(std::vector<Entry> entries);
 
@@ -282,6 +347,7 @@ class AdmissionQueue
     /// @return The requests that were waiting on it.
     [[nodiscard]] std::vector<Entry> TakeInflight(Ticket owner);
 
+    core::platform::IClock& _clock;
     PeakEstimates& _estimates;
     SharesCache _sharesCache;
     IPlacementSource const& _placement;
@@ -292,7 +358,7 @@ class AdmissionQueue
     std::unordered_map<Ticket, Inflight> _inflight;              ///< Keyed by the owner's ticket.
     std::unordered_multimap<std::string, Ticket> _inflightByKey; ///< cacheKey -> the owners running it.
     std::int64_t _frontOrder {};             ///< Last key handed to a refused ticket; counts down from zero.
-    std::vector<Decision> _stored;           ///< Waiters woken by a store, answered by the next pump.
+    std::vector<StoredWaiter> _stored;       ///< Waiters woken by a store, answered by the next pump.
     std::unordered_set<Ticket> _headTickets; ///< Entries that were a blocked head in the last pump.
 };
 

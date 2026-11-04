@@ -14,17 +14,18 @@ namespace Pace::Distributed
 
 /// One number a sample records.
 ///
-/// Ten slots rather than ten members, so an eleventh is a row and every walk over
+/// Slots rather than members, so a new one is a row and every walk over
 /// them -- sampling, encoding, decoding, rendering -- picks it up without being
 /// edited. The dispatch counters are `LeaseOutcomeTable`'s, read through the same
 /// `IMetricsSink::Counter` values so the page and the history cannot drift into two
 /// vocabularies for one fact.
 /// **ORDINALS ARE A PERSISTED CONTRACT. Append only; never insert or reorder.** (#308)
 ///
-/// A history file's body is `[start][sample][present][coverage][N values][N folds]`, where `N`
-/// is the width the format VERSION that wrote it used -- see `FleetHistory.cpp`'s
-/// `LegacyValueWidth`, frozen at nine for versions 1 and 2 forever, and this build's
-/// count from version 3 onward. The readings are stored POSITIONALLY, indexed by
+/// A history file's bucket is `[start][sample][present][coverage][N values][N folds]` through
+/// version 3 and `[start][sample][present][coverage][absent][N values][N folds]` from version 4,
+/// where `N` is the width the format VERSION that wrote it used -- see `FleetHistory.cpp`'s
+/// `LegacyValueWidth` (nine, versions 1 and 2) and `VersionThreeValueWidth` (ten, version 3),
+/// each frozen forever, and this build's count from version 4 onward. The readings are stored POSITIONALLY, indexed by
 /// `static_cast<std::size_t>(metric)`, and read back the same way. Inserting an
 /// enumerator mid-enum therefore does not fail to load: every bucket already on disk
 /// comes back with each reading attributed to the NEXT series, silently, for as long
@@ -68,11 +69,41 @@ enum class FleetMetric : std::uint8_t
     /// column for it, and reading one back at zero is the correct answer for that
     /// period: no exclusion list existed yet for it to count.
     DispatchAllExcluded = 9,
-    Last = 10
+    /// Gauge: host-wide CPU busy over the interval since the previous sample, in parts per thousand
+    /// (`HostLoad::cpuBusyPermille`). Includes this node's own compiles: no platform separates them.
+    ///
+    /// The first slot that can be ABSENT within a present bucket -- the first sample after a start has
+    /// no earlier counters to difference against, and a platform may not answer at all -- which is why
+    /// `FleetBucket::absent` exists. Absent is never written as zero: an idle machine and one that could
+    /// not say are opposite facts.
+    CpuBusyPermille = 10,
+    Last = 11
 };
 
-static_assert(static_cast<std::uint8_t>(FleetMetric::DispatchAllExcluded) == 9,
+static_assert(static_cast<std::uint8_t>(FleetMetric::DispatchAllExcluded) == 9
+                  && static_cast<std::uint8_t>(FleetMetric::CpuBusyPermille) == 10,
               "FleetMetric's ordinals are a persisted, wire-carried contract: append only, never renumber");
+
+/// Which of a bucket's slots carry no reading, one bit per `FleetMetric` ordinal.
+///
+/// A mask rather than a second `EnumTable` of flags because it is persisted and carried over the wire
+/// beside the readings, and one word is the whole of it. **Persisted and transmitted**: bit `n` is
+/// ordinal `n`, so the bit positions are the ordinals' contract, append-only with them.
+using FleetSlotMask = std::uint64_t;
+
+static_assert(static_cast<std::size_t>(FleetMetric::Last) <= sizeof(FleetSlotMask) * 8,
+              "one bit per slot: a 65th slot needs a wider absence mask, and a format version to carry it");
+
+/// @param metric A slot.
+/// @return Its bit in a `FleetSlotMask`.
+[[nodiscard]] constexpr FleetSlotMask SlotBit(FleetMetric metric) noexcept
+{
+    return FleetSlotMask { 1 } << static_cast<std::uint8_t>(metric);
+}
+
+/// Every slot this build has, as a mask: what a mask read off a file or a wire is clipped to, so a bit no slot
+/// owns can never make a later slot read absent.
+inline constexpr FleetSlotMask EveryFleetSlot = SlotBit(FleetMetric::Last) - 1;
 
 /// Whether a slot accumulates or is read afresh each time.
 ///
@@ -88,8 +119,9 @@ enum class FleetMetricKind : std::uint8_t
 /// Whether a MACHINE can answer for a slot about itself.
 ///
 /// Not "which series carries it" -- the fleet series carries every slot, because a
-/// leader can answer for all ten and its readings are fleet-wide sums. This is the
-/// narrower question the node series asks: is there a version of this number that is
+/// leader can answer for every one of them, its readings fleet-wide sums (save a slot
+/// with no fleet total, `FleetTotal::None`, which every fleet view carries absent). This
+/// is the narrower question the node series asks: is there a version of this number that is
 /// true of one machine, whoever happens to be leading?
 ///
 /// For a cache figure or a slot count there is, and it is what that machine did. For
@@ -105,6 +137,31 @@ enum class FleetMetricScope : std::uint8_t
     Last
 };
 
+/// Whether a fleet-wide figure exists for a slot.
+///
+/// The question `FleetMetricScope` does not ask. A node-scoped slot is true of one machine, and for a
+/// cache count or a slot count the sum over machines is also a true figure about the fleet, which is what
+/// the leader's series and a backfilled window carry. For a load ratio it is not: three machines at 400
+/// permille are not a fleet at 1200, and an average would weight a laptop like a build server. Such a slot
+/// is ABSENT from every fleet view and answered only per machine.
+enum class FleetTotal : std::uint8_t
+{
+    Summed = 0, ///< The fleet figure is the sum over machines (or the scheduler's own count).
+    None,       ///< No fleet figure means anything; asked per machine only.
+};
+
+/// What a record that never carried a slot says about it.
+///
+/// A slot appended after a file format or a peer was built is missing from what that format or peer wrote,
+/// and the right reading of the hole is a property of the SLOT. `DispatchAllExcluded` reads zero there --
+/// no exclusion list existed yet for it to count; `CpuBusyPermille` reads absent -- the machine was busy or
+/// idle all along, and nothing recorded which.
+enum class FleetUncarried : std::uint8_t
+{
+    Zero = 0, ///< Nothing happened that this slot counts: zero is the truth.
+    Absent,   ///< Something happened and nobody recorded it: a gap.
+};
+
 /// What one slot is, for the walks that need to know.
 struct FleetMetricRow
 {
@@ -112,6 +169,10 @@ struct FleetMetricRow
     FleetMetricKind kind;   ///< Delta or level.
     FleetMetricScope scope; ///< Who can answer for it.
     std::string_view key;   ///< Stable name, for JSON and for the on-disk header.
+    /// Whether a fleet-wide figure exists; `Summed` for every slot that predates the CPU one.
+    FleetTotal fleetTotal { FleetTotal::Summed };
+    /// What a record that never carried this slot means by its absence.
+    FleetUncarried whenUncarried { FleetUncarried::Zero };
 };
 
 /// Every slot, in enumerator order.
@@ -156,6 +217,12 @@ inline constexpr EnumTable<FleetMetric, FleetMetricRow> FleetMetricTable {
                      .kind = FleetMetricKind::Counter,
                      .scope = FleetMetricScope::Fleet,
                      .key = "all-excluded" },
+    FleetMetricRow { .metric = FleetMetric::CpuBusyPermille,
+                     .kind = FleetMetricKind::Gauge,
+                     .scope = FleetMetricScope::Node,
+                     .key = "cpu-busy",
+                     .fleetTotal = FleetTotal::None,
+                     .whenUncarried = FleetUncarried::Absent },
 };
 static_assert(RowsInEnumeratorOrder(FleetMetricTable, &FleetMetricRow::metric));
 
@@ -170,6 +237,48 @@ static_assert(std::ranges::any_of(FleetMetricTable,
                   && std::ranges::any_of(FleetMetricTable,
                                          [](FleetMetricRow const& row) { return row.scope == FleetMetricScope::Fleet; }),
               "a scope no row carries is a split that quietly does nothing");
+
+/// A slot with no fleet figure is one a MACHINE answers for: a fleet-scoped slot is the scheduler's own count,
+/// so it always has one, and a slot nobody could answer for at all would be a slot nothing renders.
+static_assert(std::ranges::all_of(FleetMetricTable,
+                                  [](FleetMetricRow const& row) {
+                                      return row.fleetTotal == FleetTotal::Summed || row.scope == FleetMetricScope::Node;
+                                  }),
+              "a slot without a fleet total must be node-scoped, or no view answers for it");
+
+/// The slots no fleet view carries, as a mask: what the leader's series and a backfilled window record absent.
+/// @return Every slot whose `fleetTotal` is `None`.
+[[nodiscard]] constexpr FleetSlotMask SlotsWithoutFleetTotal() noexcept
+{
+    FleetSlotMask mask = 0;
+    for (auto const& row: FleetMetricTable)
+        if (row.fleetTotal == FleetTotal::None)
+            mask |= SlotBit(row.metric);
+    return mask;
+}
+
+/// The slots only a scheduler answers for, as a mask: what one machine's own view records absent.
+/// @return Every slot whose `scope` is `Fleet`.
+[[nodiscard]] constexpr FleetSlotMask FleetScopedSlots() noexcept
+{
+    FleetSlotMask mask = 0;
+    for (auto const& row: FleetMetricTable)
+        if (row.scope == FleetMetricScope::Fleet)
+            mask |= SlotBit(row.metric);
+    return mask;
+}
+
+/// What a record carrying only its first @p carried slots says about the rest.
+/// @param carried How many slots, from ordinal zero, the record held.
+/// @return Every slot at or past @p carried whose `whenUncarried` is `Absent`.
+[[nodiscard]] constexpr FleetSlotMask UncarriedAbsentSlots(std::size_t carried) noexcept
+{
+    FleetSlotMask mask = 0;
+    for (auto const& row: FleetMetricTable)
+        if (static_cast<std::size_t>(row.metric) >= carried && row.whenUncarried == FleetUncarried::Absent)
+            mask |= SlotBit(row.metric);
+    return mask;
+}
 
 /// What folding several samples into one bucket kept, per slot.
 ///
@@ -248,6 +357,15 @@ struct FleetBucket
     /// case for a workstation on a VPN, not an edge one.
     std::uint64_t coverage { 0 };
 
+    /// The slots that carry no reading although the bucket is present (`SlotBit`).
+    ///
+    /// The per-slot third state beside `present`: a bucket somebody sampled can still hold a slot nobody
+    /// could read -- the CPU on the first sample after a start, or on a platform that will not say -- and
+    /// zero is a reading for every slot. For a folded bucket a slot is absent only when EVERY sample in it
+    /// lacked a reading; the others make up its value and fold. Persisted and handed over, because nothing
+    /// can recompute it.
+    FleetSlotMask absent { 0 };
+
     bool present { false }; ///< False means nobody sampled this bucket.
 
     /// Summed from what the nodes reported rather than sampled by this leader.
@@ -260,6 +378,14 @@ struct FleetBucket
     /// already was.
     bool backfilled { false };
 };
+
+/// @param bucket A window.
+/// @param metric A slot.
+/// @return Whether the slot carries no reading in it.
+[[nodiscard]] constexpr bool IsAbsent(FleetBucket const& bucket, FleetMetric metric) noexcept
+{
+    return (bucket.absent & SlotBit(metric)) != 0;
+}
 
 /// Where a node's handed-over history goes.
 ///
@@ -283,9 +409,40 @@ class IFleetHistorySink
 
     /// Take what a node handed over.
     /// @param endpoint Which machine reported; the machine, never the worker id.
+    /// @param provenKey The identity key the reporting connection PROVED, raw; empty when it proved none. What a
+    ///        machine's series is later attributed BY -- an endpoint is the machine's own claim.
     /// @param buckets Its closed buckets, oldest first.
     /// @return How many were new -- a redelivered batch answers zero.
-    virtual std::size_t AcceptHistory(std::string_view endpoint, std::span<FleetBucket const> buckets) = 0;
+    virtual std::size_t AcceptHistory(std::string_view endpoint,
+                                      std::string_view provenKey,
+                                      std::span<FleetBucket const> buckets) = 0;
+};
+
+/// Where the leader's admission queue reports each compile it GRANTS, for the keyed history (who asked, which
+/// toolchain).
+///
+/// Called once per COMPILE the leader grants: an admission ticket's first decision that runs it -- on a worker or
+/// on the requesting machine itself -- or a fail-open lease. Never for a request refused, abandoned before its
+/// grant, or answered `Stored` (another compile of the same key stored it); never for a worker refusal that puts the
+/// ticket back; and never for a request that says it asks again for a compile already granted
+/// (`CompileCacheWire::AskOrigin::AfterGrant`: the local retry after a granted worker failed, the lease after an
+/// admission broke).
+class ICompileDemandSink
+{
+  public:
+    ICompileDemandSink() = default;
+    virtual ~ICompileDemandSink() = default;
+    ICompileDemandSink(ICompileDemandSink const&) = delete;
+    ICompileDemandSink& operator=(ICompileDemandSink const&) = delete;
+    ICompileDemandSink(ICompileDemandSink&&) = delete;
+    ICompileDemandSink& operator=(ICompileDemandSink&&) = delete;
+
+    /// One compile granted.
+    /// @param requester The machine the queue charged: the identity key its connection PROVED, raw, or this leader's
+    ///        own for a caller on this machine -- never an endpoint, a worker id or a hostname. Empty when the
+    ///        caller identified no machine (a lease asked under a ticket): counted unattributed.
+    /// @param fingerprint The toolchain the request named; empty for a local-only request that did not know it.
+    virtual void CompileGranted(std::string_view requester, std::string_view fingerprint) = 0;
 };
 
 } // namespace Pace::Distributed

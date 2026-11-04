@@ -33,13 +33,17 @@ What makes it a *fleet* problem rather than a daemon problem is that a fleet has
 than one process. A cache daemon is upgraded, restarted, and done; twenty nodes cannot
 be.
 
-## This release: 0xFC version 16, discovery version 3, consensus version 5
+## This release: 0xFC version 17, discovery version 3, consensus version 5
 
 Every one of the three wires changed its grammar, so every node, every `pace-kv` serving
 `0xFC`, every `pace-cc` and every `pacectl` moves together (the supported procedure
 below).
 
-- **`0xFC` 16** (on top of 15's changes below):
+- **`0xFC` 17** (on top of 16's changes below):
+  - FLEET-TEXT carries a trailing format field, so it can return the fleet JSON `/fleet.json` serves
+    (the MCP surface reads the fleet that way), and NODE-STATUS can list the MCP surface.
+  - A version-16 peer is refused `unsupported-version`, naming the range.
+- **`0xFC` 16:**
   - New verbs ADMIT, SETTLE and MACHINE-BUDGET put a queue in front of the fleet's capacity; ADMIT may
     be answered with progress pulses, a reply status an older client cannot read.
   - A version-15 peer is refused `unsupported-version`, naming the range.

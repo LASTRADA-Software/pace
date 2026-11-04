@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <Pace/Cache/StorageTier.hpp>
+#include <Pace/Cluster/ClusterState.hpp>
 #include <Pace/Core/WireFields.hpp>
 #include <Pace/Core/WireFrame.hpp>
 #include <Pace/Distributed/FleetHistory.hpp>
+#include <Pace/Distributed/IClusterAdmin.hpp>
 #include <Pace/Distributed/MembershipOracle.hpp>
 #include <Pace/Distributed/SchedulerProtocol.hpp>
 #include <Pace/Metrics/IMetricsSink.hpp>
@@ -13,6 +15,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <iterator>
 #include <optional>
 #include <span>
@@ -24,6 +27,7 @@
 #include <tests/FleetHistoryFakes.hpp>
 #include <tests/LeaseRosterFakes.hpp>
 #include <tests/MembershipFakes.hpp>
+#include <tests/RaftPeerKeyFakes.hpp>
 #include <tests/Unwrap.hpp>
 #include <tests/WireReply.hpp>
 
@@ -78,6 +82,30 @@ struct Fixture
     KeyPairLeaseSigner const signer = Testing::TestLeaseSigner();
     SchedulerService service { clock, wallClock, metrics, schedulerLogger, signer, FleetIdentity };
     SchedulerProtocol protocol { service, metrics };
+};
+
+/// A cluster recording one learner, `node-b`, that accepts every proposal: enough for a member edit to reach the
+/// edit's own requirement.
+struct OneLearnerCluster final: IClusterAdmin
+{
+    [[nodiscard]] Cluster::ClusterState ClusterState() const override
+    {
+        auto state = Cluster::ClusterState {};
+        Cluster::Apply(state,
+                       Cluster::Command { .kind = Cluster::CommandKind::AddLearner,
+                                          .key = "node-b",
+                                          .value = {},
+                                          .schedulerEndpoint = {},
+                                          .publicKey = Testing::TestKeyPair("node-b").PublicKey() });
+        return state;
+    }
+
+    [[nodiscard]] std::expected<void, ConsensusError> ProposeToCluster(Cluster::Command const& /*command*/) override
+    {
+        return {};
+    }
+
+    void NoteAnnouncedEndpoint(Consensus::NodeId const& /*member*/, std::string /*endpoint*/) override {}
 };
 
 } // namespace
@@ -222,7 +250,7 @@ TEST_CASE("A version-14 LEASE in its own three-field grammar is refused by numbe
     auto const reply = fixture.protocol.Answer(frame, Insider);
     REQUIRE(ErrorOf(reply) == Wire::ErrorCode::UnsupportedVersion);
     auto const text = PayloadOf(reply).subspan(1);
-    CHECK(std::string_view { reinterpret_cast<char const*>(text.data()), text.size() } == "supported versions 16..16");
+    CHECK(std::string_view { reinterpret_cast<char const*>(text.data()), text.size() } == "supported versions 17..17");
     CHECK(fixture.metrics.Read(IMetricsSink::Counter::DispatchFramesRefusedUnsupportedVersion) == 1);
     CHECK(ErrorOf(reply) != Wire::ErrorCode::MalformedFrame);
 }
@@ -808,7 +836,7 @@ TEST_CASE("A heartbeat's history reaches the sink across the wire", "[distribute
     REQUIRE(StatusOf(fixture.protocol.Answer(beat, Insider)) == Wire::Status::Ok);
 
     REQUIRE(sink.calls.size() == 1);
-    auto const& [endpoint, arrived] = sink.calls.front();
+    auto const& [endpoint, provenKey, arrived] = sink.calls.front();
     CHECK(endpoint == "10.0.0.2:7100");
     REQUIRE(arrived.size() == 1);
     CHECK(arrived[0].startMillis == bucket.startMillis);
@@ -1042,10 +1070,10 @@ TEST_CASE("Exactly the verbs a machine joins the fleet with require a proven ide
     // The column, read back: a verb gaining the requirement by accident refuses every client that
     // sends it, and one losing it re-opens the address route for a node. Named here rather than
     // derived, because the SET is the decision being pinned.
-    // MachineBudget (#1728) is a machine stating how much memory it may be charged, so it joins them.
-    auto const joining = std::array {
-        Wire::Op::Register, Wire::Op::NodeAnnounce, Wire::Op::Heartbeat, Wire::Op::Withdraw, Wire::Op::MachineBudget
-    };
+    // MachineBudget (#1728) is a machine stating how much memory it may be charged, so it joins them; MemberReport is
+    // a member stating facts about its own record, read off the key it proved.
+    auto const joining = std::array { Wire::Op::Register, Wire::Op::NodeAnnounce,  Wire::Op::Heartbeat,
+                                      Wire::Op::Withdraw, Wire::Op::MachineBudget, Wire::Op::MemberReport };
     for (auto const& row: Wire::OpTable)
     {
         auto const joins = std::ranges::contains(joining, row.code);
@@ -1159,6 +1187,7 @@ TEST_CASE("An operator's control verb is refused a learner's ticket and a learne
     // can have its node mint one. So the control verbs ask for an operator's standing: this machine,
     // or an identity whose machine holds a voter's seat in the applied state. Every control verb
     // this surface serves, read FROM THE TABLE, so a verb that joins the column is asked here too.
+    OneLearnerCluster cluster; // declared first: the service holds a reference to it once a section attaches it
     Fixture fixture;
     Testing::OpenFleetFold fold;
     auto const contextOf = [&fold](ConnectionFacts facts) {
@@ -1168,7 +1197,7 @@ TEST_CASE("An operator's control verb is refused a learner's ticket and a learne
     std::ranges::copy_if(Wire::OpTable, std::back_inserter(controlVerbs), [](Wire::OpDescriptor const& row) {
         return row.identity == Wire::IdentityRequirement::OperatorStanding && row.family == Wire::VerbFamily::Scheduler;
     });
-    REQUIRE(controlVerbs.size() == 4); // admit, admit-learner, forget, set (admit-worker is retired)
+    REQUIRE(controlVerbs.size() == 5); // admit, admit-learner, forget, set, member-edit (admit-worker is retired)
     auto const counted = [&fixture] {
         return fixture.metrics.Read(IMetricsSink::Counter::SchedulerRequestsRefusedOperatorStandingRequired);
     };
@@ -1206,6 +1235,25 @@ TEST_CASE("An operator's control verb is refused a learner's ticket and a learne
     CHECK(Unwrap(message).second.contains("run it on a voter, or promote this machine"));
     CHECK(counted() == ++refused);
 
+    // A learner's MEMBER-EDIT ClearBudget -- the frame `pace-node --cluster-budget-clear`, `pacectl cluster-budget-clear`
+    // and the MCP `clear_cache_budget` tool send -- naming the learner ITSELF: refused at the door, before the payload,
+    // counted; and again after it. A member drops its own override only through MEMBER-REPORT, naming it exactly.
+    {
+        fixture.service.AdministerWith(cluster);
+        auto const learner = contextOf(Testing::OpenFleetFold::LearnerProven());
+        auto const door = fixture.protocol.RefusePeer(learner, static_cast<std::uint8_t>(Wire::Op::MemberEdit));
+        REQUIRE(door.has_value());
+        CHECK(ErrorOf(Unwrap(door)) == Wire::ErrorCode::OperatorStandingRequired);
+        CHECK(counted() == ++refused);
+        auto const clear = Wire::EncodeBudgetClearValue(Wire::BudgetClearValue { .tier = 0 });
+        auto const edit = fixture.protocol.Answer(
+            Wire::EncodeMemberEdit(Wire::MemberEditRequest {
+                .verb = Wire::MemberEditVerb::ClearBudget, .memberId = "node-b", .value = Wire::AsStringView(clear) }),
+            learner);
+        CHECK(ErrorOf(edit) == Wire::ErrorCode::OperatorStandingRequired);
+        CHECK(counted() == ++refused);
+    }
+
     // A voter's ticket and this machine are accepted at every one of them.
     for (auto const& [what, facts]: { std::pair { "a voter's ticket", Testing::OpenFleetFold::Ticketed() },
                                       std::pair { "a voter's proven key", Testing::OpenFleetFold::Proven() },
@@ -1218,6 +1266,32 @@ TEST_CASE("An operator's control verb is refused a learner's ticket and a learne
             CHECK_FALSE(fixture.protocol.RefusePeer(caller, static_cast<std::uint8_t>(row.code)).has_value());
     }
     CHECK(counted() == refused);
+}
+
+TEST_CASE("MEMBER-REPORT is refused at the door to a ticket and to a caller that proved nothing",
+          "[distributed][scheduler][protocol][admission][security][member-report]")
+{
+    // A member's report about itself is a joining machine's verb: only a connection that PROVED a live identity key
+    // sends it. A ticket proves a machine to the CALLER's node, never on this connection; loopback proves nothing.
+    Fixture fixture;
+    Testing::OpenFleetFold fold;
+    auto const contextOf = [&fold](ConnectionFacts facts) {
+        return CallerContextOf(fold.admitted, std::move(facts));
+    };
+    for (auto const& [what, facts]: { std::pair { "a voter's ticket", Testing::OpenFleetFold::Ticketed() },
+                                      std::pair { "a learner's ticket", Testing::OpenFleetFold::LearnerTicketed() },
+                                      std::pair { "loopback", Testing::OpenFleetFold::Local() } })
+    {
+        INFO(what);
+        auto const refusal =
+            fixture.protocol.RefusePeer(contextOf(facts), static_cast<std::uint8_t>(Wire::Op::MemberReport));
+        REQUIRE(refusal.has_value());
+        CHECK(ErrorOf(Unwrap(refusal)) == Wire::ErrorCode::NodeIdentityRequired);
+    }
+    // A proven key passes the door, a learner's included: its standing is not the question, its identity is.
+    for (auto const& facts: { Testing::OpenFleetFold::Proven(), Testing::OpenFleetFold::LearnerProven() })
+        CHECK_FALSE(
+            fixture.protocol.RefusePeer(contextOf(facts), static_cast<std::uint8_t>(Wire::Op::MemberReport)).has_value());
 }
 
 TEST_CASE("Where a worker was seen and what it answers on cross the wire into a grant's dial hint",

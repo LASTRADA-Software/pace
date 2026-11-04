@@ -59,6 +59,15 @@ enum class ClusterAction : std::uint8_t
     /// quorum, never a candidate. On a voter this demotes it; `Admit` on a learner
     /// promotes it.
     AdmitLearner,
+
+    /// Give a member a display name, or clear it: MEMBER-EDIT's `SetDisplayName`.
+    Name,
+
+    /// Override a member's cache budgets: MEMBER-EDIT's `SetBudget`.
+    Budget,
+
+    /// Clear one tier's override of a member's cache budget: MEMBER-EDIT's `ClearBudget`.
+    BudgetClear,
 };
 
 /// One cluster-administration request, as parsed from the command line.
@@ -66,12 +75,14 @@ struct ClusterRequest
 {
     ClusterAction action { ClusterAction::None };
 
-    /// The setting name for `Set`, the member id for `Forget`, `Admit` and
-    /// `AdmitLearner`.
+    /// The setting name for `Set`, the member id for `Forget`, `Admit`, `AdmitLearner`,
+    /// `Name`, `Budget` and `BudgetClear`.
     std::string key;
 
     /// The setting's new value for `Set`, the consensus endpoint for `Admit` and
-    /// `AdmitLearner`, empty otherwise.
+    /// `AdmitLearner`, the display name for `Name` (empty clears it), and for `Budget` and
+    /// `BudgetClear` the MEMBER-EDIT value as it travels (`CompileCacheWire::BudgetSetValue`,
+    /// `BudgetClearValue`), parsed and encoded by the flag's applier; empty otherwise.
     std::string value;
 
     /// The member's identity key for `Admit` and `AdmitLearner` when the operator typed
@@ -296,6 +307,13 @@ struct NodeConfig
     /// row's provenance, so a registration replays what was typed and never today's core count.
     std::optional<std::uint32_t> machineSlots;
 
+    /// How many keys each of the leader's keyed compile histories keeps by name, when the operator named a number
+    /// (`--history-requesters`): requesting machines, and separately toolchains -- one option governs both.
+    ///
+    /// Absent is `Distributed::DefaultHistoryKeys` (`HistoryKeysOf`). The rest fold into an `other` row whose counts
+    /// stay exact. An `optional` for `slots` reason: it is this row's provenance.
+    std::optional<std::uint32_t> historyRequesters;
+
     /// The memory the fleet's queue may have this machine's compiles hold at once, when the operator
     /// named one (`--machine-memory-budget`, bytes after `N%` is resolved against host RAM).
     ///
@@ -318,6 +336,14 @@ struct NodeConfig
     /// bare port is given: a scrape endpoint reachable from the network is the
     /// operator's decision, not this program's.
     std::string adminListen;
+
+    /// Where the MCP endpoint listens, or empty to leave it off.
+    ///
+    /// The `--admin-listen` grammar and defaulting -- a bare port binds loopback -- with one rule
+    /// that one does not have: an address that is NOT loopback is a startup refusal, because there is
+    /// no MCP authentication scheme and the design goal is that MCP is never reachable from the
+    /// network. Other machines are reached THROUGH the local node, never by dialling its MCP port.
+    std::string mcpListen;
 
     /// File holding the credential the dashboard requires, or empty for none.
     ///
@@ -773,6 +799,7 @@ struct NodeConfig
     bool nodeClassExplicit { false };
     bool toolchainDiscoveryExplicit { false };
     bool adminListenExplicit { false };
+    bool mcpListenExplicit { false };
     bool cacheDiskBytesExplicit { false };
     bool sharedCacheDiskBytesExplicit { false };
     bool raftListenExplicit { false };
@@ -973,8 +1000,9 @@ struct NodeConfig
 /// Hence a **required** parameter rather than a defaulted convenience: a caller that
 /// could omit it is a caller that can quietly go back to guessing. It must also be
 /// obtained AFTER the tier has been started, which no signature can enforce --
-/// `CacheCapacityOf(nullptr)` and "not built yet" are the same record. `WorkerBody`
-/// is the one caller and derives both together, below the tier.
+/// `CacheCapacityOf(nullptr)` and "not built yet" are the same record. `LiveNodeCapacity`
+/// is the one caller, built by `WorkerBody` below the tier, and derives it again whenever
+/// a live cache-budget override moves what the tier holds.
 /// @param cfg The parsed configuration.
 /// @param host What the machine says about itself.
 /// @param cache What this node's cache tiers hold, from `CacheCapacityOf`; a
@@ -1009,6 +1037,21 @@ struct NodeConfig
 /// @return The ceiling, in bytes.
 [[nodiscard]] std::size_t CompileRequestMaxOf(NodeConfig const& cfg) noexcept;
 
+/// What a live budget override of zero is told: the cluster's one sentence (`Cluster::TierOverrideCannotRemoveTier`),
+/// which the leader refuses by too, so a node applying an override and a leader recording one cannot disagree.
+using Cluster::TierOverrideCannotRemoveTier;
+
+/// The value-level rule a live tier budget is held to, however it arrived.
+///
+/// What a number off the wire (`CacheTier::ApplyTierBudget`) is held to on the node that applies it. A number typed as
+/// text reaches the leader through `Cluster::ParseOverrideBudget` -- the tier's own flag grammar, the ONE derivation
+/// every door that sets an override shares -- and this asks the one question only the applying process can: zero is
+/// refused (`TierOverrideCannotRemoveTier`), and so is a figure this process cannot address, which on a 64-bit build is
+/// none.
+/// @param bytes The budget asked for.
+/// @return The budget as this process's size type, or why it cannot be set.
+[[nodiscard]] std::expected<std::size_t, std::string> CheckTierBudget(std::uint64_t bytes);
+
 /// The in-flight compile budget this worker runs with: `--compile-inflight-max`, or
 /// `DefaultCompileByteBudget` over the RESOLVED slot count when it names none (#1667).
 /// @param cfg The parsed configuration.
@@ -1027,6 +1070,12 @@ inline constexpr std::uint64_t DefaultCompileEstimateBytes = 2ULL << 30;
 /// @param cfg The parsed configuration.
 /// @return The estimate, in bytes.
 [[nodiscard]] std::uint64_t CompileEstimateDefaultOf(NodeConfig const& cfg) noexcept;
+
+/// How many keys each keyed compile history keeps: `--history-requesters`, or `Distributed::DefaultHistoryKeys` when
+/// it names none.
+/// @param cfg The parsed configuration.
+/// @return The ceiling, at least one.
+[[nodiscard]] std::size_t HistoryKeysOf(NodeConfig const& cfg) noexcept;
 
 /// The least in-flight compile budget a worker may run with: the larger of the per-request
 /// ceiling (`CompileRequestMaxOf`) and the listener's COMPILE frame cap floor.
@@ -1164,6 +1213,16 @@ inline constexpr std::string_view RetiredNodeFlagsGuide =
 ///         means the candidate may be published.
 [[nodiscard]] std::vector<std::string_view> UnreloadableChanges(NodeConfig const& previous, NodeConfig const& candidate);
 
+/// Whether a reload would turn the memory tier on or off: `--cache-memory` crossing zero.
+///
+/// `--cache-memory` reloads -- a live tier takes a new budget -- but zero builds no memory tier at all, and the tier
+/// stack is built once, so a reload moving to or from zero would describe a tier that does not exist, or ignore one
+/// that does. `ValidateNodeReloadable` refuses it by name.
+/// @param previous What the worker is running with.
+/// @param candidate What the file now says.
+/// @return True when exactly one of them is zero.
+[[nodiscard]] bool MemoryTierExistenceChanged(NodeConfig const& previous, NodeConfig const& candidate) noexcept;
+
 /// The immutability rule `ConfigReloaderOf<NodeConfig>` runs, as a `ConfigError`.
 ///
 /// A thin shape over `UnreloadableChanges` because the reloader speaks errors and the
@@ -1295,9 +1354,14 @@ inline constexpr std::array<std::string_view, 2> AddressReloadableFlags { "--adv
 /// describes the TOOLCHAINS it serves rather than whom it serves them to. The scheduler
 /// has no field for it, so re-registering on a change would tell the fleet nothing it
 /// could act on -- at the price of an include-tree walk.
-inline constexpr std::array<std::string_view, 4> LocalReloadableFlags {
-    "--log-level", "--allow-compile-arg", "--requirepass", "--fleet-open"
-};
+///
+/// `--cache-memory` and `--cache-disk` are local although the fleet does see what a tier holds: the capacity this node
+/// reports is re-derived from the tier the moment a budget is applied (`CacheTier`'s budget listener), which is the
+/// one place it is derived -- so a reload resizing a tier through `BudgetOverrideApplier` needs no re-survey to tell
+/// the fleet anything.
+inline constexpr std::array<std::string_view, 6> LocalReloadableFlags { "--log-level",    "--allow-compile-arg",
+                                                                        "--requirepass",  "--fleet-open",
+                                                                        "--cache-memory", "--cache-disk" };
 
 /// Both reloadable-flag lists, so the guards walk a derived SET rather than naming
 /// each list by hand.
@@ -1686,6 +1750,20 @@ inline constexpr std::string_view ThisMachineLoopbackHost = "127.0.0.1";
 /// already means being on the machine, so a bare port needs no token while a bind an
 /// operator deliberately exposed does.
 inline constexpr std::string_view AdminListenDefaultHost = "127.0.0.1";
+
+/// What a bare `--mcp-listen` binds.
+///
+/// Loopback, and the only kind of address the surface may bind at all: a non-loopback one is
+/// refused at startup (`McpListenNotLoopbackRefusal`).
+inline constexpr std::string_view McpListenDefaultHost = "127.0.0.1";
+
+/// Why `--mcp-listen` on an address other machines can reach refuses to start, worded once so the
+/// startup rule and its test cannot drift apart.
+inline constexpr std::string_view McpListenNotLoopbackRefusal =
+    "--mcp-listen must be a loopback address (127.0.0.1 or ::1), or a bare port, which binds 127.0.0.1: MCP has "
+    "no authentication scheme here, so an endpoint other machines can reach would hand this node's fleet "
+    "controls to whoever dials it. A name is not loopback, `localhost` included -- a resolver decides what it "
+    "reaches. Other machines are reached through this node, never by dialling its MCP port.";
 
 /// How an operator states the address peers dial a consensus node at: the remedy for a node that
 /// states none, worded ONCE.
@@ -2096,6 +2174,33 @@ enum class ConsensusDialGap : std::uint8_t
 /// @param cfg The parsed configuration.
 /// @return A phrase naming who this node admits.
 [[nodiscard]] std::string AdmissionSummary(NodeConfig const& cfg);
+
+/// CLI spelling of a LogLevel, matching what ParseNodeLogLevel accepts.
+///
+/// The inverse of that parser, and the pair is what makes a log level survive
+/// a round trip into a supervisor's argument list -- and what lets a value read back out of a running
+/// node (`node_status`'s configuration in force) be handed straight back to the flag.
+/// @param level Level to name.
+/// @return Its CLI spelling.
+[[nodiscard]] constexpr std::string_view NodeLogLevelName(LogLevel level) noexcept
+{
+    switch (level)
+    {
+        case LogLevel::Trace:
+            return "trace";
+        case LogLevel::Debug:
+            return "debug";
+        case LogLevel::Info:
+            return "info";
+        case LogLevel::Warn:
+            return "warn";
+        case LogLevel::Error:
+            return "error";
+        case LogLevel::Fatal:
+            return "fatal";
+    }
+    return "info";
+}
 
 /// What the readiness line says about this node's worker.
 ///

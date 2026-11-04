@@ -163,6 +163,15 @@ class WriteErrorReportingStorage final: public IStorage
     void FlushWithGeneration(core::platform::SteadyTimePoint effectiveAt) override;
     PurgeOutcome PurgeExpired(core::platform::SteadyTimePoint now, PurgeBudget budget) override;
     void Resize(std::size_t newMaxBytes) override;
+    /// Forwarded: a decorator is no tier, and the default would reach the inner store
+    /// through `Resize`, which a `LayeredStorage` reads as its memory half's.
+    /// @param tier Which tier's budget to change.
+    /// @param newMaxBytes The new budget.
+    /// @return The inner store's answer.
+    std::optional<std::size_t> ResizeTier(StorageTier tier, std::size_t newMaxBytes) override;
+    /// Forwarded, for the same reason.
+    /// @return The inner store's answer.
+    EvictStepOutcome EvictStep() override;
 
     /// Forward to the inner storage: this decorator counts write errors, it
     /// never reclaims.

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <Pace/Cluster/ClusterState.hpp>
 #include <Pace/Consensus/RaftClusterHarness.hpp>
 #include <Pace/Core/Bytes.hpp>
 #include <Pace/Core/WireFields.hpp>
@@ -20,6 +21,7 @@
 #include <utility>
 #include <vector>
 
+#include <core/Ranges.hpp>
 #include <tests/RaftPeerKeyFakes.hpp>
 #include <tests/Unwrap.hpp>
 
@@ -1136,6 +1138,230 @@ TEST_CASE("A node restarted after compacting holds in its application what its s
     CHECK(SameApplication(cluster.At("n2").application, before));
     CHECK(SameApplication(cluster.At("n2").application, cluster.At("n1").application));
 
+    RequireNoViolations(cluster);
+}
+
+namespace
+{
+
+/// The replicated cluster state an application's entries build, each payload read as a `Cluster::Command`.
+/// @param application The entries, in index order.
+/// @return The state; an entry that is not a command is a failed check, never a skipped one.
+[[nodiscard]] Cluster::ClusterState FoldClusterState(std::span<AppliedEntry const> application)
+{
+    auto state = Cluster::ClusterState {};
+    for (auto const& entry: application)
+    {
+        auto const command = Cluster::DecodeCommand(entry.payload);
+        REQUIRE(command.has_value());
+        Cluster::Apply(state, *command, entry.index.value);
+    }
+    return state;
+}
+
+/// @param id A member.
+/// @return Its admission as a voter, under its test key.
+[[nodiscard]] std::vector<std::byte> AdmitBytes(std::string id)
+{
+    auto const key = Testing::TestKeyPair(id).PublicKey();
+    return Cluster::Encode(Cluster::Command { .kind = Cluster::CommandKind::AddMember,
+                                              .key = id,
+                                              .value = std::format("10.0.0.{}:6675", id.back()),
+                                              .schedulerEndpoint = {},
+                                              .publicKey = key });
+}
+
+/// @param id A member.
+/// @param name What to call it; empty clears.
+/// @return The `SetDisplayName` command naming it.
+[[nodiscard]] std::vector<std::byte> NameBytes(std::string id, std::string name)
+{
+    return Cluster::Encode(Cluster::Command { .kind = Cluster::CommandKind::SetDisplayName,
+                                              .key = std::move(id),
+                                              .value = std::move(name),
+                                              .schedulerEndpoint = {},
+                                              .publicKey = std::nullopt });
+}
+
+/// @param state A state.
+/// @param id A member.
+/// @return Its display name, or a marker when the state does not record it.
+[[nodiscard]] std::string NameIn(Cluster::ClusterState const& state, std::string_view id)
+{
+    auto const* const member = core::findOrNull(state.members, id, &Cluster::ClusterMember::id);
+    return member != nullptr ? member->displayName : std::string { "<no such member>" };
+}
+
+} // namespace
+
+TEST_CASE("A member's display name reaches a restarted node's application from its snapshot",
+          "[consensus][raft][cluster][snapshot][display-name]")
+{
+    // The consensus rule for anything the replicated state records: a restart case asserts `Member::application`,
+    // never only the log. The names are proposed first and padding after, so the snapshot n2 recovers from covers
+    // every naming command -- and what n2 holds before a single step is what recovery gave back.
+    RaftClusterHarness cluster { { "n1", "n2", "n3" }, Members(), 1, CompactOften };
+    REQUIRE(SettleOnLeader(cluster));
+    auto lastNaming = LogIndex::BeforeFirst();
+    for (auto payload: { AdmitBytes("n1"),
+                         AdmitBytes("n2"),
+                         NameBytes("n1", "office-pc"),
+                         NameBytes("n2", "build-box"),
+                         // A case variant of its own name is allowed; the next name a member takes replaces it.
+                         NameBytes("n2", "Build-Box") })
+    {
+        lastNaming = Unwrap(cluster.ProposeOnLeader(std::move(payload)));
+        cluster.Run(5);
+    }
+    for (auto const* const id: { "n3", "n4", "n5", "n6" })
+    {
+        REQUIRE(cluster.ProposeOnLeader(AdmitBytes(id)).has_value());
+        cluster.Run(5);
+    }
+    cluster.Run(60);
+
+    auto const snapshotIndex = cluster.At("n2").driver->Node().SnapshotIndex();
+    REQUIRE(snapshotIndex >= lastNaming);
+    REQUIRE(cluster.Restart("n2").has_value());
+
+    auto const restored = FoldClusterState(cluster.At("n2").application);
+    CHECK(NameIn(restored, "n1") == "office-pc");
+    CHECK(NameIn(restored, "n2") == "Build-Box");
+
+    // And caught up, the same state as the leader's.
+    cluster.Run(120);
+    auto const leader = Unwrap(cluster.Leader());
+    CHECK(FoldClusterState(cluster.At("n2").application) == FoldClusterState(cluster.At(leader).application));
+    RequireNoViolations(cluster);
+}
+
+TEST_CASE("An admission under an id a display name spells clears the name, and a restart recovers that state",
+          "[consensus][raft][cluster][snapshot][display-name]")
+{
+    // A label yields to an identity: n1 is named `office-pc`, then a machine whose id IS `office-pc` is admitted. The
+    // state that results must be one every node can snapshot and restore -- asserted on `Member::application` after
+    // a restart recovered from a snapshot covering both entries.
+    RaftClusterHarness cluster { { "n1", "n2", "n3" }, Members(), 1, CompactOften };
+    REQUIRE(SettleOnLeader(cluster));
+    auto lastCovered = LogIndex::BeforeFirst();
+    for (auto payload: { AdmitBytes("n1"), NameBytes("n1", "office-pc"), AdmitBytes("office-pc") })
+    {
+        lastCovered = Unwrap(cluster.ProposeOnLeader(std::move(payload)));
+        cluster.Run(5);
+    }
+    for (auto const* const id: { "n3", "n4", "n5", "n6" })
+    {
+        REQUIRE(cluster.ProposeOnLeader(AdmitBytes(id)).has_value());
+        cluster.Run(5);
+    }
+    cluster.Run(60);
+
+    REQUIRE(cluster.At("n2").driver->Node().SnapshotIndex() >= lastCovered);
+    REQUIRE(cluster.Restart("n2").has_value());
+
+    auto const restored = FoldClusterState(cluster.At("n2").application);
+    CHECK(NameIn(restored, "n1").empty());
+    CHECK(NameIn(restored, "office-pc").empty());
+    // And the state that resulted is one a node can snapshot and read back.
+    auto const decoded = Cluster::DecodeState(Cluster::Encode(restored));
+    REQUIRE(decoded.has_value());
+    CHECK(*decoded == restored);
+    RequireNoViolations(cluster);
+}
+
+namespace
+{
+/// @param id A member.
+/// @param memory The memory tier's figure, or nothing.
+/// @param disk The disk tier's figure, or nothing.
+/// @return The `SetBudget` command.
+[[nodiscard]] std::vector<std::byte> BudgetBytes(std::string id,
+                                                 std::optional<std::uint64_t> memory,
+                                                 std::optional<std::uint64_t> disk)
+{
+    return Cluster::Encode(Cluster::Command { .kind = Cluster::CommandKind::SetBudget,
+                                              .key = std::move(id),
+                                              .value = {},
+                                              .schedulerEndpoint = {},
+                                              .publicKey = std::nullopt,
+                                              .budgetBytes = { memory, disk },
+                                              .setAtUnixSeconds = 1793613600,
+                                              .setBy = "n1" });
+}
+
+/// @param id A member.
+/// @param tier Its tier's name.
+/// @param baseline The member's report.
+/// @param overrideId The override it measured against: the index of the entry that set it.
+/// @return The `RecordBaseline` command.
+[[nodiscard]] std::vector<std::byte> BaselineBytes(std::string id,
+                                                   std::string tier,
+                                                   std::uint64_t baseline,
+                                                   std::uint64_t overrideId)
+{
+    return Cluster::Encode(Cluster::Command { .kind = Cluster::CommandKind::RecordBaseline,
+                                              .key = std::move(id),
+                                              .value = std::move(tier),
+                                              .schedulerEndpoint = {},
+                                              .publicKey = std::nullopt,
+                                              .baselineBytes = baseline,
+                                              .overrideId = overrideId });
+}
+
+/// @param state A state.
+/// @param id A member.
+/// @param tier A tier.
+/// @return Its override, absent when the state records none or no such member.
+[[nodiscard]] std::optional<Cluster::BudgetOverride> BudgetIn(Cluster::ClusterState const& state,
+                                                              std::string_view id,
+                                                              StorageTier tier)
+{
+    auto const* const member = core::findOrNull(state.members, id, &Cluster::ClusterMember::id);
+    return member != nullptr ? Cluster::BudgetOf(*member, tier) : std::nullopt;
+}
+} // namespace
+
+TEST_CASE("override survives snapshot restore", "[consensus][raft][cluster][snapshot][budget]")
+{
+    // A restart case asserts `Member::application`, never only the log: the overrides and the baseline are proposed
+    // first and padding after, so the snapshot n2 recovers from covers every budget command, and what n2 holds before
+    // a single step is what recovery handed the application.
+    RaftClusterHarness cluster { { "n1", "n2", "n3" }, Members(), 1, CompactOften };
+    REQUIRE(SettleOnLeader(cluster));
+    auto const propose = [&cluster](std::vector<std::byte> payload) {
+        auto const index = Unwrap(cluster.ProposeOnLeader(std::move(payload)));
+        cluster.Run(5);
+        return index;
+    };
+    (void) propose(AdmitBytes("n1"));
+    (void) propose(AdmitBytes("n2"));
+    auto const memoryEntry = propose(BudgetBytes("n1", 64ULL << 20, std::nullopt));
+    auto const diskEntry = propose(BudgetBytes("n2", std::nullopt, 2ULL << 30));
+    auto const lastBudget = propose(BaselineBytes("n2", "disk", 8ULL << 30, diskEntry.value));
+    for (auto const* const id: { "n3", "n4", "n5", "n6" })
+    {
+        REQUIRE(cluster.ProposeOnLeader(AdmitBytes(id)).has_value());
+        cluster.Run(5);
+    }
+    cluster.Run(60);
+
+    auto const snapshotIndex = cluster.At("n2").driver->Node().SnapshotIndex();
+    REQUIRE(snapshotIndex >= lastBudget);
+    REQUIRE(cluster.Restart("n2").has_value());
+
+    auto const restored = FoldClusterState(cluster.At("n2").application);
+    auto const memory = Unwrap(BudgetIn(restored, "n1", StorageTier::Memory));
+    CHECK(memory.bytes == 64ULL << 20);
+    CHECK_FALSE(memory.baseline.has_value());
+    CHECK(memory.setAtUnixSeconds == 1793613600);
+    CHECK(memory.id == memoryEntry.value);
+    CHECK(memory.setBy == "n1");
+    auto const disk = Unwrap(BudgetIn(restored, "n2", StorageTier::Disk));
+    CHECK(disk.baseline == std::optional<std::uint64_t> { 8ULL << 30 });
+
+    cluster.Run(120);
+    auto const leader = Unwrap(cluster.Leader());
+    CHECK(FoldClusterState(cluster.At("n2").application) == FoldClusterState(cluster.At(leader).application));
     RequireNoViolations(cluster);
 }
 

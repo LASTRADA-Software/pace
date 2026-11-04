@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <Pace/Cli/Duration.hpp>
 #include <Pace/Cluster/ClusterState.hpp>
+#include <Pace/Core/Bytes.hpp>
 #include <Pace/Core/Ed25519.hpp>
 #include <Pace/Core/EnumTable.hpp>
 #include <Pace/Core/HostPort.hpp>
@@ -15,6 +16,7 @@
 #include <cstdint>
 #include <format>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -28,6 +30,15 @@ namespace Pace::Distributed
 namespace
 {
     namespace Wire = CompileCacheWire;
+
+    /// @param caller A connection.
+    /// @return The identity key it PROVED, raw, as text; empty when it proved none. What a handed-over history is
+    ///         attributed BY, since the endpoint it is filed under is the machine's own claim.
+    [[nodiscard]] std::string_view ProvenKeyText(CallerContext const& caller) noexcept
+    {
+        return caller.provenKey.has_value() ? AsStringView(std::span<std::byte const> { *caller.provenKey })
+                                            : std::string_view {};
+    }
 
     /// One row per refusal that moves a counter: the wire code, and which one.
     ///
@@ -336,6 +347,9 @@ namespace
         // stands*, and the sentence carries which key and whose it was. The permanence is
         // stated where it is decided -- `RefusalSubjects` -- which is what a reconciler reads.
         { .code = ConsensusErrorCode::KeyRevoked, .reported = Wire::ErrorCode::InvalidClusterChange },
+        // `KeyRevoked`'s reasoning: no client acts differently on a taken name than on any other change that will not
+        // be accepted as it stands, and the sentence names the name and its holder.
+        { .code = ConsensusErrorCode::DisplayNameTaken, .reported = Wire::ErrorCode::InvalidClusterChange },
         { .code = ConsensusErrorCode::NotLeader, .reported = Wire::ErrorCode::NotLeader },
         { .code = ConsensusErrorCode::StorageFailure, .reported = Wire::ErrorCode::StorageWriteFailed },
         // A store another build wrote is judged when the node STARTS, which it then
@@ -491,6 +505,11 @@ namespace
         KeptField<WorkerRegistration> { .name = "toolchain label",
                                         .read = [](WorkerRegistration const& r) { return Text(r.toolchainLabel); },
                                         .ceiling = Wire::MaxToolchainLabelBytes },
+        // Composed by the node from a table rather than read from compiler output, and refused all the same: it is
+        // text a PEER sent, rendered in `/fleet.json`, and the node at the other end is whichever build it is.
+        KeptField<WorkerRegistration> { .name = "toolchain family",
+                                        .read = [](WorkerRegistration const& r) { return Text(r.toolchainFamily); },
+                                        .ceiling = Wire::MaxToolchainFamilyBytes },
         // The fifth, and it comes from the same place the fourth does: the machine
         // itself, not this project. `gethostname` and `GetComputerNameExA` hand back
         // whatever the host is called, in whatever encoding the host chose -- so this
@@ -720,7 +739,7 @@ SchedulerService::SchedulerService(core::platform::IClock& clock,
     _unserved { clock },
     _estimates { admissionEstimateBytes, AdmissionEstimateCapacity },
     _placement { _workers },
-    _queue { _estimates, _placement }
+    _queue { _clock, _estimates, _placement }
 {
 }
 
@@ -896,6 +915,293 @@ SchedulerReply SchedulerService::ClusterSet(CallerContext const& caller, std::st
                                     .value = std::string { value },
                                     .schedulerEndpoint = {},
                                     .publicKey = std::nullopt });
+}
+
+namespace
+{
+    /// A refusal as the service's `Refuse` takes it: the code and the sentence.
+    using EditRefusal = std::pair<Wire::ErrorCode, std::string>;
+
+    /// The tier a positional byte names, as `PerTier`'s rule numbers them.
+    /// @param position The tier's position on the wire.
+    /// @return The tier, or nullopt for one this build does not have.
+    [[nodiscard]] std::optional<StorageTier> TierAt(std::size_t position) noexcept
+    {
+        if (position >= EnumeratorCount<StorageTier>)
+            return std::nullopt;
+        return static_cast<StorageTier>(position);
+    }
+
+    /// A command naming one member and, for a clear or a baseline, one tier: the shape every budget verb shares.
+    /// @param kind The verb.
+    /// @param memberId The member.
+    /// @param tierName The tier's name; empty for a `SetBudget`, which names its tiers positionally.
+    /// @return The command, with no figures yet.
+    [[nodiscard]] Cluster::Command BudgetCommand(Cluster::CommandKind kind,
+                                                 std::string_view memberId,
+                                                 std::string_view tierName)
+    {
+        return Cluster::Command { .kind = kind,
+                                  .key = std::string { memberId },
+                                  .value = std::string { tierName },
+                                  .schedulerEndpoint = {},
+                                  .publicKey = std::nullopt };
+    }
+
+    /// What a value could not be read as.
+    /// @param verb The verb's spelling (`member-edit set-budget`, `member-report record-baseline`).
+    /// @param why What was wrong.
+    /// @return The refusal.
+    [[nodiscard]] EditRefusal Unreadable(std::string_view verb, std::string_view why)
+    {
+        return EditRefusal { Wire::ErrorCode::InvalidClusterChange, std::format("{}'s value {}", verb, why) };
+    }
+
+    /// The tier a value names by position, or the refusal naming one this leader's build does not have.
+    /// @param verb The verb's spelling, for the refusal.
+    /// @param position The tier's position.
+    /// @return The tier, or the refusal.
+    [[nodiscard]] std::expected<StorageTier, EditRefusal> KnownTier(std::string_view verb, std::size_t position)
+    {
+        if (auto const tier = TierAt(position); tier.has_value())
+            return *tier;
+        return std::unexpected(Unreadable(
+            verb,
+            std::format("names cache tier {}, which this leader's build does not have; upgrade it to the client's build",
+                        position)));
+    }
+
+    /// Facts a MEMBER-EDIT reader stamps that the frame does not carry.
+    struct EditStamp
+    {
+        std::int64_t setAtUnixSeconds; ///< The LEADER's clock, read once by the caller.
+        std::string setBy;             ///< The member whose key the proposing connection proved; empty when none did.
+    };
+
+    /// How one edit's value becomes the command it proposes.
+    using EditReader = std::expected<Cluster::Command, EditRefusal> (*)(std::string_view memberId,
+                                                                        std::span<std::byte const> value,
+                                                                        EditStamp const& stamp);
+
+    /// One row per `Wire::MemberEditVerb`, in enumerator order.
+    struct MemberEditReaderRow
+    {
+        Wire::MemberEditVerb verb; ///< The edit.
+        EditReader read;           ///< How its value becomes a command.
+    };
+
+    /// **A table of readers, one per edit**, so the next edit is a row rather than another arm threaded through
+    /// `MemberEdit`. Every edit is ONE command, so a two-tier `SetBudget` is recorded whole or not at all.
+    constexpr EnumTable<Wire::MemberEditVerb, MemberEditReaderRow> MemberEditReaders { {
+        { .verb = Wire::MemberEditVerb::SetDisplayName,
+          .read = [](std::string_view memberId, std::span<std::byte const> value, EditStamp const&)
+              -> std::expected<Cluster::Command, EditRefusal> {
+              return Cluster::Command { .kind = Cluster::CommandKind::SetDisplayName,
+                                        .key = std::string { memberId },
+                                        .value = std::string { Wire::AsStringView(value) },
+                                        .schedulerEndpoint = {},
+                                        .publicKey = std::nullopt };
+          } },
+        { .verb = Wire::MemberEditVerb::SetBudget,
+          .read = [](std::string_view memberId, std::span<std::byte const> value, EditStamp const& stamp)
+              -> std::expected<Cluster::Command, EditRefusal> {
+              constexpr auto Verb = std::string_view { "member-edit set-budget" };
+              auto const decoded = Wire::DecodeBudgetSetValue(value);
+              if (!decoded.has_value())
+                  return std::unexpected(Unreadable(
+                      Verb, "is not a figure or an absence per tier this leader's build has; upgrade it to the client's"));
+              auto command = BudgetCommand(Cluster::CommandKind::SetBudget, memberId, {});
+              for (auto const position: std::views::iota(std::size_t { 0 }, decoded->bytes.size()))
+              {
+                  auto const tier = KnownTier(Verb, position);
+                  if (!tier.has_value())
+                      return std::unexpected(tier.error());
+                  command.budgetBytes[static_cast<std::size_t>(*tier)] = decoded->bytes[position];
+              }
+              if (std::ranges::none_of(command.budgetBytes, [](auto const& tier) { return tier.has_value(); }))
+                  return std::unexpected(Unreadable(Verb, "names no tier, so there is nothing to override"));
+              command.setAtUnixSeconds = stamp.setAtUnixSeconds;
+              command.setBy = stamp.setBy;
+              return command;
+          } },
+        { .verb = Wire::MemberEditVerb::ClearBudget,
+          .read = [](std::string_view memberId, std::span<std::byte const> value, EditStamp const&)
+              -> std::expected<Cluster::Command, EditRefusal> {
+              constexpr auto Verb = std::string_view { "member-edit clear-budget" };
+              auto const decoded = Wire::DecodeBudgetClearValue(value);
+              if (!decoded.has_value())
+                  return std::unexpected(Unreadable(Verb, "is not one tier byte"));
+              auto const tier = KnownTier(Verb, decoded->tier);
+              if (!tier.has_value())
+                  return std::unexpected(tier.error());
+              // An operator's clear names no override: it removes whatever is recorded.
+              return BudgetCommand(Cluster::CommandKind::ClearBudget, memberId, Cluster::TierName(*tier));
+          } },
+    } };
+
+    static_assert(RowsInEnumeratorOrder(MemberEditReaders, &MemberEditReaderRow::verb),
+                  "MemberEditReaders must hold one row per MemberEditVerb, in enumerator order");
+
+    /// How one report's value becomes the command it proposes, about @p memberId -- the member holding the key the
+    /// reporting connection proved, never a field of the frame.
+    using ReportReader = std::expected<Cluster::Command, EditRefusal> (*)(std::string_view memberId,
+                                                                          std::span<std::byte const> value);
+
+    /// One row per `Wire::MemberReportVerb`, in enumerator order.
+    struct MemberReportReaderRow
+    {
+        Wire::MemberReportVerb verb; ///< The report.
+        ReportReader read;           ///< How its value becomes a command.
+    };
+
+    constexpr EnumTable<Wire::MemberReportVerb, MemberReportReaderRow> MemberReportReaders { {
+        { .verb = Wire::MemberReportVerb::RecordBaseline,
+          .read = [](std::string_view memberId,
+                     std::span<std::byte const> value) -> std::expected<Cluster::Command, EditRefusal> {
+              constexpr auto Verb = std::string_view { "member-report record-baseline" };
+              auto const decoded = Wire::DecodeBudgetBaselineValue(value);
+              if (!decoded.has_value())
+                  return std::unexpected(Unreadable(Verb, "is not a tier, a baseline and the override it answers"));
+              auto const tier = KnownTier(Verb, decoded->tier);
+              if (!tier.has_value())
+                  return std::unexpected(tier.error());
+              auto command = BudgetCommand(Cluster::CommandKind::RecordBaseline, memberId, Cluster::TierName(*tier));
+              command.baselineBytes = decoded->baseline;
+              command.overrideId = decoded->overrideId;
+              return command;
+          } },
+        { .verb = Wire::MemberReportVerb::DropOverride,
+          .read = [](std::string_view memberId,
+                     std::span<std::byte const> value) -> std::expected<Cluster::Command, EditRefusal> {
+              constexpr auto Verb = std::string_view { "member-report drop-override" };
+              auto const decoded = Wire::DecodeBudgetDropValue(value);
+              if (!decoded.has_value())
+                  return std::unexpected(Unreadable(Verb, "is not a tier and the override it drops"));
+              auto const tier = KnownTier(Verb, decoded->tier);
+              if (!tier.has_value())
+                  return std::unexpected(tier.error());
+              // ALWAYS conditional: a member drops exactly the override its own configuration outranks, never a newer
+              // one an operator set since.
+              auto command = BudgetCommand(Cluster::CommandKind::ClearBudget, memberId, Cluster::TierName(*tier));
+              command.overrideId = decoded->overrideId;
+              return command;
+          } },
+    } };
+
+    static_assert(RowsInEnumeratorOrder(MemberReportReaders, &MemberReportReaderRow::verb),
+                  "MemberReportReaders must hold one row per MemberReportVerb, in enumerator order");
+
+    /// The member whose identity key @p caller PROVED on its connection, as the applied state records it.
+    ///
+    /// **The key, never an id the connection claims**: a proof binds a key, and the state says whose it is. Empty when
+    /// the connection proved no key, or one no member holds.
+    /// @param caller Who is asking.
+    /// @param state The state this leader applied.
+    /// @return The member's id, or empty.
+    [[nodiscard]] std::string ProvenMemberOf(CallerContext const& caller, Cluster::ClusterState const& state)
+    {
+        if (!caller.provenKey.has_value())
+            return {};
+        return state.HolderOf(*caller.provenKey).value_or(std::string {});
+    }
+
+    /// Which member an operator's edit is ATTRIBUTED to (`BudgetOverride::setBy`): a label, deciding nothing.
+    ///
+    /// The member holding the key the connection PROVED; else the one holding the key a verified machine TICKET was
+    /// signed by, since that is the minting machine's own live key exactly as a proof's is; else, for a caller on THIS
+    /// machine -- one that proved or presented a key no member holds included -- the member holding this leader's own
+    /// key -- the rule an admission's charge follows
+    /// (`ReportLeaseDemand`), since a loopback route is by definition this machine. Empty when none of them names a
+    /// member: `--fleet-open` identifies nobody.
+    /// @param caller Who is asking.
+    /// @param state The state this leader applied.
+    /// @param ownKey This leader's own identity key.
+    /// @return The member's id, or empty.
+    [[nodiscard]] std::string AttributedMemberOf(CallerContext const& caller,
+                                                 Cluster::ClusterState const& state,
+                                                 Ed25519PublicKey const& ownKey)
+    {
+        // In order of precedence: what the connection proved, what its ticket was signed by, this machine.
+        auto const candidates = std::array {
+            caller.provenKey,
+            caller.ticketKey,
+            IsLoopbackHost(caller.peerId) ? std::optional { ownKey } : std::nullopt,
+        };
+        // The first candidate a member HOLDS: a proof or a ticket under a key the roster does not hold names nobody, so
+        // a caller on this machine that proved such a key is still this machine.
+        for (auto const& candidate: candidates)
+            if (candidate.has_value())
+                if (auto holder = state.HolderOf(*candidate); holder.has_value())
+                    return std::move(*holder);
+        return {};
+    }
+} // namespace
+
+SchedulerReply SchedulerService::MemberEdit(CallerContext const& caller,
+                                            std::uint8_t verb,
+                                            std::string_view memberId,
+                                            std::string_view value)
+{
+    // An operator's standing is the verb's door (`OpTable`), asked by the surface before the payload is read and again
+    // in `Answer`; every edit this verb carries is an operator's.
+    if (auto refusal = Gate(caller); refusal.has_value())
+        return std::move(*refusal);
+    if (_admin == nullptr)
+        return Refuse(Wire::ErrorCode::NoCluster);
+
+    // An edit this build does not know is a client newer than this leader: refused by name, never read as whichever
+    // edit its byte aliases, and as a change that will not be accepted as it stands -- the answer an unknown setting
+    // gets.
+    auto const edit = Wire::DecodeMemberEditVerb(verb);
+    if (!edit.has_value())
+        return Refuse(Wire::ErrorCode::InvalidClusterChange,
+                      std::format("member-edit verb {} is one this leader's build does not know; upgrade it to the "
+                                  "client's build",
+                                  static_cast<unsigned>(verb)));
+
+    // The leader's clock, once, stamped where the proposal is made because `Apply` reads no clock; and who set it
+    // (`AttributedMemberOf`): the machine whose key the connection proved or whose ticket it presented -- the
+    // operator's machine, or the node an MCP call or a one-shot verb was forwarded through -- else this leader's own
+    // machine for a caller on it.
+    auto const state = _admin->ClusterState();
+    auto const setAt = std::chrono::duration_cast<std::chrono::seconds>(_wallClock.now().time_since_epoch()).count();
+    auto command = MemberEditReaders[static_cast<std::size_t>(*edit)].read(
+        memberId,
+        std::as_bytes(std::span { value.data(), value.size() }),
+        EditStamp { .setAtUnixSeconds = static_cast<std::int64_t>(setAt),
+                    .setBy = AttributedMemberOf(caller, state, _signer.PublicKey()) });
+    if (!command.has_value())
+        return Refuse(command.error().first, std::move(command.error().second));
+    return Offer(*command);
+}
+
+SchedulerReply SchedulerService::MemberReport(CallerContext const& caller, std::uint8_t verb, std::string_view value)
+{
+    if (auto refusal = Gate(caller); refusal.has_value())
+        return std::move(*refusal);
+    if (_admin == nullptr)
+        return Refuse(Wire::ErrorCode::NoCluster);
+
+    // The member is the one holding the key this connection PROVED: the door asked for a proof (`ProvenNodeOnly`), and
+    // this asks it again here, where the member is read off it -- a report is about the machine sending it, or nothing.
+    auto const state = _admin->ClusterState();
+    auto const member = ProvenMemberOf(caller, state);
+    if (member.empty())
+        return Refuse(Wire::ErrorCode::NodeIdentityRequired,
+                      "member-report is about the member whose identity key the connection proved, and this one proved "
+                      "no key a member of this cluster holds");
+
+    auto const report = Wire::DecodeMemberReportVerb(verb);
+    if (!report.has_value())
+        return Refuse(Wire::ErrorCode::InvalidClusterChange,
+                      std::format("member-report verb {} is one this leader's build does not know; upgrade it to the "
+                                  "member's build",
+                                  static_cast<unsigned>(verb)));
+    auto command = MemberReportReaders[static_cast<std::size_t>(*report)].read(
+        member, std::as_bytes(std::span { value.data(), value.size() }));
+    if (!command.has_value())
+        return Refuse(command.error().first, std::move(command.error().second));
+    return Offer(*command);
 }
 
 SchedulerReply SchedulerService::ClusterForget(CallerContext const& caller, std::string_view memberId)
@@ -1189,6 +1495,27 @@ void SchedulerService::SetHistorySink(IFleetHistorySink* sink) noexcept
     _history = sink;
 }
 
+void SchedulerService::SetDemandSink(ICompileDemandSink* sink) noexcept
+{
+    auto const guard = std::scoped_lock { _admissionMutex };
+    _demand = sink;
+}
+
+void SchedulerService::ReportLeaseDemand(CallerContext const& caller, std::string_view fingerprint)
+{
+    // Attributed by the rule an admission's charge follows (`AdmissionResponder`): the key this connection PROVED,
+    // else this leader's own machine for a caller on this machine. Anything else -- a ticket, `--fleet-open` --
+    // identified no machine here, so it is counted UNATTRIBUTED: never guessed from an address.
+    auto requester = MachineId {};
+    if (caller.provenKey.has_value())
+        requester = KeyAsMachineId(*caller.provenKey);
+    else if (IsLoopbackHost(caller.peerId))
+        requester = OwnMachineId();
+    auto const guard = std::scoped_lock { _admissionMutex };
+    if (_demand != nullptr)
+        _demand->CompileGranted(requester, fingerprint);
+}
+
 SchedulerReply SchedulerService::AnnounceNode(CallerContext const& caller,
                                               NodePresence const& presence,
                                               std::span<FleetBucket const> history)
@@ -1213,12 +1540,15 @@ SchedulerReply SchedulerService::AnnounceNode(CallerContext const& caller,
                              presence.capacity,
                              presence.load,
                              std::string { presence.version },
-                             presence.conditions);
+                             presence.conditions,
+                             caller.provenKey.has_value()
+                                 ? std::string { AsStringView(std::span<std::byte const> { *caller.provenKey }) }
+                                 : std::string {});
 
     // Filed under the ENDPOINT, exactly as a worker's batch is. The node's cursor advances only
     // because this verb was accepted, which is the rule `Heartbeat` already follows.
     if (_history != nullptr && !history.empty())
-        _history->AcceptHistory(std::string { presence.endpoint }, history);
+        _history->AcceptHistory(std::string { presence.endpoint }, ProvenKeyText(caller), history);
 
     // The fleets it once asked, filed apart from the history above and under the id the caller
     // PROVED rather than the endpoint it names: they are the evidence a split of THIS fleet is told
@@ -1304,7 +1634,7 @@ SchedulerReply SchedulerService::Heartbeat(CallerContext const& caller,
     // `WorkerRegistry::NodeCaches()` already exists to enforce on the neighbouring
     // number.
     if (_history != nullptr && !history.empty())
-        _history->AcceptHistory(*endpoint, history);
+        _history->AcceptHistory(*endpoint, ProvenKeyText(caller), history);
 
     // A heartbeat restates what the worker is running, which is how a slot the queue was waiting on
     // comes free: the queued requests are due a pump (#1728).
@@ -1457,6 +1787,10 @@ SchedulerReply SchedulerService::Lease(CallerContext const& caller, Wire::LeaseR
     // would not arrive until its next heartbeat.
     _workers.JobStarted(picked->id);
     _metrics.Increment(IMetricsSink::Counter::DispatchLeasesGranted);
+    // Counted beside the admission queue's grants, once per compile: a lease asked AFTER this compile was already
+    // granted -- an admission that broke past its grant and failed open -- is the same compile again.
+    if (request.origin == Wire::AskOrigin::First)
+        ReportLeaseDemand(caller, request.fingerprint);
 
     // Signed over the endpoint as well as the key, which is what makes it a grant on
     // ONE worker rather than on the fleet: without the endpoint inside the MAC, a

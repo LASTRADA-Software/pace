@@ -100,6 +100,7 @@ constexpr auto NodeSeriesFamilies = std::to_array<std::string_view>({
     "formation",
     "frame",
     "live",
+    "mcp",
     "node",
     "raft",
     "scheduler",

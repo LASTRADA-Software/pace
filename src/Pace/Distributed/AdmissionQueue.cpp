@@ -20,7 +20,11 @@ namespace
 
 } // namespace
 
-AdmissionQueue::AdmissionQueue(PeakEstimates& estimates, IPlacementSource const& placement, SharesCache sharesCache):
+AdmissionQueue::AdmissionQueue(core::platform::IClock& clock,
+                               PeakEstimates& estimates,
+                               IPlacementSource const& placement,
+                               SharesCache sharesCache):
+    _clock { clock },
     _estimates { estimates },
     _sharesCache { sharesCache ? std::move(sharesCache) : SharesCache { std::equal_to<> {} } },
     _placement { placement }
@@ -35,7 +39,8 @@ Ticket AdmissionQueue::Enqueue(QueueRequest request)
                              .request = std::move(request),
                              .chargedBytes = charged,
                              .refusals = 0,
-                             .order = static_cast<std::int64_t>(ticket) });
+                             .order = static_cast<std::int64_t>(ticket),
+                             .enqueuedAt = _clock.now() });
     return ticket;
 }
 
@@ -87,6 +92,46 @@ QueueView AdmissionQueue::Snapshot() const
             .budgetBytes = ledger.report.has_value() ? std::optional { ledger.report->memoryBudgetBytes } : std::nullopt });
     }
     return view;
+}
+
+TicketView AdmissionQueue::ViewOf(Entry const& entry,
+                                  TicketView::State state,
+                                  core::platform::SteadyTimePoint now,
+                                  std::optional<Placement> placement)
+{
+    auto const& request = entry.request;
+    // A clock read before the stamp (a test moving it backwards) is no time spent, never a negative age.
+    auto const age = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now < entry.enqueuedAt ? core::platform::SteadyDuration::zero() : now - entry.enqueuedAt);
+    return TicketView { .ticket = entry.ticket,
+                        .caller = request.caller,
+                        .sourcePath = request.estimate.sourcePath,
+                        .fingerprint = request.fingerprint,
+                        .treeLabel = request.treeLabel,
+                        .state = state,
+                        .age = age,
+                        .placement = std::move(placement) };
+}
+
+std::vector<TicketView> AdmissionQueue::Tickets() const
+{
+    using State = TicketView::State;
+    auto const now = _clock.now();
+    auto waiting = _stored.size();
+    for (auto const& [owner, inflight]: _inflight)
+        waiting += inflight.waiters.size();
+    std::vector<TicketView> out;
+    out.reserve(_queue.size() + waiting + _charges.size());
+    for (auto const& entry: _queue)
+        out.push_back(ViewOf(entry, State::Queued, now, std::nullopt));
+    for (auto const& [owner, inflight]: _inflight)
+        for (auto const& waiter: inflight.waiters)
+            out.push_back(ViewOf(waiter, State::Waiting, now, std::nullopt));
+    for (auto const& woken: _stored)
+        out.push_back(ViewOf(woken.entry, State::Waiting, now, std::nullopt));
+    for (auto const& [ticket, charge]: _charges)
+        out.push_back(ViewOf(charge.entry, State::Running, now, charge.placement));
+    return out;
 }
 
 std::optional<AdmissionQueue::Charge> AdmissionQueue::Free(Ticket ticket)
@@ -146,11 +191,16 @@ void AdmissionQueue::Settle(Ticket ticket, Settlement const& settlement)
 
     if (settlement.outcome == SettleOutcome::Stored)
         for (auto& waiter: waiters)
-            _stored.push_back(Decision { .ticket = waiter.ticket,
-                                         .kind = GrantKind::Stored,
-                                         .placement = std::nullopt,
-                                         .chargedBytes = 0,
-                                         .ranAlone = false });
+        {
+            // Read before the move below; named apart from the parameter, the ticket that was SETTLED.
+            auto const waiterTicket = waiter.ticket;
+            _stored.push_back(StoredWaiter { .decision = Decision { .ticket = waiterTicket,
+                                                                    .kind = GrantKind::Stored,
+                                                                    .placement = std::nullopt,
+                                                                    .chargedBytes = 0,
+                                                                    .ranAlone = false },
+                                             .entry = std::move(waiter) });
+        }
     else
         Requeue(std::move(waiters));
 }
@@ -175,7 +225,9 @@ void AdmissionQueue::Abandon(Ticket ticket)
         _headTickets.erase(ticket);
         return;
     }
-    if (auto const woken = std::ranges::find(_stored, ticket, &Decision::ticket); woken != _stored.end())
+    if (auto const woken =
+            std::ranges::find(_stored, ticket, [](StoredWaiter const& waiter) { return waiter.decision.ticket; });
+        woken != _stored.end())
     {
         _stored.erase(woken);
         return;
@@ -197,8 +249,8 @@ std::vector<Ticket> AdmissionQueue::LoseLeadership()
     parked.reserve(_queue.size() + _stored.size());
     for (auto const& entry: _queue)
         parked.push_back(entry.ticket);
-    for (auto const& decision: _stored)
-        parked.push_back(decision.ticket);
+    for (auto const& woken: _stored)
+        parked.push_back(woken.decision.ticket);
     for (auto const& [owner, inflight]: _inflight)
         for (auto const& waiter: inflight.waiters)
             parked.push_back(waiter.ticket);
@@ -249,7 +301,10 @@ std::vector<Decision> AdmissionQueue::Pump()
         std::optional<Placement> placement;
     };
 
-    std::vector<Decision> decisions = std::exchange(_stored, {});
+    std::vector<Decision> decisions;
+    decisions.reserve(_stored.size());
+    for (auto& woken: std::exchange(_stored, {}))
+        decisions.push_back(std::move(woken.decision));
     std::vector<Entry> remaining;
     std::unordered_map<MachineId, Reserved> reserved;
     std::unordered_set<MachineId> claimed; // machines whose head was already found this pump
@@ -311,7 +366,10 @@ std::vector<Decision> AdmissionQueue::Pump()
                 _inflightByKey.emplace(request.estimate.cacheKey, ticket);
             }
             _charges.emplace(ticket,
-                             Charge { .machine = granted->machine, .bytes = chargedBytes, .entry = std::move(entry) });
+                             Charge { .machine = granted->machine,
+                                      .bytes = chargedBytes,
+                                      .entry = std::move(entry),
+                                      .placement = granted->placement });
             decisions.push_back(Decision {
                 .ticket = ticket,
                 .kind = granted->placement.has_value() ? GrantKind::Worker : GrantKind::Local,

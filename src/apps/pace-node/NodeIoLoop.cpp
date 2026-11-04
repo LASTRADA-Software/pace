@@ -68,6 +68,7 @@ void NodeIoLoop::Start()
         return;
 
     _thread = std::jthread { [this] { _reactor.run(); } };
+    _started.store(true, std::memory_order_release);
 }
 
 void NodeIoLoop::Retire(std::shared_ptr<void> owned)

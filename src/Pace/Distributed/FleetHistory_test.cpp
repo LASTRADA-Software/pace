@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <Pace/Core/ByteAppender.hpp>
 #include <Pace/Core/Crc32c.hpp>
+#include <Pace/Distributed/FleetChart.hpp>
 #include <Pace/Distributed/FleetHistory.hpp>
 #include <Pace/Distributed/SchedulerProtocol.hpp>
 
@@ -11,6 +12,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <ranges>
 #include <span>
@@ -20,6 +22,7 @@
 
 #include <tests/FleetHistoryFakes.hpp>
 #include <tests/ScratchPath.hpp>
+#include <tests/Unwrap.hpp>
 
 using namespace Pace;
 using namespace Pace::Distributed;
@@ -396,7 +399,7 @@ TEST_CASE("A history file's words are big-endian, and not only self-consistent",
     auto const raw = ReadFile(file);
     REQUIRE(raw.size() > 21);
     CHECK(raw.substr(0, 4) == "FCFH");
-    CHECK(raw[4] == char { 3 }); // the version this build writes
+    CHECK(raw[4] == char { 4 }); // the version this build writes
 
     // The body length, big-endian, and it really is the body's length.
     std::string expectedLength;
@@ -907,8 +910,8 @@ TEST_CASE("A leader fills the windows it missed from what the nodes kept", "[dis
     }
 
     FleetNodeHistories received { clock };
-    CHECK(received.AcceptHistory("a:1", nodeA.ClosedBucketsAfter(-1, 100)) == 4);
-    CHECK(received.AcceptHistory("b:1", nodeB.ClosedBucketsAfter(-1, 100)) == 4);
+    CHECK(received.AcceptHistory("a:1", "key-a", nodeA.ClosedBucketsAfter(-1, 100)) == 4);
+    CHECK(received.AcceptHistory("b:1", "key-b", nodeB.ClosedBucketsAfter(-1, 100)) == 4);
     CHECK(received.Count() == 2);
 
     // A leader whose own series is empty: it was not leading for any of that.
@@ -948,7 +951,7 @@ TEST_CASE("A window the leader sampled itself is never replaced by a sum", "[dis
     leader.Record(Reading(0, 999));
 
     FleetNodeHistories received { clock };
-    received.AcceptHistory("a:1", node.ClosedBucketsAfter(-1, 100));
+    received.AcceptHistory("a:1", "key-a", node.ClosedBucketsAfter(-1, 100));
 
     auto view = leader.Buckets(FleetRange::OneHour);
     received.BackfillInto(view, FleetRange::OneHour);
@@ -977,9 +980,9 @@ TEST_CASE("A redelivered heartbeat does not count twice", "[distributed][fleethi
     REQUIRE(batch.size() == 3);
 
     FleetNodeHistories received { clock };
-    CHECK(received.AcceptHistory("a:1", batch) == 3);
+    CHECK(received.AcceptHistory("a:1", "key-a", batch) == 3);
     // The very same batch again, as a lost reply would produce.
-    CHECK(received.AcceptHistory("a:1", batch) == 0);
+    CHECK(received.AcceptHistory("a:1", "key-a", batch) == 0);
     CHECK(received.HighWaterFor("a:1") == batch.back().startMillis);
 
     FleetHistory leader { clock };
@@ -1033,7 +1036,7 @@ TEST_CASE("A handover carries no fold, and the leader rebuilds one", "[distribut
         CHECK(bucket.fold[Hits].high == 0);
 
     FleetNodeHistories received { clock };
-    REQUIRE(received.AcceptHistory("a:1", handed) == 3);
+    REQUIRE(received.AcceptHistory("a:1", "key-a", handed) == 3);
 
     FleetHistory leader { clock };
     auto view = leader.Buckets(FleetRange::OneHour);
@@ -1070,8 +1073,8 @@ TEST_CASE("A leader's record of the other machines survives a restart", "[distri
     auto const batchA = nodeA.ClosedBucketsAfter(-1, 100);
     {
         FleetNodeHistories received { clock };
-        REQUIRE(received.AcceptHistory("a:1", batchA) == 4);
-        REQUIRE(received.AcceptHistory("b:1", nodeB.ClosedBucketsAfter(-1, 100)) == 4);
+        REQUIRE(received.AcceptHistory("a:1", "key-a", batchA) == 4);
+        REQUIRE(received.AcceptHistory("b:1", "key-b", nodeB.ClosedBucketsAfter(-1, 100)) == 4);
         highA = received.HighWaterFor("a:1");
         REQUIRE(received.Save(file, StateFile::ReceivedHistory));
     }
@@ -1082,7 +1085,7 @@ TEST_CASE("A leader's record of the other machines survives a restart", "[distri
     // The mark as well as the readings: without it a restarted leader would take the
     // batch a node resends after a reply it never saw and count every window twice.
     CHECK(restored.HighWaterFor("a:1") == highA);
-    CHECK(restored.AcceptHistory("a:1", batchA) == 0);
+    CHECK(restored.AcceptHistory("a:1", "key-a", batchA) == 0);
 
     FleetHistory leader { clock };
     auto view = leader.Buckets(FleetRange::OneHour);
@@ -1138,7 +1141,7 @@ TEST_CASE("A received-history file that cannot be trusted starts empty", "[distr
             node.Record(Reading(0, 7));
             clock.Advance(std::chrono::minutes { 1 });
             FleetNodeHistories received { clock };
-            REQUIRE(received.AcceptHistory("a:1", node.ClosedBucketsAfter(-1, 100)) == 1);
+            REQUIRE(received.AcceptHistory("a:1", "key-a", node.ClosedBucketsAfter(-1, 100)) == 1);
             REQUIRE(received.Save(file, StateFile::ReceivedHistory));
         }
         {
@@ -1152,13 +1155,12 @@ TEST_CASE("A received-history file that cannot be trusted starts empty", "[distr
     }
 }
 
-TEST_CASE("A v1 received-history file still reads, with its slots in place", "[distributed][fleethistory]")
+TEST_CASE("A v1 received-history file loads with its keyless series dropped and the drop reported",
+          "[distributed][fleethistory]")
 {
-    // The regression this exists to prevent: `NodeStoreFile`'s nested bodies grew a
-    // slot right along with `FleetMetric`, but the OUTER envelope's version is what
-    // has to say so -- a nested body carries none of its own. Without this, a real
-    // v1 file would be decoded through `ReadVersion3`'s wider shape and every field
-    // past the first missing one would land in the wrong place.
+    // A store written before keys were recorded holds every series under no key. Kept, a series would be counted a
+    // second time beside the one its machine files under its key once it reports again -- so it is dropped, counted
+    // for the start to say, and the file still loads rather than keeping the node from starting.
     Testing::ScratchDirectory const scratch { "fleet-received-v1" };
     auto const file = scratch.Path() / "v1.bin";
 
@@ -1167,23 +1169,50 @@ TEST_CASE("A v1 received-history file still reads, with its slots in place", "[d
     // Comfortably closed, not the instant a fresh reader would call its open bucket.
     auto const minuteStart = ((nowMillis / 60'000) - 5) * 60'000;
 
+    // Its body is still read through the v1 nested reader before it is dropped: a damaged one refuses the file whole.
     WriteFile(file, VersionOneNodeStoreFile("a:1", 5, 42, minuteStart, 17, 4));
 
     FleetNodeHistories received { clock };
-    REQUIRE(received.Load(file));
-    CHECK(received.Count() == 1);
-    CHECK(received.HighWaterFor("a:1") == 5);
+    CHECK_FALSE(received.Load(file));     // nothing was restored ...
+    CHECK(received.DroppedOnLoad() == 1); // ... because the one series it held was dropped, and said so
+    CHECK(received.Count() == 0);
+    CHECK_FALSE(received.ReadOnly());
+    CHECK(received.HighWaterFor("a:1") == -1);
+
+    // And it saves forward as an empty v3 store.
+    REQUIRE(received.Save(file, StateFile::ReceivedHistory));
+    CHECK(ReadFile(file)[4] == static_cast<char>(3));
+}
+
+TEST_CASE("A fleet window spanning a legacy store and the machine's keyed series counts the machine once",
+          "[distributed][fleethistory]")
+{
+    // The upgrade: a v1 store holds machine A's minute M under its endpoint, no key. After the upgrade A announces its
+    // minute M+1 under its key. The 5-minute Day window holding both must read A's in-flight once -- 4 -- never 8.
+    Testing::ScratchDirectory const scratch { "fleet-received-span" };
+    auto const file = scratch.Path() / "v1.bin";
+
+    PlacedWallClock clock;
+    auto const nowMillis = std::chrono::duration_cast<std::chrono::milliseconds>(clock.now().time_since_epoch()).count();
+    // Two minutes inside one closed 5-minute window: its first and second minute.
+    auto const window = ((nowMillis / 300'000) - 1) * 300'000;
+    WriteFile(file, VersionOneNodeStoreFile("a:1", static_cast<std::uint64_t>(window), 1, window, 0, 4));
+
+    FleetNodeHistories received { clock };
+    (void) received.Load(file);
+    REQUIRE(received.DroppedOnLoad() == 1);
+
+    auto next = Testing::ClosedBucket(window + 60'000);
+    next.values[static_cast<std::size_t>(FleetMetric::JobsInFlight)] = 4;
+    REQUIRE(received.AcceptHistory("a:1", "key-a", std::span { &next, 1 }) == 1);
 
     FleetHistory leader { clock };
-    auto view = leader.Buckets(FleetRange::OneHour);
-    received.BackfillInto(view, FleetRange::OneHour);
-
-    // `JobsInFlight`, not `DispatchGranted`: `BackfillInto` sums NODE-scoped slots
-    // only, and it is also the LAST of the nine legacy slots -- the one a width bug
-    // misreads first, since everything before it would have to already be wrong for
-    // the read to still be in bounds.
-    auto const found = std::ranges::find_if(view, [](FleetBucket const& b) { return b.present; });
+    auto view = leader.Buckets(FleetRange::Day);
+    received.BackfillInto(view, FleetRange::Day);
+    auto const found =
+        std::ranges::find_if(view, [window](FleetBucket const& bucket) { return bucket.startMillis == window; });
     REQUIRE(found != view.end());
+    REQUIRE(found->present);
     CHECK(found->values[static_cast<std::size_t>(FleetMetric::JobsInFlight)] == 4);
 }
 
@@ -1201,7 +1230,7 @@ TEST_CASE("A received-history file newer than this build is kept, and never writ
         node.Record(Reading(0, 7));
         clock.Advance(std::chrono::minutes { 1 });
         FleetNodeHistories writer { clock };
-        REQUIRE(writer.AcceptHistory("a:1", node.ClosedBucketsAfter(-1, 100)) == 1);
+        REQUIRE(writer.AcceptHistory("a:1", "key-a", node.ClosedBucketsAfter(-1, 100)) == 1);
         REQUIRE(writer.Save(file, StateFile::ReceivedHistory));
     }
     auto bytes = ReadFile(file);
@@ -1217,4 +1246,432 @@ TEST_CASE("A received-history file newer than this build is kept, and never writ
 
     CHECK_FALSE(received.Save(file, StateFile::ReceivedHistory));
     CHECK(ReadFile(file) == before);
+}
+
+namespace
+{
+
+/// The CPU slot's index, for the cases about it.
+constexpr auto CpuSlot = static_cast<std::size_t>(FleetMetric::CpuBusyPermille);
+
+/// A history file in the v3 layout, written by hand: ten values and ten folds per bucket, no absence mask.
+///
+/// By hand for `VersionTwoFile`'s reason: a file this build writes is v4 and would exercise nothing. Ten is
+/// frozen here, not `EnumeratorCount<FleetMetric>`: it is the width every v3 file was written at, the day
+/// `DispatchAllExcluded` was the newest slot -- so the CPU slot is one v3 never carried.
+/// @param generation What the file claims.
+/// @param minuteStart Bucket start of the one present minute bucket.
+/// @param minuteGranted Its `DispatchGranted` reading.
+/// @param minuteExcluded Its `DispatchAllExcluded` reading -- the LAST slot v3 carried.
+/// @return The complete file, header included.
+[[nodiscard]] std::string VersionThreeFile(std::uint64_t generation,
+                                           std::int64_t minuteStart,
+                                           std::uint64_t minuteGranted,
+                                           std::uint64_t minuteExcluded)
+{
+    constexpr std::size_t VersionThreeWidth = 10;
+
+    std::string body;
+    AppendU64(body, generation);
+    AppendU64(body, 1U); // the minute ring: one bucket
+    AppendU64(body, static_cast<std::uint64_t>(minuteStart));
+    AppendU64(body, static_cast<std::uint64_t>(minuteStart)); // sample == start
+    AppendU64(body, 1U);                                      // present
+    AppendU64(body, 1U);                                      // coverage
+    for (auto const slot: std::views::iota(std::size_t { 0 }, VersionThreeWidth))
+    {
+        auto value = std::uint64_t { 0 };
+        if (slot == static_cast<std::size_t>(FleetMetric::DispatchGranted))
+            value = minuteGranted;
+        else if (slot == static_cast<std::size_t>(FleetMetric::DispatchAllExcluded))
+            value = minuteExcluded;
+        AppendU64(body, value);
+    }
+    for ([[maybe_unused]] auto const slot: std::views::iota(std::size_t { 0 }, VersionThreeWidth))
+    {
+        AppendU64(body, 0U); // low
+        AppendU64(body, 0U); // high
+        AppendU64(body, 0U); // total
+    }
+    AppendU64(body, 0U); // the hour ring: empty
+    AppendU64(body, 0U); // the day ring: empty
+
+    std::string file;
+    file += "FCFH";
+    file.push_back(static_cast<char>(3));
+    AppendU64(file, body.size());
+    AppendU64(file, Crc32c::Compute(std::span { reinterpret_cast<std::byte const*>(body.data()), body.size() }));
+    file += body;
+    return file;
+}
+
+/// A reading with the CPU slot set to @p permille.
+[[nodiscard]] EnumTable<FleetMetric, std::uint64_t> CpuReading(std::uint64_t permille)
+{
+    auto values = Reading(0);
+    values[CpuSlot] = permille;
+    return values;
+}
+
+} // namespace
+
+TEST_CASE("The CPU slot is pinned at 10, a node-scoped gauge no fleet total answers for", "[distributed][fleethistory]")
+{
+    // Appended, per the ordinal contract, and the ordinal pinned by value beside the name.
+    CHECK(static_cast<std::uint8_t>(FleetMetric::CpuBusyPermille) == 10);
+    auto const& row = FleetMetricTable[CpuSlot];
+    CHECK(row.key == "cpu-busy");
+    CHECK(row.kind == FleetMetricKind::Gauge);
+    CHECK(row.scope == FleetMetricScope::Node);
+    // A permille summed over machines is no machine's load and no fleet's either.
+    CHECK(row.fleetTotal == FleetTotal::None);
+    // A record that never carried it says nothing about it: absent, unlike an exclusion count nobody kept yet.
+    CHECK(row.whenUncarried == FleetUncarried::Absent);
+    CHECK(FleetMetricTable[static_cast<std::size_t>(FleetMetric::DispatchAllExcluded)].whenUncarried
+          == FleetUncarried::Zero);
+}
+
+TEST_CASE("cpu sample recorded as gauge", "[distributed][fleethistory]")
+{
+    PlacedWallClock clock;
+    FleetHistory history { clock };
+
+    // Three readings inside one 5-minute Day bucket: the level is the newest, the fold keeps floor, peak and sum.
+    clock.Set(std::chrono::system_clock::time_point { std::chrono::seconds { 1'767'225'600 } });
+    history.Record(CpuReading(400));
+    clock.Advance(std::chrono::minutes { 1 });
+    history.Record(CpuReading(900));
+    clock.Advance(std::chrono::minutes { 1 });
+    history.Record(CpuReading(250));
+
+    auto const day = history.Buckets(FleetRange::Day);
+    REQUIRE(day.back().present);
+    CHECK_FALSE(IsAbsent(day.back(), FleetMetric::CpuBusyPermille));
+    CHECK(day.back().values[CpuSlot] == 250);
+    CHECK(FoldOf(day.back(), FleetMetric::CpuBusyPermille).low == 250);
+    CHECK(FoldOf(day.back(), FleetMetric::CpuBusyPermille).high == 900);
+    CHECK(FoldOf(day.back(), FleetMetric::CpuBusyPermille).total == 1550);
+
+    // Rendered as a LEVEL, never as a rate: a gauge's value is the bucket itself.
+    auto const* const series = FleetSeriesFromKey("cpu-busy");
+    REQUIRE(series != nullptr);
+    CHECK(series->kind == FleetSeriesKind::Level);
+    CHECK(series->numerator == FleetMetric::CpuBusyPermille);
+    auto const values = ValuesFor(*series, day, 300);
+    REQUIRE(values.back().has_value());
+    CHECK(values.back() == std::optional { 250.0 });
+}
+
+TEST_CASE("absent CPU reading leaves the slot absent", "[distributed][fleethistory]")
+{
+    PlacedWallClock clock;
+    clock.Set(std::chrono::system_clock::time_point { std::chrono::seconds { 1'767'225'600 } });
+    FleetHistory history { clock };
+
+    // A bucket whose only sample could not read the CPU: present (the other slots were read), the CPU slot not.
+    history.Record(CpuReading(0), SlotBit(FleetMetric::CpuBusyPermille));
+    auto const hour = history.Buckets(FleetRange::OneHour);
+    REQUIRE(hour.back().present);
+    CHECK(IsAbsent(hour.back(), FleetMetric::CpuBusyPermille));
+    CHECK_FALSE(IsAbsent(hour.back(), FleetMetric::JobsInFlight));
+
+    auto const* const series = FleetSeriesFromKey("cpu-busy");
+    REQUIRE(series != nullptr);
+    // A gap, never 0: an idle machine and one that could not say are opposite facts.
+    CHECK_FALSE(ValuesFor(*series, hour, 60).back().has_value());
+    // The other series in the same bucket still answer.
+    auto const* const inFlight = FleetSeriesFromKey("in-flight");
+    REQUIRE(inFlight != nullptr);
+    CHECK(ValuesFor(*inFlight, hour, 60).back().has_value());
+
+    // A later sample in the same Day window that DID read it makes the window answer from that reading alone:
+    // the absent sample is neither its floor nor part of its sum.
+    clock.Advance(std::chrono::minutes { 1 });
+    history.Record(CpuReading(600));
+    clock.Advance(std::chrono::minutes { 1 });
+    history.Record(CpuReading(0), SlotBit(FleetMetric::CpuBusyPermille));
+    auto const day = history.Buckets(FleetRange::Day);
+    REQUIRE(day.back().present);
+    CHECK_FALSE(IsAbsent(day.back(), FleetMetric::CpuBusyPermille));
+    CHECK(day.back().values[CpuSlot] == 600);
+    CHECK(FoldOf(day.back(), FleetMetric::CpuBusyPermille).low == 600);
+    CHECK(FoldOf(day.back(), FleetMetric::CpuBusyPermille).total == 600);
+
+    // And the absence survives a save and a reload, so a restart does not turn it into a zero.
+    Testing::ScratchDirectory const scratch { "fleet-history-absent" };
+    auto const file = scratch.Path() / "absent.bin";
+    REQUIRE(history.Save(file, StateFile::FleetHistory));
+    FleetHistory again { clock };
+    REQUIRE(again.Load(file));
+    auto const reloaded = again.Buckets(FleetRange::OneHour);
+    CHECK(IsAbsent(reloaded.back(), FleetMetric::CpuBusyPermille));
+    CHECK_FALSE(IsAbsent(reloaded[reloaded.size() - 2], FleetMetric::CpuBusyPermille));
+    CHECK(reloaded[reloaded.size() - 2].values[CpuSlot] == 600);
+}
+
+TEST_CASE("v3 history file still loads; a v5 file is kept and not overwritten", "[distributed][fleethistory]")
+{
+    Testing::ScratchDirectory const scratch { "fleet-history-v3-v5" };
+    PlacedWallClock clock;
+    auto const nowMillis = std::chrono::duration_cast<std::chrono::milliseconds>(clock.now().time_since_epoch()).count();
+    auto const minuteStart = (nowMillis / 60'000) * 60'000;
+
+    SECTION("v3 reads at its own width, and the slot it never carried is absent rather than zero")
+    {
+        auto const file = scratch.Path() / "v3.bin";
+        WriteFile(file, VersionThreeFile(42, minuteStart, 17, 3));
+
+        FleetHistory history { clock };
+        REQUIRE(history.Load(file));
+        CHECK(history.Generation() == 42);
+        CHECK_FALSE(history.ReadOnly());
+
+        auto const day = history.Buckets(FleetRange::Day);
+        REQUIRE(day.back().present);
+        CHECK(GrantedOf(day.back()) == 17);
+        CHECK(day.back().values[static_cast<std::size_t>(FleetMetric::DispatchAllExcluded)] == 3);
+        CHECK(IsAbsent(day.back(), FleetMetric::CpuBusyPermille));
+        CHECK_FALSE(IsAbsent(day.back(), FleetMetric::DispatchAllExcluded));
+
+        // Saved forward as v4, and the absence travels with it.
+        auto const upgraded = scratch.Path() / "v4.bin";
+        REQUIRE(history.Save(upgraded, StateFile::FleetHistory));
+        CHECK(ReadFile(upgraded)[4] == static_cast<char>(4));
+        FleetHistory again { clock };
+        REQUIRE(again.Load(upgraded));
+        CHECK(IsAbsent(again.Buckets(FleetRange::Day).back(), FleetMetric::CpuBusyPermille));
+        CHECK(GrantedOf(again.Buckets(FleetRange::Day).back()) == 17);
+    }
+
+    SECTION("v5, a later build's, is kept and never written over")
+    {
+        auto const file = scratch.Path() / "v5.bin";
+        {
+            FleetHistory writer { clock };
+            writer.Record(CpuReading(300));
+            REQUIRE(writer.Save(file, StateFile::FleetHistory));
+        }
+        auto bytes = ReadFile(file);
+        REQUIRE(bytes[4] == static_cast<char>(4));
+        bytes[4] = static_cast<char>(5);
+        WriteFile(file, bytes);
+        auto const before = ReadFile(file);
+
+        FleetHistory history { clock };
+        CHECK_FALSE(history.Load(file));
+        CHECK(history.ReadOnly());
+        history.Record(CpuReading(500));
+        CHECK_FALSE(history.Save(file, StateFile::FleetHistory));
+        CHECK(ReadFile(file) == before);
+    }
+}
+
+TEST_CASE("A received-history store keeps each slot's absence and the key a machine proved", "[distributed][fleethistory]")
+{
+    Testing::ScratchDirectory const scratch { "fleet-received-cpu" };
+    auto const file = scratch.Path() / "received.bin";
+    PlacedWallClock clock;
+
+    FleetHistory node { clock };
+    node.Record(CpuReading(700));
+    clock.Advance(std::chrono::minutes { 1 });
+    node.Record(CpuReading(0), SlotBit(FleetMetric::CpuBusyPermille));
+    clock.Advance(std::chrono::minutes { 1 });
+
+    {
+        FleetNodeHistories writer { clock };
+        REQUIRE(writer.AcceptHistory("a:1", "key-a", node.ClosedBucketsAfter(-1, 100)) == 2);
+        REQUIRE(writer.Save(file, StateFile::ReceivedHistory));
+    }
+    CHECK(ReadFile(file)[4] == static_cast<char>(3));
+
+    FleetNodeHistories received { clock };
+    REQUIRE(received.Load(file));
+    auto const machine = received.MachineBuckets("key-a", FleetRange::OneHour);
+    REQUIRE(machine.has_value());
+    auto const& buckets = Testing::Unwrap(machine);
+    REQUIRE(buckets.size() >= 3);
+    auto const& older = buckets[buckets.size() - 3];
+    auto const& newer = buckets[buckets.size() - 2];
+    REQUIRE(older.present);
+    REQUIRE(newer.present);
+    CHECK(older.values[CpuSlot] == 700);
+    CHECK_FALSE(IsAbsent(older, FleetMetric::CpuBusyPermille));
+    CHECK(IsAbsent(newer, FleetMetric::CpuBusyPermille));
+    // A machine answers for no dispatch outcome: those slots are absent in its own view, never zero.
+    CHECK(IsAbsent(older, FleetMetric::DispatchGranted));
+
+    // A key nobody delivered under names no machine.
+    CHECK_FALSE(received.MachineBuckets("key-b", FleetRange::OneHour).has_value());
+}
+
+namespace
+{
+
+/// @param clock Where the readings are placed.
+/// @param minutes How many one-minute readings to take, each with the CPU at `100 * (minute + 1)`.
+/// @return The closed buckets a node would hand over, oldest first.
+[[nodiscard]] std::vector<FleetBucket> CpuMinutes(PlacedWallClock& clock, int minutes)
+{
+    FleetHistory node { clock };
+    for (auto const minute: std::views::iota(0, minutes))
+    {
+        node.Record(CpuReading(static_cast<std::uint64_t>(minute + 1) * 100));
+        clock.Advance(std::chrono::minutes { 1 });
+    }
+    return node.ClosedBucketsAfter(-1, 100);
+}
+
+/// @param buckets A machine's view.
+/// @return Its CPU readings, oldest first, absent ones skipped.
+[[nodiscard]] std::vector<std::uint64_t> CpuReadings(std::vector<FleetBucket> const& buckets)
+{
+    auto out = std::vector<std::uint64_t> {};
+    for (auto const& bucket: buckets)
+        if (bucket.present && !IsAbsent(bucket, FleetMetric::CpuBusyPermille))
+            out.push_back(bucket.values[CpuSlot]);
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("A machine that moves endpoint keeps one series across both", "[distributed][fleethistory]")
+{
+    // Filed under the key it proved, so the minutes it reported from its old address and those from its new one are one
+    // machine's: none of them reads unsampled for having been handed over under the other label.
+    PlacedWallClock clock;
+    auto const batch = CpuMinutes(clock, 4);
+    REQUIRE(batch.size() == 4);
+
+    FleetNodeHistories received { clock };
+    REQUIRE(received.AcceptHistory("10.0.0.7:6674", "key-a", std::span { batch }.first(2)) == 2);
+    REQUIRE(received.AcceptHistory("192.168.1.7:6674", "key-a", std::span { batch }.subspan(2)) == 2);
+    CHECK(received.Count() == 1);
+    CHECK(received.HighWaterFor("192.168.1.7:6674") == batch.back().startMillis);
+    // The old label is no longer where it reports from.
+    CHECK(received.HighWaterFor("10.0.0.7:6674") == -1);
+
+    auto const machine = received.MachineBuckets("key-a", FleetRange::OneHour);
+    REQUIRE(machine.has_value());
+    CHECK(CpuReadings(Testing::Unwrap(machine)) == std::vector<std::uint64_t> { 100, 200, 300, 400 });
+}
+
+TEST_CASE("A second key at one endpoint is a second machine and takes nothing from the first", "[distributed][fleethistory]")
+{
+    // A wiped state directory mints a new key at the same host:port, and any member may NAME another's endpoint in its
+    // announcement. Either way the first machine's series stays its own and answers; the second has a series of its own.
+    PlacedWallClock clock;
+    auto const batch = CpuMinutes(clock, 4);
+    REQUIRE(batch.size() == 4);
+
+    FleetNodeHistories received { clock };
+    REQUIRE(received.AcceptHistory("10.0.0.7:6674", "key-a", std::span { batch }.first(2)) == 2);
+    REQUIRE(received.AcceptHistory("10.0.0.7:6674", "key-b", std::span { batch }.subspan(2)) == 2);
+    CHECK(received.Count() == 2);
+
+    auto const first = received.MachineBuckets("key-a", FleetRange::OneHour);
+    auto const second = received.MachineBuckets("key-b", FleetRange::OneHour);
+    REQUIRE(first.has_value());
+    REQUIRE(second.has_value());
+    CHECK(CpuReadings(Testing::Unwrap(first)) == std::vector<std::uint64_t> { 100, 200 });
+    CHECK(CpuReadings(Testing::Unwrap(second)) == std::vector<std::uint64_t> { 300, 400 });
+
+    // And the first keeps taking its own minutes afterwards: nothing it can be blocked by was recorded.
+    clock.Advance(std::chrono::minutes { 1 });
+    auto later = Testing::ClosedBucket(batch.back().startMillis + 60'000);
+    later.values[CpuSlot] = 900;
+    CHECK(received.AcceptHistory("10.0.0.7:6674", "key-a", std::span { &later, 1 }) == 1);
+    CHECK(CpuReadings(Testing::Unwrap(received.MachineBuckets("key-a", FleetRange::OneHour))).back() == 900);
+
+    // An empty key is no key: never a match for a lookup.
+    CHECK_FALSE(received.MachineBuckets("", FleetRange::OneHour).has_value());
+}
+
+TEST_CASE("A connection that proved no key files nothing", "[distributed][fleethistory]")
+{
+    // Its series could answer for no machine, and it may be a machine a proven connection also reports: filed, it would
+    // be summed twice into every fleet window it filled.
+    PlacedWallClock clock;
+    auto const batch = CpuMinutes(clock, 3);
+    FleetNodeHistories received { clock };
+    CHECK(received.AcceptHistory("10.0.0.7:6674", batch) == 0);
+    CHECK(received.AcceptHistory("10.0.0.7:6674", "", batch) == 0);
+    CHECK(received.Count() == 0);
+
+    FleetHistory leader { clock };
+    auto view = leader.Buckets(FleetRange::OneHour);
+    received.BackfillInto(view, FleetRange::OneHour);
+    CHECK(std::ranges::none_of(view, [](FleetBucket const& bucket) { return bucket.present; }));
+}
+
+TEST_CASE("A received-history store holds at most its ceiling, dropping the series heard from longest ago",
+          "[distributed][fleethistory]")
+{
+    PlacedWallClock clock;
+    FleetNodeHistories received { clock };
+    auto const base = Testing::MinuteBucketStart(clock.now()) - (static_cast<std::int64_t>(MaxReceivedHistories) * 60'000);
+    // One series per key, each reporting one minute later than the one before.
+    for (auto const index: std::views::iota(std::size_t { 0 }, MaxReceivedHistories))
+    {
+        auto bucket = Testing::ClosedBucket(base + (static_cast<std::int64_t>(index) * 60'000));
+        REQUIRE(received.AcceptHistory("e:1", std::format("key-{}", index), std::span { &bucket, 1 }) == 1);
+    }
+    CHECK(received.Count() == MaxReceivedHistories);
+
+    // One more key: the series whose newest reading is oldest -- key-0 -- goes, and nothing else does.
+    auto fresh = Testing::ClosedBucket(base + (static_cast<std::int64_t>(MaxReceivedHistories) * 60'000));
+    REQUIRE(received.AcceptHistory("e:1", "key-new", std::span { &fresh, 1 }) == 1);
+    CHECK(received.Count() == MaxReceivedHistories);
+    CHECK_FALSE(received.MachineBuckets("key-0", FleetRange::OneHour).has_value());
+    CHECK(received.MachineBuckets("key-1", FleetRange::OneHour).has_value());
+    CHECK(received.MachineBuckets("key-new", FleetRange::OneHour).has_value());
+}
+
+TEST_CASE("A fleet backfill never sums the CPU slot", "[distributed][fleethistory]")
+{
+    PlacedWallClock clock;
+    FleetHistory nodeA { clock };
+    FleetHistory nodeB { clock };
+    nodeA.Record(CpuReading(400));
+    nodeB.Record(CpuReading(500));
+    clock.Advance(std::chrono::minutes { 1 });
+
+    FleetNodeHistories received { clock };
+    REQUIRE(received.AcceptHistory("a:1", "key-a", nodeA.ClosedBucketsAfter(-1, 100)) == 1);
+    REQUIRE(received.AcceptHistory("b:1", "key-b", nodeB.ClosedBucketsAfter(-1, 100)) == 1);
+
+    FleetHistory leader { clock };
+    auto view = leader.Buckets(FleetRange::OneHour);
+    received.BackfillInto(view, FleetRange::OneHour);
+    auto const found = std::ranges::find_if(view, [](FleetBucket const& b) { return b.present; });
+    REQUIRE(found != view.end());
+    CHECK(found->backfilled);
+    // 900 would be no machine's load: the slot is absent from the fleet's view, never a sum.
+    CHECK(IsAbsent(*found, FleetMetric::CpuBusyPermille));
+    CHECK_FALSE(IsAbsent(*found, FleetMetric::JobsInFlight));
+}
+
+TEST_CASE("A handed-over bucket carries its absences, and an older peer's missing CPU slot is absent",
+          "[distributed][fleethistory]")
+{
+    auto bucket = Testing::ClosedBucket(60'000);
+    bucket.values[CpuSlot] = 0;
+    bucket.absent = SlotBit(FleetMetric::CpuBusyPermille);
+    auto const decoded = CompileCacheWire::DecodeHistoryBuckets(
+        CompileCacheWire::EncodeHistoryBuckets(HistoryToWire(std::span { &bucket, 1 })));
+    REQUIRE(decoded.has_value());
+    auto const back = HistoryFromWire(Testing::Unwrap(decoded));
+    REQUIRE(back.size() == 1);
+    CHECK(IsAbsent(back.front(), FleetMetric::CpuBusyPermille));
+
+    // A peer that carried ten slots and no mask: the exclusion count reads zero (no list existed), the CPU slot it
+    // never sent is absent.
+    auto older = CompileCacheWire::HistoryBucketFields {};
+    older.startMillis = 60'000;
+    older.sampleMillis = 60'000;
+    older.carried = 10;
+    auto const fromOlder = HistoryFromWire(std::span { &older, 1 });
+    REQUIRE(fromOlder.size() == 1);
+    CHECK(IsAbsent(fromOlder.front(), FleetMetric::CpuBusyPermille));
+    CHECK_FALSE(IsAbsent(fromOlder.front(), FleetMetric::DispatchAllExcluded));
 }

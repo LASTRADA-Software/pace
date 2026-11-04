@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+#include "BudgetOverrideApplier.hpp"
 #include "ConsensusTier.hpp"
 #include "DiscoveryTier.hpp"
+#include "McpUpstream.hpp"
 #include "NodeFormation.hpp"
 #include "NodeIdentity.hpp"
 #include "NodeStateFiles.hpp"
@@ -186,14 +188,15 @@ std::string DescribeTermAdoption(Consensus::Term adopted, Consensus::TermAdoptio
 std::string UnreadableConsensusStateRefusal(std::filesystem::path const& directory, ConsensusError const& refusal)
 {
     // Which of the two the application found decides the middle clause: another build's
-    // layout is intact and has no conversion, while bytes no build wrote are damage -- a
-    // disk or a crash to look at before anything is moved. The remedy after it is the
-    // same either way, because either way this directory cannot be run on.
+    // layout is intact and is not one this build converts -- the context names the ones it
+    // does convert, so the clause must not deny that any exist -- while bytes no build wrote
+    // are damage, a disk or a crash to look at before anything is moved. The remedy after it
+    // is the same either way, because either way this directory cannot be run on.
     auto const intact = refusal.code == ConsensusErrorCode::UnsupportedFormatVersion;
     return std::format("cannot start consensus on the state in {}: {}; {}: {}",
                        directory.string(),
                        refusal.context,
-                       intact ? "it is intact, and there is no conversion"
+                       intact ? "it is intact, and this build has no conversion from its version"
                               : "it is damaged, which is a disk or a crash to investigate first",
                        Consensus::UnreadableStateRemedy);
 }
@@ -1629,7 +1632,9 @@ std::expected<std::unique_ptr<ConsensusTier>, NodeRefusal> StartConsensusOrExpla
     NodeRoster& roster,
     AppliedSchedulers& schedulers,
     SchedulingLeaderPublisher& schedulingLeader,
+    AppliedUpstreamDirectory* upstreamDirectory,
     SharedCacheListeners sharedCache,
+    BudgetOverrideApplier* budgetOverrides,
     IMetricsSink& metrics,
     ILogger& logger,
     NodeConditions* conditions,
@@ -1649,12 +1654,17 @@ std::expected<std::unique_ptr<ConsensusTier>, NodeRefusal> StartConsensusOrExpla
         advertised,
         raftAdvertised,
         identityKey,
-        [&schedulerTier,
-         &schedulingLeader](Distributed::SchedulerRole role, std::string_view leaderEndpoint, std::uint64_t term) {
+        [&schedulerTier, &schedulingLeader, upstreamDirectory](
+            Distributed::SchedulerRole role, std::string_view leaderEndpoint, std::uint64_t term) {
             // Told on every node, scheduler or not: a node running none still names the leader
             // it follows to the launchers that ask it to schedule (#1639). The endpoint is the
             // member record's `0xFC` one (`Republish`), never its Raft one.
             schedulingLeader.LeaderChanged(leaderEndpoint);
+
+            // And the term an MCP answer reports as this node's view of it, and whether this node leads in
+            // it -- the scheduling leader above is empty while it does.
+            if (upstreamDirectory != nullptr)
+                upstreamDirectory->ObservedRole(term, role == Distributed::SchedulerRole::Leader);
 
             // Null when this node runs no scheduler surface, which is a legitimate
             // shape: a LEARNER, which applies the fleet's state and may contribute CPU
@@ -1663,7 +1673,8 @@ std::expected<std::unique_ptr<ConsensusTier>, NodeRefusal> StartConsensusOrExpla
             if (schedulerTier != nullptr)
                 schedulerTier->SetRole(role, leaderEndpoint, term);
         },
-        [&membership, &roster, &schedulers, sharedCache](Cluster::ClusterState const& state) {
+        [&membership, &roster, &schedulers, upstreamDirectory, sharedCache, budgetOverrides](
+            Cluster::ClusterState const& state) {
             // The member set no longer joins admission; its KEYS do. A machine the cluster
             // agreed to admit is served by every surface at once by the key it proves or
             // presents, never by the address it dials from. `--fleet-open` is this node's own
@@ -1684,11 +1695,20 @@ std::expected<std::unique_ptr<ConsensusTier>, NodeRefusal> StartConsensusOrExpla
             // them, so a voter that moved, proven, is reached at the next round (T26's carry).
             schedulers.Applied(state);
 
+            // And where each member's `0xFC` port answers, for the MCP surface's forwarded calls to a named node.
+            if (upstreamDirectory != nullptr)
+                upstreamDirectory->Applied(state);
+
             // And the fleet's shared cache: where it is, and whether this machine is it -- recorded
             // and handed to the host's own thread, never opened here: opening a store may walk it,
             // and this is the apply callback a voter's heartbeats wait behind. Then the private
             // tier's upstream, which re-judges what it reports from what the directory now says.
             sharedCache.Applied(state);
+
+            // And this member's cache budget overrides: recorded and handed to the applier's own thread, which resizes
+            // a tier and reports to the leader -- neither belongs on the callback a voter's heartbeats wait behind.
+            if (budgetOverrides != nullptr)
+                budgetOverrides->OnState(state);
         },
         // And how long that state has gone without a leader it counts speaking: past
         // `LeaderSilenceBound`, every grant is refused (`consensus-leader-silent`) -- and past the

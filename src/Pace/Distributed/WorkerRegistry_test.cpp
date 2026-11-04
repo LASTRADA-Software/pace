@@ -13,6 +13,7 @@
 #include <format>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -1291,4 +1292,119 @@ TEST_CASE("Find answers a live worker by id and nothing for an unknown one", "[d
     CHECK(Unwrap(found).endpoint == "10.0.0.1:6676");
     CHECK(Unwrap(found).fingerprint == Gcc13);
     CHECK_FALSE(fix.registry.Find("no-such-worker").has_value());
+}
+
+namespace
+{
+/// @param fill The byte every position holds.
+/// @return A stand-in for a proven identity key, as the registry holds one: raw bytes.
+[[nodiscard]] std::array<std::byte, 32> KeyOf(unsigned char fill)
+{
+    auto key = std::array<std::byte, 32> {};
+    key.fill(std::byte { fill });
+    return key;
+}
+
+/// @param key A key.
+/// @return Its bytes as the registry's `identityKey` string holds them.
+[[nodiscard]] std::string KeyText(std::array<std::byte, 32> const& key)
+{
+    return { reinterpret_cast<char const*>(key.data()), key.size() };
+}
+
+/// @param fingerprint The toolchain.
+/// @param endpoint Where it claims to answer.
+/// @param key The key its connection proved.
+/// @return The registration.
+[[nodiscard]] WorkerRegistration ProvenAnnounce(std::string_view fingerprint,
+                                                std::string_view endpoint,
+                                                std::array<std::byte, 32> const& key)
+{
+    auto registration = Announce(fingerprint, endpoint, 2);
+    registration.identityKey = std::span<std::byte const> { key };
+    return registration;
+}
+
+/// @return One raised condition, as a machine announces it.
+[[nodiscard]] std::vector<CompileCacheWire::NodeConditionFields> RaisedCondition()
+{
+    return { CompileCacheWire::NodeConditionFields { .id = "scratch-low",
+                                                     .persistence = "live",
+                                                     .severity = "warning",
+                                                     .state = "raised",
+                                                     .detail = "scratch is 97% full",
+                                                     .remedy = "free scratch space" } };
+}
+} // namespace
+
+TEST_CASE("A machine row whose registrations proved different keys carries no key, never one winner",
+          "[distributed][registry][display-name]")
+{
+    // An endpoint is a claim: two members registering under one endpoint are not one proven machine, so the row is
+    // joined to nobody -- the rule the MCP `toolchains` tool applies to the same registrations.
+    Fixture fix;
+    auto const a = KeyOf(0xA1);
+    auto const b = KeyOf(0xB2);
+    constexpr std::string_view Shared = "10.0.0.1:6676";
+    (void) fix.registry.Register(ProvenAnnounce(Gcc13, Shared, a));
+    SECTION("the control: one machine's two toolchains under one key keep it")
+    {
+        (void) fix.registry.Register(ProvenAnnounce(Gcc14, Shared, a));
+        auto const nodes = fix.registry.NodeReports();
+        REQUIRE(nodes.size() == 1);
+        CHECK(nodes.front().identityKey == KeyText(a));
+    }
+    SECTION("another member claiming the endpoint empties it, whichever entry contributes the rest")
+    {
+        fix.clock.advance(std::chrono::milliseconds { 10 }); // B is the most recent: it would win the "better" choice.
+        (void) fix.registry.Register(ProvenAnnounce(Gcc14, Shared, b));
+        auto const nodes = fix.registry.NodeReports();
+        REQUIRE(nodes.size() == 1);
+        CHECK(nodes.front().fingerprints.size() == 2);
+        CHECK(nodes.front().identityKey.empty());
+    }
+    SECTION("an unproven registration beside a proven one empties it too")
+    {
+        (void) fix.registry.Register(Announce(Gcc14, Shared, 2));
+        // The PROVEN entry heard from last, so it -- not the unproven one -- would win the "better" choice: the
+        // empty key below is the disagreement rule's, never an accident of which entry contributed.
+        fix.clock.advance(std::chrono::milliseconds { 10 });
+        (void) fix.registry.Register(ProvenAnnounce(Gcc13, Shared, a));
+        auto const nodes = fix.registry.NodeReports();
+        REQUIRE(nodes.size() == 1);
+        CHECK(nodes.front().identityKey.empty());
+    }
+}
+
+TEST_CASE("An announcement's conditions reach a worker's row only from the machine that proved the row's key",
+          "[distributed][registry][display-name]")
+{
+    // NODE-ANNOUNCE is keyed by the endpoint it claims, so another machine announcing under this one's endpoint must
+    // not put ITS conditions under this row's (key-backed) name. Conservative: a row with no key takes none.
+    Fixture fix;
+    auto const a = KeyOf(0xA1);
+    auto const b = KeyOf(0xB2);
+    constexpr std::string_view Endpoint = "10.0.0.1:6676";
+    (void) fix.registry.Register(ProvenAnnounce(Gcc13, Endpoint, a));
+    auto const conditionsAt = [&fix] {
+        auto const nodes = fix.registry.NodeReports();
+        REQUIRE(nodes.size() == 1);
+        return nodes.front().conditions;
+    };
+
+    SECTION("the control: the row's own machine announcing attaches its conditions")
+    {
+        fix.registry.NoteNodePresent(std::string { Endpoint }, {}, {}, "v", RaisedCondition(), KeyText(a));
+        CHECK(conditionsAt() == std::optional { RaisedCondition() });
+    }
+    SECTION("another machine announcing under the endpoint attaches nothing: absent, not its conditions")
+    {
+        fix.registry.NoteNodePresent(std::string { Endpoint }, {}, {}, "v", RaisedCondition(), KeyText(b));
+        CHECK_FALSE(conditionsAt().has_value());
+    }
+    SECTION("an announcement that proved no key attaches nothing")
+    {
+        fix.registry.NoteNodePresent(std::string { Endpoint }, {}, {}, "v", RaisedCondition(), {});
+        CHECK_FALSE(conditionsAt().has_value());
+    }
 }

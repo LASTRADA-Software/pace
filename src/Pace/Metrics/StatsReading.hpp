@@ -504,6 +504,10 @@ enum class MetricsSurface : std::uint8_t
     /// relays while another voter leads -- so the leader serves it too, reading zero until it is demoted.
     AdmissionForwarding,
 
+    /// The MCP endpoint, `apps/pace-node/McpEndpoint.cpp`. Served only where `--mcp-listen` is set,
+    /// which is off unless asked for.
+    NodeMcp,
+
     /// Enumerator count. Not a surface.
     Last
 };
@@ -521,6 +525,7 @@ inline constexpr std::array EverySurface {
     MetricsSurface::CompileWorker,     MetricsSurface::NodeEnrollment,     MetricsSurface::NodeCacheTier,
     MetricsSurface::NodeFrameEndpoint, MetricsSurface::NodeDiscovery,      MetricsSurface::NodeFormation,
     MetricsSurface::NodeSharedCache,   MetricsSurface::SchedulerAdmission, MetricsSurface::AdmissionForwarding,
+    MetricsSurface::NodeMcp,
 };
 
 static_assert(EverySurface.size() == static_cast<std::size_t>(MetricsSurface::Last),
@@ -561,7 +566,7 @@ struct CounterSoleWriter
 /// a row silently absent from the attribution and indistinguishable from one nobody had
 /// considered, cannot recur by omission ([#1501](https://github.com/LASTRADA-Software/pace/issues/1501)).
 ///
-/// **How the 244 rows are attributed**, since a scan for `Increment(Counter::X)` finds only 68
+/// **How the 245 rows are attributed**, since a scan for `Increment(Counter::X)` finds only 69
 /// of them and would have rendered the other 176 absent -- the same defect as the bug, three
 /// times larger. The rows are written by five mechanisms, and reading only `SurfaceRefusal`
 /// tables (the obvious reading of *written through `Refuse(row)`*) reaches 148 of the 176 and
@@ -573,9 +578,9 @@ struct CounterSoleWriter
 /// | a `LeaseToken.hpp` outcome row's `workerCounter` | 10 |
 /// | returned by a classifier for its caller to spend | 6 |
 /// | a `CacheTierProfile` member, spent by the tier built with it | 16 |
-/// | `Increment(Counter::X)` directly | 68 |
+/// | `Increment(Counter::X)` directly | 69 |
 ///
-/// The column sums past 244 because five rows are written two ways -- and the 148 above is not
+/// The column sums past 245 because five rows are written two ways -- and the 148 above is not
 /// the 149 here: 149 rows HAVE a refusal row, and 148 of those have no increment site, which is
 /// what a `SurfaceRefusal`-only reading would reach. Two figures one apart, measuring different
 /// things, is exactly how a census comes to be quoted wrong, so both are asserted.
@@ -1055,6 +1060,10 @@ inline constexpr std::array CounterSoleWriterTable {
                         .surface = MetricsSurface::AdmissionForwarding },
     CounterSoleWriter { .counter = IMetricsSink::Counter::AdmissionForwardAbandoned,
                         .surface = MetricsSurface::AdmissionForwarding },
+    CounterSoleWriter { .counter = IMetricsSink::Counter::McpRequestsRefusedNotLoopback,
+                        .surface = MetricsSurface::NodeMcp },
+    CounterSoleWriter { .counter = IMetricsSink::Counter::NodeFingerprintInputsRefusedMalformed,
+                        .surface = MetricsSurface::NodeFrameEndpoint },
 };
 
 /// Whether every catalogue row has at least one surface attributed to it.
@@ -1082,7 +1091,7 @@ inline constexpr std::array CounterSoleWriterTable {
 }
 
 /// A `consteval` fold rather than a size comparison, because `CounterSoleWriterTable.size()`
-/// counts (counter, surface) PAIRS: it is 245 for 244 counters today, and a row duplicated
+/// counts (counter, surface) PAIRS: it is 246 for 245 counters today, and a row duplicated
 /// while another went missing would leave any arithmetic on the size perfectly consistent.
 ///
 /// @return True when no enumerator is missing from the table.

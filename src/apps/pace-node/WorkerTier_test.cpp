@@ -15,6 +15,7 @@
 #include <Pace/Core/Logger.hpp>
 #include <Pace/Distributed/MembershipOracle.hpp>
 #include <Pace/Distributed/NodePolicy.hpp>
+#include <Pace/Distributed/SchedulerProtocol.hpp>
 #include <Pace/Metrics/IMetricsSink.hpp>
 #include <Pace/Platform/HostEvents.hpp>
 #include <Pace/Platform/HostInfo.hpp>
@@ -33,6 +34,7 @@
 #include <format>
 #include <initializer_list>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -52,6 +54,7 @@
 #include <core/platform/Clock.hpp>
 #include <tests/BoundedWait.hpp>
 #include <tests/ScratchPath.hpp>
+#include <tests/ScriptedSocket.hpp>
 #include <tests/SteppedDrainWait.hpp>
 #include <tests/SurfaceOwnerFakes.hpp>
 #include <tests/Unwrap.hpp>
@@ -779,7 +782,9 @@ TEST_CASE("A toolchain label a scheduler would refuse is withheld from the regis
         INFO(why);
         CapturingLogger logger;
         auto const registered = RegisteredToolchainLabel(
-            ServedToolchain { .compiler = "/opt/cross/bin/g++", .label = label, .witness = std::nullopt }, logger);
+            ServedToolchain {
+                .compiler = "/opt/cross/bin/g++", .label = label, .family = {}, .witness = std::nullopt, .inputs = nullptr },
+            logger);
         CHECK(registered == sent);
 
         // CHECK rather than REQUIRE on the count, so a case that goes wrong does not hide the ones
@@ -809,7 +814,11 @@ TEST_CASE("RegistrarsFor asks RegisteredToolchainLabel rather than sending a lab
 
     auto const served = std::map<std::string, ServedToolchain> {
         { "fp-cross",
-          ServedToolchain { .compiler = "/opt/cross/bin/g++", .label = "g++ \xff 14.2.0", .witness = std::nullopt } },
+          ServedToolchain { .compiler = "/opt/cross/bin/g++",
+                            .label = "g++ \xff 14.2.0",
+                            .family = {},
+                            .witness = std::nullopt,
+                            .inputs = nullptr } },
     };
     auto const registrars = tier.value()->RegistrarsFor(served);
     CHECK(registrars.size() == 1);
@@ -861,6 +870,145 @@ namespace
 }
 
 } // namespace
+
+namespace
+{
+/// A capacity a case moves, as a live cache-budget override moves the node's.
+class MovingCapacity final: public INodeCapacitySource
+{
+  public:
+    /// @param capacity What this machine is until `Set`.
+    explicit MovingCapacity(Distributed::NodeCapacity capacity) noexcept:
+        _capacity { capacity }
+    {
+    }
+
+    [[nodiscard]] Distributed::NodeCapacity Current() const override
+    {
+        std::scoped_lock const lock { _mutex };
+        return _capacity;
+    }
+
+    /// @param capacity What this machine is from now on.
+    void Set(Distributed::NodeCapacity const& capacity)
+    {
+        std::scoped_lock const lock { _mutex };
+        _capacity = capacity;
+    }
+
+  private:
+    mutable std::mutex _mutex;
+    Distributed::NodeCapacity _capacity;
+};
+} // namespace
+
+TEST_CASE("After a live budget move the registration and node-status weigh the worker by one capacity",
+          "[node][worker-tier][capacity][resize]")
+{
+    // One quantity, one answer: the registry sizes this worker by the capacity its REGISTER carried,
+    // and node-status names the same ceilings only if it weighs the worker by that very record. So
+    // a moved capacity is re-registered, and node-status reads what was re-registered.
+    namespace Wire = CompileCacheWire;
+    constexpr std::uint64_t GiB = 1ULL << 30;
+    auto const capacityWith = [](std::uint64_t reserved) {
+        auto capacity =
+            Distributed::NodeCapacity { .logicalCores = 16, .totalMemoryBytes = 32 * GiB, .reservedMemoryBytes = reserved };
+        capacity.cache.tierBytesLimit[static_cast<std::size_t>(StorageTier::Memory)] = reserved;
+        return capacity;
+    };
+    MovingCapacity moving { capacityWith(28 * GiB) };
+    WorkerTierFixture fixture;
+    fixture.cfg.slots = 16;
+    fixture.capacitySource = &moving;
+    auto started = fixture.Start();
+    REQUIRE(started.has_value());
+    REQUIRE(started.value() != nullptr);
+    auto& tier = *started.value();
+    core::platform::ManualClock statusClock;
+
+    CHECK_FALSE(tier.FollowCapacity(statusClock));
+    auto const before = tier.RegisteredCapacity();
+
+    moving.Set(capacityWith(8 * GiB));
+    CHECK(tier.FollowCapacity(statusClock));
+    CHECK(tier.RegisteredCapacity() == moving.Current());
+    CHECK_FALSE(tier.FollowCapacity(statusClock));
+
+    // What the next REGISTER carries, decoded from the frame a registrar actually writes.
+    auto const served = std::map<std::string, ServedToolchain> {
+        { "fp-1",
+          ServedToolchain {
+              .compiler = "/usr/bin/gcc", .label = "gcc", .family = "gcc", .witness = std::nullopt, .inputs = nullptr } },
+    };
+    auto registrars = tier.RegistrarsFor(served);
+    REQUIRE(registrars.size() == 1);
+    Testing::ScriptedSocket scheduler { RegisterAccepted("w-1") };
+    REQUIRE(registrars.front().Register(scheduler, {}).has_value());
+    auto const& sent = scheduler.Sent();
+    REQUIRE(sent.size() > Wire::RequestHeaderSize);
+    auto const view = Wire::DecodeRegisterPayload(std::span { sent }.subspan(Wire::RequestHeaderSize));
+    REQUIRE(view.has_value());
+    auto const registered = Distributed::CapacityFromWire(Testing::Unwrap(view).capacity);
+    REQUIRE(registered.has_value());
+    CHECK(Testing::Unwrap(registered).reservedMemoryBytes == 8 * GiB);
+    CHECK(Testing::Unwrap(registered).cache == tier.RegisteredCapacity().cache);
+
+    // The scheduler's arithmetic over what its registry now holds, and node-status's over what the worker
+    // registered: the same ceilings, from the same record.
+    Distributed::NodeLoad load {};
+    load.cpuBusyPermille = 500;
+    auto const bySchedulerNow = Distributed::SlotCeilingsFor(Testing::Unwrap(registered), tier.Slots(), load);
+    auto const byStatusNow = Distributed::SlotCeilingsFor(tier.RegisteredCapacity(), tier.Slots(), load);
+    CHECK(bySchedulerNow.available == byStatusNow.available);
+    CHECK(bySchedulerNow.binding == byStatusNow.binding);
+    // And the record both read is the moved one, not the startup one.
+    CHECK(Testing::Unwrap(registered).reservedMemoryBytes != before.reservedMemoryBytes);
+    CHECK(Testing::Unwrap(registered).reservedMemoryBytes == tier.RegisteredCapacity().reservedMemoryBytes);
+}
+
+TEST_CASE("A served toolchain's family reaches the REGISTER frame's capacity record", "[node][worker-tier][family]")
+{
+    // The family is surveyed beside the label and must travel to the scheduler in `CapacityFields::toolchainFamily`;
+    // a registrar that dropped it would register every toolchain into no family, and the upgrade report would go
+    // silent with nothing failing. So the frame a registrar actually WRITES is decoded, not a field read back.
+    namespace Wire = CompileCacheWire;
+    WorkerTierFixture fixture;
+    auto const tier = fixture.Start();
+    REQUIRE(tier.has_value());
+    REQUIRE(tier.value() != nullptr);
+
+    auto const served = std::map<std::string, ServedToolchain> {
+        { "fp-apple",
+          ServedToolchain { .compiler = "/usr/bin/gcc",
+                            .label = "gcc 17.0.0",
+                            .family = "apple-clang",
+                            .witness = std::nullopt,
+                            .inputs = nullptr } },
+        { "fp-pinned",
+          ServedToolchain {
+              .compiler = "/opt/none/g++", .label = {}, .family = {}, .witness = std::nullopt, .inputs = nullptr } },
+    };
+    auto registrars = tier.value()->RegistrarsFor(served);
+    REQUIRE(registrars.size() == 2);
+
+    auto const familyRegistered = [](Cc::WorkerRegistrar& registrar) {
+        Testing::ScriptedSocket scheduler { RegisterAccepted("w-1") };
+        REQUIRE(registrar.Register(scheduler, {}).has_value());
+        auto const& sent = scheduler.Sent();
+        REQUIRE(sent.size() > Wire::RequestHeaderSize);
+        auto const header = Wire::DecodeRequestHeader(sent);
+        REQUIRE(header.has_value());
+        REQUIRE(Testing::Unwrap(header).opRaw == static_cast<std::uint8_t>(Wire::Op::Register));
+        auto const view = Wire::DecodeRegisterPayload(std::span { sent }.subspan(Wire::RequestHeaderSize));
+        REQUIRE(view.has_value());
+        return std::pair { std::string { Wire::AsStringView(Testing::Unwrap(view).fingerprint) },
+                           Testing::Unwrap(view).capacity.toolchainFamily };
+    };
+    auto families = std::map<std::string, std::string> {};
+    for (auto& registrar: registrars)
+        families.insert(familyRegistered(registrar));
+    CHECK(families == std::map<std::string, std::string> { { "fp-apple", "apple-clang" }, { "fp-pinned", "" } });
+}
 
 TEST_CASE("A worker re-registers under a moved endpoint and withdraws the old one exactly once", "[node][worker][endpoint]")
 {

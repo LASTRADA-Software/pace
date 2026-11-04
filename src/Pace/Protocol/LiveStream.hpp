@@ -290,9 +290,14 @@ class ILiveStatsSources
     /// `0xFC` surface is listening -- the reason this interface has a slot.
     /// @param section A section key, or empty for every whole-document section.
     /// @param range A range key, or empty for the default day.
+    /// @param format Which document: the tables, or `/fleet.json`'s body (which takes no section).
+    /// @param node A member id whose own series the `series` section draws, or empty for the fleet's.
     /// @return The document, or why there is none.
-    [[nodiscard]] virtual std::expected<FleetTextDocument, FleetTextDeclined> FleetText(std::string_view section,
-                                                                                        std::string_view range) const = 0;
+    [[nodiscard]] virtual std::expected<FleetTextDocument, FleetTextDeclined> FleetText(
+        std::string_view section,
+        std::string_view range,
+        CompileCacheWire::FleetTextFormat format,
+        std::string_view node) const = 0;
 };
 
 /// The sources a live stream reads, attached once they exist and detached before they go.
@@ -358,7 +363,9 @@ class LiveStatsSourceSlot final: public ILiveStatsSources
 
     /// @copydoc ILiveStatsSources::FleetText
     [[nodiscard]] std::expected<FleetTextDocument, FleetTextDeclined> FleetText(std::string_view section,
-                                                                                std::string_view range) const override;
+                                                                                std::string_view range,
+                                                                                CompileCacheWire::FleetTextFormat format,
+                                                                                std::string_view node) const override;
 
   private:
     mutable std::shared_mutex _mutex;
@@ -399,7 +406,9 @@ class CacheLiveStatsSources final: public ILiveStatsSources
     /// No fleet. Unreachable in the daemon, which refuses the verb by name (`RelocatedVerbs`)
     /// before any source is asked; answered rather than left to a caller to assume.
     [[nodiscard]] std::expected<FleetTextDocument, FleetTextDeclined> FleetText(std::string_view /*section*/,
-                                                                                std::string_view /*range*/) const override
+                                                                                std::string_view /*range*/,
+                                                                                CompileCacheWire::FleetTextFormat /*format*/,
+                                                                                std::string_view /*node*/) const override
     {
         return std::unexpected(FleetTextDeclined { .refusal = FleetTextRefusal::NoFleet,
                                                    .detail = "this process is a cache and serves no fleet" });

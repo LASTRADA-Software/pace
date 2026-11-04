@@ -1544,6 +1544,16 @@ inline constexpr EnumTable<IMetricsSink::Counter, CounterDescriptor> CounterTabl
       .help = "Relayed queue requests whose launcher left before the leader's answer reached it. The relay's "
               "connection to the leader is closed with it, which releases the request there.",
       .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::McpRequestsRefusedNotLoopback,
+      .prometheusName = "pace_mcp_requests_refused_not_loopback_total",
+      .help = "MCP requests refused 403 because the caller was not on this machine. The MCP surface binds loopback "
+              "only, so any count means a caller reached it from an address it was never meant to answer.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::NodeFingerprintInputsRefusedMalformed,
+      .prometheusName = "pace_node_fingerprint_inputs_refused_malformed_total",
+      .help = "fingerprint-inputs requests that were not exactly a fingerprint and an eight-byte page cursor. No "
+              "shipped client builds one, so a rise is a client of another build or a hand-made probe.",
+      .type = MetricType::Counter },
 } };
 
 // Checked at compile time rather than by a test, because the failure this prevents

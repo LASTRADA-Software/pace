@@ -311,6 +311,19 @@ void NotifyingStorage::Resize(std::size_t newMaxBytes)
     _inner.Resize(newMaxBytes);
 }
 
+std::optional<std::size_t> NotifyingStorage::ResizeTier(StorageTier tier, std::size_t newMaxBytes)
+{
+    // Drained like `Resize`: a shrink evicts, and each victim is a keyspace event.
+    ReclaimDrain const drain { *this };
+    return _inner.ResizeTier(tier, newMaxBytes);
+}
+
+IStorage::EvictStepOutcome NotifyingStorage::EvictStep()
+{
+    ReclaimDrain const drain { *this };
+    return _inner.EvictStep();
+}
+
 StorageStats NotifyingStorage::Snapshot() const noexcept
 {
     return _inner.Snapshot();

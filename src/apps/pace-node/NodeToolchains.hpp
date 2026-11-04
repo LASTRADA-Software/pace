@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include "FingerprintInputsResponder.hpp"
 #include "NodeConfig.hpp"
 
 #include <Pace/Core/Logger.hpp>
@@ -55,6 +56,49 @@ enum class SurveyVoice : std::uint8_t
     /// The timer sweep, which on almost every occasion finds the same compilers it
     /// found fifteen minutes ago.
     Routine,
+};
+
+/// Whether a survey may take a fingerprint from the launcher's fingerprint cache, or must walk the tree.
+///
+/// **PRIVATE: persisted and transmitted nowhere.** An enum rather than a `bool` at this seam, because the call reads
+/// `FingerprintToolchains(..., FingerprintWalk::Always)` where a bare `true` would say nothing.
+///
+/// A cache hit returns a digest an earlier run wrote and walks nothing, so it has no INPUTS to keep -- and a node
+/// keeps them so `toolchain_diff` can explain the fingerprint to another node (`ServedToolchain::inputs`). The
+/// startup survey still takes the cache, so a warm start registers at once (`StartupSurveyPlan`); the inputs come
+/// from ONE forced walk per process on a thread of its own (`InputsCapture`), adopted through `AdoptCapture`.
+enum class FingerprintWalk : std::uint8_t
+{
+    /// Take a cached fingerprint whose stamp still validates; walk only on a miss.
+    CacheMayAnswer,
+
+    /// Walk every tree whatever the cache holds, and rewrite the cache with the same answer.
+    Always,
+};
+
+/// How a worker's start surveys its toolchains: what registers, and what captures inputs.
+struct SurveyPlan
+{
+    FingerprintWalk initial; ///< The survey the heartbeat thread runs before it registers anything.
+    FingerprintWalk capture; ///< The one survey per process, on its own thread, that captures inputs.
+};
+
+/// The plan every worker starts by. **The registering survey takes the cache**: a warm start must register as fast as
+/// it did before inputs existed, since a walk is seconds on Linux and has exceeded five minutes on a Windows CI runner
+/// (#1157). **The capture walks**, off the heartbeat thread, so its length never holds a heartbeat.
+inline constexpr SurveyPlan StartupSurveyPlan { .initial = FingerprintWalk::CacheMayAnswer,
+                                                .capture = FingerprintWalk::Always };
+
+/// Whether this process's one capture walk has concluded.
+///
+/// **PRIVATE: persisted and transmitted nowhere.** It decides which absence a toolchain with no inputs reports:
+/// `NotYetCaptured` before, `NotCaptured` after -- a capture runs once, so a toolchain without inputs after it gets
+/// them only when a re-survey walks it again (a stamp change, a cache miss) or the node restarts, and saying
+/// "not yet" then would be a promise nothing keeps.
+enum class InputsCaptureState : std::uint8_t
+{
+    Pending,   ///< The capture walk has not handed back a result.
+    Concluded, ///< It has, whatever it found.
 };
 
 /// The level a survey's narration is emitted at.
@@ -145,6 +189,11 @@ struct ServedToolchain
     /// everywhere it travels, and is rendered as absent rather than as a blank.
     std::string label;
 
+    /// Which compiler family it belongs to, from the banner (`Cc::ToolchainFamily`), e.g. `g++` or `apple-clang`:
+    /// what the upgrade report compares versions within. Empty when no banner was read or no row knows the driver,
+    /// and for an operator's override, which is never probed.
+    std::string family;
+
     /// What this toolchain's identity was derived from, so it can be rechecked cheaply.
     ///
     /// A node fingerprints once at startup and then lives for weeks, while the launcher
@@ -183,7 +232,51 @@ struct ServedToolchain
     /// as an empty version of the second, which is exactly the collapse
     /// `Cc::ToolchainIdentity::evidence` carries an `optional` to avoid.
     std::optional<Cc::ToolchainEvidence> witness;
+
+    /// The inputs this fingerprint was computed from, as the survey's walk handed them to the digest; null when
+    /// nothing was digested here.
+    ///
+    /// **Captured, never re-gathered** (`Cc::ToolchainIdentity::inputs`): it is the digest's own argument list, so
+    /// it recomputes to the fingerprint this toolchain is filed under, and another node can check that before it
+    /// explains how two fingerprints differ. Null for an operator's `<fingerprint>=<compiler>` pin, which is never
+    /// probed, and for a toolchain a cache hit identified with no walk to carry it forward from. Kept in memory
+    /// only -- never persisted, never replicated.
+    ///
+    /// Shared and immutable, because a record runs to thousands of files and is published whole to the reactor
+    /// that answers `FINGERPRINT-INPUTS` (`NodeRuntimeState::PublishServedInputs`) without a copy.
+    std::shared_ptr<Cc::FingerprintInputs const> inputs;
 };
+
+/// Whether @p holder's inputs may be given to @p receiver, both found under one fingerprint: both probed -- a pin
+/// neither gives nor takes a record -- and the same compiler. The ONE pair match `CarryInputsForward` and
+/// `AdoptCapture` attach by, so the two cannot disagree about whose record is whose.
+/// @param holder The entry that holds the record.
+/// @param receiver The entry it would be given to.
+/// @return True when the record is the receiver's own digest arguments.
+[[nodiscard]] bool InputsBelongTo(ServedToolchain const& holder, ServedToolchain const& receiver) noexcept;
+
+/// Keep the inputs a previous survey captured for every fingerprint a later survey found unchanged and took
+/// from the cache -- matched on the whole (fingerprint, compiler) pair (`InputsBelongTo`), never onto a pin.
+///
+/// Sound because the map is keyed by FINGERPRINT: a record filed under a key recomputes to that key, so carrying
+/// it to the same key in the next map hands nobody inputs for another digest -- and the node that reads it
+/// recomputes it before using it anyway. A toolchain whose fingerprint moved has a new key and inherits nothing.
+/// @param previous What the worker served before.
+/// @param next What it serves from now on; a toolchain with no inputs takes @p previous's under the same key.
+void CarryInputsForward(std::map<std::string, ServedToolchain> const& previous,
+                        std::map<std::string, ServedToolchain>& next);
+
+/// What `FINGERPRINT-INPUTS` reads of a served map: each toolchain's fingerprint, label, compiler and inputs -- and,
+/// where it holds none, WHY.
+///
+/// A toolchain with no witness is an operator's pin (a served toolchain that was probed always carries one -- an
+/// unrun probe is refused, never served), so it is `Pinned`; any other toolchain without inputs is `NotYetCaptured`
+/// while @p capture is pending and `NotCaptured` once it has concluded.
+/// @param served What the worker serves.
+/// @param capture Whether this process's capture walk has concluded.
+/// @return The same toolchains in fingerprint order, sharing their inputs rather than copying them.
+[[nodiscard]] std::shared_ptr<ServedInputs const> ServedInputsOf(std::map<std::string, ServedToolchain> const& served,
+                                                                 InputsCaptureState capture);
 
 /// Split a `--toolchain` value into its fingerprint and compiler.
 ///
@@ -350,6 +443,36 @@ struct SurveyResult
     std::map<std::string, ServedToolchain> served;           ///< Empty unless `Served`.
 };
 
+/// What adopting the capture walk's survey concluded.
+struct CaptureAdoption
+{
+    /// What the worker serves from now on: the map it served, with the capture's inputs attached wherever the same
+    /// (fingerprint, compiler) pair is in both -- and NOTHING else changed: no entry added, dropped or re-pointed.
+    std::map<std::string, ServedToolchain> served;
+
+    /// Whether the capture showed a probed toolchain's compiler now digesting to another fingerprint, so the worker
+    /// must re-derive what it serves from its LIVE configuration (`RefreshToolchains`, unconditional) -- never serve
+    /// the capture's own map, which was surveyed from the startup configuration.
+    bool refreshFromLiveConfig { false };
+
+    /// The capture's map, kept so a refresh can carry its inputs onto what it re-derives (`CarryInputsForward`).
+    std::map<std::string, ServedToolchain> captured;
+};
+
+/// Adopt the capture walk's survey into what the worker serves, entry by entry.
+///
+/// **One derivation**: an input attaches only under a key the captured record digested to, with the same compiler, so
+/// it is right by construction even after a race. **A pin is never stale and never touched**; **an entry the capture
+/// lacks is left alone** -- a probe that timed out, or a toolchain a reload added, is not evidence of staleness. A
+/// probed toolchain whose compiler the capture filed under ANOTHER fingerprint is a genuine mismatch, and asks for a
+/// refresh from the live configuration -- that refresh serves nothing the configuration in force would not. The pair
+/// match alone decides attachment, so a map a reload re-derived while the capture ran takes the inputs of every pair
+/// it still holds. Pure, so every race is a unit test.
+/// @param current What the worker serves now.
+/// @param captured What the forced walk surveyed.
+/// @return The map to serve, whether to refresh, and the capture's map.
+[[nodiscard]] CaptureAdoption AdoptCapture(std::map<std::string, ServedToolchain> const& current, SurveyResult captured);
+
 /// Identify the discovered compilers, and refuse a node that would serve none.
 ///
 /// The **expensive** half: a driver spawn and a full walk of the include tree per
@@ -364,6 +487,7 @@ struct SurveyResult
 /// @return Fingerprint to what this worker serves under it -- never empty -- or
 ///         nullopt when there is nothing to serve, which is refused HERE with the
 ///         message that fits `discovered.source`.
+/// @param walk Whether a cached fingerprint may answer; the startup survey walks, so it captures inputs.
 /// @param stop Observed between toolchains and between hashed files, so a node told
 ///        to stop mid-walk stops. It is not a courtesy: since #365 this runs on the
 ///        heartbeat thread, whose `jthread` destructor joins before `main` returns,
@@ -378,7 +502,8 @@ struct SurveyResult
                                                  core::platform::IClock const& clock,
                                                  ILogger& logger,
                                                  std::stop_token const& stop,
-                                                 SurveyVoice voice = SurveyVoice::Announce);
+                                                 SurveyVoice voice = SurveyVoice::Announce,
+                                                 FingerprintWalk walk = FingerprintWalk::CacheMayAnswer);
 
 /// Which of these toolchains no longer match the machine they were derived from.
 ///

@@ -483,6 +483,15 @@ struct CallerContext
     /// same fold that engaged `provenNodeId`.
     std::optional<Ed25519PublicKey> provenKey {};
 
+    /// The key a machine TICKET this connection presented verified under, engaged only while that key is LIVE and the
+    /// ticket is among the routes that admitted the connection.
+    ///
+    /// **A label, deciding nothing**: what a ticket proves is a CALLER, never a machine joining the fleet, so no gate
+    /// reads this -- `provenNodeId` and the routes' columns decide. It is read only to say WHICH machine an operator
+    /// acted from (`BudgetOverride::setBy`), since a verified ticket is signed by that machine's own live key exactly as
+    /// a proof is. Filled by `Distributed::CallerContextOf`, from the same fold as every field above.
+    std::optional<Ed25519PublicKey> ticketKey {};
+
     /// Whether a route that IDENTIFIES the caller admitted it -- this machine, a live proven key or
     /// a verified ticket (`MembershipRoutes`) -- rather than `--fleet-open` alone.
     ///
@@ -690,6 +699,41 @@ struct AdmissionSnapshot
     std::vector<MachineLedgerView> budgets;
 };
 
+/// What a running compile granted on its own requesting machine names as its worker.
+inline constexpr std::string_view LocalCompileWorker = "local";
+
+/// One compile ticket, joined to the worker lease it holds.
+///
+/// The join is by the ticket id the lease carries (`Lease::ticket`), never by cache key: two
+/// tickets may miss one key, and each holds a lease of its own.
+struct CompileRow
+{
+    TicketView ticket;          ///< The ticket, as the queue holds it.
+    std::string toolchainLabel; ///< What the client calls the toolchain; empty when it named none.
+    /// The worker running it: the lease's worker id, `LocalCompileWorker` for a ticket granted on its
+    /// own caller, and ABSENT where the join cannot establish one -- a queued or waiting ticket, or a
+    /// running one whose live lease is gone.
+    std::optional<std::string> worker;
+    /// What is left of its lease's lifetime; absent for every ticket without a live lease.
+    std::optional<std::chrono::milliseconds> leaseExpiresIn;
+};
+
+/// The admission queue as a fleet report reads it: its view and its compile tickets, one sample.
+struct AdmissionReport
+{
+    /// The queue's depth, clients and per-machine ledger, or ABSENT when this node does not lead or the
+    /// queue has never seen a request or a budget: a fleet with no admission data says so rather than
+    /// reporting a queue of zero.
+    std::optional<QueueView> queue;
+    /// Every compile ticket the queue holds, each running one joined to its worker lease by the ticket
+    /// id the lease carries -- never by cache key, which two tickets may share. A running ticket granted
+    /// on its own caller says `LocalCompileWorker` and has no expiry; a running one placed on a worker
+    /// whose live lease the join cannot find (expired, or released when its worker was dropped) leaves
+    /// both absent rather than guessing. In no particular order; ABSENT when this node does not lead: a
+    /// follower's queue is not the fleet's, which is a different claim from a leader with no compiles.
+    std::optional<std::vector<CompileRow>> compiles;
+};
+
 /// Who to tell when the queue changes under a waiting connection. Called from any thread the service
 /// is driven on, outside the service admission lock, and must not block.
 struct AdmissionObserver
@@ -721,6 +765,14 @@ inline constexpr std::size_t AdmissionEstimateCapacity = 65'536;
 [[nodiscard]] CompileCacheWire::LocalGrantReason LocalGrantReasonOf(std::span<WorkerInfo const> live,
                                                                     std::string_view fingerprint,
                                                                     std::span<std::string const> excluded);
+
+/// A key as the registry stores a machine: the raw bytes, in a string.
+///
+/// The one derivation of a `MachineId` from an identity key -- the admission queue's charge, this node's own id and
+/// the demand history's requester all spell it, so none may restate it.
+/// @param key An identity public key.
+/// @return Its bytes.
+[[nodiscard]] std::string KeyAsMachineId(Ed25519PublicKey const& key);
 
 /// The fleet scheduler: who may compile where, and on whose behalf.
 ///
@@ -782,6 +834,13 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     /// what was kept.
     /// @param sink Where to route it; must outlive this service.
     void SetHistorySink(IFleetHistorySink* sink) noexcept;
+
+    /// Where each compile the admission queue grants is reported, for the keyed history; null to report none.
+    ///
+    /// A setter for `SetHistorySink`'s reason: the store lives in the sampler, built after this service. Taken under
+    /// the admission lock, so unwiring it at teardown cannot race a grant being decided.
+    /// @param sink Where to report; must outlive this service or be unwired first.
+    void SetDemandSink(ICompileDemandSink* sink) noexcept;
 
     /// Publish this node's current standing in the cluster.
     ///
@@ -892,10 +951,13 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     /// @return Queue depth and bytes charged per machine, as of now.
     [[nodiscard]] AdmissionSnapshot AdmissionSnapshotNow() const;
 
-    /// @return The queue's depth, clients and per-machine ledger, read under the admission lock, or
-    ///         ABSENT when this node does not lead or the queue has never seen a request or a budget:
-    ///         a fleet with no admission data says so rather than reporting a queue of zero.
-    [[nodiscard]] std::optional<QueueView> AdmissionDetailNow() const;
+    /// The queue's view and its joined compile tickets, read under ONE acquisition of the admission
+    /// lock, so the queue depth and the ticket totals a report publishes side by side are one sample.
+    ///
+    /// The ONLY way to read either: there is deliberately no call returning one half alone, so a
+    /// report cannot be written that reads the two in turn and publishes them from different moments.
+    /// @return Both halves; see `AdmissionReport` for when each is absent.
+    [[nodiscard]] AdmissionReport AdmissionReportNow() const;
 
     /// Be told when capacity may have appeared and when leadership is lost. A wiring door, set once.
     /// @param observer What to call; empty members are skipped.
@@ -1057,6 +1119,34 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     /// @param value What to set it to.
     /// @return `Ok` once the entry is appended, or a refusal.
     [[nodiscard]] SchedulerReply ClusterSet(CallerContext const& caller, std::string_view name, std::string_view value);
+
+    /// Edit one member's replicated record: MEMBER-EDIT, proposed by the leader as the ONE command its edit names (a
+    /// display name; the budget overrides of every tier it names, stamped with this leader's wall clock and the member
+    /// whose key the asking connection proved; a clear), through `Offer` as every cluster control verb is -- so a
+    /// non-leader answers `NotLeader` naming the leader, and every rule `Cluster::ValidateAgainst` holds is the refusal
+    /// the operator reads. An operator's standing is the verb's door (`OpTable`), asked by the surface.
+    /// @param caller Who is asking.
+    /// @param verb The edit byte as received; one this build does not know is refused by name.
+    /// @param memberId The member, by its id exactly.
+    /// @param value The edit's value: for a display name, the name, empty to clear it; for a budget edit, the bytes of
+    ///        its `CompileCacheWire` value record.
+    /// @return `Ok` once the entry is appended, or a refusal.
+    [[nodiscard]] SchedulerReply MemberEdit(CallerContext const& caller,
+                                            std::uint8_t verb,
+                                            std::string_view memberId,
+                                            std::string_view value);
+
+    /// A member reporting about its OWN record: MEMBER-REPORT, proposed by the leader as the command its report names
+    /// (an override's baseline; a drop of the exact override the member's own configuration outranks).
+    ///
+    /// **About the member holding the key the connection PROVED**, never one a frame names: a report from a connection
+    /// that proved no member's key is refused `NodeIdentityRequired`. The door (`ProvenNodeOnly`) asks for the proof
+    /// first; this asks again, because it is where the member is read off it.
+    /// @param caller Who is asking.
+    /// @param verb The report byte as received; one this build does not know is refused by name.
+    /// @param value The report's `CompileCacheWire` value record.
+    /// @return `Ok` once the entry is appended, or a refusal.
+    [[nodiscard]] SchedulerReply MemberReport(CallerContext const& caller, std::uint8_t verb, std::string_view value);
 
     /// Forget a machine: remove the id's member record and revoke the key it was admitted
     /// under (#1555).
@@ -1381,7 +1471,19 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
         core::platform::SteadyTimePoint enqueuedAt; ///< For `queued`.
         core::platform::SteadyTimePoint parkedAt;   ///< For `waited`: the enqueue, or the last requeue.
         std::optional<Distributed::Lease> lease;    ///< Engaged once granted on a worker.
+        MachineId machine;                          ///< The machine the queue charges: who asked, for the keyed history.
+        /// Whether this ticket's grant was reported to the demand sink: once per ticket, so a worker refusal that puts
+        /// it back and a later grant is still one compile asked for.
+        bool demandReported { false };
     };
+
+    /// `AdmissionReport::queue`. Caller holds `_admissionMutex`.
+    /// @return The view, or absent.
+    [[nodiscard]] std::optional<QueueView> AdmissionDetailLocked() const;
+
+    /// `AdmissionReport::compiles`. Caller holds `_admissionMutex`.
+    /// @return The rows, or absent.
+    [[nodiscard]] std::optional<std::vector<CompileRow>> CompileTicketsLocked() const;
 
     /// Tell the admission observer a pump is due. Called outside every lock.
     void NotifyAdmissionChanged();
@@ -1403,6 +1505,16 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     /// @param held The ticket record; its lease is taken.
     /// @param end Who ended it; only `Settled` counts a release, and only of a lease actually held.
     void ReleaseAdmissionLease(AdmissionTicket& held, AdmissionLeaseEnd end);
+
+    /// Tell the demand sink this ticket's compile was granted, unless it already was. Caller holds `_admissionMutex`.
+    /// @param held The ticket record.
+    void ReportDemandOnce(AdmissionTicket& held);
+
+    /// Tell the demand sink a fail-open lease was granted, attributed like an admission's charge or unattributed.
+    /// Takes `_admissionMutex`, which guards the sink; the caller holds none of the scheduler's locks.
+    /// @param caller The connection that asked.
+    /// @param fingerprint The toolchain it named.
+    void ReportLeaseDemand(CallerContext const& caller, std::string_view fingerprint);
 
     /// Turn one decision into a verdict: re-gate, mint the lease, encode the grant.
     /// Caller holds `_admissionMutex`.
@@ -1488,6 +1600,8 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     /// driver thread (demotion). Order: this is taken BEFORE the registry and the lease table own
     /// locks, never after.
     mutable std::mutex _admissionMutex;
+    /// Where each grant is reported (`SetDemandSink`); guarded by `_admissionMutex`.
+    ICompileDemandSink* _demand { nullptr };
     PeakEstimates _estimates;                                      ///< Guarded by `_admissionMutex`.
     RegistryPlacement _placement;                                  ///< Reads `_workers`, which locks for itself.
     AdmissionQueue _queue;                                         ///< Guarded by `_admissionMutex`.

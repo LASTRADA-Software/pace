@@ -241,6 +241,12 @@ struct WorkerTierFixture
     /// `activatedNodeEndpoint` as they stand THEN, as `main` builds the process's one -- and kept for
     /// as long as the fixture, since a tier borrows it.
     std::vector<std::unique_ptr<AppliedSchedulers>> schedulers;
+    /// What each started tier reads `capacity` through, one per `Start` -- `capacity` as it stands
+    /// THEN -- and kept for as long as the fixture, since a tier borrows it.
+    std::vector<std::unique_ptr<FixedNodeCapacity>> capacities;
+    /// When set, what a started tier reads its capacity through instead of a fixed `capacity`: a case
+    /// about a capacity that MOVES. Must outlive the tier.
+    INodeCapacitySource const* capacitySource = nullptr;
 
     /// Start a tier for `cfg` on a machine of sixteen cores.
     [[nodiscard]] std::expected<std::unique_ptr<WorkerTier>, NodeRefusal> Start()
@@ -264,33 +270,35 @@ struct WorkerTierFixture
                                    .scratchBase = scratchBase.empty() ? scratch.Path() : scratchBase };
         };
         schedulers.push_back(std::make_unique<AppliedSchedulers>(cfg, activatedNodeEndpoint));
-        return WorkerTier::Start(WorkerTierParts { .cfg = cfg,
-                                                   .reloader = nullptr,
-                                                   .capacity = capacity,
-                                                   .announced = announced,
-                                                   .endpoints = endpoints,
-                                                   .activatedNodeEndpoint = activatedNodeEndpoint,
-                                                   .schedulers = *schedulers.back(),
-                                                   .membership = membership,
-                                                   .locality = locality,
-                                                   .io = io,
-                                                   .host = *host,
-                                                   .cacheTier = nullptr,
-                                                   // Nothing proves: every case here is about the worker tier
-                                                   // itself, against a scripted fleet that serves no handshake.
-                                                   .prover = nullptr,
-                                                   // No roster either, for the same reason: a worker no other
-                                                   // machine reaches checks no grant (#178).
-                                                   .leaseRoster = nullptr,
-                                                   .leaseCheck = leaseCheck,
-                                                   .metrics = metrics,
-                                                   .logger = logger,
-                                                   .conditions = conditions,
-                                                   .hostEvents = hostEvents,
-                                                   .suspendWait = suspendWait,
-                                                   .schedulerDialer = Dialer(),
-                                                   .measurements = measuredPeaks },
-                                 makeMachine);
+        capacities.push_back(std::make_unique<FixedNodeCapacity>(capacity));
+        return WorkerTier::Start(
+            WorkerTierParts { .cfg = cfg,
+                              .reloader = nullptr,
+                              .capacity = capacitySource != nullptr ? *capacitySource : *capacities.back(),
+                              .announced = announced,
+                              .endpoints = endpoints,
+                              .activatedNodeEndpoint = activatedNodeEndpoint,
+                              .schedulers = *schedulers.back(),
+                              .membership = membership,
+                              .locality = locality,
+                              .io = io,
+                              .host = *host,
+                              .cacheTier = nullptr,
+                              // Nothing proves: every case here is about the worker tier
+                              // itself, against a scripted fleet that serves no handshake.
+                              .prover = nullptr,
+                              // No roster either, for the same reason: a worker no other
+                              // machine reaches checks no grant (#178).
+                              .leaseRoster = nullptr,
+                              .leaseCheck = leaseCheck,
+                              .metrics = metrics,
+                              .logger = logger,
+                              .conditions = conditions,
+                              .hostEvents = hostEvents,
+                              .suspendWait = suspendWait,
+                              .schedulerDialer = Dialer(),
+                              .measurements = measuredPeaks },
+            makeMachine);
     }
 };
 

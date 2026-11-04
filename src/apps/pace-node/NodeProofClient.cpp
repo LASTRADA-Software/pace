@@ -45,7 +45,11 @@ namespace
             result = NodeProofResult::NotOffered;
         else if (outcome.kind == Cc::CacheOutcomeKind::Rejected && outcome.code == Wire::ErrorCode::RosterNotYetApplied)
             result = NodeProofResult::Deferred;
-        return NodeProofAttempt { .result = result, .reason = Cc::DescribeOutcome(outcome), .standing = standing };
+        return NodeProofAttempt { .result = result,
+                                  .reason = Cc::DescribeOutcome(outcome),
+                                  .standing = standing,
+                                  .exchange = outcome.kind == Cc::CacheOutcomeKind::Transport ? ProofExchange::Incomplete
+                                                                                              : ProofExchange::Answered };
     }
 
     /// Who is proving, borrowed from the client for one handshake.

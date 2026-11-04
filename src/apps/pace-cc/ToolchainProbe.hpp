@@ -7,6 +7,7 @@
 #include "ToolchainFingerprint.hpp"
 #include "ToolchainHost.hpp"
 
+#include <Pace/CompileCache/VersionName.hpp>
 #include <Pace/Core/EnumTable.hpp>
 
 #include <cstddef>
@@ -360,17 +361,26 @@ struct DriverIdentityProbe
 ///         Empty only when the compiler is.
 [[nodiscard]] std::string ToolchainLabel(std::string_view compiler, std::string_view banner);
 
-/// Whether a name is made only of digits and dots, with at least one digit.
+/// Which compiler family a toolchain belongs to, for the upgrade report: versions are compared within a family and
+/// never across one.
 ///
-/// One predicate for two questions that must answer alike: which subdirectory of a
-/// Windows SDK's `Include` is a kit version (`10.0.26100.0` yes, `KitsRoot10` and
-/// the GUID-named values no), and which suffix on a compiler name is a version
-/// (`gcc-13` yes, `gcc-ar` no). A second spelling is a second set of rules for what
-/// counts as a version.
+/// **From the banner, not the name** -- the rule `cc` and `c++` taught (`ClassifyCompilerFromBanner`): the name
+/// says what was invoked, the banner says what answered. `/usr/bin/gcc` on macOS is Apple clang and is
+/// `apple-clang` here; a `cc` that is GNU is `gcc`. Apple clang is distinct from LLVM `clang`, whose version
+/// numbers mean something else, and a `++` driver (`CompilesEverythingAsCxx`) is the `++` family of its flavour.
 ///
-/// @param name The candidate.
-/// @return True when it could be a version.
-[[nodiscard]] bool LooksLikeVersion(std::string_view name) noexcept;
+/// Display and advice only, like `ToolchainLabel`: the fingerprint decides every match.
+/// @param compiler The compiler as invoked.
+/// @param banner What `CompilerBanner` returned for it.
+/// @return e.g. `gcc`, `g++`, `clang++`, `apple-clang`, `cl`, `clang-cl`; empty when the banner is the
+///         unrun-driver fallback or the driver is one no row knows (a cross driver such as `aarch64-none-elf-gcc`
+///         classifies as no flavour, and joins no family rather than a native one).
+[[nodiscard]] std::string ToolchainFamily(std::string_view compiler, std::string_view banner);
+
+/// Whether a name is made only of digits and dots, with at least one digit: the ONE predicate, shared header-only
+/// with the scheduler (`CompileCache::LooksLikeVersion`, `<Pace/CompileCache/VersionName.hpp>`), so the launcher and
+/// the upgrade report cannot disagree about what counts as a version.
+using CompileCache::LooksLikeVersion;
 
 /// The VC half of an MSVC toolchain's include roots, from its own install layout.
 ///
@@ -878,6 +888,15 @@ struct ToolchainIdentity
     /// fingerprint covers and stop noticing SDK-side changes, permanently and in
     /// silence.
     std::optional<ToolchainEvidence> evidence;
+
+    /// The inputs the digest was computed from in THIS call, or nothing when it computed none.
+    ///
+    /// Engaged exactly when this call walked the tree and digested it -- the record is the argument list
+    /// `ComputeToolchainFingerprint` was handed (`CaptureFingerprintInputs`), so it recomputes to `fingerprint`
+    /// by construction. Disengaged for a cache HIT, which returns a digest written by an earlier run and walked
+    /// nothing, and for an identity nobody probed (an operator's pin): there was no argument list to keep, and
+    /// re-gathering one afterwards would describe whatever the tree is NOW rather than what was digested.
+    std::optional<FingerprintInputs> inputs;
 
     /// Whether this identity may be registered, matched on, or dispatched with.
     ///

@@ -835,13 +835,55 @@ TEST_CASE("A member that never announced and one a re-admit cleared render diffe
     // both endpoint cells are the absent marker. Members sort by id, so `moved` first.
     auto const members = RenderFleetText(snapshot, NoHistory(), FleetSection::Members);
     INFO(members);
-    CHECK(members.contains("moved\t10.0.0.2:6675\t-\tcleared\n"));
-    CHECK(members.contains("quiet\t10.0.0.1:6675\t-\tnever-announced\n"));
+    // The eight trailing dashes are the budget override columns (figure, setter, baseline, set-at per tier) neither
+    // member has.
+    CHECK(members.contains("moved\t-\t-\t10.0.0.2:6675\t-\tcleared\t-\t-\t-\t-\t-\t-\t-\t-\n"));
+    CHECK(members.contains("quiet\t-\t-\t10.0.0.1:6675\t-\tnever-announced\t-\t-\t-\t-\t-\t-\t-\t-\n"));
 
     // And the JSON, where the endpoint stays `null` for both rather than becoming a word.
     auto const json = RenderFleetJson(snapshot, NoHistory());
     CHECK(json.contains(R"("scheduler-endpoint":null,"scheduler-endpoint-state":"cleared")"));
     CHECK(json.contains(R"("scheduler-endpoint":null,"scheduler-endpoint-state":"never-announced")"));
+}
+
+TEST_CASE("A member's recorded budget override is a column of the members table, absent where none is",
+          "[distributed][fleetview][budget]")
+{
+    // The replicated record, rendered by the one member table every surface walks -- the page, the JSON, the text and
+    // the MCP fleet_overview that projects the JSON -- so every node shows the figure the cluster recorded.
+    auto snapshot = LeadingSnapshot();
+    Cluster::ClusterState state;
+    auto key = Ed25519PublicKey {};
+    key.fill(std::byte { 0x61 });
+    Apply(state,
+          Cluster::Command { .kind = Cluster::CommandKind::AddLearner,
+                             .key = "box",
+                             .value = {},
+                             .schedulerEndpoint = {},
+                             .publicKey = key });
+    Apply(state,
+          Cluster::Command { .kind = Cluster::CommandKind::SetBudget,
+                             .key = "box",
+                             .value = {},
+                             .schedulerEndpoint = {},
+                             .publicKey = std::nullopt,
+                             .budgetBytes = { std::nullopt, 2ULL << 30 },
+                             .setAtUnixSeconds = 1793613600,
+                             .setBy = "voter-1" },
+          2);
+    snapshot.cluster = state;
+
+    auto const json = RenderFleetJson(snapshot, NoHistory());
+    INFO(json);
+    CHECK(json.contains(
+        R"("memory-override":null,"disk-override":2147483648,"memory-override-by":null,"disk-override-by":"voter-1")"));
+    auto const members = RenderFleetText(snapshot, NoHistory(), FleetSection::Members);
+    INFO(members);
+    // Bytes as /fleet.txt writes them; no baseline reported yet (absent, never zero), and the leader's stamp in UTC.
+    CHECK(members.contains("never-announced\t-\t2147483648\t-\tvoter-1\t-\t-\t-\t2026-11-02T10:00:00Z\n"));
+    CHECK(json.contains(R"("memory-override-baseline":null,"disk-override-baseline":null)"));
+    CHECK(json.contains(R"("memory-override-set-at":null,"disk-override-set-at":"2026-11-02T10:00:00Z")"));
+    CHECK(FleetColumnFormat(FleetSection::Members, "disk-override") == std::optional { CellFormat::Bytes });
 }
 
 TEST_CASE("A hostile fingerprint cannot escape the page or the document", "[distributed][fleetview][security]")
@@ -1292,7 +1334,7 @@ namespace
 /// A day of buckets carrying a rising counter, so every chart has something to draw.
 [[nodiscard]] FleetHistoryView SomeHistory(FleetRange range = FleetRange::Day, bool durable = true)
 {
-    FleetHistoryView view { .range = range, .buckets = {}, .durable = durable };
+    FleetHistoryView view { .range = range, .buckets = {}, .durable = durable, .keyed = {} };
     for (auto const index: std::views::iota(0, 8))
     {
         FleetBucket bucket {};
@@ -2565,4 +2607,78 @@ TEST_CASE("FleetView.admission-absent-when-no-queue", "[distributed][fleetview][
     CHECK(RenderFleetText(snapshot, NoHistory(), FleetSection::Clients) == "machine\ttree\trunning\tqueued\n");
     CHECK(RenderFleetText(snapshot, NoHistory(), FleetSection::Kpi).contains("queue-depth\t-\t"));
     CHECK(RenderFleetHtml(snapshot, NoHistory(), 0).contains("leads no compile queue"));
+}
+
+TEST_CASE("The fleet document is schema generation 3", "[distributed][fleetview]")
+{
+    // The literal, not `FleetJsonSchema`: a case spelling the constant passes whatever it is bumped to,
+    // and the byte a reader branches on is what this pins (generation 3: the uncapped lease list).
+    CHECK(RenderFleetJson(FleetSnapshot {}, NoHistory()).starts_with(R"({"schema":3,)"));
+}
+
+TEST_CASE("The JSON lists every outstanding lease while the page and the text show the oldest fifty",
+          "[distributed][fleetview]")
+{
+    constexpr std::size_t Held = OutstandingLeaseRows + 10;
+    auto snapshot = LeadingSnapshot();
+    snapshot.liveLeases = Held + 7; // seven more than collected: the JSON's ceiling was hit
+    for (auto const index: std::views::iota(std::size_t { 0 }, Held))
+        snapshot.outstandingLeases.push_back(LeaseHolding { .key = std::format("lease-{:03}", index),
+                                                            .workerId = "w1",
+                                                            .workerEndpoint = "10.0.0.2:7100",
+                                                            .age = std::chrono::milliseconds { 1000 } });
+    auto const last = std::format("lease-{:03}", Held - 1);
+    auto const lastShown = std::format("lease-{:03}", OutstandingLeaseRows - 1);
+    auto const firstHidden = std::format("lease-{:03}", OutstandingLeaseRows);
+
+    auto const json = RenderFleetJson(snapshot, NoHistory());
+    CHECK(json.contains(std::format(R"("key":"{}")", last)));
+    CHECK(json.contains(R"("leases-outstanding-truncated":7)"));
+
+    auto const html = RenderFleetHtml(snapshot, NoHistory(), 10);
+    CHECK(html.contains(lastShown));
+    CHECK_FALSE(html.contains(firstHidden));
+    CHECK(html.contains(std::format("the {} oldest of {}", OutstandingLeaseRows, Held + 7)));
+
+    auto const text = RenderFleetText(snapshot, NoHistory(), FleetSection::Leases);
+    CHECK(text.contains(lastShown));
+    CHECK_FALSE(text.contains(firstHidden));
+}
+
+TEST_CASE("The compile list reaches the JSON and the page through one column table", "[distributed][fleetview]")
+{
+    auto snapshot = LeadingSnapshot();
+    auto compiles = CompileSection {};
+    for (auto const index: std::views::iota(Ticket { 1 }, Ticket { DashboardCompileRows + 3 }))
+        compiles.rows.push_back(FleetCompile {
+            .compile = CompileRow { .ticket = TicketView { .ticket = index,
+                                                           .caller = "m",
+                                                           .sourcePath = std::format("src/tu-{:03}.cpp", index),
+                                                           .fingerprint = "gcc-14-abc",
+                                                           .treeLabel = "wt",
+                                                           .state = TicketView::State::Running,
+                                                           .age = std::chrono::milliseconds { 2500 },
+                                                           .placement = std::nullopt },
+                                    .toolchainLabel = "gcc 14.2.0",
+                                    .worker = std::string { LocalCompileWorker },
+                                    .leaseExpiresIn = std::nullopt },
+            .requester = "ws-1" });
+    compiles.truncated = 4;
+    compiles.totals[static_cast<std::size_t>(TicketView::State::Running)] = compiles.rows.size() + 4;
+    snapshot.compiles = std::move(compiles);
+
+    auto const json = RenderFleetJson(snapshot, NoHistory());
+    // One row, every column named by its table and every absence spelled `null`.
+    CHECK(json.contains(R"({"ticket":1,"requester":"ws-1","requester-key":null,"source":"src/tu-001.cpp",)"
+                        R"("fingerprint":"gcc-14-abc","toolchain":"gcc 14.2.0","tree":"wt","state":"running",)"
+                        R"("age":2500,"worker":"local","lease-expires-in":null})"));
+    CHECK(json.contains(R"("compiles-truncated":4,)"));
+    CHECK(
+        json.contains(std::format(R"("compile-totals":{{"queued":0,"waiting":0,"running":{}}})", DashboardCompileRows + 6)));
+
+    auto const html = RenderFleetHtml(snapshot, NoHistory(), 10);
+    CHECK(html.contains("<h2>Compiles</h2>"));
+    CHECK(html.contains(std::format("src/tu-{:03}.cpp", DashboardCompileRows)));
+    CHECK_FALSE(html.contains(std::format("src/tu-{:03}.cpp", DashboardCompileRows + 1)));
+    CHECK(html.contains(std::format("the {} oldest of {}", DashboardCompileRows, DashboardCompileRows + 6)));
 }

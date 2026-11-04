@@ -7,11 +7,15 @@
 #include "NodeStatusText.hpp"
 
 #include <Pace/Cli/Duration.hpp>
+#include <Pace/Cli/MemberId.hpp>
+#include <Pace/Cluster/BudgetOverride.hpp>
 #include <Pace/Cluster/ClusterState.hpp>
 #include <Pace/Cluster/FleetPin.hpp>
 #include <Pace/Core/Ed25519.hpp>
 #include <Pace/Core/EnumTable.hpp>
 #include <Pace/Distributed/MembershipWire.hpp>
+#include <Pace/Distributed/ShownName.hpp>
+#include <Pace/Protocol/NodeStatusView.hpp>
 
 #include <algorithm>
 #include <array>
@@ -980,20 +984,7 @@ namespace
     /// @return A stable lower-case name.
     [[nodiscard]] std::string_view NameOfSurface(CompileCacheWire::WireSurface surface) noexcept
     {
-        switch (surface)
-        {
-            case CompileCacheWire::WireSurface::Admin:
-                return "admin";
-            case CompileCacheWire::WireSurface::Raft:
-                return "raft";
-            case CompileCacheWire::WireSurface::Discovery:
-                return "discovery";
-        }
-        // A tag this build does not name never reaches here -- `DecodeNodeStatus` SKIPS
-        // one rather than refusing the whole reply, which is what lets an older client
-        // read a newer node at all. Closed anyway, because falling off the end of a
-        // function returning a view is a dangling one.
-        return "unknown";
+        return NodeStatusView::SurfaceName(surface);
     }
 
     /// What to call one enrollment-window state.
@@ -1021,19 +1012,7 @@ namespace
     /// @return A stable lower-case name.
     [[nodiscard]] std::string_view NameOfConsensusStanding(CompileCacheWire::WireConsensusStanding standing) noexcept
     {
-        switch (standing)
-        {
-            case CompileCacheWire::WireConsensusStanding::NoCluster:
-                return "no-cluster";
-            case CompileCacheWire::WireConsensusStanding::Voter:
-                return "voter";
-            case CompileCacheWire::WireConsensusStanding::Learner:
-                return "learner";
-            case CompileCacheWire::WireConsensusStanding::Outsider:
-                return "outsider";
-        }
-        // Unreachable for `NameOfEnrollmentState`'s reason.
-        return "unknown";
+        return NodeStatusView::ConsensusStandingName(standing);
     }
 
     /// What to call one cordon state.
@@ -1041,17 +1020,7 @@ namespace
     /// @return A stable lower-case name.
     [[nodiscard]] std::string_view NameOfCordonState(CompileCacheWire::WireCordonState state) noexcept
     {
-        switch (state)
-        {
-            case CompileCacheWire::WireCordonState::Serving:
-                return "serving";
-            case CompileCacheWire::WireCordonState::Draining:
-                return "draining";
-            case CompileCacheWire::WireCordonState::Drained:
-                return "drained";
-        }
-        // Unreachable for `NameOfEnrollmentState`'s reason.
-        return "unknown";
+        return NodeStatusView::CordonStateName(state);
     }
 
     /// Add an optional unsigned field, or nothing at all when the node did not say.
@@ -1067,6 +1036,90 @@ namespace
     {
         if (value.has_value())
             record.push_back({ .name = std::string { name }, .value = NumberCell(*value) });
+    }
+
+    /// Append the detail `node_status` reads too: the slot ceilings with the binding one named, each cache tier,
+    /// the configuration in force and the budget overrides.
+    ///
+    /// **Every value is `NodeStatusView`'s** -- the tiers this build names, a tier's hit ratio and what its zero
+    /// budget means, a setting's rows gathered and a redaction spelled -- the derivation the MCP tool renders
+    /// from, so the two cannot disagree about a quantity both show. Absent is a CELL, never a zero: a cache that
+    /// lacks a tier says so under that tier's name, a ratio of no lookups is absent, and an unset setting is
+    /// absent rather than empty.
+    /// @param record Where the fields are appended.
+    /// @param runtime What the node said.
+    void AddNodeDetail(std::vector<Field>& record, CompileCacheWire::NodeRuntimeFields const& runtime)
+    {
+        if (auto const ceilings = NodeStatusView::CeilingsOf(runtime); ceilings.has_value())
+        {
+            record.push_back({ .name = "slots-available", .value = NumberCell(std::uint64_t { ceilings->available }) });
+            record.push_back({ .name = "slots-bound-by", .value = TextCell(ceilings->binding) });
+            for (auto const& ceiling: ceilings->ceilings)
+                record.push_back(
+                    { .name = std::format("slot-ceiling-{}", ceiling.name),
+                      .value = ceiling.slots.has_value() ? NumberCell(std::uint64_t { *ceiling.slots }) : AbsentCell() });
+            record.push_back(
+                { .name = "slot-ceilings-sampled-seconds-ago", .value = NumberCell(ceilings->sampledSecondsAgo) });
+        }
+
+        if (auto const tiers = NodeStatusView::TiersOf(runtime); tiers.has_value())
+            for (auto const& tier: *tiers)
+            {
+                auto const prefix = std::format("cache-{}", tier.name);
+                if (!tier.stats.has_value())
+                {
+                    record.push_back({ .name = prefix, .value = AbsentCell() });
+                    continue;
+                }
+                auto const& stats = *tier.stats;
+                auto const budget = NodeStatusView::BudgetBytes(stats);
+                auto const ratio = NodeStatusView::HitRatio(stats);
+                record.push_back({ .name = prefix + "-entries", .value = NumberCell(stats.entries) });
+                record.push_back({ .name = prefix + "-bytes", .value = NumberCell(stats.bytesUsed) });
+                record.push_back({ .name = prefix + "-budget",
+                                   .value = budget.has_value() ? NumberCell(*budget) : TextCell("unbounded") });
+                record.push_back({ .name = prefix + "-hits", .value = NumberCell(stats.hits) });
+                record.push_back({ .name = prefix + "-misses", .value = NumberCell(stats.misses) });
+                record.push_back(
+                    { .name = prefix + "-hit-ratio", .value = ratio.has_value() ? RealCell(*ratio) : AbsentCell() });
+            }
+
+        // One field per setting, named for the flag without its dashes; a list setting's values joined. A
+        // redacted credential reads `<redacted>`: its value never left the node.
+        if (auto const settings = NodeStatusView::SettingsOf(runtime); settings.has_value())
+            for (auto const& setting: *settings)
+            {
+                auto const flag = std::string_view { setting.name };
+                auto const name = std::format("config-{}", flag.substr(std::min(flag.find_first_not_of('-'), flag.size())));
+                if (!setting.values.has_value())
+                {
+                    record.push_back({ .name = name, .value = AbsentCell() });
+                    continue;
+                }
+                auto joined = std::string {};
+                for (auto const& value: *setting.values)
+                    joined += (joined.empty() ? "" : ", ") + value;
+                record.push_back({ .name = name, .value = TextCell(std::move(joined)) });
+            }
+
+        // Each tier's budget through the view `node_status` renders from -- in force, from where, the override and its
+        // baseline -- one field per tier and their line together. ABSENT from a node that does not say, and `none`
+        // from one with no tier and no override.
+        if (auto const budgets = NodeStatusView::BudgetOverridesOf(runtime); budgets.has_value())
+        {
+            auto described = std::string {};
+            for (auto const& view: *budgets)
+            {
+                auto line = NodeStatusView::DescribeBudget(view);
+                described += std::format("{}{}: {}", described.empty() ? "" : "; ", view.tier, line);
+                record.push_back({ .name = std::format("budget-{}", view.tier), .value = TextCell(std::move(line)) });
+                record.push_back({ .name = std::format("budget-{}-source", view.tier), .value = TextCell(view.source) });
+            }
+            record.push_back(
+                { .name = "budget-overrides", .value = TextCell(described.empty() ? std::string { "none" } : described) });
+        }
+        else
+            record.push_back({ .name = "budget-overrides", .value = AbsentCell() });
     }
 
     /// Turn a decoded node status into the reported record.
@@ -1085,6 +1138,20 @@ namespace
         // **Absent, not empty.** A node running no consensus has no minted identity, and
         // an empty string renders as a value somebody could paste into `--cluster-admit`.
         record.push_back({ .name = "node-id", .value = fields.nodeId.empty() ? AbsentCell() : TextCell(fields.nodeId) });
+
+        // **The name a person knows the machine by**, beside the id it annotates, through the rule the fleet page's
+        // `name` column uses (`Distributed::NameShown`): the display name the cluster records for it, else what the
+        // machine calls itself, and which of the two it is. Absent, both cells, when neither says.
+        // Views into the record, which outlives `shown`: never into a temporary `value_or` would make.
+        auto const shown = Distributed::NameShown(
+            fields.runtime.displayName.has_value() ? std::string_view { *fields.runtime.displayName } : std::string_view {},
+            fields.runtime.hostName.has_value() ? std::string_view { *fields.runtime.hostName } : std::string_view {});
+        record.push_back(
+            { .name = "name", .value = shown.text.empty() ? AbsentCell() : TextCell(std::string { shown.text }) });
+        record.push_back({ .name = "name-source",
+                           .value = shown.source.has_value()
+                                        ? TextCell(std::string { Distributed::NameSourceWord(*shown.source) })
+                                        : AbsentCell() });
 
         // **The key this node proves who it is with** (#178), WHOLE, through the one encoder:
         // it is the string an operator holds against a roster or types after `@` in a
@@ -1292,6 +1359,8 @@ namespace
         else
             record.push_back({ .name = "shared-cache", .value = AbsentCell() });
 
+        AddNodeDetail(record, fields.runtime);
+
         // One field per surface the node actually opened. A surface it does not run gets
         // no field at all rather than a zero port -- the same rule the node applies when
         // encoding, held on both sides so neither can quietly invent a number.
@@ -1415,115 +1484,17 @@ namespace
         return NodeConditionsAnswer(*fields, context.node->Address());
     }
 
-    /// What to call one admission verdict.
-    ///
-    /// The word an operator would use, not the enumerator: `refused` rather than `Outsider`,
-    /// which reads as a status this tool invented.
-    /// @param verdict The wire tag.
-    /// @return A stable lower-case name.
-    [[nodiscard]] std::string_view NameOfMembership(CompileCacheWire::WireMembership verdict) noexcept
-    {
-        switch (verdict)
-        {
-            case CompileCacheWire::WireMembership::Outsider:
-                return "refused";
-            case CompileCacheWire::WireMembership::Member:
-                return "admitted";
-            case CompileCacheWire::WireMembership::Forgotten:
-                return "forgotten";
-        }
-        // Unreachable for `NameOfCordonState`'s reason: `DecodeAdmissionExplanation` REFUSES a
-        // verdict this build cannot name rather than passing it through, because a verdict is
-        // the answer itself -- an unknown route can be counted, an unknown verdict cannot.
-        return "unknown";
-    }
-
-    /// One row of `AdmissionRouteNames`.
-    struct AdmissionRouteName
-    {
-        Distributed::MembershipParticipant route; ///< The route.
-        std::string_view name;                    ///< What an operator calls it.
-    };
-
-    /// How each admission route is spelled for a person.
-    ///
-    /// **The setting or the act, never the enumerator.** An operator told `fleet-open` knows which
-    /// setting to change; one told `OpenPolicy` has to go and look it up.
-    ///
-    /// Keyed on the PARTICIPANT rather than on the wire bit, and that is the guard rather than a
-    /// preference: a bitmask enum has no `Last`, so a table keyed on one cannot be checked for
-    /// completeness. Keyed here, `RowsInEnumeratorOrder` fails the build when a route is added
-    /// and not spelled -- where a bit-keyed array would compile and render the new route as *a
-    /// route this client cannot name*, blaming the node's version for this client's omission.
-    /// That is the confident wrong signal the verb exists to remove, arriving inside the verb.
-    constexpr EnumTable<Distributed::MembershipParticipant, AdmissionRouteName> AdmissionRouteNames { {
-        // Never printed: `Reserved` travels as no bit, so no answer can carry it.
-        { .route = Distributed::MembershipParticipant::Reserved, .name = "reserved" },
-        { .route = Distributed::MembershipParticipant::Loopback, .name = "loopback" },
-        { .route = Distributed::MembershipParticipant::OpenPolicy, .name = "fleet-open" },
-        { .route = Distributed::MembershipParticipant::ProvenIdentity, .name = "proven-key" },
-        { .route = Distributed::MembershipParticipant::MachineTicket, .name = "ticket" },
-        { .route = Distributed::MembershipParticipant::KeyTombstone, .name = "key-revoked" },
-    } };
-
-    static_assert(RowsInEnumeratorOrder(AdmissionRouteNames, &AdmissionRouteName::route),
-                  "AdmissionRouteNames must hold one row per MembershipParticipant, in enumerator order");
-
-    /// Every route in @p decidedBy, as an operator reads them.
-    ///
-    /// **A route this build cannot name is COUNTED, never dropped.** The node may be newer, and
-    /// under-reporting authorship during an upgrade would say *fewer things decided this than
-    /// did* -- which is the reading that sends somebody to change a route that was never
-    /// consulted. Counted, the operator knows to ask a client of the node's own version.
+    /// Every route in @p decidedBy, as an operator reads them: `Distributed::AdmissionRouteNames`, the one
+    /// derivation this verb and the MCP `explain_admission` tool share, joined.
     /// @param decidedBy The bitmask the node sent.
     /// @return The routes, joined, or empty when nothing decided.
     [[nodiscard]] std::string DescribeAdmissionRoutes(std::uint32_t decidedBy)
     {
         auto described = std::string {};
-        auto named = std::uint32_t { 0 };
-        for (auto const& row: Distributed::MembershipWireRoutes)
-        {
-            auto const bit = row.bit;
-            if ((decidedBy & bit) == 0)
-                continue;
-            named |= bit;
-            if (!described.empty())
-                described += ", ";
-            described += AdmissionRouteNames[static_cast<std::size_t>(row.route)].name;
-        }
-
-        // Each bit this build cannot name, as its NUMBER: the operator can then ask a client of the
-        // node's own version which route that is, which a count alone would not let them do.
-        for (auto const bit: std::views::iota(0U, 32U))
-        {
-            auto const value = std::uint32_t { 1 } << bit;
-            if ((decidedBy & ~named & value) == 0)
-                continue;
-            if (!described.empty())
-                described += ", ";
-            described += std::format("{:#x}", value);
-        }
+        for (auto const& name: Distributed::AdmissionRouteNames(decidedBy))
+            described += (described.empty() ? "" : ", ") + name;
         return described;
     }
-
-    /// One row of `MachineStandingNames`.
-    struct MachineStandingName
-    {
-        Distributed::MachineStanding standing; ///< The standing.
-        std::string_view name;                 ///< What an operator calls it.
-    };
-
-    /// How each standing is spelled for a person: the seat, or why there is none.
-    constexpr EnumTable<Distributed::MachineStanding, MachineStandingName> MachineStandingNames { {
-        { .standing = Distributed::MachineStanding::Voter, .name = "voter" },
-        { .standing = Distributed::MachineStanding::Learner, .name = "learner" },
-        { .standing = Distributed::MachineStanding::Pending, .name = "pending" },
-        { .standing = Distributed::MachineStanding::Revoked, .name = "revoked" },
-        { .standing = Distributed::MachineStanding::Unknown, .name = "unknown" },
-    } };
-
-    static_assert(RowsInEnumeratorOrder(MachineStandingNames, &MachineStandingName::standing),
-                  "MachineStandingNames must hold one row per MachineStanding, in enumerator order");
 
     /// `explain-admission [<machine-id|key>]` -- which routes admit or refuse a machine, or this
     /// very connection when no subject is given, as THIS node folds it.
@@ -1563,10 +1534,9 @@ namespace
         auto answer = Answered(RecordValue(
             { Field { .name = "subject", .value = TextCell(fields->subject) },
               Field { .name = "standing",
-                      .value = standing.has_value()
-                                   ? TextCell(std::string { MachineStandingNames[static_cast<std::size_t>(*standing)].name })
-                                   : AbsentCell() },
-              Field { .name = "verdict", .value = TextCell(std::string { NameOfMembership(fields->verdict) }) },
+                      .value = standing.has_value() ? TextCell(std::string { Distributed::StandingName(*standing) })
+                                                    : AbsentCell() },
+              Field { .name = "verdict", .value = TextCell(std::string { Distributed::VerdictName(fields->verdict) }) },
               // An empty set is a READING -- no route had an opinion -- so the field is present
               // and ABSENT, exactly as `leader` is when no leader is known. Dropping the field
               // would say this node cannot answer that half; a `0` or an empty string would read
@@ -1783,6 +1753,7 @@ namespace
         std::vector<std::vector<Cell>> rows;
         rows.reserve(state.members.size());
         for (auto const& member: state.members)
+        {
             // **Absent, not empty.** An empty `schedulerEndpoint` is the state of a
             // member that has announced none -- every member's record carries the
             // endpoint its join stated -- so it is a member that has not said, never a
@@ -1806,9 +1777,22 @@ namespace
                              member.raftEndpoint.empty() ? AbsentCell() : TextCell(member.raftEndpoint),
                              member.schedulerEndpoint.empty() ? AbsentCell() : TextCell(member.schedulerEndpoint),
                              TextCell(std::string { Cluster::SchedulerEndpointStateName(member) }),
-                             TextCell(FormatEd25519PublicKey(member.publicKey)) });
+                             TextCell(FormatEd25519PublicKey(member.publicKey)),
+                             // ABSENT when nobody named it, never an empty text cell: a label that decides nothing,
+                             // last so the columns an operator compares keep their places.
+                             member.displayName.empty() ? AbsentCell() : TextCell(member.displayName) });
+            // One column per tier's override, after the name: the figure, the baseline the member reported (or that it
+            // has not), and the leader's time -- `--cluster-status`'s rendering. ABSENT where none is recorded.
+            for (auto const& row: Cluster::BudgetSlots)
+            {
+                auto const& budget = member.*row.slot;
+                rows.back().push_back(budget.has_value() ? TextCell(Cluster::FormatBudgetOverride(*budget)) : AbsentCell());
+            }
+        }
 
-        return TableValue({ "id", "seat", "raft", "scheduler", "scheduler-state", "key" }, std::move(rows));
+        return TableValue(
+            { "id", "seat", "raft", "scheduler", "scheduler-state", "key", "name", "memory-budget", "disk-budget" },
+            std::move(rows));
     }
 
     /// Every setting this build knows, with what the cluster has agreed for it.
@@ -1920,6 +1904,78 @@ namespace
         auto const reply = AskNode(context,
                                    CompileCacheWire::EncodeClusterSet(CompileCacheWire::ClusterSetRequest {
                                        .name = context.operands[0], .value = context.operands[1] }));
+        if (!reply.has_value())
+            return reply.error();
+        return Answered(ClusterChangeAccepted());
+    }
+
+    /// `cluster-name <id> [<name>]` -- give a member a display name, or clear it with no name.
+    ///
+    /// The name is held to the leader's own rule (`Cluster::RefuseDisplayName`) before anything is sent, so a name no
+    /// member may carry is a usage error in front of the command that typed it; uniqueness is the leader's to judge,
+    /// since only the state it holds can answer it.
+    /// @param context What to run against.
+    /// @return The answer.
+    [[nodiscard]] Answer ClusterName(VerbContext const& context)
+    {
+        // The id by the rule `pace-node --cluster-name` holds it to (`ParseMemberId`), and never empty: an empty id names
+        // no member.
+        auto const id = ParseMemberId(context.operands[0]);
+        if (!id.has_value() || id->empty())
+            return Concluded(Outcome::Usage,
+                             std::format("`{}` is no member id: {}",
+                                         context.operands[0],
+                                         id.has_value() ? std::string { "it is empty" } : id.error().context));
+        auto const name = context.operands.size() > 1 ? std::string_view { context.operands[1] } : std::string_view {};
+        if (auto const refused = Cluster::RefuseDisplayName(name); refused.has_value())
+            return Concluded(Outcome::Usage, *refused);
+        auto const reply = AskNode(
+            context,
+            CompileCacheWire::EncodeMemberEdit(CompileCacheWire::MemberEditRequest {
+                .verb = CompileCacheWire::MemberEditVerb::SetDisplayName, .memberId = context.operands[0], .value = name }));
+        if (!reply.has_value())
+            return reply.error();
+        return Answered(ClusterChangeAccepted());
+    }
+
+    /// `cluster-budget <id>:memory=<size>[,disk=<size>]` -- override a member's cache budgets.
+    ///
+    /// Through the ONE grammar `pace-node --cluster-budget` and the MCP tool share (`Cluster::ParseBudgetSpec`), so a
+    /// budget the leader would refuse -- zero, a share of RAM, a size no flag takes -- is a usage error here.
+    /// @param context What to run against.
+    /// @return The answer.
+    [[nodiscard]] Answer ClusterBudget(VerbContext const& context)
+    {
+        auto spec = Cluster::ParseBudgetSpec(context.operands[0]);
+        if (!spec.has_value())
+            return Concluded(Outcome::Usage, std::move(spec).error());
+        auto const value = CompileCacheWire::EncodeBudgetSetValue(
+            CompileCacheWire::BudgetSetValue { .bytes = { spec->bytes.begin(), spec->bytes.end() } });
+        auto const reply = AskNode(context,
+                                   CompileCacheWire::EncodeMemberEdit(CompileCacheWire::MemberEditRequest {
+                                       .verb = CompileCacheWire::MemberEditVerb::SetBudget,
+                                       .memberId = spec->memberId,
+                                       .value = CompileCacheWire::AsStringView(value) }));
+        if (!reply.has_value())
+            return reply.error();
+        return Answered(ClusterChangeAccepted());
+    }
+
+    /// `cluster-budget-clear <id>:<memory|disk>` -- clear one tier's override.
+    /// @param context What to run against.
+    /// @return The answer.
+    [[nodiscard]] Answer ClusterBudgetClear(VerbContext const& context)
+    {
+        auto spec = Cluster::ParseBudgetClearSpec(context.operands[0]);
+        if (!spec.has_value())
+            return Concluded(Outcome::Usage, std::move(spec).error());
+        auto const value = CompileCacheWire::EncodeBudgetClearValue(
+            CompileCacheWire::BudgetClearValue { .tier = static_cast<std::uint8_t>(spec->tier) });
+        auto const reply = AskNode(context,
+                                   CompileCacheWire::EncodeMemberEdit(CompileCacheWire::MemberEditRequest {
+                                       .verb = CompileCacheWire::MemberEditVerb::ClearBudget,
+                                       .memberId = spec->memberId,
+                                       .value = CompileCacheWire::AsStringView(value) }));
         if (!reply.has_value())
             return reply.error();
         return Answered(ClusterChangeAccepted());
@@ -2561,6 +2617,41 @@ namespace
           .protocolCommand = "cluster-set",
           .modifiers = Modifier::None,
           .handler = &ClusterSet,
+          .nodeFallback = nullptr,
+          .session = nullptr },
+        { .name = "cluster-name",
+          .wire = Wire::Node,
+          .minOperands = 1,
+          .maxOperands = 2,
+          .operands = " <member-id> [<name>]",
+          .summary = "give a member a display name every surface shows, or\n"
+                     "clear it with no name; unique, ASCII case folded",
+          .protocolCommand = "member-edit",
+          .modifiers = Modifier::None,
+          .handler = &ClusterName,
+          .nodeFallback = nullptr,
+          .session = nullptr },
+        { .name = "cluster-budget",
+          .wire = Wire::Node,
+          .minOperands = 1,
+          .maxOperands = 1,
+          .operands = " <member-id>:memory=<size>[,disk=<size>]",
+          .summary = "override a member's cache budgets (k, m, g; never 0\n"
+                     "or a share of RAM); applied by the member, also later",
+          .protocolCommand = "member-edit",
+          .modifiers = Modifier::None,
+          .handler = &ClusterBudget,
+          .nodeFallback = nullptr,
+          .session = nullptr },
+        { .name = "cluster-budget-clear",
+          .wire = Wire::Node,
+          .minOperands = 1,
+          .maxOperands = 1,
+          .operands = " <member-id>:<memory|disk>",
+          .summary = "clear a member's override of one cache tier's budget",
+          .protocolCommand = "member-edit",
+          .modifiers = Modifier::None,
+          .handler = &ClusterBudgetClear,
           .nodeFallback = nullptr,
           .session = nullptr },
         { .name = "cluster-forget",

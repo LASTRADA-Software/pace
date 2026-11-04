@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <Pace/Core/Json.hpp>
 #include <Pace/Core/Utf8.hpp>
 #include <Pace/Distributed/FleetText.hpp>
 
@@ -12,10 +13,9 @@
 using Pace::EscapeMarkup;
 using Pace::IsValidUtf8;
 using Pace::MarkupReplacement;
-using Pace::Distributed::AppendJsonText;
 using Pace::Distributed::DelimitedReplacement;
 using Pace::Distributed::EscapeDelimited;
-using Pace::Distributed::JsonReplacement;
+using Pace::Json::ReplacementEscape;
 using namespace std::string_view_literals;
 
 // Every expectation is built from the header's own constants rather than from a
@@ -25,11 +25,14 @@ using namespace std::string_view_literals;
 
 namespace
 {
-/// One JSON string literal, quotes included.
+/// One JSON string literal, quotes included, through the tree's one JSON escaper.
+///
+/// The fleet documents' JSON cases stay here after the fleet's own escaper was folded into
+/// `Json::AppendString`: they pin that the documents' text still comes out the way it did.
 [[nodiscard]] std::string Json(std::string_view text)
 {
     std::string out;
-    AppendJsonText(out, text);
+    Pace::Json::AppendString(out, text);
     return out;
 }
 
@@ -139,12 +142,12 @@ TEST_CASE("A byte that starts no sequence becomes a replacement, in both formats
     // The defect this closes. `AppendJsonText` escaped the quotes and every control
     // byte and passed everything from 0x80 up through verbatim -- half of what JSON
     // requires of a byte, applied to half of the bytes.
-    CHECK(Json("gcc-\x80"sv) == "\"gcc-" + std::string { JsonReplacement } + "\"");
+    CHECK(Json("gcc-\x80"sv) == "\"gcc-" + std::string { ReplacementEscape } + "\"");
     CHECK(EscapeMarkup("gcc-\x80"sv) == "gcc-" + std::string { MarkupReplacement });
 
     // One replacement per BYTE, which is what makes the output length predictable:
     // this is a three-byte sequence that stops after two, so it is two of them.
-    auto const twiceJson = std::string { JsonReplacement } + std::string { JsonReplacement };
+    auto const twiceJson = std::string { ReplacementEscape } + std::string { ReplacementEscape };
     auto const twiceMarkup = std::string { MarkupReplacement } + std::string { MarkupReplacement };
     CHECK(Json("\xE2\x82"sv) == "\"" + twiceJson + "\"");
     CHECK(EscapeMarkup("\xE2\x82"sv) == twiceMarkup);
@@ -159,7 +162,7 @@ TEST_CASE("A repaired encoding is still an escaped one", "[distributed][fleettex
 
     // Bound to a name for the reason the first case records: a raw string carrying
     // backslashes must not be a macro argument.
-    auto const quoted = std::string { R"("\")" } + std::string { JsonReplacement } + R"(\"")";
+    auto const quoted = std::string { R"("\")" } + std::string { ReplacementEscape } + R"(\"")";
     CHECK(Json("\"\xFF\""sv) == quoted);
 }
 
