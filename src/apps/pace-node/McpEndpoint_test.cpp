@@ -317,7 +317,7 @@ TEST_CASE("mcp server/discover over a real loopback socket names 2026-07-28 and 
     auto const* versions = body.Find("result")->Find("supportedVersions");
     REQUIRE(versions != nullptr);
     REQUIRE(versions->AsArray() != nullptr);
-    CHECK(std::ranges::any_of(*versions->AsArray(), [](Json::Value const& v) {
+    CHECK(std::ranges::any_of(Unwrap(versions->AsArray()), [](Json::Value const& v) {
         return v.AsString() != nullptr && *v.AsString() == "2026-07-28";
     }));
 

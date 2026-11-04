@@ -148,11 +148,11 @@ TEST_CASE("mcp-action: enrollment_approve sends the approval naming the id and t
     REQUIRE(rig.upstream.calls.size() == 1);
     CHECK(rig.upstream.calls[0].target == UpstreamTarget::Leader);
     CHECK(rig.upstream.calls[0].frame == Text(Wire::EncodeEnrollApprove("n4", JoinerKey())));
-    CHECK(*At(result, "node_id").AsString() == "n4");
-    CHECK(*At(result, "decision").AsString() == "approved");
-    CHECK(*At(result, "enrollment").AsString() == "manual");
+    CHECK(Unwrap(At(result, "node_id").AsString()) == "n4");
+    CHECK(Unwrap(At(result, "decision").AsString()) == "approved");
+    CHECK(Unwrap(At(result, "enrollment").AsString()) == "manual");
     CHECK(At(result, "auto_approve_left_s").IsNull());
-    CHECK(*At(result, "answered_by").AsString() == AnsweredAt);
+    CHECK(Unwrap(At(result, "answered_by").AsString()) == AnsweredAt);
 }
 
 TEST_CASE("mcp-action: enrollment_approve refuses a key that is not one, and asks nobody", "[node][mcp][mcp-action]")
@@ -181,7 +181,7 @@ TEST_CASE("mcp-action: enrollment_reject sends the rejection naming the id, to t
     REQUIRE(rig.upstream.calls.size() == 1);
     CHECK(rig.upstream.calls[0].target == UpstreamTarget::Leader);
     CHECK(rig.upstream.calls[0].frame == Text(Wire::EncodeEnrollControl(Wire::EnrollControlVerb::Reject, "n4")));
-    CHECK(*At(result, "decision").AsString() == "rejected");
+    CHECK(Unwrap(At(result, "decision").AsString()) == "rejected");
 }
 
 TEST_CASE("mcp-action: enrollment_auto_approve arms for minutes, and ends with off", "[node][mcp][mcp-action]")
@@ -299,7 +299,7 @@ TEST_CASE("mcp-action: cordon and uncordon ask this node, in-process", "[node][m
         CHECK(rig.upstream.calls[0].target == UpstreamTarget::Node);
         CHECK(rig.upstream.calls[0].nodeIdOrEmpty.empty());
         CHECK(rig.upstream.calls[0].frame == Text(Wire::EncodeCordonRequest(Wire::CordonAction::Cordon)));
-        CHECK(*At(result, "node").AsString() == SelfId);
+        CHECK(Unwrap(At(result, "node").AsString()) == SelfId);
         CHECK(*At(result, "cordon").AsString() == "draining");
         CHECK(At(result, "compiles_in_flight").AsInt() == 2);
         CHECK(result.text.contains("a restart of this node lifts it"));
@@ -523,7 +523,7 @@ TEST_CASE("mcp-action: tools/list shows readOnlyHint false on every action", "[n
         auto const& tool = tools[index];
         auto const& want = expected[index];
         CAPTURE(want.name);
-        CHECK(*tool.Find("name")->AsString() == want.name);
+        CHECK(Unwrap(tool.Find("name")->AsString()) == want.name);
         CHECK(tool.Find("annotations")->Find("readOnlyHint")->AsBool() == want.readOnly);
         CHECK(tool.Find("annotations")->Find("destructiveHint")->AsBool() == want.destructive);
     }
@@ -573,7 +573,7 @@ TEST_CASE("mcp-action: set_display_name asks the leader one MEMBER-EDIT it built
         CHECK(*At(result, "node_id").AsString() == "node-b");
         CHECK(*At(result, "display_name").AsString() == "Lab Box");
         CHECK(*At(result, "state").AsString() == "replicating");
-        CHECK(*At(result, "answered_by").AsString() == AnsweredAt);
+        CHECK(Unwrap(At(result, "answered_by").AsString()) == AnsweredAt);
         // The audit line, with the VALIDATED arguments and who answered.
         auto const lines = rig.InfoLines();
         REQUIRE(lines.size() == 1);

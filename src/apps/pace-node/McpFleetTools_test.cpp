@@ -128,7 +128,7 @@ constexpr std::array MillisColumns { std::string_view { "age" },
 void CheckSameRow(Json::Value const& document, Json::Value const& projected)
 {
     REQUIRE(document.AsObject() != nullptr);
-    for (auto const& [key, value]: *document.AsObject())
+    for (auto const& [key, value]: Unwrap(document.AsObject()))
     {
         auto snake = key;
         std::ranges::replace(snake, '-', '_');
@@ -427,7 +427,7 @@ TEST_CASE("Every fleet tool reads the leader's fleet document and reports what i
         auto const& documentRows = Elements(At(document, "conditions"));
         REQUIRE(conditions.size() == 2);
         for (auto const index: std::views::iota(std::size_t { 0 }, conditions.size()))
-            for (auto const& [key, value]: *documentRows[index].AsObject())
+            for (auto const& [key, value]: Unwrap(documentRows[index].AsObject()))
                 if (key != "endpoint")
                     CHECK(Text(At(conditions[index], key)) == Text(value));
     }
@@ -678,7 +678,7 @@ TEST_CASE("history reports the values /fleet/series.json carries for one series,
         // Compared as NUMBERS: the document writes `12` where the tool writes `12.0`, one value.
         CHECK(NumberOf(At(reported[index], "value")) == NumberOf(expected[index]));
         CHECK(At(reported[index], "value").IsNull() == expected[index].IsNull());
-        CHECK(Text(At(reported[index], "coverage")) == Text(At(Unwrap(seriesJson), "coverage").AsArray()->at(index)));
+        CHECK(Text(At(reported[index], "coverage")) == Text(Unwrap(At(Unwrap(seriesJson), "coverage").AsArray()).at(index)));
     }
     // The gap stays a gap, and a counter that went backwards is unknowable rather than negative.
     CHECK(At(reported[0], "value").IsNull());

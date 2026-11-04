@@ -84,7 +84,7 @@ TEST_CASE("json parses every value kind", "[json]")
     CHECK((*array)[3].AsBool() == true);
     CHECK((*array)[4].AsBool() == false);
     CHECK((*array)[5].IsNull());
-    CHECK(*(*array)[6].AsString() == "x\xC3\xA9"sv);
+    CHECK(Unwrap((*array)[6].AsString()) == "x\xC3\xA9"sv);
 
     CHECK(parsed->Find("missing") == nullptr);
     CHECK((*array)[0].Find("a") == nullptr);
@@ -181,12 +181,12 @@ TEST_CASE("json escapes strings per RFC 8259", "[json]")
 
 TEST_CASE("json decodes escapes and surrogate pairs", "[json]")
 {
-    CHECK(*Unwrap(J::Parse(R"("\"\\\/\b\f\n\r\t")"sv)).AsString() == "\"\\/\b\f\n\r\t"sv);
-    CHECK(*Unwrap(J::Parse(R"("\u0041\u00E9\u20ac")"sv)).AsString() == "A\xC3\xA9\xE2\x82\xAC"sv);
-    CHECK(*Unwrap(J::Parse(R"("\ud83d\ude00")"sv)).AsString() == "\xF0\x9F\x98\x80"sv);
-    CHECK(*Unwrap(J::Parse(R"("\u0000")"sv)).AsString() == "\0"sv);
+    CHECK(Unwrap(Unwrap(J::Parse(R"("\"\\\/\b\f\n\r\t")"sv)).AsString()) == "\"\\/\b\f\n\r\t"sv);
+    CHECK(Unwrap(Unwrap(J::Parse(R"("\u0041\u00E9\u20ac")"sv)).AsString()) == "A\xC3\xA9\xE2\x82\xAC"sv);
+    CHECK(Unwrap(Unwrap(J::Parse(R"("\ud83d\ude00")"sv)).AsString()) == "\xF0\x9F\x98\x80"sv);
+    CHECK(Unwrap(Unwrap(J::Parse(R"("\u0000")"sv)).AsString()) == "\0"sv);
     // Whitespace around and inside is skipped.
-    CHECK(Unwrap(J::Parse(" \t\r\n[ 1 , 2 ]\n"sv)).AsArray()->size() == 2);
+    CHECK(Unwrap(Unwrap(J::Parse(" \t\r\n[ 1 , 2 ]\n"sv)).AsArray()).size() == 2);
 }
 
 TEST_CASE("json refuses", "[json]")

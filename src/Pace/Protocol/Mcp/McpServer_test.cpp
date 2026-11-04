@@ -22,8 +22,11 @@
 #include <utility>
 #include <vector>
 
+#include <tests/Unwrap.hpp>
+
 using namespace Pace;
 using namespace Pace::Mcp;
+using Pace::Testing::Unwrap;
 
 namespace
 {
@@ -49,7 +52,7 @@ std::vector<ToolRow> FakeTools()
                   .effect = ToolEffect::ReadOnly,
                   .handler =
                       [](ToolCall const& call) {
-                          auto const& text = *call.arguments.Find("text")->AsString();
+                          auto const& text = Unwrap(call.arguments.Find("text")->AsString());
                           return ToolResult {
                               .structured = Json::Value { Json::Object {
                                   { "echoed", Json::Value { text } },
@@ -195,7 +198,7 @@ struct Fixture
     auto const* member = value.Find(key);
     REQUIRE(member != nullptr);
     REQUIRE(member->AsString() != nullptr);
-    return *member->AsString();
+    return Unwrap(member->AsString());
 }
 
 [[nodiscard]] bool HasHeaderNamed(AdminResponse const& response, std::string_view name)
@@ -338,8 +341,8 @@ TEST_CASE("mcp-server refuses an unsupported version and names what it supports"
     CHECK(StringAt(data, "requested") == "1900-01-01");
     auto const& supported = *data.Find("supported")->AsArray();
     REQUIRE(supported.size() == SupportedVersions.size());
-    CHECK(*supported[0].AsString() == SupportedVersions[0]);
-    CHECK(*supported[1].AsString() == SupportedVersions[1]);
+    CHECK(Unwrap(supported[0].AsString()) == SupportedVersions[0]);
+    CHECK(Unwrap(supported[1].AsString()) == SupportedVersions[1]);
     CHECK(body.Find("id")->AsInt() == 3);
 }
 
@@ -355,8 +358,8 @@ TEST_CASE("mcp-server server/discover reports versions, capabilities and serverI
     CHECK(StringAt(result, "resultType") == "complete");
     auto const& versions = *result.Find("supportedVersions")->AsArray();
     REQUIRE(versions.size() == 2);
-    CHECK(*versions[0].AsString() == "2026-07-28");
-    CHECK(*versions[1].AsString() == "2025-11-25");
+    CHECK(Unwrap(versions[0].AsString()) == "2026-07-28");
+    CHECK(Unwrap(versions[1].AsString()) == "2025-11-25");
     CHECK(result.Find("capabilities")->Find("tools")->Find("listChanged")->AsBool() == false);
     auto const& info = *result.Find("_meta")->Find("io.modelcontextprotocol/serverInfo");
     CHECK(StringAt(info, "name") == ServerName);
@@ -586,7 +589,7 @@ TEST_CASE("mcp-server legacy tools/list and tools/call are served from the same 
     auto const& listed = ResultOf(list);
     CHECK(listed.Find("resultType") == nullptr);
     CHECK(listed.Find("ttlMs") == nullptr);
-    REQUIRE(listed.Find("tools")->AsArray()->size() == 3);
+    REQUIRE(Unwrap(listed.Find("tools")->AsArray()).size() == 3);
     CHECK(StringAt((*listed.Find("tools")->AsArray())[0], "name") == "echo");
 
     auto const call = BodyOf(fixture.Send(LegacyRequest("tools/call", R"({"name":"echo","arguments":{"text":"old"}})")));

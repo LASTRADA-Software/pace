@@ -1270,17 +1270,19 @@ TEST_CASE("A registration's toolchain family reaches the fleet document's worker
     REQUIRE(workers != nullptr);
     REQUIRE(workers->AsArray() != nullptr);
     auto const familyOf = [&](std::string_view fingerprint) -> Json::Value const* {
-        for (auto const& row: *workers->AsArray())
+        for (auto const& row: Unwrap(workers->AsArray()))
             if (auto const* const toolchain = row.Find("toolchain");
                 toolchain != nullptr && toolchain->AsString() != nullptr && *toolchain->AsString() == fingerprint)
                 return row.Find("family");
         return nullptr;
     };
-    REQUIRE(familyOf("fp-gnu") != nullptr);
-    REQUIRE(familyOf("fp-gnu")->AsString() != nullptr);
-    CHECK(*familyOf("fp-gnu")->AsString() == "apple-clang");
-    REQUIRE(familyOf("fp-pinned") != nullptr);
-    CHECK(familyOf("fp-pinned")->IsNull());
+    auto const* const gnu = familyOf("fp-gnu");
+    REQUIRE(gnu != nullptr);
+    REQUIRE(gnu->AsString() != nullptr);
+    CHECK(Unwrap(Unwrap(gnu).AsString()) == "apple-clang");
+    auto const* const pinned = familyOf("fp-pinned");
+    REQUIRE(pinned != nullptr);
+    CHECK(Unwrap(pinned).IsNull());
 
     // A re-registration states the family afresh: a toolchain upgraded under a pinned fingerprint names what is
     // there now.

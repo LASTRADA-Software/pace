@@ -2210,10 +2210,11 @@ TEST_CASE("/fleet.json refuses an unknown range in JSON and still ignores a sect
     auto const* const error = Testing::Unwrap(document).Find("error");
     REQUIRE(error != nullptr);
     REQUIRE(error->AsString() != nullptr);
+    auto const& message = Testing::Unwrap(Testing::Unwrap(error).AsString());
     for (auto const& row: Distributed::FleetRangeTable)
     {
         INFO("range " << row.key);
-        CHECK(error->AsString()->contains(row.key));
+        CHECK(message.contains(row.key));
     }
 
     // The route never read `section`, and routing it through the verb's derivation does not start to:
@@ -2534,13 +2535,13 @@ TEST_CASE("The keyed compile histories fold only while leading and reach /fleet.
     sampler.Demand().CompileGranted(std::string { reinterpret_cast<char const*>(key.data()), key.size() }, "gcc-14");
 
     auto const led = document();
-    auto const* const section = led.Find("requesters");
-    REQUIRE(section != nullptr);
-    REQUIRE_FALSE(section->IsNull());
-    CHECK(section->Find("total")->AsInt() == std::optional<std::int64_t> { 1 });
-    CHECK(*section->Find("range")->AsString() == "1h");
-    CHECK_FALSE(section->Find("coverage_since_ms")->IsNull());
-    CHECK(led.Find("toolchain_demand")->Find("total")->AsInt() == std::optional<std::int64_t> { 1 });
+    REQUIRE(led.Find("requesters") != nullptr);
+    auto const& section = Unwrap(led.Find("requesters"));
+    REQUIRE_FALSE(section.IsNull());
+    CHECK(Unwrap(section.Find("total")).AsInt() == std::optional<std::int64_t> { 1 });
+    CHECK(Unwrap(Unwrap(section.Find("range")).AsString()) == "1h");
+    CHECK_FALSE(Unwrap(section.Find("coverage_since_ms")).IsNull());
+    CHECK(Unwrap(Unwrap(led.Find("toolchain_demand")).Find("total")).AsInt() == std::optional<std::int64_t> { 1 });
     // The text tables carry no keyed history: it rides the JSON document alone.
     auto const text =
         AnswerFleetText(Distributed::CollectFleet(sources), &sampler, {}, "1h", CompileCacheWire::FleetTextFormat::Text);

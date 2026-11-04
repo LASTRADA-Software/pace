@@ -6263,6 +6263,9 @@ TEST_CASE("ADMIT and LEASE carry the ask origin as their last byte, pinned", "[w
         auto const payload = std::vector<std::byte>(PayloadOfFrame(frame).begin(), PayloadOfFrame(frame).end());
         auto const fields = Unwrap(WireFields::SplitAll(payload));
         std::vector<std::span<std::byte const>> parts { fields.begin(), fields.end() };
+        // A payload with no fields has no origin to replace, so nothing here proves a refusal.
+        if (parts.empty())
+            return false;
         parts.back() = replacement;
         auto const bad = WireFields::Encode(WireFields::FieldList { parts });
         return op == Op::Admit ? !DecodeAdmitPayload(bad).has_value() : !DecodeLeasePayload(bad).has_value();

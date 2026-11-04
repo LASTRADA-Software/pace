@@ -183,7 +183,7 @@ struct Fleet
     auto const* const compiles = document.Find("compiles");
     REQUIRE(compiles != nullptr);
     REQUIRE(compiles->AsArray() != nullptr);
-    for (auto const& row: *compiles->AsArray())
+    for (auto const& row: Unwrap(compiles->AsArray()))
     {
         auto const* const id = row.Find("ticket");
         if (id != nullptr && id->AsInt() == static_cast<std::int64_t>(ticket))
@@ -206,7 +206,7 @@ struct Fleet
 {
     auto const member = MemberOf(object, key);
     REQUIRE(member.AsString() != nullptr);
-    return *member.AsString();
+    return Unwrap(member.AsString());
 }
 } // namespace
 

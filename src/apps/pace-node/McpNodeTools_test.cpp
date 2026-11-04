@@ -170,7 +170,7 @@ TEST_CASE("node_status equals pacectl node for the same reply", "[mcp][node-stat
 
     // The envelope every forwarded answer opens with.
     CHECK(At(structured, "answered_by").AsString() != nullptr);
-    CHECK(*At(structured, "answered_by").AsString() == AnsweredAt);
+    CHECK(Unwrap(At(structured, "answered_by").AsString()) == AnsweredAt);
     CHECK(At(structured, "term").AsInt() == std::optional<std::int64_t> { 3 });
     CHECK(*At(structured, "term_scope").AsString() == "this-node");
     CHECK(At(structured, "node").IsNull());
@@ -180,7 +180,7 @@ TEST_CASE("node_status equals pacectl node for the same reply", "[mcp][node-stat
     auto const names = NodeStatusView::ComponentNames(Unwrap(decoded).components);
     REQUIRE(components.size() == names.size());
     for (auto const index: std::views::iota(std::size_t { 0 }, names.size()))
-        CHECK(*components[index].AsString() == names[index]);
+        CHECK(Unwrap(components[index].AsString()) == names[index]);
 
     // Tiers: the view's rows, its budget reading and its hit ratio.
     auto const tiers = NodeStatusView::TiersOf(runtime);
@@ -191,7 +191,7 @@ TEST_CASE("node_status equals pacectl node for the same reply", "[mcp][node-stat
     {
         auto const& view = Unwrap(tiers)[index];
         auto const& row = tierRows[index];
-        CHECK(*At(row, "tier").AsString() == view.name);
+        CHECK(Unwrap(At(row, "tier").AsString()) == view.name);
         CHECK(At(row, "present").AsBool() == std::optional { view.stats.has_value() });
         if (!view.stats.has_value())
             continue;
@@ -211,7 +211,7 @@ TEST_CASE("node_status equals pacectl node for the same reply", "[mcp][node-stat
     for (auto const index: std::views::iota(std::size_t { 0 }, settingRows.size()))
     {
         auto const& view = Unwrap(settings)[index];
-        CHECK(*At(settingRows[index], "name").AsString() == view.name);
+        CHECK(Unwrap(At(settingRows[index], "name").AsString()) == view.name);
         auto const& values = At(settingRows[index], "values");
         CHECK(values.IsNull() == !view.values.has_value());
         if (!view.values.has_value())
@@ -219,7 +219,7 @@ TEST_CASE("node_status equals pacectl node for the same reply", "[mcp][node-stat
         auto const& listed = Elements(values);
         REQUIRE(listed.size() == view.values->size());
         for (auto const at: std::views::iota(std::size_t { 0 }, listed.size()))
-            CHECK(*listed[at].AsString() == (*view.values)[at]);
+            CHECK(Unwrap(listed[at].AsString()) == (*view.values)[at]);
     }
 
     // The ceilings: the view's rows, each with its binding mark -- the view `pacectl node`'s ceiling cells read.
@@ -227,14 +227,14 @@ TEST_CASE("node_status equals pacectl node for the same reply", "[mcp][node-stat
     REQUIRE(ceilingsView.has_value());
     auto const& view = Unwrap(ceilingsView);
     auto const& ceilings = At(structured, "slot_ceilings");
-    CHECK(*At(ceilings, "binding").AsString() == view.binding);
+    CHECK(Unwrap(At(ceilings, "binding").AsString()) == view.binding);
     CHECK(At(ceilings, "available").AsUint() == std::optional<std::uint64_t> { view.available });
     CHECK(At(ceilings, "sampled_age_s").AsUint() == std::optional<std::uint64_t> { view.sampledSecondsAgo });
     auto const& ceilingRows = Elements(At(ceilings, "ceilings"));
     REQUIRE(ceilingRows.size() == view.ceilings.size());
     for (auto const index: std::views::iota(std::size_t { 0 }, ceilingRows.size()))
     {
-        CHECK(*At(ceilingRows[index], "name").AsString() == view.ceilings[index].name);
+        CHECK(Unwrap(At(ceilingRows[index], "name").AsString()) == view.ceilings[index].name);
         CHECK(At(ceilingRows[index], "binding").AsBool() == std::optional { view.ceilings[index].binding });
         auto const& slots = At(ceilingRows[index], "slots");
         CHECK(slots.IsNull() == !view.ceilings[index].slots.has_value());
@@ -283,7 +283,7 @@ TEST_CASE("secrets are redacted", "[mcp][node-status][node-status-detail]")
     REQUIRE(row != rows.end());
     auto const& values = Elements(At(*row, "values"));
     REQUIRE(values.size() == 1);
-    CHECK(*values.front().AsString() == Wire::RedactedSettingText);
+    CHECK(Unwrap(values.front().AsString()) == Wire::RedactedSettingText);
 }
 
 TEST_CASE("a prefix of an id is not a match", "[mcp][node-status][node-name]")
@@ -305,7 +305,7 @@ TEST_CASE("a prefix of an id is not a match", "[mcp][node-status][node-name]")
     REQUIRE_FALSE(exact.isError);
     REQUIRE(upstream.calls.size() == 1);
     CHECK(upstream.calls.front().nodeIdOrEmpty == "node-alpha-1");
-    CHECK(*At(exact.structured, "node").AsString() == "node-alpha-1");
+    CHECK(Unwrap(At(exact.structured, "node").AsString()) == "node-alpha-1");
 
     // And a `node` that is not a string is refused rather than read as "this node".
     auto const number = CallNodeStatus(upstream, cluster, R"({"node":7})");
@@ -396,7 +396,7 @@ TEST_CASE("absent tier renders absent", "[mcp][node-status][node-status-detail]"
     REQUIRE_FALSE(result.isError);
     auto const& tiers = Elements(At(result.structured, "tiers"));
     REQUIRE(tiers.size() == 2);
-    CHECK(*At(tiers[1], "tier").AsString() == "disk");
+    CHECK(Unwrap(At(tiers[1], "tier").AsString()) == "disk");
     CHECK(At(tiers[1], "present").AsBool() == std::optional { false });
     CHECK(At(tiers[1], "entries").IsNull());
     CHECK(At(tiers[1], "bytes").IsNull());

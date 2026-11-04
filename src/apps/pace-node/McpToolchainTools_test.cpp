@@ -210,7 +210,7 @@ void CountFor(Testing::PlacedWallClock& wall, Dist::CompileDemandHistory& demand
     for (auto const& element: Elements(value))
     {
         REQUIRE(element.AsString() != nullptr);
-        strings.push_back(*element.AsString());
+        strings.push_back(Unwrap(element.AsString()));
     }
     return strings;
 }
@@ -533,7 +533,7 @@ TEST_CASE("toolchains opens a covered window with no compiles for the family by 
 TEST_CASE("toolchains lets demand decide from exactly 1440 observed minutes and not from 1439",
           "[pace-node][mcp][toolchains][toolchain-demand]")
 {
-    for (auto const [minutes, decides]: { std::pair { 1439, false }, std::pair { 1440, true } })
+    for (auto const& [minutes, decides]: { std::pair { 1439, false }, std::pair { 1440, true } })
     {
         INFO("minutes " << minutes);
         Testing::PlacedWallClock wall;
@@ -553,7 +553,7 @@ TEST_CASE("toolchains lets demand decide from exactly 1440 observed minutes and 
 TEST_CASE("toolchains counts unattributed compiles against a demand lead, like folded ones",
           "[pace-node][mcp][toolchains][toolchain-demand]")
 {
-    for (auto const [unnamed, decides]: { std::pair { 6, true }, std::pair { 7, false } })
+    for (auto const& [unnamed, decides]: { std::pair { 6, true }, std::pair { 7, false } })
     {
         INFO("unattributed " << unnamed);
         Testing::PlacedWallClock wall;
@@ -737,7 +737,7 @@ TEST_CASE("toolchains names a fingerprint per driver, so gcc and cc of one insta
     auto const& gcc = RowWhere(At(result.structured, "upgrade_report"), "family", "gcc");
     auto const& chosen = At(gcc, "recommended_fingerprints");
     REQUIRE(chosen.AsObject() != nullptr);
-    CHECK(chosen.AsObject()->size() == 2);
+    CHECK(Unwrap(chosen.AsObject()).size() == 2);
     CHECK(TextAt(chosen, "gcc") == std::optional<std::string> { "fp-gcc" });
     CHECK(TextAt(chosen, "cc") == std::optional<std::string> { "fp-cc" });
     CHECK(Elements(At(gcc, "same_version_other_fingerprint")).empty());
@@ -1531,7 +1531,7 @@ TEST_CASE("toolchain_diff cuts a long listed path and says how long it was", "[p
     REQUIRE_FALSE(result.isError);
     auto const& paths = Elements(At(At(result.structured, "only_b"), "paths"));
     REQUIRE(paths.size() == 1);
-    auto const listed = *paths.front().AsString();
+    auto const listed = Unwrap(paths.front().AsString());
     CHECK(listed.size() < McpToolchainDiff::MaxListedPathBytes + 64);
     CHECK(listed.ends_with("... (2007 bytes in all)"));
 }
