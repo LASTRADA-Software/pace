@@ -14,6 +14,8 @@
 #include <Pace/Protocol/NodeStatusView.hpp>
 
 #include <algorithm>
+#include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <format>
@@ -529,6 +531,49 @@ namespace
     using McpToolchainDiff::MaxDiffPagesPerSide;
     using McpToolchainDiff::MaxListedDiffPaths;
     using McpToolchainDiff::MaxListedPathBytes;
+    using McpToolchainDiff::TotalBudget;
+    static_assert(TotalBudget == std::chrono::seconds { 30 },
+                  "toolchain_diff's description states its budget as 30 seconds");
+
+    /// One `toolchain_diff` call's upstream: every question is put to @p inner until `TotalBudget` has passed since
+    /// the call began, and refused `BudgetSpent` after it, without asking anyone.
+    ///
+    /// A decorator rather than a check at each of the three places the tool asks, so no question can be added that
+    /// the budget does not see.
+    class BudgetedUpstream final: public IMcpUpstream
+    {
+      public:
+        /// @param inner Where questions go; must outlive this.
+        /// @param clock What the budget is measured on; must outlive this.
+        BudgetedUpstream(IMcpUpstream& inner, core::platform::IClock const& clock) noexcept:
+            _inner { inner },
+            _clock { clock },
+            _began { clock.now() }
+        {
+        }
+
+        /// @copydoc IMcpUpstream::Ask
+        [[nodiscard]] UpstreamResult Ask(UpstreamTarget target, std::string_view nodeIdOrEmpty, std::string frame) override
+        {
+            auto const spent = std::chrono::duration_cast<std::chrono::milliseconds>(_clock.now() - _began);
+            if (spent >= TotalBudget)
+                return std::unexpected { std::pair {
+                    UpstreamFailure::BudgetSpent,
+                    std::format("{}: toolchain_diff starts no question {} ms after it began, and had asked {} when it "
+                                "reached that; the nodes answered too slowly to compare -- ask again",
+                                UpstreamFailureRowOf(UpstreamFailure::BudgetSpent).sentence,
+                                TotalBudget.count(),
+                                _asked) } };
+            ++_asked;
+            return _inner.Ask(target, nodeIdOrEmpty, std::move(frame));
+        }
+
+      private:
+        IMcpUpstream& _inner;
+        core::platform::IClock const& _clock;
+        core::platform::SteadyTimePoint _began;
+        std::size_t _asked { 0 };
+    };
 
     /// One side of a `toolchain_diff` call, resolved: whom to ask and which fingerprint.
     struct DiffSide
@@ -866,12 +911,15 @@ namespace
         return Obj(Json::Object { { "a", Str(Readable(pair->first)) }, { "b", Str(Readable(pair->second)) } });
     }
 
-    [[nodiscard]] Mcp::ToolResult ToolchainDiff(IMcpUpstream& upstream,
+    [[nodiscard]] Mcp::ToolResult ToolchainDiff(IMcpUpstream& unbudgeted,
                                                 IAppliedClusterView const& cluster,
+                                                core::platform::IClock const& clock,
                                                 std::string const& selfId,
                                                 std::string const& thisVersion,
                                                 Mcp::ToolCall const& call)
     {
+        // Every question below goes through the one budget, the resolves included.
+        auto upstream = BudgetedUpstream { unbudgeted, clock };
         auto a = SideOf(call, "a", upstream, cluster, selfId);
         if (!a.has_value())
             return std::move(a.error());
@@ -1060,11 +1108,13 @@ namespace
 
 std::vector<Mcp::ToolRow> ToolchainTools(IMcpUpstream& upstream,
                                          IAppliedClusterView const& cluster,
+                                         core::platform::IClock const& clock,
                                          std::string selfId,
                                          std::string thisVersion)
 {
     auto* const to = &upstream;
     auto const* const in = &cluster;
+    auto const* const timer = &clock;
     return {
         Mcp::ToolRow {
             .name = "toolchains",
@@ -1105,12 +1155,13 @@ std::vector<Mcp::ToolRow> ToolchainTools(IMcpUpstream& upstream,
                 "inputs reproducing neither fingerprint, or a side digested under another schema, are reported as a "
                 "skew naming both versions and schemas. A side past 200000 files, its byte bound or its page bound "
                 "is compared on schema, banner and grammar only (complete: false), and the verdict says the files "
-                "were not compared. `term` is the term THIS node holds.",
+                "were not compared. A call whose nodes answer too slowly to finish within 30 seconds is an error "
+                "saying so, never a partial diff. `term` is the term THIS node holds.",
             .inputSchema = ToolchainDiffInput,
             .outputSchema = ToolchainDiffOutput,
             .effect = Mcp::ToolEffect::ReadOnly,
-            .handler = [to, in, self = std::move(selfId), version = std::move(thisVersion)](
-                           Mcp::ToolCall const& call) { return ToolchainDiff(*to, *in, self, version, call); },
+            .handler = [to, in, timer, self = std::move(selfId), version = std::move(thisVersion)](
+                           Mcp::ToolCall const& call) { return ToolchainDiff(*to, *in, *timer, self, version, call); },
         },
     };
 }

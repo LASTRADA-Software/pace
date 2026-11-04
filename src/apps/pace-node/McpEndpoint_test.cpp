@@ -4,6 +4,7 @@
 #include "NodeSurfaces.hpp"
 
 #include <Pace/Cli/Options.hpp>
+#include <Pace/Core/BoundedDrain.hpp>
 #include <Pace/Core/Bytes.hpp>
 #include <Pace/Core/HostPort.hpp>
 #include <Pace/Core/Json.hpp>
@@ -16,17 +17,21 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <expected>
 #include <filesystem>
 #include <format>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -155,6 +160,7 @@ struct RunningEndpoint
     AtomicMetricsSink metrics;
     NullLogger logger;
     core::net::AcceptLoopHealth acceptLoops;
+    McpStopFlag stopping;
     std::uint16_t port { 0 };
     std::unique_ptr<McpEndpoint> endpoint;
 
@@ -173,6 +179,7 @@ struct RunningEndpoint
         endpoint = McpEndpoint::StartWithListener(std::move(listener),
                                                   std::format("127.0.0.1:{}", port),
                                                   std::vector<Mcp::ToolRow> {},
+                                                  stopping,
                                                   metrics,
                                                   logger,
                                                   acceptLoops);
@@ -389,7 +396,8 @@ TEST_CASE("an MCP port another listener holds refuses to start, naming the addre
     AtomicMetricsSink metrics;
     CapturingLogger logger;
     core::net::AcceptLoopHealth acceptLoops;
-    auto const started = McpEndpoint::Start(cfg, {}, metrics, logger, acceptLoops);
+    McpStopFlag stopping;
+    auto const started = McpEndpoint::Start(cfg, {}, stopping, metrics, logger, acceptLoops);
     REQUIRE_FALSE(started.has_value());
     CHECK(started.error().contains(std::format("127.0.0.1:{}", holder->boundPort())));
 }
@@ -471,4 +479,124 @@ TEST_CASE("mcp closes a connection that sends nothing after its own first-byte b
     CHECK(elapsed >= McpEndpoint::Deadlines.firstByte - 500ms);
     // ...and closed by the server, well before this read's own deadline would have ended it.
     CHECK(elapsed < McpEndpoint::Deadlines.firstByte * 3);
+}
+
+namespace
+{
+/// An upstream whose first question takes `Hold` to answer and whose later ones answer at once, counting each:
+/// a forwarded call that is still running when the surface is told to stop.
+class SlowFirstUpstream final: public IMcpUpstream
+{
+  public:
+    /// Longer than the dashboard's five-second drain, so a stop that kept that figure would log an abandoned request;
+    /// well inside `McpUpstream::CallDeadline`, as a forwarded call that answers is.
+    static constexpr auto Hold = std::chrono::milliseconds { 6000 };
+    static_assert(Hold > DrainBound {}.ceiling && Hold < McpUpstream::CallDeadline);
+
+    /// @copydoc IMcpUpstream::Ask
+    [[nodiscard]] UpstreamResult Ask(UpstreamTarget /*target*/, std::string_view /*node*/, std::string /*frame*/) override
+    {
+        if (asked.fetch_add(1) == 0)
+        {
+            entered.store(true);
+            std::this_thread::sleep_for(Hold);
+        }
+        return UpstreamReply { .status = CompileCacheWire::Status::Ok, .payload = {}, .answeredBy = "leader", .term = {} };
+    }
+
+    std::atomic<std::size_t> asked { 0 };
+    std::atomic<bool> entered { false };
+};
+
+/// The `tools/call` of the one tool the stop case serves.
+constexpr std::string_view SlowCallBody {
+    R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"_meta":{)"
+    R"("io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}},)"
+    R"("name":"two_questions","arguments":{}}})"
+};
+} // namespace
+
+TEST_CASE("an MCP stop during a forwarded call is bounded and refuses later calls at once and abandons nothing",
+          "[node][mcp][hostile]")
+{
+    // A tool asks twice through the production gate. The stop lands while the first question is in flight on a serving
+    // thread: the stop flag must refuse the second at once rather than forward it, the drain must outlast the call in
+    // flight rather than log it abandoned, and the whole stop must fit `WorstCaseStop`. The counter the connection
+    // decrements is a member of the server, so the serving thread must be joined before it goes.
+    SlowFirstUpstream inner;
+    McpStopFlag stopping;
+    LoopGatedUpstream gated { inner, [] { return true; }, [&stopping] { return stopping.Raised(); } };
+    std::mutex secondMutex;
+    std::optional<UpstreamResult> second;
+    auto secondTook = std::chrono::steady_clock::duration {};
+    auto tools = std::vector<Mcp::ToolRow> { Mcp::ToolRow {
+        .name = "two_questions",
+        .title = "Two questions",
+        .description = "Asks the upstream twice.",
+        .inputSchema = R"({"type":"object"})",
+        .outputSchema = {},
+        .effect = Mcp::ToolEffect::ReadOnly,
+        .handler =
+            [&](Mcp::ToolCall const& /*call*/) {
+                std::ignore = gated.Ask(UpstreamTarget::Leader, {}, "first");
+                auto const started = std::chrono::steady_clock::now();
+                auto answer = gated.Ask(UpstreamTarget::Leader, {}, "second");
+                auto const guard = std::scoped_lock { secondMutex };
+                secondTook = std::chrono::steady_clock::now() - started;
+                second = std::move(answer);
+                return Mcp::ToolResult { .structured = {}, .text = "asked twice", .isError = false };
+            },
+    } };
+
+    AtomicMetricsSink metrics;
+    CapturingLogger logger;
+    core::net::AcceptLoopHealth acceptLoops;
+    auto bound = BlockingListener::Bind("127.0.0.1", 0);
+    REQUIRE(bound != nullptr);
+    REQUIRE(bound->IsBound());
+    bound->SetTimeouts(AdminHttpServer::AcceptPoll, AdminHttpServer::RequestTimeout);
+    auto const port = bound->boundPort();
+    auto endpoint = McpEndpoint::StartWithListener(
+        std::move(bound), std::format("127.0.0.1:{}", port), std::move(tools), stopping, metrics, logger, acceptLoops);
+    REQUIRE(endpoint != nullptr);
+
+    // Sent and left open: the response is never read, as a client that went quiet would leave it.
+    core::net::BlockingConnector connector;
+    auto client =
+        core::async::syncRun(connector.connect("127.0.0.1", port, core::net::DialOptions { .connectTimeout = 5s }));
+    REQUIRE(client.has_value());
+    REQUIRE(core::async::syncRun(
+        WriteAll(client->get(),
+                 std::format("POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n"
+                             "MCP-Protocol-Version: 2026-07-28\r\nMcp-Method: tools/call\r\nMcp-Name: two_questions\r\n"
+                             "Content-Length: {}\r\n\r\n{}",
+                             SlowCallBody.size(),
+                             SlowCallBody))));
+    REQUIRE(Testing::WaitUntil(
+        "the tool's first question to be in flight on a serving thread",
+        [&] { return inner.entered.load(); },
+        [&] { return std::format("asked {}", inner.asked.load()); },
+        Testing::WaitOptions { .step = {}, .context = {}, .bound = 5s }));
+
+    auto const stopBegan = std::chrono::steady_clock::now();
+    endpoint.reset();
+    auto const stopTook = std::chrono::steady_clock::now() - stopBegan;
+
+    // The stop waited for the call in flight and no longer than its stated bound.
+    CHECK(stopTook < McpEndpoint::WorstCaseStop);
+    // The second question was refused by name, at once, and never reached the upstream.
+    {
+        auto const guard = std::scoped_lock { secondMutex };
+        REQUIRE(second.has_value());
+        auto const& answered = Unwrap(second);
+        REQUIRE_FALSE(answered.has_value());
+        CHECK(answered.error().first == UpstreamFailure::Stopping);
+        CHECK(secondTook < 1s);
+    }
+    CHECK(inner.asked.load() == 1);
+    // And the request finished inside the drain, so the stop abandoned nothing.
+    auto const records = logger.Snapshot();
+    CHECK(std::ranges::none_of(records, [](CapturingLogger::Record const& record) {
+        return record.message.contains("did not finish within the stop ceiling");
+    }));
 }

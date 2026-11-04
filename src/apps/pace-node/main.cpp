@@ -764,7 +764,7 @@ class McpForwarding
             RequireProver(prover), io.Connector(), io.Reactor(), Node::ForwardDialBudget {}, Node::McpUpstream::MaxReplyBytes
         },
         _upstream { io.Loop(), _dialer, _directory, _answerer },
-        _gated { _upstream, [&io] { return io.Turning(); } }
+        _gated { _upstream, [&io] { return io.Turning(); }, [this] { return _stopping.Raised(); } }
     {
     }
 
@@ -787,6 +787,18 @@ class McpForwarding
         return _gated;
     }
 
+    /// @return What the MCP endpoint raises as it begins to stop, so `Upstream()` refuses every later call.
+    [[nodiscard]] Node::McpStopFlag& Stopping() noexcept
+    {
+        return _stopping;
+    }
+
+    /// @return The clock a tool's whole-call budget is measured on.
+    [[nodiscard]] core::platform::IClock const& Clock() const noexcept
+    {
+        return _clock;
+    }
+
   private:
     /// The invariant `StartAdmissionRelay` states: every start adopts or mints its key before any body runs, so
     /// the prover is engaged; a change that broke it ends the start on a named exception.
@@ -801,6 +813,10 @@ class McpForwarding
 
     // Declaration order IS construction order: each borrows the ones above it.
     Node::AppliedUpstreamDirectory& _directory;
+    /// Outlives the MCP endpoint that raises it, since this object does: a request still running after the stop
+    /// began reads a flag that is still there.
+    Node::McpStopFlag _stopping;
+    core::platform::SteadyClock _clock;
     Node::FrameRouterAnswerer _answerer;
     Node::ProvenSchedulerDialer _dialer;
     Node::NodeIoUpstream _upstream;
@@ -817,7 +833,8 @@ class McpForwarding
 {
     auto tools = Node::FleetReadTools(forwarding.Upstream(), forwarding.Directory(), cfg.nodeId);
     std::ranges::move(
-        Node::ToolchainTools(forwarding.Upstream(), forwarding.Directory(), cfg.nodeId, std::string { VersionString }),
+        Node::ToolchainTools(
+            forwarding.Upstream(), forwarding.Directory(), forwarding.Clock(), cfg.nodeId, std::string { VersionString }),
         std::back_inserter(tools));
     std::ranges::move(Node::NodeReadTools(forwarding.Upstream(), forwarding.Directory(), cfg.nodeId),
                       std::back_inserter(tools));
@@ -1946,24 +1963,27 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
         Node::AdminSurface admin;
         std::unique_ptr<Node::McpEndpoint> mcp;
     };
-    auto surfaceOrRefusal =
-        Node::StartAdminSurfaceOrExplain(cfg,
-                                         *host,
-                                         metrics,
-                                         std::move(snapshotProvider),
-                                         fleetSources,
-                                         &sampler,
-                                         dashboardCredential,
-                                         logger,
-                                         conditions,
-                                         nodeIo.AcceptLoops())
-            .and_then([&](Node::AdminSurface admin) {
-                return Node::StartMcpSurfaceOrExplain(
-                           cfg, McpToolTable(cfg, mcpForwarding, logger), metrics, logger, nodeIo.AcceptLoops())
-                    .transform([&admin](std::unique_ptr<Node::McpEndpoint> mcp) {
-                        return HttpSurfaces { .admin = std::move(admin), .mcp = std::move(mcp) };
-                    });
-            });
+    auto surfaceOrRefusal = Node::StartAdminSurfaceOrExplain(cfg,
+                                                             *host,
+                                                             metrics,
+                                                             std::move(snapshotProvider),
+                                                             fleetSources,
+                                                             &sampler,
+                                                             dashboardCredential,
+                                                             logger,
+                                                             conditions,
+                                                             nodeIo.AcceptLoops())
+                                .and_then([&](Node::AdminSurface admin) {
+                                    return Node::StartMcpSurfaceOrExplain(cfg,
+                                                                          McpToolTable(cfg, mcpForwarding, logger),
+                                                                          mcpForwarding.Stopping(),
+                                                                          metrics,
+                                                                          logger,
+                                                                          nodeIo.AcceptLoops())
+                                        .transform([&admin](std::unique_ptr<Node::McpEndpoint> mcp) {
+                                            return HttpSurfaces { .admin = std::move(admin), .mcp = std::move(mcp) };
+                                        });
+                                });
 
     // Fatal here and not in the daemon, which is a real difference between the two
     // binaries rather than a defect in either; the row says why

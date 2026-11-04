@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "AdmissionTestUtils.hpp"
 #include "FleetTextResponder.hpp"
+#include "McpEndpoint.hpp"
 #include "McpUpstream.hpp"
 #include "NodeIoLoop.hpp"
 
@@ -18,6 +19,8 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <format>
+#include <functional>
 #include <future>
 #include <map>
 #include <memory>
@@ -153,6 +156,7 @@ enum class Script : std::uint8_t
     Answer, ///< Connects, and answers the first request with the scripted reply.
     Silent, ///< Connects, and never answers.
     Fails,  ///< The dial fails with the scripted fault and reason.
+    Hangs,  ///< Connects, and closes before it answers; the seal reports `Scripted::seal` as the reason, if any.
 };
 
 /// One endpoint's script.
@@ -162,6 +166,7 @@ struct Scripted
     std::vector<std::byte> reply;
     std::string reason;
     UpstreamOpeningFault fault { UpstreamOpeningFault::Unreached }; ///< For `Fails`.
+    std::optional<SealFault> seal {};                               ///< For `Hangs`: what the seal says stopped it.
 };
 
 /// A dialer over in-memory pairs: each dial runs on the loop (it is a coroutine the flow awaits there),
@@ -197,9 +202,14 @@ class ScriptedDialer final: public IUpstreamDialer
                 co_return UpstreamOpening { .socket = nullptr, .reason = scripted.reason, .fault = scripted.fault };
             case Script::Answer:
             case Script::Silent:
+            case Script::Hangs:
                 break;
         }
         auto pair = core::net::testing::InMemorySocketPair::create();
+        // Closed before the request arrives: the exchange breaks as it does when a peer goes away -- or, in
+        // production, when the seal refuses a reply and ends the stream, which is what `seal` stands for.
+        if (scripted.script == Script::Hangs)
+            pair.server->close();
         // Written before the request arrives: an in-memory pipe buffers it, and the exchange reads it once
         // its own request is sent, exactly as it would read a reply that came back over the wire.
         if (scripted.script == Script::Answer)
@@ -210,7 +220,15 @@ class ScriptedDialer final: public IUpstreamDialer
             _servers.push_back(std::move(pair.server));
             _clients.push_back(std::move(pair.client));
         }
-        co_return UpstreamOpening { .socket = std::move(handed), .reason = {} };
+        auto sealFault = std::function<std::optional<SealFault>()> {};
+        if (scripted.seal.has_value())
+            sealFault = [fault = *scripted.seal] {
+                return std::optional { fault };
+            };
+        co_return UpstreamOpening { .socket = std::move(handed),
+                                    .reason = {},
+                                    .fault = UpstreamOpeningFault::Unreached,
+                                    .sealFault = std::move(sealFault) };
     }
 
     /// @return Every endpoint dialled, in order.
@@ -602,6 +620,42 @@ TEST_CASE("mcp-upstream: an endpoint nothing answers at is Unreachable", "[node]
     CHECK(answer.error().second.contains("connection refused"));
 }
 
+TEST_CASE("mcp-upstream: a reply the seal refused for its size is TooLarge and never a peer that went away",
+          "[node][mcp][mcp-upstream]")
+{
+    // Both connections break the same way on the wire; only what the seal recorded tells them apart.
+    Bridge bridge;
+    bridge.fleet.leader = LeaderA;
+    bridge.dialer.Place(std::string { LeaderA },
+                        Scripted { .script = Script::Hangs, .reply = {}, .reason = {}, .seal = SealFault::Oversized });
+
+    auto const answer = bridge.upstream.Ask(UpstreamTarget::Leader, "", RequestFrame());
+    REQUIRE_FALSE(answer.has_value());
+    CHECK(answer.error().first == UpstreamFailure::TooLarge);
+    CHECK(answer.error().second.contains(LeaderA));
+    CHECK(answer.error().second.contains(std::format("{} bytes", McpUpstream::MaxReplyBytes)));
+
+    SECTION("the control: a peer that closes with no seal fault went away before it answered")
+    {
+        bridge.dialer.Place(std::string { NodeB }, Scripted { .script = Script::Hangs, .reply = {}, .reason = {} });
+        bridge.fleet.leader = NodeB;
+        auto const lost = bridge.upstream.Ask(UpstreamTarget::Leader, "", RequestFrame());
+        REQUIRE_FALSE(lost.has_value());
+        CHECK(lost.error().first == UpstreamFailure::Unreachable);
+        CHECK(lost.error().second.contains("before it answered"));
+    }
+
+    SECTION("and a seal fault that is not a size is not reported as one")
+    {
+        bridge.dialer.Place(std::string { NodeB },
+                            Scripted { .script = Script::Hangs, .reply = {}, .reason = {}, .seal = SealFault::BadTag });
+        bridge.fleet.leader = NodeB;
+        auto const tampered = bridge.upstream.Ask(UpstreamTarget::Leader, "", RequestFrame());
+        REQUIRE_FALSE(tampered.has_value());
+        CHECK(tampered.error().first == UpstreamFailure::Unreachable);
+    }
+}
+
 TEST_CASE("mcp-upstream: a proof refusal surfaces ProofRefused with the peer's reason", "[node][mcp][mcp-upstream]")
 {
     Bridge bridge;
@@ -926,7 +980,7 @@ TEST_CASE("mcp-upstream: a loop that is not turning is refused at once, and noth
     // seconds later naming the node asked. The gate answers at once, naming this node's own loop.
     CountingUpstream inner;
     auto turning = false;
-    LoopGatedUpstream gated { inner, [&turning] { return turning; } };
+    LoopGatedUpstream gated { inner, [&turning] { return turning; }, [] { return false; } };
 
     auto const refused = gated.Ask(UpstreamTarget::Leader, {}, "frame");
     REQUIRE_FALSE(refused.has_value());
@@ -938,6 +992,33 @@ TEST_CASE("mcp-upstream: a loop that is not turning is refused at once, and noth
     turning = true;
     CHECK(gated.Ask(UpstreamTarget::Leader, {}, "frame").has_value());
     CHECK(inner.asked == 1);
+}
+
+TEST_CASE("mcp-upstream: a stopping MCP surface is refused at once ahead of the loop and nothing is asked",
+          "[node][mcp][mcp-upstream]")
+{
+    // A tool that asks many questions -- toolchain_diff -- must not go on asking while the surface waits to stop.
+    CountingUpstream inner;
+    McpStopFlag stopping;
+    LoopGatedUpstream gated { inner, [] { return true; }, [&stopping] { return stopping.Raised(); } };
+
+    // The control: before the stop the call is asked.
+    CHECK(gated.Ask(UpstreamTarget::Leader, {}, "frame").has_value());
+    CHECK(inner.asked == 1);
+
+    stopping.Raise();
+    auto const refused = gated.Ask(UpstreamTarget::Leader, {}, "frame");
+    REQUIRE_FALSE(refused.has_value());
+    CHECK(refused.error().first == UpstreamFailure::Stopping);
+    CHECK(inner.asked == 1);
+
+    SECTION("and stopping is named even when the loop has stopped too")
+    {
+        LoopGatedUpstream both { inner, [] { return false; }, [&stopping] { return stopping.Raised(); } };
+        auto const named = both.Ask(UpstreamTarget::Leader, {}, "frame");
+        REQUIRE_FALSE(named.has_value());
+        CHECK(named.error().first == UpstreamFailure::Stopping);
+    }
 }
 
 TEST_CASE("mcp-upstream: a node loop that adopted no surface is not turning, even once started", "[node][mcp][mcp-upstream]")

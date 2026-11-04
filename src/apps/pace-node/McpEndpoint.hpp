@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include "McpUpstream.hpp"
 #include "NodeConfig.hpp"
 #include "NodeRefusal.hpp"
 
@@ -11,6 +12,8 @@
 #include <Pace/Protocol/ProvenIdentity.hpp>
 #include <Pace/Server/AdminHttpServer.hpp>
 
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <expected>
 #include <memory>
@@ -27,8 +30,8 @@ namespace Pace::Node
 {
 
 /// @file McpEndpoint.hpp
-/// The node's MCP surface (`NodeSurface::Mcp`, `--mcp-listen`): one `POST /mcp` route, served on a
-/// thread of its own by the same hardened HTTP code the admin surface runs.
+/// The node's MCP surface (`NodeSurface::Mcp`, `--mcp-listen`): one `POST /mcp` route, served on
+/// threads of its own by the same hardened HTTP code the admin surface runs.
 ///
 /// **Loopback only, asked twice.** `--mcp-listen` on an address other machines can reach is a
 /// startup refusal (`McpListenNotLoopbackRefusal`), and every request is asked again whether its
@@ -38,9 +41,40 @@ namespace Pace::Node
 /// **Its own threads, never the dashboard's and never a reactor's.** The accept loop runs on a thread of its
 /// own and hands every connection to one of `MaxConcurrentRequests` serving threads
 /// (`AdminConnectionServing::OnOwnThreads`), so a held connection holds one slot, never the surface; past the
-/// cap the next connection is answered `503` at once. `Deadlines` bounds how long a slot can be held without a
-/// request: a peer that sends nothing frees its slot in two seconds, so idle or trickling connects can make
-/// MCP refuse for about that long, never wait. Hostile or slow MCP input stalls only MCP.
+/// cap the next connection is answered `503`, and each `503` lingers on the accept thread for up to
+/// `Deadlines.linger`. `Deadlines` bounds how long a slot can be held without a request: a peer that sends
+/// nothing frees its slot in two seconds. So idle or trickling connects make MCP refuse while they keep them
+/// open -- a local process that keeps reconnecting keeps MCP refusing for as long as it keeps going -- and
+/// never make it wait. Hostile or slow MCP input stalls only MCP.
+///
+/// **A stop is bounded, and the bound is derived** (`McpEndpoint::WorstCaseStop`): the stop flag is raised
+/// before the accept loop is asked to stop, so a tool asks nothing more (`LoopGatedUpstream`), and the drain
+/// waits out the one forwarded call a request can have in flight.
+
+/// Whether the MCP surface is stopping: raised by `~McpEndpoint` BEFORE it asks its accept loop to stop, read by
+/// `LoopGatedUpstream` on every forwarded call.
+///
+/// Owned by whoever owns the upstream (`McpForwarding`), which outlives the endpoint, so a request still running
+/// on a serving thread after the stop began reads a flag that is still there. Never lowered: a stopped endpoint
+/// is not restarted.
+class McpStopFlag
+{
+  public:
+    /// Say the surface is stopping.
+    void Raise() noexcept
+    {
+        _raised.store(true, std::memory_order_release);
+    }
+
+    /// @return Whether `Raise` was called.
+    [[nodiscard]] bool Raised() const noexcept
+    {
+        return _raised.load(std::memory_order_acquire);
+    }
+
+  private:
+    std::atomic<bool> _raised { false };
+};
 
 /// Whether a connection may be answered by the MCP surface.
 ///
@@ -68,7 +102,7 @@ class McpEndpoint
 {
   public:
     /// How many MCP requests are served at once -- each on a serving thread of its own -- before the next
-    /// connection is answered `503`.
+    /// connection is answered `503` (on the accept thread, lingering there up to `Deadlines.linger`).
     ///
     /// Small, because the only legitimate caller is one or two sessions on this machine, each
     /// sending one request at a time over a fresh connection; anything holding more than this is
@@ -84,6 +118,12 @@ class McpEndpoint
     /// `body` keep the dashboard's figures, which already were two. The linger is short because a `503`
     /// written past the cap lingers on the ACCEPT thread: a quarter of 400 ms of silence ends it, so sixteen
     /// silent connects past the cap delay the next accept by under two seconds rather than eight.
+    ///
+    /// `drain` is how long a stop waits for the requests in flight, and it is sized from the longest a request
+    /// can still run once the stop flag is raised: either the forwarded call it is waiting on
+    /// (`McpUpstream::CallDeadline`; every later call is refused `Stopping` at once), or what is left of reading
+    /// its head and body -- then its response write and its linger (`DrainMargin`). The dashboard's five seconds
+    /// would log every stop that lands during a call as a request abandoned.
     static constexpr AdminDeadlines Deadlines {
         .firstByte = std::chrono::milliseconds { 2000 },
         .request = std::chrono::milliseconds { 2000 },
@@ -91,7 +131,26 @@ class McpEndpoint
         .body = std::chrono::milliseconds { 2000 },
         .linger =
             LingerBounds { .total = std::chrono::milliseconds { 400 }, .maxBytes = std::size_t { 64 } * 1024, .reads = 4 },
+        .drain = McpUpstream::CallDeadline + std::chrono::seconds { 5 },
     };
+
+    /// What `Deadlines.drain` allows beyond the forwarded call: one response write (each blocking write is bounded
+    /// by `AdminHttpServer::RequestTimeout`, which `Start` arms on the listener) and one linger.
+    static constexpr auto DrainMargin = Deadlines.drain - McpUpstream::CallDeadline;
+    static_assert(DrainMargin >= AdminHttpServer::RequestTimeout + Deadlines.linger.total,
+                  "the drain must outlast a forwarded call, the response write after it and the linger");
+    static_assert(Deadlines.drain >= Deadlines.firstByte + Deadlines.head + Deadlines.body + AdminHttpServer::RequestTimeout
+                                         + Deadlines.linger.total,
+                  "the drain must outlast a request still being read when the stop began, its refused calls answered "
+                  "at once");
+
+    /// The longest `~McpEndpoint` takes: one accept poll for the accept thread to see the stop, then the drain.
+    /// The serving threads are joined after it, and a request the flag let finish has finished by then.
+    static constexpr auto WorstCaseStop = AdminHttpServer::AcceptPoll + Deadlines.drain;
+    /// A quarter of the packaged units' `TimeoutStopSec=120` (`packaging/linux/pace-node.service`): the node's
+    /// other surfaces and tiers stop inside the same supervisor budget, so MCP may take no more than its share.
+    static_assert(WorstCaseStop <= std::chrono::seconds { 30 },
+                  "an MCP stop must leave the supervisor's stop budget to the rest of the node");
 
     /// The path the endpoint answers.
     static constexpr std::string_view Path { "/mcp" };
@@ -106,6 +165,7 @@ class McpEndpoint
     /// first.
     /// @param cfg What the operator asked for; `NodeSurface::Mcp`'s row resolves the endpoint.
     /// @param tools The tool table `tools/list` reports and `tools/call` dispatches into.
+    /// @param stopping Raised when the endpoint begins to stop; must outlive the endpoint.
     /// @param metrics Where a refused request is counted.
     /// @param logger Where the server and its tools report.
     /// @param acceptLoops The node's accept-loop registry; must outlive the endpoint.
@@ -113,6 +173,7 @@ class McpEndpoint
     [[nodiscard]] static std::expected<std::unique_ptr<McpEndpoint>, std::string> Start(
         NodeConfig const& cfg,
         std::vector<Mcp::ToolRow> tools,
+        McpStopFlag& stopping,
         IMetricsSink& metrics,
         ILogger& logger,
         core::net::AcceptLoopHealth& acceptLoops);
@@ -121,6 +182,7 @@ class McpEndpoint
     /// @param listener The bound listener, its accept poll already armed (owned).
     /// @param boundEndpoint What `BoundEndpoint()` reports.
     /// @param tools The tool table.
+    /// @param stopping Raised when the endpoint begins to stop; must outlive the endpoint.
     /// @param metrics Where a refused request is counted.
     /// @param logger Where the server and its tools report.
     /// @param acceptLoops The node's accept-loop registry; must outlive the endpoint.
@@ -128,11 +190,13 @@ class McpEndpoint
     [[nodiscard]] static std::unique_ptr<McpEndpoint> StartWithListener(std::unique_ptr<core::net::IListener> listener,
                                                                         std::string boundEndpoint,
                                                                         std::vector<Mcp::ToolRow> tools,
+                                                                        McpStopFlag& stopping,
                                                                         IMetricsSink& metrics,
                                                                         ILogger& logger,
                                                                         core::net::AcceptLoopHealth& acceptLoops);
 
-    /// Stop serving and join the thread.
+    /// Raise the stop flag, stop accepting, drain the requests in flight and join every thread; within
+    /// `WorstCaseStop`.
     ~McpEndpoint();
 
     McpEndpoint(McpEndpoint const&) = delete;
@@ -153,10 +217,12 @@ class McpEndpoint
     McpEndpoint(std::unique_ptr<core::net::IListener> listener,
                 std::string boundEndpoint,
                 std::vector<Mcp::ToolRow> tools,
+                McpStopFlag& stopping,
                 IMetricsSink& metrics,
                 ILogger& logger,
                 core::net::AcceptLoopHealth& acceptLoops);
 
+    McpStopFlag& _stopping;
     std::unique_ptr<core::net::IListener> _listener;
     /// Owned for the reason `AdminEndpoint::_clock` is: app wiring, with the testable seam for the
     /// deadlines one level down on `ServeAdminHttp`.
@@ -176,6 +242,7 @@ class McpEndpoint
 /// has already refused every address that is not loopback.
 /// @param cfg What the operator asked for.
 /// @param tools The tool table.
+/// @param stopping Raised when the endpoint begins to stop; must outlive the endpoint.
 /// @param metrics Where a refused request is counted.
 /// @param logger Where the bound endpoint is announced.
 /// @param acceptLoops The node's accept-loop registry; must outlive the endpoint.
@@ -183,6 +250,7 @@ class McpEndpoint
 [[nodiscard]] std::expected<std::unique_ptr<McpEndpoint>, NodeRefusal> StartMcpSurfaceOrExplain(
     NodeConfig const& cfg,
     std::vector<Mcp::ToolRow> tools,
+    McpStopFlag& stopping,
     IMetricsSink& metrics,
     ILogger& logger,
     core::net::AcceptLoopHealth& acceptLoops);

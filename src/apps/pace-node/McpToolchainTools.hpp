@@ -6,9 +6,12 @@
 
 #include <Pace/Protocol/Mcp/McpTool.hpp>
 
+#include <chrono>
 #include <cstddef>
 #include <string>
 #include <vector>
+
+#include <core/platform/Clock.hpp>
 
 namespace Pace::Node
 {
@@ -60,6 +63,20 @@ namespace McpToolchainDiff
     /// the next cursor one further on -- from holding the call for `MaxDiffFiles` round trips.
     inline constexpr std::size_t MaxDiffPagesPerSide = 32;
 
+    /// How long after it began `toolchain_diff` still starts a forwarded question.
+    ///
+    /// The per-side bounds cap how MANY questions one call asks -- two resolves and `MaxDiffPagesPerSide` pages a
+    /// side, 66 in all -- and each is bounded by `McpUpstream::CallDeadline`, but nothing else bounds their SUM:
+    /// a peer answering every page just inside the deadline would hold the call, and its serving thread, for
+    /// eleven minutes. A legitimate diff is one resolve and one to five pages a side, each a round trip on the
+    /// fleet's network, so thirty seconds is generous. Checked before every question, so the call answers within
+    /// `TotalBudget + McpUpstream::CallDeadline`; past it the call is a tool error saying the budget ran out, and
+    /// nothing read so far is reported -- a diff of part of what was asked would read as the whole answer.
+    inline constexpr std::chrono::milliseconds TotalBudget { std::chrono::seconds { 30 } };
+
+    /// The longest a `toolchain_diff` call can take: the budget, then the one question started just inside it.
+    inline constexpr std::chrono::milliseconds LongestCall = TotalBudget + McpUpstream::CallDeadline;
+
     /// The most paths each differing group lists; the group's `count` is always the whole number.
     inline constexpr std::size_t MaxListedDiffPaths = 500;
 
@@ -70,12 +87,14 @@ namespace McpToolchainDiff
 /// The toolchain tools: `toolchains` and `toolchain_diff`.
 /// @param upstream How the leader and the nodes are reached; must outlive every row returned.
 /// @param cluster The state `toolchain_diff`'s node names resolve in; must outlive every row returned.
+/// @param clock What `toolchain_diff`'s `TotalBudget` is measured on; must outlive every row returned.
 /// @param selfId This node's id: the one name that resolves on a node that has applied no cluster state.
 /// @param thisVersion This build's `pace-node` version: `toolchain_diff` recomputes HERE, so a side that fails on
 ///        another build may be this build's digest moving, which the refusal then names.
 /// @return The rows, in the order `tools/list` presents them.
 [[nodiscard]] std::vector<Mcp::ToolRow> ToolchainTools(IMcpUpstream& upstream,
                                                        IAppliedClusterView const& cluster,
+                                                       core::platform::IClock const& clock,
                                                        std::string selfId,
                                                        std::string thisVersion);
 

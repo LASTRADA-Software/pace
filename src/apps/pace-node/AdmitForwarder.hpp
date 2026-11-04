@@ -8,10 +8,12 @@
 
 #include <Pace/Metrics/IMetricsSink.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
+#include <Pace/Protocol/SealedFrameSocket.hpp>
 
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -89,6 +91,10 @@ struct UpstreamOpening
     std::string reason;
     /// Which half failed; meaningful only when `socket` is null.
     UpstreamOpeningFault fault { UpstreamOpeningFault::Unreached };
+    /// Why the sealed connection stopped reading, asked once an exchange over `socket` broke -- so a reply the
+    /// seal refused for its SIZE is reported as that, never as a peer that went away. Valid while `socket` lives;
+    /// empty when the connection has no seal to ask (a test's in-memory pair).
+    std::function<std::optional<SealFault>()> sealFault {};
 };
 
 /// Opens a connection to the leader's scheduling endpoint.

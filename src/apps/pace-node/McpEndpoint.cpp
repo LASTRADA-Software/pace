@@ -71,9 +71,11 @@ AdminRoute MakeMcpRoute(Mcp::McpServer const& server, IMetricsSink& metrics)
 McpEndpoint::McpEndpoint(std::unique_ptr<core::net::IListener> listener,
                          std::string boundEndpoint,
                          std::vector<Mcp::ToolRow> tools,
+                         McpStopFlag& stopping,
                          IMetricsSink& metrics,
                          ILogger& logger,
                          core::net::AcceptLoopHealth& acceptLoops):
+    _stopping { stopping },
     _listener { std::move(listener) },
     _server { std::move(tools), VersionString, logger },
     _http { std::make_unique<AdminHttpServer>(
@@ -101,6 +103,9 @@ McpEndpoint::McpEndpoint(std::unique_ptr<core::net::IListener> listener,
 
 McpEndpoint::~McpEndpoint()
 {
+    // The flag FIRST: from here every forwarded call a running request makes is refused at once, so the drain
+    // below waits for the one call each request has in flight rather than for every call a tool would go on making.
+    _stopping.Raise();
     // Ask, join, then close: `AdminEndpoint::~AdminEndpoint`'s order, for its reason (#260) -- closing
     // the listener while the accept thread reads it is a data race, and closing is not what wakes it.
     _http->RequestStop();
@@ -112,17 +117,19 @@ McpEndpoint::~McpEndpoint()
 std::unique_ptr<McpEndpoint> McpEndpoint::StartWithListener(std::unique_ptr<core::net::IListener> listener,
                                                             std::string boundEndpoint,
                                                             std::vector<Mcp::ToolRow> tools,
+                                                            McpStopFlag& stopping,
                                                             IMetricsSink& metrics,
                                                             ILogger& logger,
                                                             core::net::AcceptLoopHealth& acceptLoops)
 {
     // `new` because the constructor is private: this and `Start` are the only ways to reach it.
     return std::unique_ptr<McpEndpoint> { new McpEndpoint {
-        std::move(listener), std::move(boundEndpoint), std::move(tools), metrics, logger, acceptLoops } };
+        std::move(listener), std::move(boundEndpoint), std::move(tools), stopping, metrics, logger, acceptLoops } };
 }
 
 std::expected<std::unique_ptr<McpEndpoint>, std::string> McpEndpoint::Start(NodeConfig const& cfg,
                                                                             std::vector<Mcp::ToolRow> tools,
+                                                                            McpStopFlag& stopping,
                                                                             IMetricsSink& metrics,
                                                                             ILogger& logger,
                                                                             core::net::AcceptLoopHealth& acceptLoops)
@@ -151,12 +158,18 @@ std::expected<std::unique_ptr<McpEndpoint>, std::string> McpEndpoint::Start(Node
 
     // The admin surface's own figures: the same HTTP code, on the same terms.
     listener->SetTimeouts(AdminHttpServer::AcceptPoll, AdminHttpServer::RequestTimeout);
-    return StartWithListener(
-        std::move(listener), FormatHostPort(endpoint.host, endpoint.port), std::move(tools), metrics, logger, acceptLoops);
+    return StartWithListener(std::move(listener),
+                             FormatHostPort(endpoint.host, endpoint.port),
+                             std::move(tools),
+                             stopping,
+                             metrics,
+                             logger,
+                             acceptLoops);
 }
 
 std::expected<std::unique_ptr<McpEndpoint>, NodeRefusal> StartMcpSurfaceOrExplain(NodeConfig const& cfg,
                                                                                   std::vector<Mcp::ToolRow> tools,
+                                                                                  McpStopFlag& stopping,
                                                                                   IMetricsSink& metrics,
                                                                                   ILogger& logger,
                                                                                   core::net::AcceptLoopHealth& acceptLoops)
@@ -164,7 +177,7 @@ std::expected<std::unique_ptr<McpEndpoint>, NodeRefusal> StartMcpSurfaceOrExplai
     // Off unless asked for, like every other surface this program serves.
     if (cfg.mcpListen.empty())
         return std::unique_ptr<McpEndpoint> {};
-    auto started = McpEndpoint::Start(cfg, std::move(tools), metrics, logger, acceptLoops);
+    auto started = McpEndpoint::Start(cfg, std::move(tools), stopping, metrics, logger, acceptLoops);
     if (!started.has_value())
         return std::unexpected { Refusal(NodeRefusalCause::Listener, std::format("--mcp-listen {}", started.error())) };
     logger.Logf(LogLevel::Info,

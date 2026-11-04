@@ -348,7 +348,11 @@ core::async::Task<UpstreamOpening> ProvenSchedulerDialer::Open(std::string endpo
                                                   : std::move(attempt.reason),
                                     .fault = OpeningFaultOf(attempt.result) };
     }
-    co_return UpstreamOpening { .socket = std::move(sealed), .reason = {} };
+    auto const* const seal = sealed.get();
+    co_return UpstreamOpening { .socket = std::move(sealed),
+                                .reason = {},
+                                .fault = UpstreamOpeningFault::Unreached,
+                                .sealFault = [seal] { return seal->Fault(); } };
 }
 
 AdmitForwarder::AdmitForwarder(ISchedulingLeaderSource const& leader,

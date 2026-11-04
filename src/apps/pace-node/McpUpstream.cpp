@@ -151,6 +151,16 @@ namespace
         auto outcome = co_await Cc::ExchangeFramed(socket, &notice, std::move(frame), NoCredential(), &window);
         if (call->cancel.stop_requested())
             co_return std::unexpected { Abandoned(endpoint).error() };
+        // A reply the seal refused for its size breaks the exchange the way a lost peer does; it is told apart
+        // here, because "lost before it answered" would send a person after a node that answered too much.
+        if (outcome.kind == Cc::CacheOutcomeKind::Transport && opened.sealFault
+            && opened.sealFault() == SealFault::Oversized)
+            co_return std::unexpected { std::pair {
+                UpstreamFailure::TooLarge,
+                std::format("{}: the node asked at {} answered with more than the {} bytes a forwarded call reads",
+                            UpstreamFailureRowOf(UpstreamFailure::TooLarge).sentence,
+                            endpoint,
+                            McpUpstream::MaxReplyBytes) } };
         if (outcome.kind == Cc::CacheOutcomeKind::Transport)
             co_return std::unexpected { std::pair { UpstreamFailure::Unreachable,
                                                     std::format("the node asked at {} {} before it answered",
@@ -400,14 +410,20 @@ UpstreamResult NodeIoUpstream::Ask(UpstreamTarget target, std::string_view nodeI
                               _policy.deadline.count()));
 }
 
-LoopGatedUpstream::LoopGatedUpstream(IMcpUpstream& inner, std::function<bool()> loopTurning) noexcept:
+LoopGatedUpstream::LoopGatedUpstream(IMcpUpstream& inner,
+                                     std::function<bool()> loopTurning,
+                                     std::function<bool()> stopping) noexcept:
     _inner { inner },
-    _loopTurning { std::move(loopTurning) }
+    _loopTurning { std::move(loopTurning) },
+    _stopping { std::move(stopping) }
 {
 }
 
 UpstreamResult LoopGatedUpstream::Ask(UpstreamTarget target, std::string_view nodeIdOrEmpty, std::string frame)
 {
+    // Stopping first: a surface that is going away asks nobody, whether or not the loop still turns.
+    if (_stopping())
+        return Failed(UpstreamFailure::Stopping, std::string { UpstreamFailureRowOf(UpstreamFailure::Stopping).sentence });
     if (!_loopTurning())
         return Failed(UpstreamFailure::LoopNotRunning,
                       std::string { UpstreamFailureRowOf(UpstreamFailure::LoopNotRunning).sentence });

@@ -1116,7 +1116,9 @@ void AdminHttpServer::Shutdown() noexcept
     // timeout, plus a generous spin-cap so a stuck handler cannot block
     // forever -- through the one shared `DrainWithin`, which measures that ceiling
     // rather than counting polls towards it (#452).
-    if (DrainWithin([this] { return _inFlight.load(std::memory_order_acquire) > 0; }) == DrainResult::Ceiling)
+    if (DrainWithin([this] { return _inFlight.load(std::memory_order_acquire) > 0; },
+                    DrainBound { .ceiling = _profile.deadlines.drain })
+        == DrainResult::Ceiling)
         _logger.Logf(LogLevel::Error,
                      "{}: {} request(s) did not finish within the stop ceiling",
                      _profile.surface,

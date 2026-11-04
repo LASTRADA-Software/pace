@@ -71,7 +71,21 @@ namespace McpUpstream
     /// because what MCP forwards is a REPORT -- the fleet document among them -- and smaller than the
     /// wire's report ceiling (`CompileCacheWire::MaxReportReply`), because the answer is held whole in
     /// this process and re-rendered into one MCP response.
+    ///
+    /// **Above every reply a forwarded verb is built to send**, so the cap refuses only a peer answering
+    /// past its own wire's bounds: a FINGERPRINT-INPUTS page is cut to `FingerprintInputsReplyCeiling` by the
+    /// responder, a refusal is at most `MaxRefusalReply`, and the fleet document the fleet tools read is parsed
+    /// under this same figure (`McpFleet::FleetDocumentLimits`), so the parse refuses nothing the wire let
+    /// through for size. **And below `MaxReportReply`**, the ceiling a `pacectl` client reads the same reports
+    /// under: a fleet whose document passes 16 MiB is answered `TooLarge` here and still readable there, which
+    /// is the right side to fail on for a reply this process must hold whole and re-render as JSON-RPC text.
     inline constexpr std::size_t MaxReplyBytes = std::size_t { 16 } * 1024U * 1024U;
+    static_assert(CompileCacheWire::FingerprintInputsReplyCeiling + CompileCacheWire::ReplyHeaderSize <= MaxReplyBytes,
+                  "a whole FINGERPRINT-INPUTS page must pass the forwarded-call cap, or toolchain_diff reads none");
+    static_assert(CompileCacheWire::MaxRefusalReply <= MaxReplyBytes,
+                  "a refusal must pass the forwarded-call cap, or its explanation reads as a size failure");
+    static_assert(MaxReplyBytes <= CompileCacheWire::MaxReportReply,
+                  "a forwarded call holds no more than a report client reads, since it holds the reply whole");
 } // namespace McpUpstream
 
 /// Whom a forwarded frame is put to.
@@ -128,6 +142,9 @@ enum class UpstreamFailure : std::uint8_t
     StandingRequired, ///< The authority answered that THIS node, identified, holds no operator's standing there.
     NotIdentified,    ///< The authority answered that it could not identify THIS node as the caller at all.
     LoopNotRunning,   ///< This node's `0xFC` I/O loop is not turning, so nothing could be asked at all.
+    Stopping,         ///< This node's MCP surface is stopping, so no further question is put to anyone.
+    BudgetSpent,      ///< The tool's budget for the whole call ran out before this question was asked.
+    TooLarge,         ///< The node asked answered with more than `McpUpstream::MaxReplyBytes`.
     Last,             ///< Not a failure.
 };
 
@@ -185,6 +202,17 @@ inline constexpr EnumTable<UpstreamFailure, UpstreamFailureRow> UpstreamFailureT
       .name = "loop-not-running",
       .sentence = "this node's 0xFC I/O loop is not running -- it serves no 0xFC surface (an empty --listen-node), "
                   "has not finished starting, or is stopping -- so it cannot reach any node, itself included" },
+    { .failure = UpstreamFailure::Stopping,
+      .name = "stopping",
+      .sentence = "this node's MCP surface is stopping, so it asks no node anything more; ask again once it is back" },
+    { .failure = UpstreamFailure::BudgetSpent,
+      .name = "budget-spent",
+      .sentence = "the tool's time budget for the whole call ran out before this question was asked, so nothing it "
+                  "had read is reported" },
+    { .failure = UpstreamFailure::TooLarge,
+      .name = "too-large",
+      .sentence = "the node asked answered with a reply larger than this node accepts for a forwarded call, and the "
+                  "reply was dropped unread" },
 } };
 static_assert(RowsInEnumeratorOrder(UpstreamFailureTable, &UpstreamFailureRow::failure),
               "UpstreamFailureTable must hold one row per UpstreamFailure, in enumerator order");
@@ -450,13 +478,20 @@ class NodeIoUpstream final: public IMcpUpstream
 /// stops once the last adopted loop ends. A call posted there is never run, so every tool would answer
 /// `Timeout` ten seconds later -- a wait that tells a person nothing, ending in a sentence that blames the node
 /// asked. Asked per call, so a loop that stops while the node shuts down is reported the same way.
+///
+/// **And when the MCP surface is stopping** (`McpStopFlag`, raised before the surface asks its accept loop to
+/// stop): a tool that asks several questions -- `toolchain_diff` asks up to 66 -- would otherwise go on asking
+/// for as long as its peers answer, and the stop's drain would wait for every one. Refused `Stopping` at once,
+/// so a stop waits for the ONE call in flight (`McpUpstream::CallDeadline`) and no more.
 class LoopGatedUpstream final: public IMcpUpstream
 {
   public:
     /// @param inner What answers when the loop turns; must outlive this.
     /// @param loopTurning Whether the loop a call would run on is turning now; asked on the calling thread, so
     ///        it is thread-safe.
-    LoopGatedUpstream(IMcpUpstream& inner, std::function<bool()> loopTurning) noexcept;
+    /// @param stopping Whether the MCP surface is stopping; asked on the calling thread before anything else, so
+    ///        it is thread-safe.
+    LoopGatedUpstream(IMcpUpstream& inner, std::function<bool()> loopTurning, std::function<bool()> stopping) noexcept;
 
     /// @copydoc IMcpUpstream::Ask
     [[nodiscard]] UpstreamResult Ask(UpstreamTarget target, std::string_view nodeIdOrEmpty, std::string frame) override;
@@ -464,6 +499,7 @@ class LoopGatedUpstream final: public IMcpUpstream
   private:
     IMcpUpstream& _inner;
     std::function<bool()> _loopTurning;
+    std::function<bool()> _stopping;
 };
 
 /// The production `IInProcessAnswerer`: this node's own `0xFC` frame router, asked as a caller on this machine

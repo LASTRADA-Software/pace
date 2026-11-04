@@ -238,7 +238,9 @@ enum class AdminConnectionServing : std::uint8_t
     OnAcceptThread = 0,
     /// On a thread of the server's own, one per in-flight request up to `maxConcurrentRequests`: a
     /// held connection holds one slot, never the surface, and the next connection past the cap is
-    /// answered `503` at once. For a surface whose requests run long (MCP: a tool asks the leader).
+    /// answered `503` -- written on the accept thread, which then lingers on it for up to
+    /// `AdminDeadlines::linger`, so a peer that keeps reconnecting keeps the surface refusing while it
+    /// does. For a surface whose requests run long (MCP: a tool asks the leader).
     OnOwnThreads,
     Last
 };
@@ -259,6 +261,11 @@ struct AdminDeadlines
     std::chrono::milliseconds body { 2000 };
     /// How a served or refused connection is closed (`AdminHttpServer::Linger`).
     LingerBounds linger { .total = std::chrono::milliseconds { 2000 }, .maxBytes = std::size_t { 64 } * 1024, .reads = 4 };
+    /// How long `AdminHttpServer::Shutdown` waits for the requests still in flight before it says some did not
+    /// finish. The admin surface's figure is `DrainBound`'s default; a surface whose handler waits on something
+    /// longer than that (MCP: a forwarded call) states a ceiling above its own longest request, or every stop that
+    /// lands during one is logged as a request abandoned.
+    std::chrono::milliseconds drain { DrainBound {}.ceiling };
 };
 
 /// How one instance of this server is shaped, beside the routes it serves.
@@ -335,8 +342,10 @@ struct AdminServerProfile
 /// A caller may register further routes; see `AdminRoute`.
 /// Each connection answers exactly one request, then closes (`Connection:
 /// close`); the request head is bounded so a slow or oversized client cannot
-/// tie the server up. Admission traffic is trivial, so connections are served
-/// one at a time on the owning thread.
+/// tie the server up. Where a connection is served is the profile's
+/// `AdminConnectionServing`: the admin surface's traffic is trivial, so it serves
+/// one connection at a time on the accept thread; a surface whose requests run
+/// long (MCP) serves each on a thread of the server's own, up to its cap.
 class AdminHttpServer
 {
   public:
@@ -350,9 +359,10 @@ class AdminHttpServer
 
     /// How long one request read may take before the connection is dropped.
     ///
-    /// The endpoint serves one connection at a time on its owning thread, so an
-    /// idle client that never finishes its request head would otherwise wedge it
-    /// for everybody (slowloris).
+    /// The admin surface serves one connection at a time on its accept thread, so
+    /// an idle client that never finishes its request head would otherwise wedge it
+    /// for everybody (slowloris); a surface serving on threads of its own would
+    /// lose a slot to it for as long.
     static constexpr auto RequestTimeout = AdminDeadlines {}.request;
 
     /// How long a peer may hold the connection having sent **nothing**.
@@ -398,9 +408,10 @@ class AdminHttpServer
     /// past the byte cap, `408` past the total, `503` past the concurrency cap -- is
     /// followed by a close, and a close over unread bytes is a reset that destroys the
     /// refusal before a Windows client reads it (#1554; `CloseLingering` has the
-    /// measurement). Short, because these sockets BLOCK the one admin thread while it
-    /// listens: no longer than one `RequestTimeout`, spread over the reads -- a read
-    /// that meets a quarter of it in silence ends the linger.
+    /// measurement). Short, because these sockets BLOCK the thread they are served on
+    /// while it listens -- for a `503` that is the ACCEPT thread, on every profile: no
+    /// longer than one `RequestTimeout`, spread over the reads -- a read that meets a
+    /// quarter of it in silence ends the linger.
     static constexpr LingerBounds Linger = AdminDeadlines {}.linger;
     static_assert(Linger.total == RequestTimeout, "the admin linger is one RequestTimeout, as argued above");
 
@@ -492,13 +503,16 @@ class AdminHttpServer
     /// What this instance reports as, its request cap and its built-in routes.
     AdminServerProfile _profile;
     std::atomic<bool> _shuttingDown { false };
-    /// The threads an `AdminConnectionServing::OnOwnThreads` profile serves its connections on, one per
-    /// in-flight request; null for `OnAcceptThread`. Declared after everything a connection borrows, so it is
-    /// destroyed -- its threads joined -- first.
-    std::unique_ptr<core::async::ThreadPoolExecutor> _connections;
     /// Number of admin requests currently being served as detached tasks.
-    /// Bumped in the accept loop, decremented at the end of each request.
+    /// Bumped in the accept loop, decremented at the end of each request -- on a `_connections` thread for an
+    /// `OnOwnThreads` profile, which is why it is declared before that member.
     std::atomic<std::size_t> _inFlight { 0 };
+    /// The threads an `AdminConnectionServing::OnOwnThreads` profile serves its connections on, one per
+    /// in-flight request; null for `OnAcceptThread`. Declared LAST, after everything a connection borrows
+    /// (`_inFlight`, which each connection decrements as it ends, included), so it is destroyed -- its threads
+    /// joined -- first: a request still running when `Shutdown`'s drain gave up finishes against members that
+    /// are all still alive.
+    std::unique_ptr<core::async::ThreadPoolExecutor> _connections;
 
   public:
     /// Test hook: live count of concurrently-in-flight admin requests.

@@ -35,6 +35,7 @@
 #include <vector>
 
 #include <core/Ranges.hpp>
+#include <core/platform/Clock.hpp>
 #include <tests/FleetHistoryFakes.hpp>
 #include <tests/Unwrap.hpp>
 
@@ -56,6 +57,13 @@ constexpr std::string_view ThisVersion = "1.0.0";
 
 /// A cluster that has applied no state: only this node's own id names anybody.
 McpFakes::FixedCluster const NoState { std::nullopt };
+
+/// @return A clock that never moves: `toolchain_diff`'s whole-call budget never runs out on it.
+[[nodiscard]] core::platform::IClock const& StillClock()
+{
+    static core::platform::ManualClock const still;
+    return still;
+}
 
 /// Where the leader answers, as the scripted upstream reports it.
 constexpr std::string_view LeaderAt = "10.0.0.1:6674";
@@ -148,7 +156,7 @@ void CountFor(Testing::PlacedWallClock& wall, Dist::CompileDemandHistory& demand
 /// @return What it answered.
 [[nodiscard]] Mcp::ToolResult CallToolchains(IMcpUpstream& upstream)
 {
-    auto const tools = ToolchainTools(upstream, NoState, std::string { SelfId }, std::string { ThisVersion });
+    auto const tools = ToolchainTools(upstream, NoState, StillClock(), std::string { SelfId }, std::string { ThisVersion });
     auto const found = std::ranges::find(tools, std::string_view { "toolchains" }, &Mcp::ToolRow::name);
     REQUIRE(found != tools.end());
     auto const args = Json::Parse("{}");
@@ -814,7 +822,7 @@ TEST_CASE("toolchains refuses a worker row it cannot read rather than skipping i
 TEST_CASE("toolchains is read-only and says its report is conservative and checkable", "[pace-node][mcp][toolchains]")
 {
     auto upstream = LeaderUpstream();
-    auto const tools = ToolchainTools(upstream, NoState, std::string { SelfId }, std::string { ThisVersion });
+    auto const tools = ToolchainTools(upstream, NoState, StillClock(), std::string { SelfId }, std::string { ThisVersion });
     REQUIRE(tools.size() == 2);
     CHECK(tools.front().name == "toolchains");
     CHECK(tools.front().effect == Mcp::ToolEffect::ReadOnly);
@@ -944,11 +952,14 @@ struct DiffFleet
 /// @param fleet The nodes.
 /// @param upstream The upstream answering through @p fleet; its calls are what a case reads back.
 /// @param arguments The arguments, as JSON text.
+/// @param clock What its whole-call budget is measured on; one that never moves by default.
 /// @return What it answered.
-[[nodiscard]] Mcp::ToolResult CallDiff(McpFakes::RespondingUpstream& upstream, std::string_view arguments)
+[[nodiscard]] Mcp::ToolResult CallDiff(McpFakes::RespondingUpstream& upstream,
+                                       std::string_view arguments,
+                                       core::platform::IClock const& clock = StillClock())
 {
     static McpFakes::FixedCluster const cluster { McpFakes::StateOf({ SelfId, "node-b" }) };
-    auto const tools = ToolchainTools(upstream, cluster, std::string { SelfId }, std::string { ThisVersion });
+    auto const tools = ToolchainTools(upstream, cluster, clock, std::string { SelfId }, std::string { ThisVersion });
     auto const found = std::ranges::find(tools, std::string_view { "toolchain_diff" }, &Mcp::ToolRow::name);
     REQUIRE(found != tools.end());
     auto const args = Json::Parse(arguments);
@@ -1075,7 +1086,7 @@ TEST_CASE("toolchains names each machine by the member id its proven key joined 
     state.members[1].schedulerEndpoint = "10.0.0.9:6674";
     state.members[1].displayName = "build-box";
     McpFakes::FixedCluster const cluster { state };
-    auto const tools = ToolchainTools(upstream, cluster, std::string { SelfId }, std::string { ThisVersion });
+    auto const tools = ToolchainTools(upstream, cluster, StillClock(), std::string { SelfId }, std::string { ThisVersion });
     auto const* const row = core::findOrNull(tools, std::string_view { "toolchains" }, &Mcp::ToolRow::name);
     REQUIRE(row != nullptr);
     auto const result = row->handler(Mcp::ToolCall { .arguments = Unwrap(Json::Parse("{}")), .clientName = "test" });
@@ -1153,6 +1164,49 @@ TEST_CASE("toolchain_diff refuses to stitch two surveys together", "[pace-node][
     // Both causes, since this end cannot tell them apart: a survey that ran again, or a node whose pages do not add up.
     CHECK(result.text.contains("its toolchain survey ran again"));
     CHECK(result.text.contains("pages that do not add up"));
+}
+
+TEST_CASE("toolchain_diff starts no question past its whole-call budget and reports nothing it read",
+          "[pace-node][mcp][toolchain-diff]")
+{
+    // Every page answered well inside the per-call deadline, and the call would still run for as long as the pages
+    // last: only the budget over the WHOLE call ends it. Fourteen pages a side at three files a page, each answered
+    // `perQuestion` after it was asked.
+    using McpToolchainDiff::TotalBudget;
+    DiffFleet fleet;
+    auto const record = DiffRecord(40);
+    auto const fingerprint = Cc::ComputeToolchainFingerprint(record);
+    fleet.members[""] = DiffFleet::Member { .served = Survey({ Served(record) }), .version = "1.0.0" };
+    core::platform::ManualClock clock;
+    auto perQuestion = std::chrono::milliseconds { 4000 };
+    fleet.afterAsked = [&](std::size_t /*unused*/) {
+        clock.advance(perQuestion);
+    };
+    auto upstream = UpstreamOf(fleet);
+    auto const arguments = std::format(R"({{"a":{{"fingerprint":"{0}"}},"b":{{"fingerprint":"{0}"}}}})", fingerprint);
+
+    SECTION("a slow fleet is refused by name once the budget has passed")
+    {
+        auto const result = CallDiff(upstream, arguments, clock);
+        INFO(result.text);
+        CHECK(result.isError);
+        CHECK(result.structured.IsNull());
+        CHECK(result.text.contains("budget-spent"));
+        CHECK(result.text.contains(std::format("{} ms", TotalBudget.count())));
+        // Asked at 0, 4, ..., 28 seconds, and not at 32: the budget is checked BEFORE a question.
+        CHECK(upstream.Calls().size() == static_cast<std::size_t>(TotalBudget / perQuestion) + 1);
+    }
+
+    SECTION("the control: the same pages answered faster compare whole")
+    {
+        perQuestion = std::chrono::milliseconds { 1000 };
+        auto const result = CallDiff(upstream, arguments, clock);
+        INFO(result.text);
+        REQUIRE_FALSE(result.isError);
+        CHECK(At(result.structured, "complete").AsBool() == std::optional { true });
+        CHECK(At(result.structured, "identical").AsBool() == std::optional { true });
+        CHECK(upstream.Calls().size() < static_cast<std::size_t>(TotalBudget / perQuestion));
+    }
 }
 
 TEST_CASE("toolchain_diff recomputes whatever the version strings say, and refuses the one side that fails as stale",
