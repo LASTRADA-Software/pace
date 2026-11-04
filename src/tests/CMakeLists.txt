@@ -4883,6 +4883,20 @@ else()
         )
     endif()
 
+    # The MCP enrollment tools against a real leader and two real joiners: the `decision` field
+    # read back after an approve and a reject, and a learner refused the control verbs by name.
+    # Binds this host's primary IPv4 address (a fleet on loopback admits no joiner) and skips 77
+    # on a host with none, or without curl or python3.
+    add_test(
+        NAME "node-mcp-enrollment-e2e"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/node-mcp-enrollment-e2e.sh"
+            --node "$<TARGET_FILE:pace-node>"
+    )
+    set_tests_properties("node-mcp-enrollment-e2e" PROPERTIES
+        LABELS "smoke"
+        SKIP_RETURN_CODE 77
+        TIMEOUT 300
+    )
 endif()
 
 # ---------------------------------------------------------------------------
