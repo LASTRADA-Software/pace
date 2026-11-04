@@ -374,16 +374,16 @@ namespace
         auto const flag = SkewFlag(skew);
         auto const leader = StringAt(document->root, "leader");
         auto const flagText = SkewWord(flag.AsBool());
-        auto text =
-            std::format("fleet led by {}: {} member(s), {} machine(s); versions {} ({}){}{}; {}",
-                        LeaderWords(leader, StringAt(document->root, "role"), document->reply),
-                        members->IsNull() ? std::string { "no cluster" } : std::format("{}", ElementsOf(*members).size()),
-                        ElementsOf(*nodes).size(),
-                        skew.known.empty() ? std::string { "none reported" } : std::format("{}", skew.known),
-                        flagText,
-                        skew.unknown.empty() ? std::string {} : std::format("; no version from {}", skew.unknown),
-                        UnplacedNote(unplaced),
-                        Provenance(document->reply));
+        auto text = std::format(
+            "fleet led by {}: {} member(s), {} machine(s); versions {} ({}){}{}; {}",
+            LeaderWords(leader, StringAt(document->root, "role"), document->reply),
+            members->IsNull() ? std::string { "no cluster" } : std::format("{}", ElementsOf(*members).size()),
+            ElementsOf(*nodes).size(),
+            skew.known.empty() ? std::string { "none reported" } : Joined(skew.known, ", "),
+            flagText,
+            skew.unknown.empty() ? std::string {} : std::format("; no version from {}", Joined(skew.unknown, ", ")),
+            UnplacedNote(unplaced),
+            Provenance(document->reply));
 
         auto result = Envelope(document->reply);
         result.emplace_back("role", StrOrNull(StringAt(document->root, "role")));
@@ -634,14 +634,15 @@ namespace
             machines.push_back(Obj(std::move(row)));
         }
 
-        auto text = std::format("{} condition(s) raised across {} machine(s) that reported{}{}; {}{}",
-                                raised,
-                                machines.size(),
-                                notReported.empty() ? std::string {}
-                                                    : std::format("; {} reported no conditions at all", notReported),
-                                UnplacedNote(unplaced),
-                                Provenance(document->reply),
-                                raisedLines);
+        auto text =
+            std::format("{} condition(s) raised across {} machine(s) that reported{}{}; {}{}",
+                        raised,
+                        machines.size(),
+                        notReported.empty() ? std::string {}
+                                            : std::format("; {} reported no conditions at all", Joined(notReported, ", ")),
+                        UnplacedNote(unplaced),
+                        Provenance(document->reply),
+                        raisedLines);
         auto result = Envelope(document->reply);
         result.emplace_back("raised_count", Count(raised));
         result.emplace_back("nodes", Arr(std::move(machines)));

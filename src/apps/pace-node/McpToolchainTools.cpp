@@ -123,18 +123,6 @@ namespace
         return Arr(std::move(array));
     }
 
-    /// @param items Some texts.
-    /// @param separator What goes between two of them.
-    /// @return Them joined, in their order.
-    template <typename Range>
-    [[nodiscard]] std::string Joined(Range const& items, std::string_view separator)
-    {
-        auto text = std::string {};
-        for (auto const& item: items)
-            text += std::format("{}{}", text.empty() ? std::string_view {} : separator, item);
-        return text;
-    }
-
     /// @param values A set.
     /// @return Its one value, or nothing when it holds none or several.
     [[nodiscard]] std::optional<std::string> OnlyOf(std::set<std::string> const& values)

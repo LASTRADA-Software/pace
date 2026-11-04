@@ -335,4 +335,25 @@ struct NodeTarget
     return Mcp::ToolResult { .structured = Obj(std::move(result)), .text = std::move(text), .isError = false };
 }
 
+/// Texts joined, in their order, for a sentence a person reads.
+///
+/// **Never `std::format("{}", range)`**: C++23's range formatting (P2286) is absent from libstdc++ 14, the
+/// standard library CI's gcc and clang Linux legs build against, so a range handed to `std::format` compiles
+/// here and nowhere there -- and it would print brackets and quotes a sentence does not want.
+/// @param items Some texts.
+/// @param separator What goes between two of them.
+/// @return Them joined.
+template <typename Range>
+[[nodiscard]] std::string Joined(Range const& items, std::string_view separator)
+{
+    auto text = std::string {};
+    for (auto const& item: items)
+    {
+        if (!text.empty())
+            text += separator;
+        text += item;
+    }
+    return text;
+}
+
 } // namespace Pace::Node::McpSupport
