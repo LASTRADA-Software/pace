@@ -41,6 +41,7 @@
 #include <core/Ranges.hpp>
 #include <core/net/BlockingSocket.hpp>
 #include <core/platform/Clock.hpp>
+#include <tests/BoundedWait.hpp>
 #include <tests/FleetHistoryFakes.hpp>
 #include <tests/LeaseRosterFakes.hpp>
 #include <tests/RaftPeerKeyFakes.hpp>
@@ -2274,7 +2275,7 @@ TEST_CASE("A CPU reading lands in the node series' CPU slot, and one the sampler
     CHECK(none[static_cast<std::size_t>(Distributed::FleetMetric::CpuBusyPermille)] == 0);
 }
 
-TEST_CASE("The node series records this machine's CPU from its own sampler, absent until it can say",
+TEST_CASE("The node series records this machine's CPU from its own sampler and leaves it absent until it can say",
           "[node][admin][fleethistory]")
 {
     AtomicMetricsSink metrics;
@@ -2289,8 +2290,18 @@ TEST_CASE("The node series records this machine's CPU from its own sampler, abse
                            logger,
                            std::make_unique<ScriptedLoadSampler>(
                                std::vector<std::optional<std::uint32_t>> { std::nullopt, 420 }) };
-    // The sampler thread takes its own first sample at construction; whichever reading it took, the two below are
-    // placed one minute apart so each owns a bucket.
+    // The sampler thread takes its own first sample at construction, at a moment this case does not choose -- under
+    // TSan it landed AFTER the advance below, so the unanswerable reading and 420 shared one minute and the absent
+    // slot was overwritten. Waited for, so the scripted readings are consumed in one order: the construction sample
+    // takes the absent one into this minute, and the two below each own a later minute.
+    REQUIRE(Testing::WaitUntil(
+        "the sampler thread's construction sample to land in the node series",
+        [&sampler] {
+            auto const buckets = sampler.NodeHistory().Buckets(Distributed::FleetRange::OneHour);
+            return std::ranges::any_of(buckets, [](Distributed::FleetBucket const& bucket) { return bucket.present; });
+        },
+        [] { return std::string { "no present bucket yet" }; },
+        Testing::WaitOptions { .step = {}, .context = {}, .bound = std::chrono::seconds { 10 } }));
     wall.Advance(std::chrono::minutes { 1 });
     REQUIRE_FALSE(sampler.SampleOnce());
     wall.Advance(std::chrono::minutes { 1 });
