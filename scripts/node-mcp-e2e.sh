@@ -280,11 +280,18 @@ fleet_round() {
     # And fields only the fleet document gives: it was rendered by a LEADER -- whose document names no
     # leader, `null` rather than itself -- every machine row carries its heartbeat age in seconds, and the
     # text names the node that answered as the leader.
-    json_check "fleet_overview content (${label})" "$(body_of "$(curl -s -i -m 20 -X POST -H "Content-Type: application/json" \
+    #
+    # Fetched into a variable FIRST, never as `"$(body_of "$(curl ... --data "{\"...\",...}")")"`: bash 3.2 --
+    # macOS's /bin/bash, which runs this fixture there -- brace-expands a command ARGUMENT whose `$(...)` holds
+    # `\"` and a `{...,...}`, and sent `"jsonrpc":"2.0"` as the body, answered `Parse error`. An assignment's
+    # right-hand side is not brace-expanded, so a body with a comma in it is fetched in one.
+    response="$(curl -s -i -m 20 -X POST -H "Content-Type: application/json" \
             -H "Accept: application/json, text/event-stream" -H "MCP-Protocol-Version: ${MODERN}" \
             -H "Mcp-Method: tools/call" -H "Mcp-Name: fleet_overview" \
             --data "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"tools/call\",\"params\":{\"name\":\"fleet_overview\",\"arguments\":{},${META}}}" \
-            "http://127.0.0.1:${fleet_mcp_port}/mcp")")" \
+            "http://127.0.0.1:${fleet_mcp_port}/mcp")" \
+        || fail "curl could not complete fleet_overview content (${label})"
+    json_check "fleet_overview content (${label})" "$(body_of "$response")" \
         "d['result']['structuredContent']['role'] == 'leader' and d['result']['structuredContent']['leader'] is None and isinstance(d['result']['structuredContent']['nodes'], list) and all('heartbeat_age_s' in n for n in d['result']['structuredContent']['nodes']) and 'version_skew' in d['result']['structuredContent'] and 'fleet led by ${expected}, which answered' in d['result']['content'][0]['text']"
     e2e_note "fleet_overview and running_compiles answered by the leading scheduler itself (${label})"
     stop_and_require_clean_exit "$fleet_pid" "the scheduler (${label})" 30 "${workdir}/node.log"
@@ -448,7 +455,10 @@ json_check "node_status by display name" "$(call_action node_status '{"node":"e2
     "${OK} and ${SC}['node_id'] == '${self_id}' and ${SC}['node'] == 'e2e-box' and ${SC}['display_name'] == 'e2e-box' and ${SC}['name'] == 'e2e-box' and ${SC}['name_source'] == 'replicated'"
 json_check "node_status by another case of the name" "$(call_action node_status '{"node":"E2E-BOX"}')" \
     "d['result']['isError'] is True"
-json_check "set_display_name refuses a control byte" "$(call_action set_display_name "{\"node\":\"${self_id}\",\"name\":\"a\\tb\"}")" \
+# Each JSON argument with a comma goes through an assignment, never straight into an argument: see
+# "fleet_overview content" above for what bash 3.2 makes of the other form.
+refused_name="$(call_action set_display_name "{\"node\":\"${self_id}\",\"name\":\"a\\tb\"}")"
+json_check "set_display_name refuses a control byte" "$refused_name" \
     "d['result']['isError'] is True and 'control character' in d['result']['content'][0]['text']"
 e2e_note "set_display_name named this node e2e-box, shown replicated in the fleet document, and node_status resolved it by that name"
 
@@ -479,7 +489,8 @@ node_budget_configured() {
     node_budget_reads "r[0]['source'] == 'configured' and r[0]['bytes'] == r[0]['configured_bytes'] and r[0]['override_bytes'] is None and r[0]['baseline_bytes'] is None"
 }
 wait_until node_budget_applied "node_status to show the 64 MiB memory override in force from the cluster, its baseline recorded" "$action_pid" "${workdir}/node.log" 60
-json_check "set_cache_budget refuses a share of RAM" "$(call_action set_cache_budget "{\"node\":\"${self_id}\",\"memory\":\"25%\"}")" \
+refused_share="$(call_action set_cache_budget "{\"node\":\"${self_id}\",\"memory\":\"25%\"}")"
+json_check "set_cache_budget refuses a share of RAM" "$refused_share" \
     "d['result']['isError'] is True and 'absolute size' in d['result']['content'][0]['text']"
 cleared="$(call_action clear_cache_budget "{\"node\":\"${self_id}\",\"which\":\"memory\"}")"
 json_check "clear_cache_budget" "$cleared" "${OK} and ${SC}['node_id'] == '${self_id}' and ${SC}['which'] == 'memory'"
@@ -627,10 +638,12 @@ e2e_note "history answered cpu-busy for ${self_id} (e2e-box): $(python3 -I -c "i
 for keyed in requesters:requesters toolchain-demand:toolchain_demand; do
     series="${keyed%%:*}"
     section="${keyed#*:}"
-    json_check "history ${series}" "$(call_action history "{\"series\":\"${series}\",\"range\":\"1h\"}")" \
+    history_body="$(call_action history "{\"series\":\"${series}\",\"range\":\"1h\"}")"
+    json_check "history ${series}" "$history_body" \
         "${OK} and ${SC}['series'] == '${series}' and ${SC}['key'] is None and isinstance(${SC}['${section}'], dict) and isinstance(${SC}['${section}']['coverage_since_ms'], int) and ${SC}['${section}']['observed_minutes'] >= 1 and sum(${SC}['${section}']['coverage']) == ${SC}['${section}']['observed_minutes'] and ${SC}['${section}']['full_coverage'] == 1 and ${SC}['${section}']['window_minutes'] == 60 and ${SC}['${section}']['unattributed'] is None and isinstance(${SC}['${section}']['counts'], str) and ${SC}['${section}']['coverage_since_ms'] >= ${SC}['${section}']['bucket_starts_ms'][0] and ${SC}['${section}']['keys'] == [] and ${SC}['${section}']['other'] is None and ${SC}['${section}']['total'] == 0 and len(${SC}['${section}']['bucket_starts_ms']) == 60"
 done
-json_check "history requesters with node" "$(call_action history "{\"series\":\"requesters\",\"range\":\"1h\",\"node\":\"${self_id}\"}")" \
+history_body="$(call_action history "{\"series\":\"requesters\",\"range\":\"1h\",\"node\":\"${self_id}\"}")"
+json_check "history requesters with node" "$history_body" \
     "d['result']['isError'] is True and '\`key\`' in d['result']['content'][0]['text']"
 e2e_note "history answered requesters and toolchain-demand: counted since the leader's first fold, nothing granted, refused with node"
 
