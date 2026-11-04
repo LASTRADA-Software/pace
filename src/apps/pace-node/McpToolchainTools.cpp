@@ -547,10 +547,12 @@ namespace
             if (spent >= TotalBudget)
                 return std::unexpected { std::pair {
                     UpstreamFailure::BudgetSpent,
-                    std::format("{}: toolchain_diff starts no question {} ms after it began, and had asked {} when it "
-                                "reached that; the nodes answered too slowly to compare -- ask again",
+                    std::format("{}: toolchain_diff starts no question more than {} ms after it began, and question "
+                                "{} was the first past that; the {} question(s) before it took that long between them, "
+                                "which does not say which node was slow -- ask again",
                                 UpstreamFailureRowOf(UpstreamFailure::BudgetSpent).sentence,
                                 TotalBudget.count(),
+                                _asked + 1,
                                 _asked) } };
             ++_asked;
             return _inner.Ask(target, nodeIdOrEmpty, std::move(frame));
@@ -610,6 +612,14 @@ namespace
     {
         auto answer =
             upstream.Ask(UpstreamTarget::Node, side.target.nodeId, FrameText(Wire::EncodeFingerprintInputsRequest(request)));
+        // A spent budget is no fault of the node this question was for, so it is named as the question refused,
+        // never as the node that failed.
+        if (!answer.has_value() && answer.error().first == UpstreamFailure::BudgetSpent)
+            return std::unexpected { Error(std::format("side {}'s question to {} was not asked: {}: {}",
+                                                       side.key,
+                                                       NodeWords(side),
+                                                       UpstreamFailureRowOf(answer.error().first).name,
+                                                       answer.error().second)) };
         if (!answer.has_value())
             return std::unexpected { Error(std::format("{} (side {}): {}: {}",
                                                        NodeWords(side),

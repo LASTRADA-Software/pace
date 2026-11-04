@@ -78,9 +78,8 @@ template <typename T>
 ///
 /// The same contract as the default-initializable `optional` overload above: a `REQUIRE` precedes every call, and the
 /// shared default is never observed. Spelled as a function rather than `*p` so the null branch is VISIBLE to the optimiser
-/// -- GCC's
-/// `-Wnull-dereference` at `-O3` does not carry a `REQUIRE(p != nullptr)` into the dereference after it, and it
-/// cannot: a failed `REQUIRE` returns through Catch2's handler as far as the compiler can see.
+/// -- GCC's `-Wnull-dereference` at `-O3` does not carry a `REQUIRE(p != nullptr)` into the dereference after it, and
+/// it cannot: a failed `REQUIRE` returns through Catch2's handler as far as the compiler can see.
 /// @param value The pointer.
 /// @return What it names, or a default-constructed instance when it is null.
 template <typename T>

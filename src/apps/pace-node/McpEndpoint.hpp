@@ -47,9 +47,9 @@ namespace Pace::Node
 /// open -- a local process that keeps reconnecting keeps MCP refusing for as long as it keeps going -- and
 /// never make it wait. Hostile or slow MCP input stalls only MCP.
 ///
-/// **A stop is bounded, and the bound is derived** (`McpEndpoint::WorstCaseStop`): the stop flag is raised
-/// before the accept loop is asked to stop, so a tool asks nothing more (`LoopGatedUpstream`), and the drain
-/// waits out the one forwarded call a request can have in flight.
+/// **A stop is bounded for a client that reads its answer, and the bound is derived** (`McpEndpoint::WorstCaseStop`):
+/// the stop flag is raised before the accept loop is asked to stop, so a tool asks nothing more (`LoopGatedUpstream`),
+/// and the drain waits out the one forwarded call a request can have in flight.
 
 /// Whether the MCP surface is stopping: raised by `~McpEndpoint` BEFORE it asks its accept loop to stop, read by
 /// `LoopGatedUpstream` on every forwarded call.
@@ -144,8 +144,15 @@ class McpEndpoint
                   "the drain must outlast a request still being read when the stop began, its refused calls answered "
                   "at once");
 
-    /// The longest `~McpEndpoint` takes: one accept poll for the accept thread to see the stop, then the drain.
-    /// The serving threads are joined after it, and a request the flag let finish has finished by then.
+    /// The longest `~McpEndpoint` takes when every client reads its answer: one accept poll for the accept thread to
+    /// see the stop, then the drain. The serving threads are joined after it, and a request the flag let finish has
+    /// finished by then.
+    ///
+    /// **Not a bound over a client that will not read.** Each blocking write is bounded by `RequestTimeout`, but a
+    /// loopback peer that reads just often enough to keep every write moving holds a response write -- and its
+    /// serving thread, which the join then waits for -- past the drain. Nor does the formula count a `503` the
+    /// accept thread is lingering on when the stop arrives: up to `Deadlines.linger` (400 ms) more before the
+    /// accept thread is joined.
     static constexpr auto WorstCaseStop = AdminHttpServer::AcceptPoll + Deadlines.drain;
     /// A quarter of the packaged units' `TimeoutStopSec=120` (`packaging/linux/pace-node.service`): the node's
     /// other surfaces and tiers stop inside the same supervisor budget, so MCP may take no more than its share.
@@ -196,7 +203,7 @@ class McpEndpoint
                                                                         core::net::AcceptLoopHealth& acceptLoops);
 
     /// Raise the stop flag, stop accepting, drain the requests in flight and join every thread; within
-    /// `WorstCaseStop`.
+    /// `WorstCaseStop` while every client reads its answer.
     ~McpEndpoint();
 
     McpEndpoint(McpEndpoint const&) = delete;
