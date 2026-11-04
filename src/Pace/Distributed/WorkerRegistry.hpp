@@ -48,6 +48,11 @@ enum class PickError : std::uint8_t
     /// machines exist and that client could not reach them a moment ago. A NETWORK
     /// problem, and never summed with `NoWorker`, which is a configuration one.
     Excluded,
+    /// The only matching live workers are on the requesting client's own machine (#1745):
+    /// a fleet of one, or one whose other machines lack the toolchain. Not a fault -- a
+    /// compile dispatched to yourself is the local compile plus a second preprocess and a
+    /// loopback transfer -- and never summed with `NoWorker`.
+    OwnMachineOnly,
     Last, ///< Not a refusal, and has no row: the length of a table keyed by one.
 };
 
@@ -538,9 +543,12 @@ class WorkerRegistry
     /// @param fingerprint The toolchain the client is compiling with.
     /// @param excluded Endpoints the client could not reach a moment ago, by what
     ///        they advertise; they narrow this pick only, never a registration.
+    /// @param requester The asking machine's identity key, as `WorkerInfo::identityKey` spells
+    ///        one; its own workers are never picked. Empty when the caller identified no machine.
     /// @return The chosen worker, or why none could be chosen.
     [[nodiscard]] std::expected<WorkerInfo, PickError> Pick(std::string_view fingerprint,
-                                                            std::span<std::string_view const> excluded = {});
+                                                            std::span<std::string_view const> excluded = {},
+                                                            std::string_view requester = {});
 
     /// The workers that could take a job of @p fingerprint right now, best first: live, an exact
     /// toolchain match, not excluded, and a slot free by the same `FreeSlots` test `Pick` applies.

@@ -411,6 +411,7 @@ TEST_CASE("ToStringView names every dispatch token")
     // nothing, which is indistinguishable from a build that never dispatched.
     CHECK(ToStringView(DispatchOutcome::Unknown) == "UNKNOWN");
     CHECK(ToStringView(DispatchOutcome::NotConfigured) == "NOT_CONFIGURED");
+    CHECK(ToStringView(DispatchOutcome::SwitchedOff) == "SWITCHED_OFF");
     CHECK(ToStringView(DispatchOutcome::NotAttempted) == "NOT_ATTEMPTED");
     CHECK(ToStringView(DispatchOutcome::Refused) == "REFUSED");
     CHECK(ToStringView(DispatchOutcome::Declined) == "DECLINED");
@@ -618,6 +619,19 @@ TEST_CASE("A launcher with no scheduler reports no fleet rather than a failed on
     CHECK(report.contains("misses       : 4"));
     CHECK_FALSE(report.contains("distribution"));
     CHECK_FALSE(report.contains("asked of the fleet"));
+}
+
+TEST_CASE("A launcher with distribution switched off says so, and rates no fleet")
+{
+    // #1745: PACE_DISTRIBUTE=off is the operator's choice, recorded apart from a fleet nobody set up --
+    // printed, so `--show-stats` shows why nothing was dispatched, and never in the denominator.
+    ScopedStateDir const scoped;
+    AppendDispatchRecords(3, DispatchOutcome::SwitchedOff);
+
+    auto const report = FormatReport("");
+    CHECK(report.contains("distribution"));
+    CHECK(report.contains("switched off"));
+    CHECK(report.contains("of 0 asked of the fleet"));
 }
 
 TEST_CASE("A pre-upgrade log line makes no claim about the operator's fleet")

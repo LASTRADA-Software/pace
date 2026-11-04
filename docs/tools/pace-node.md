@@ -287,8 +287,11 @@ export PACE_SCHEDULER=build-cache.internal:6675
 cmake -DCMAKE_CXX_COMPILER_LAUNCHER=pace-cc ...
 ```
 
-Unset `PACE_SCHEDULER` and every miss compiles locally again, which is the
-behaviour without this feature.
+`PACE_SCHEDULER` is only where a `LEASE` goes when no queue answers: a miss is queued at the node
+behind `PACE_ADDR` either way. `PACE_DISTRIBUTE=off` makes every miss compile locally again, which is
+the behaviour without this feature -- still queued at that node as a local compile, so the machine's
+memory bound holds. A compile is never placed on the machine that asked for it, so a
+fleet of one compiles everything locally on its own (`pace_dispatch_leases_own_machine_only_total`).
 
 ## `--advertise` is the flag to get right
 
@@ -4323,11 +4326,10 @@ from "this node never told us".
 
 ### An unused fleet is not an idle one
 
-**Dispatch is opt-in.** A client asks for a lease only when `PACE_SCHEDULER`
-names a scheduler; `PACE_ADDR` alone points the launcher at a *cache*. A node
-deployed the common way — as a shared cache for a build that compiles locally —
-therefore registers its slots, is never asked for a lease, and reports **0
-compiling** for as long as it runs.
+**A node can be asked for nothing.** A launcher whose `PACE_ADDR` is a plain cache,
+one with `PACE_DISTRIBUTE=off`, and a fleet of one — whose compiles are never placed
+on the machine that asked (#1745) — all compile locally. A node in such a fleet
+registers its slots and reports **0 compiling** for as long as it runs.
 
 That zero is honest and it is not idleness, so the capacity panel says which it is
 rather than leaving the three numbers to be read the wrong way. It matters because

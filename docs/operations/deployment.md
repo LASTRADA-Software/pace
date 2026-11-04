@@ -642,6 +642,7 @@ is where they are explained one by one.
 | `pace_dispatch_leases_no_capacity_total` | The fleet is too small -- or, where a worker reads `limited-by: compile-budget`, its compiles hold its `--compile-inflight-max` instead: raise that on it. |
 | `pace_dispatch_leases_withdrawn_total` | The fleet is unavailable — slots free on paper, machines busy elsewhere. |
 | `pace_dispatch_leases_all_excluded_total` | The fleet is **unreachable from its clients** — every matching worker was on the asking client's exclusion list. A network problem, not a missing toolchain. |
+| `pace_dispatch_leases_own_machine_only_total` | Compiles kept on the machine that asked because the only workers serving the toolchain run **on that machine** — a fleet of one, or a fleet whose other machines lack the toolchain. Ordinary, not a fault: dispatching to yourself only adds a preprocess and a loopback transfer. |
 | `pace_dispatch_leases_duplicate_total` | Duplicate-work suppression is doing its job. |
 | `pace_dispatch_leases_reclaimed_total` | A machine went away mid-job and the keys it was building were freed. |
 | `pace_dispatch_leases_unauthorized_total` | A lease token this cluster never signed was handed back. |

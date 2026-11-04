@@ -694,9 +694,9 @@ TEST_CASE("An admission answered with a body this build cannot read is refused",
     // whole change exists to prevent arriving through the renderer -- an operator
     // comparing two blank columns finds them equal.
     //
-    // And deliberately NOT reported as *an older leader*: `MinSupportedVersion` equals
-    // `CurrentVersion`, so a leader speaking another version is refused by name at the
-    // header and never reaches this arm at all.
+    // And deliberately NOT reported as *an older leader*: every version this build accepts
+    // reads this receipt alike, so a leader speaking another version is refused by name at
+    // the header and never reaches this arm at all.
     auto const empty = InterpretClusterReply(ClusterAction::Admit, {});
     REQUIRE_FALSE(empty.has_value());
     CHECK(empty.error().contains("cannot read"));

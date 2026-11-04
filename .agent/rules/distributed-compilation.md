@@ -4104,6 +4104,20 @@ Each rule below is a shape a plausible simpler design gets wrong, and none of th
   launcher read as "compile here" -- an uncharged compile, the load the queue exists to bound. The
   token still signs the OBJECT key, as a `Lease` grant's does: the table's key is bookkeeping the
   worker never sees.
+- **A compile is never placed on the machine that ASKED** (#1745). A fleet of one dispatched every miss
+  to its own worker: a full client-side preprocess and a loopback transfer added to the same compile,
+  measured +25-55% per miss and a cold build 9% slower than sccache, while every counter read healthy.
+  The queue skips a candidate whose machine is the caller (`AdmissionQueue::Pump`) and answers
+  `LocalGrantReason::OwnMachineOnly`, counted `DispatchLeasesOwnMachineOnly`; `WorkerRegistry::Pick`
+  takes the requester's key for a LEASE (`PickError::OwnMachineOnly`, `no-worker` on the wire). Machine
+  identity is the identity KEY on both sides -- the queue's `KeyAsMachineId` of what the connection
+  proved or loopback (the charge's own rule), a LEASE's proof or ticket only, since `dist-compile-e2e`
+  runs scheduler and worker as one node and leases over loopback; the launcher's a ticket its own node mints verifying under the
+  grant's `workerKey` (`Cc::GrantNamesOwnMachine`) -- never an address. The launcher's check exists for
+  an OLDER leader and runs before the dispatch preprocess, which is the cost it saves.
+- **Distribution is switched off by `PACE_DISTRIBUTE`, never by an empty `PACE_SCHEDULER`**: Windows
+  cannot hold an empty environment variable, and the queue at `PACE_ADDR` places compiles whatever
+  `PACE_SCHEDULER` says. Off is recorded as `SwitchedOff`, apart from `NotConfigured`.
 - **A launcher asks the queue at its OWN node, `PACE_ADDR`, whatever `PACE_SCHEDULER` names** (Ruling
   16, `Cc::AdmissionEndpointOf`). The leader charges a compile to the machine that ASKED, and names
   it only by a key the connection PROVED or by loopback: the launcher's node proves its machine's key

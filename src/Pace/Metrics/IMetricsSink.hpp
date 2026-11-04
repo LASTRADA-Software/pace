@@ -125,6 +125,11 @@ class IMetricsSink
         /// on the wire and NEVER counted there: this is the network between clients and
         /// machines, that one is a toolchain nobody serves.
         DispatchLeasesAllExcluded,
+        /// Compiles kept on the machine that asked because the only workers serving the toolchain are
+        /// on that machine (#1745): a dispatch there would add a second preprocess and a loopback
+        /// transfer to the same compile. A fleet of one, or a fleet whose other machines lack the
+        /// toolchain. Answered `no-worker` to a LEASE, and never counted there.
+        DispatchLeasesOwnMachineOnly,
         /// Lease requests refused because another client already held a lease for
         /// this key. Not a failure: it is duplicate-work suppression doing its
         /// job, and the clients it refuses compile locally.

@@ -784,7 +784,10 @@ core::async::Task<FrameReply> AdmissionResponder::Answer(std::span<std::byte con
         charge = core->held->Hold(verdict->chargedBytes);
     scope->Hold(std::make_unique<AdmissionHold>(core, *scope, ticket, std::move(charge)));
     registration.Done();
-    co_return FrameReply { Wire::EncodeReply(Wire::Status::Ok, verdict->grant) };
+    // In the asker's spelling: a version-17 launcher cannot read `OwnMachineOnly`, and one that cannot read its
+    // grant compiles unadmitted and closes the hold.
+    co_return FrameReply { Wire::EncodeReply(Wire::Status::Ok,
+                                             Wire::AdmitGrantAt(std::move(verdict->grant), header->version)) };
 }
 
 } // namespace Pace::Node

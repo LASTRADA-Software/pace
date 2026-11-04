@@ -64,6 +64,11 @@ namespace
         // compile locally, which is what a queue is for, and not a refusal. Counted as `NoCapacity` it
         // would read as "buy more machines" on every build that merely filled its fleet.
         { .reason = Wire::LocalGrantReason::NoRoom, .counter = std::nullopt, .unservedToolchain = false },
+        // Counted, unlike `NoRoom`: it is a SHAPE of the fleet -- nobody but the caller serves the toolchain --
+        // and an operator who expected distribution reads it here (#1745). The toolchain is served, by the caller.
+        { .reason = Wire::LocalGrantReason::OwnMachineOnly,
+          .counter = IMetricsSink::Counter::DispatchLeasesOwnMachineOnly,
+          .unservedToolchain = false },
     } };
 
     static_assert(RowsInEnumeratorOrder(LocalGrantSignals, &LocalGrantSignalRow::reason),
@@ -83,18 +88,24 @@ std::vector<Placement> SchedulerService::RegistryPlacement::Candidates(std::stri
 
 Wire::LocalGrantReason LocalGrantReasonOf(std::span<WorkerInfo const> live,
                                           std::string_view fingerprint,
-                                          std::span<std::string const> excluded)
+                                          std::span<std::string const> excluded,
+                                          std::string_view caller)
 {
     // Only a worker the queue could place on counts as serving: one that proved no identity has no
-    // machine to charge (`RegistryPlacement::Candidates`).
-    auto const serves = [&](WorkerInfo const& worker) {
+    // machine to charge (`RegistryPlacement::Candidates`), and one on the caller's own machine is never
+    // placed on (`AdmissionQueue::Pump`).
+    auto const servesAnyone = [&](WorkerInfo const& worker) {
         return worker.fingerprint == fingerprint && !worker.identityKey.empty();
+    };
+    auto const serves = [&](WorkerInfo const& worker) {
+        return servesAnyone(worker) && worker.identityKey != caller;
     };
     auto const reachable = [&](WorkerInfo const& worker) {
         return serves(worker) && !std::ranges::contains(excluded, worker.endpoint);
     };
     if (std::ranges::none_of(live, serves))
-        return Wire::LocalGrantReason::NoWorker;
+        return std::ranges::any_of(live, servesAnyone) ? Wire::LocalGrantReason::OwnMachineOnly
+                                                       : Wire::LocalGrantReason::NoWorker;
     if (std::ranges::none_of(live, reachable))
         return Wire::LocalGrantReason::AllExcluded;
     return Wire::LocalGrantReason::NoRoom;
@@ -268,9 +279,10 @@ std::optional<AdmissionVerdict> SchedulerService::GrantFor(Decision const& decis
             // A dispatchable request kept here says why, so the launcher records a fleet that placed it
             // nowhere as it records a lease the scheduler refused -- a fleet that distributes nothing must
             // not go green in silence.
-            auto const reason = decision.kind == Wire::GrantKind::Local && held.kind == Wire::AdmitKind::Dispatchable
-                                    ? LocalGrantReasonOf(_workers.LiveWorkers(), held.fingerprint, held.excluded)
-                                    : Wire::LocalGrantReason::Asked;
+            auto const reason =
+                decision.kind == Wire::GrantKind::Local && held.kind == Wire::AdmitKind::Dispatchable
+                    ? LocalGrantReasonOf(_workers.LiveWorkers(), held.fingerprint, held.excluded, held.machine)
+                    : Wire::LocalGrantReason::Asked;
             // Under `_admissionMutex`: the counter is an atomic, and `_unserved` takes only its own lock
             // and calls nothing back, so nothing can take these two in the other order.
             auto const& signal = LocalGrantSignals[static_cast<std::size_t>(reason)];

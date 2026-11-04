@@ -230,6 +230,12 @@ namespace
                       .tone = &StatsPalette::neutral,
                       .outcome = DispatchOutcome::NotConfigured,
                       .reach = FleetReach::NoFleet },
+        DispatchRow { .token = "SWITCHED_OFF",
+                      .label = "switched off",
+                      .tone = &StatsPalette::neutral,
+                      .outcome = DispatchOutcome::SwitchedOff,
+                      // Printed, unlike `NotConfigured`: the operator chose it, and the report says so (#1745).
+                      .reach = FleetReach::NotAsked },
         DispatchRow { .token = "NOT_ATTEMPTED",
                       .label = "not attempted",
                       .tone = &StatsPalette::neutral,
@@ -393,6 +399,9 @@ namespace
                            .specifics = Specifics::None },
         DeclineReasonRow { .reason = "another client was already building this key",
                            .cause = DeclineCause::AlreadyBuilding,
+                           .specifics = Specifics::None },
+        DeclineReasonRow { .reason = "the only worker serving this toolchain is this machine",
+                           .cause = DeclineCause::OwnMachine,
                            .specifics = Specifics::None },
         DeclineReasonRow {
             .reason = "the fleet refused this client", .cause = DeclineCause::NotPermitted, .specifics = Specifics::None },

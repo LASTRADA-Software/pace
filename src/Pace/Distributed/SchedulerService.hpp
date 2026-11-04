@@ -486,10 +486,11 @@ struct CallerContext
     /// The key a machine TICKET this connection presented verified under, engaged only while that key is LIVE and the
     /// ticket is among the routes that admitted the connection.
     ///
-    /// **A label, deciding nothing**: what a ticket proves is a CALLER, never a machine joining the fleet, so no gate
-    /// reads this -- `provenNodeId` and the routes' columns decide. It is read only to say WHICH machine an operator
-    /// acted from (`BudgetOverride::setBy`), since a verified ticket is signed by that machine's own live key exactly as
-    /// a proof is. Filled by `Distributed::CallerContextOf`, from the same fold as every field above.
+    /// **A label, admitting nothing**: what a ticket proves is a CALLER, never a machine joining the fleet, so no gate
+    /// reads this -- `provenNodeId` and the routes' columns decide. It names WHICH machine asked, since a verified
+    /// ticket is signed by that machine's own live key exactly as a proof is: an operator's (`BudgetOverride::setBy`),
+    /// and a LEASE's, whose own workers it is never granted (`RequestingMachineOf`, #1745) -- a decision that can at
+    /// worst keep a compile local. Filled by `Distributed::CallerContextOf`, from the same fold as every field above.
     std::optional<Ed25519PublicKey> ticketKey {};
 
     /// Whether a route that IDENTIFIES the caller admitted it -- this machine, a live proven key or
@@ -756,15 +757,19 @@ inline constexpr std::size_t AdmissionEstimateCapacity = 65'536;
 /// Read from the registry as it stands when the grant is minted, because the queue's own candidates are
 /// only the workers with a free slot -- "none was free" and "none exists" are opposite fixes, and the
 /// launcher records them apart exactly as the LEASE path's `NoWorker`, `Excluded` and `NoCapacity` rows
-/// are. Only a worker that proved its identity serves: the queue places on no other.
+/// are. Only a worker that proved its identity serves: the queue places on no other, and never on the
+/// machine that asked (#1745).
 /// @param live The registry's live workers (`WorkerRegistry::LiveWorkers`).
 /// @param fingerprint The toolchain the request named.
 /// @param excluded The workers the client could not reach, by advertised endpoint.
-/// @return `NoWorker` when nothing serves the toolchain, `AllExcluded` when everything that does is
-///         excluded, otherwise `NoRoom`.
+/// @param caller The machine that asked, as the queue names it (`KeyAsMachineId`); its own workers serve
+///        nobody it asks for.
+/// @return `NoWorker` when nothing serves the toolchain, `OwnMachineOnly` when only the caller's own
+///         machine does, `AllExcluded` when everything else that does is excluded, otherwise `NoRoom`.
 [[nodiscard]] CompileCacheWire::LocalGrantReason LocalGrantReasonOf(std::span<WorkerInfo const> live,
                                                                     std::string_view fingerprint,
-                                                                    std::span<std::string const> excluded);
+                                                                    std::span<std::string const> excluded,
+                                                                    std::string_view caller);
 
 /// A key as the registry stores a machine: the raw bytes, in a string.
 ///
@@ -1515,6 +1520,12 @@ class SchedulerService final: public Cluster::IAnnouncedJoinMemos
     /// @param caller The connection that asked.
     /// @param fingerprint The toolchain it named.
     void ReportLeaseDemand(CallerContext const& caller, std::string_view fingerprint);
+
+    /// The machine a LEASE comes from, for keeping it off its own workers (#1745): the key the connection
+    /// proved, else the key its machine ticket verified under. Never inferred from a loopback address.
+    /// @param caller The connection that asked.
+    /// @return That machine as the registry spells one (`KeyAsMachineId`), or empty when nothing names one.
+    [[nodiscard]] MachineId RequestingMachineOf(CallerContext const& caller) const;
 
     /// Turn one decision into a verdict: re-gate, mint the lease, encode the grant.
     /// Caller holds `_admissionMutex`.

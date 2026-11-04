@@ -342,6 +342,37 @@ TEST_CASE("AdmissionQueue.dispatchable-without-candidate-runs-local", "[distribu
     CHECK(f.queue.Pump().empty());
 }
 
+TEST_CASE("AdmissionQueue.dispatchable-is-never-placed-on-its-callers-own-machine", "[distributed][admission]")
+{
+    // A fleet of one: the only worker is on the machine that asked, so placing there would add a second
+    // preprocess and a loopback transfer to the very compile a Local grant runs (#1745).
+    Fixture f;
+    f.placement.byFingerprint["fp"] = { Placement { .workerId = "worker-c", .machine = "c", .endpoint = "10.0.0.1:6680" } };
+    f.queue.ReportMachine("c", Report(8 * GiB, 4));
+    f.Add(AdmitKind::Dispatchable, "c", 1 * GiB, "fp");
+    auto const granted = f.queue.Pump();
+    REQUIRE(granted.size() == 1);
+    CHECK(granted[0].kind == Pace::CompileCacheWire::GrantKind::Local);
+    CHECK_FALSE(granted[0].placement.has_value());
+}
+
+TEST_CASE("AdmissionQueue.dispatchable-skips-its-own-machine-for-another-worker", "[distributed][admission]")
+{
+    Fixture f;
+    Placement const own { .workerId = "worker-c", .machine = "c", .endpoint = "10.0.0.1:6680" };
+    Placement const other { .workerId = "worker-w", .machine = "w", .endpoint = "10.0.0.2:6680" };
+    // The caller's own worker first, as a placement source that prefers it would list it.
+    f.placement.byFingerprint["fp"] = { own, other };
+    f.queue.ReportMachine("c", Report(8 * GiB, 4));
+    f.queue.ReportMachine("w", Report(8 * GiB, 4));
+    f.Add(AdmitKind::Dispatchable, "c", 1 * GiB, "fp");
+    auto const granted = f.queue.Pump();
+    REQUIRE(granted.size() == 1);
+    CHECK(granted[0].kind == Pace::CompileCacheWire::GrantKind::Worker);
+    REQUIRE(granted[0].placement.has_value());
+    CHECK(Unwrap(granted[0].placement).workerId == other.workerId);
+}
+
 using Pace::CompileCacheWire::GrantKind;
 
 TEST_CASE("AdmissionQueue.dedup-waiter-woken-by-store", "[distributed][admission]")

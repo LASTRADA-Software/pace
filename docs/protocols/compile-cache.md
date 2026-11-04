@@ -24,7 +24,7 @@ declares:
 | Offset | Size | Field | Meaning |
 |--------|------|-------|---------|
 | 0 | 1 | magic | Always `0xFC`. |
-| 1 | 1 | version | Protocol version. Current: **15**, and the oldest accepted is also **15** — see [Versioning](#versioning). |
+| 1 | 1 | version | Protocol version. Current: **18**, and the oldest accepted is **17** — see [Versioning](#versioning). |
 | 2 | 1 | op | `0x01` STORE, `0x02` FETCH, `0x03` AUTH; the rest are [distributed execution](#distributed-execution) and [node identity](#node-identity-and-sealed-frames). |
 | 3 | 4 | payloadLength | Bytes of payload following the header. |
 
@@ -654,8 +654,12 @@ endpoint, dialled before `endpoint` and never signed -- the token signs `endpoin
 is refused `lease-endpoint-mismatch` by whatever answers there. `reason` is one byte saying why a
 dispatchable request was granted the machine that asked: `0` it asked to (every other grant
 says this), `1` no worker serves its toolchain, `2` every worker that does was excluded, `3` none
-had room. Every byte is pinned: an `AdmitKind`, `GrantKind`, `LocalGrantReason` or `SettleOutcome`
-past its last value is refused.
+had room, `4` only workers on the machine that asked serve it -- a leader never places a compile
+there, since that is the local compile plus a transfer. `4` exists from version 18: a version-17
+launcher would refuse it as past its last value, compile **unadmitted** and close the connection that
+held its grant, so a request that arrived at version 17 is answered `1` instead, which compiles it on
+the machine that asked under its grant just the same. Every byte is pinned: an `AdmitKind`,
+`GrantKind`, `LocalGrantReason` or `SettleOutcome` past its last value is refused.
 
 Two machines that missed the same key are each granted a worker: the leader files a worker
 grant's lease under the admission, never under the cache key, so no admission is refused
@@ -863,7 +867,7 @@ through the daemon's connection logger, so a rejection is visible to the
 operator as well as to the client.
 
 An `unsupported-version` message names the offered version *and* the supported
-range (`unsupported wire version 14; this server speaks 16..16`). A rejection that
+range (`unsupported wire version 14; this server speaks 17..18`). A rejection that
 does not say what would have worked cannot be acted on, and this is the only
 message an operator with a mismatched install will ever see.
 
@@ -879,6 +883,12 @@ common case, one wasted round trip in the case that is already broken.
 
 Because both binaries ship in one package, version skew is an operator error — a
 mixed install — so the goal here is a loud diagnostic, not automatic interop.
+
+**Version 18 is the first that accepts its predecessor.** It changed one reply byte -- an ADMIT
+grant's `reason` may be `4` -- and a server answers a version-17 request in version 17's spelling
+(`1`), so every frame a version-17 peer sends still reads and every reply it gets back still decodes.
+The range is one-way: a version-18 node serves a version-17 `pace-cc`, while a version-17 node
+refuses a version-18 one by number. Upgrade the nodes first and the launchers can follow.
 
 The [node handshake](#node-identity-and-sealed-frames) is not an exception to this: it
 negotiates no version and no feature, it establishes WHICH machine is on the other end,

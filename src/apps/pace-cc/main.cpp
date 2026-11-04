@@ -203,13 +203,16 @@ struct Config
     /// this is for CI, a nightly, or somebody reproducing a report -- never for every
     /// build (#423).
     unsigned verifyRate { Cc::VerificationOff };
-    /// Scheduler endpoint for distributed compilation, empty when not configured.
+    /// Scheduler endpoint for a LEASE when no queue answers, empty when not configured.
     ///
-    /// Distribution is OFF unless this is set. That is the whole switch: a launcher
-    /// with no scheduler behaves exactly as it did before, and a scheduler that
-    /// cannot be reached costs one failed connect on a miss and then a local
-    /// compile, which is the same shape every other cache failure has here.
+    /// Not the switch for distribution: the queue at `addr` places compiles whether or not
+    /// this is set (Ruling 16), and `distribute` turns both off. A scheduler that cannot be
+    /// reached costs one failed connect on a miss and then a local compile, which is the
+    /// same shape every other cache failure has here.
     std::string schedulerAddr;
+
+    /// `PACE_DISTRIBUTE`: `Off` keeps every miss here, asking no scheduler and no worker (#1745).
+    Cc::DistributeSetting distribute { Cc::DistributeSetting::On };
 
     /// The PASSWORD configured for the cache at `addr` (`PACE_TOKEN`), empty when none
     /// is. Presented to that one endpoint alone: every other machine is shown a machine
@@ -372,6 +375,7 @@ struct Config
     // the same unauthenticated behaviour they had before, rather than an AUTH
     // frame carrying an empty secret that every server would refuse.
     c.schedulerAddr = EnvOr(Cc::EnvName::Scheduler, "");
+    c.distribute = Cc::ParseDistribute(EnvOr(Cc::EnvName::Distribute, ""));
     c.credential.username = EnvOr(Cc::EnvName::User, "");
     c.credential.secret = EnvOr(Cc::EnvName::Token, "");
     // Resolved ONCE, through the one table, with the provenance recorded by the
@@ -417,10 +421,11 @@ struct Config
 /// Answered differently, a launcher would either report a fleet it never had or
 /// stay silent about one it did.
 /// @param cfg The launcher configuration.
-/// @return True when a scheduler endpoint is configured.
+/// @return True when a scheduler endpoint is configured and distribution is not switched off.
 [[nodiscard]] bool DispatchConfigured(Config const& cfg) noexcept
 {
-    return !cfg.schedulerAddr.empty();
+    return Cc::GateDistribution(cfg.distribute, Cc::LauncherEndpoints { .cache = cfg.addr, .scheduler = cfg.schedulerAddr })
+        .leaseFallback;
 }
 
 /// What this invocation ended up doing, for the statistics log.
@@ -2838,21 +2843,25 @@ void RecordPlanRefusal(InvocationRecord& record, PlanRefusal const& refusal)
     auto const exchange = Cc::MakeTcpExchange(Notice(record.verbose));
     auto& tickets = Tickets(cfg, record.verbose);
     Cc::CredentialedExchange credentialed { *exchange, tickets };
-    auto const request = Cc::DispatchRequest { .schedulerEndpoint = cfg.schedulerAddr,
-                                               .fingerprint = plan.fingerprint,
-                                               .objectKey = key,
-                                               .args = plan.args,
-                                               .family = Cc::DriverOf(cmd.flavor).family,
-                                               .preprocessed = preprocessRun.out,
-                                               .sourceName = sourceName,
-                                               .compileDir = compileDirPath,
-                                               .compileDirReplacement = compileDirReplacement,
-                                               .sourceRoot = sourceRoot,
-                                               .sourceRootReplacement = sourceRootReplacement,
-                                               .excludedWorkers = excludedWorkers,
-                                               .toolchainLabel = plan.toolchainLabel,
-                                               .admissionSourcePath = admissionSource,
-                                               .askOrigin = origin };
+    auto const request =
+        Cc::DispatchRequest { .schedulerEndpoint = cfg.schedulerAddr,
+                              .fingerprint = plan.fingerprint,
+                              .objectKey = key,
+                              .args = plan.args,
+                              .family = Cc::DriverOf(cmd.flavor).family,
+                              .preprocessed = preprocessRun.out,
+                              .sourceName = sourceName,
+                              .compileDir = compileDirPath,
+                              .compileDirReplacement = compileDirReplacement,
+                              .sourceRoot = sourceRoot,
+                              .sourceRootReplacement = sourceRootReplacement,
+                              .excludedWorkers = excludedWorkers,
+                              .toolchainLabel = plan.toolchainLabel,
+                              .admissionSourcePath = admissionSource,
+                              .askOrigin = origin,
+                              .ownMachine = [&tickets](std::string_view firstDialed, std::span<std::byte const> workerKey) {
+                                  return Cc::GrantNamesOwnMachine(tickets, firstDialed, workerKey);
+                              } };
     // An admission already placed this compile: the queue chose the worker and minted the token, so
     // there is no LEASE to ask for and no RELEASE to send. The grant's age starts when it ARRIVED.
     auto const outcome = granted != nullptr
@@ -3839,19 +3848,19 @@ std::optional<int> CachedCompile::AdmitAndCompile()
     std::vector<std::string_view> const excludedWorkers { unreachedWorkers.begin(), unreachedWorkers.end() };
     auto const treeLabel = Cc::TreeLabelOf(workingDirectoryText, cfg.srcRoot);
     auto const acceptedCodecs = Cc::AvailableCodecs();
-    Wire::AdmitRequest const admit { .kind = plan.has_value() ? Wire::AdmitKind::Dispatchable : Wire::AdmitKind::LocalOnly,
-                                     .fingerprint =
-                                         plan.has_value() ? std::string_view { plan->fingerprint } : std::string_view {},
-                                     .cacheKey = key,
-                                     .sourcePath = admissionSource,
-                                     .treeLabel = treeLabel,
-                                     .storable = true,
-                                     .acceptedCodecs = acceptedCodecs,
-                                     .excluded = excludedWorkers,
-                                     // What a leader with no worker for the fingerprint names it by; withheld when it
-                                     // is not text the leader would keep.
-                                     .toolchainLabel = plan.has_value() ? Cc::SendableToolchainLabel(plan->toolchainLabel)
-                                                                        : std::string_view {} };
+    Wire::AdmitRequest const admit {
+        .kind = Cc::GateDistribution(cfg.distribute, EndpointsOf(cfg)).AdmitKindFor(plan.has_value()),
+        .fingerprint = plan.has_value() ? std::string_view { plan->fingerprint } : std::string_view {},
+        .cacheKey = key,
+        .sourcePath = admissionSource,
+        .treeLabel = treeLabel,
+        .storable = true,
+        .acceptedCodecs = acceptedCodecs,
+        .excluded = excludedWorkers,
+        // What a leader with no worker for the fingerprint names it by; withheld when it
+        // is not text the leader would keep.
+        .toolchainLabel = plan.has_value() ? Cc::SendableToolchainLabel(plan->toolchainLabel) : std::string_view {}
+    };
 
     Cc::MissSeams const seams {
         .open =
@@ -3897,7 +3906,23 @@ std::optional<int> CachedCompile::AdmitAndCompile()
         .dispatchAdmitted = [&](Cc::AdmitTicket const& ticket) -> Cc::AdmittedDispatch {
             if (!plan.has_value())
                 return {};
-            return TryRemoteCompile(record, cfg, cmd, argv, key, *plan, dispatchDependencies, &ticket, admissionSource);
+            // A leader that does not keep a machine off its own workers (#1745).
+            return Cc::DispatchUnlessOwnMachine(
+                ticket,
+                [&](std::string_view firstDialed, std::span<std::byte const> workerKey) {
+                    return Cc::GrantNamesOwnMachine(Tickets(cfg, record.verbose), firstDialed, workerKey);
+                },
+                [&] {
+                    (void) DeclineDispatch(record,
+                                           Cc::RecordingFor(Cc::DispatchStatus::Declined, Cc::DeclineCause::OwnMachine),
+                                           std::format("not dispatched (the grant named {}, which is this machine); "
+                                                       "compiling locally",
+                                                       ticket.endpoint));
+                },
+                [&] {
+                    return TryRemoteCompile(
+                        record, cfg, cmd, argv, key, *plan, dispatchDependencies, &ticket, admissionSource);
+                });
         },
         // Today's path when no queue answers: a LEASE, which needs a scheduler named -- and is not dialled
         // at one a launcher a moment ago could not reach, exactly as before a queue existed.
@@ -4103,7 +4128,7 @@ std::optional<int> CachedCompile::AdmitAndCompile()
     // Planned whenever there is a queue to ask, not only when a scheduler is named: the queue at the
     // cache's own node places compiles on workers too (Ruling 12). Only today's LEASE path, which a
     // launcher falls back to when no queue answers, still needs `PACE_SCHEDULER`.
-    bool const dispatchConfigured = !AdmissionEndpoint(cfg).empty();
+    bool const dispatchConfigured = Cc::GateDistribution(cfg.distribute, EndpointsOf(cfg)).planDispatch;
 
     CachedCompile run { .record = record,
                         .cfg = cfg,
@@ -4322,6 +4347,11 @@ int main(int argc, char** argv)
     // this; every path that does not leaves "a fleet was configured and this compile
     // never reached it", which is a different fact again.
     record.dispatch = DispatchConfigured(cfg) ? Cc::DispatchOutcome::NotAttempted : Cc::DispatchOutcome::NotConfigured;
+    // The operator's choice, recorded as one: `NotConfigured` is a fleet nobody set up (#1745).
+    if (cfg.distribute == Cc::DistributeSetting::Off)
+        record.dispatch = Cc::DispatchOutcome::SwitchedOff;
+    else if (cfg.distribute == Cc::DistributeSetting::Unrecognised)
+        Note(record.verbose, std::format("{} is not off, 0, false or no; distribution stays on", Cc::EnvName::Distribute));
 
     if (!cmd.parsedOk)
     {

@@ -2,6 +2,7 @@
 #include "TicketCredentials.hpp"
 
 #include <Pace/Core/HostPort.hpp>
+#include <Pace/Distributed/MachineTicket.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -19,6 +20,8 @@
 #include <utility>
 #include <vector>
 
+#include <core/platform/Clock.hpp>
+#include <tests/CompileReplyFakes.hpp>
 #include <tests/Unwrap.hpp>
 
 using namespace Pace;
@@ -126,12 +129,14 @@ struct Minting
                   std::move(passwordFor),
                   budget,
                   [this](std::string_view line) { said.emplace_back(line); },
-                  std::move(refusalCost) }
+                  std::move(refusalCost),
+                  &clock }
     {
     }
 
     RecordingExchange raw;
     std::vector<std::string> said;
+    core::platform::ManualClock clock;
     TicketCredentials tickets;
 
     /// @return How many times this machine's node was asked to mint.
@@ -699,6 +704,67 @@ TEST_CASE("An exchange through the credentialed decorator presents a ticket for 
     CHECK(fix.raw.seen[1].credential.secret.View() == "ticket-for:10.0.0.7:6676");
 }
 
+TEST_CASE("A reserved ticket is the one its exchange presents: looking ahead costs no second mint",
+          "[cc][ticket][own-machine]")
+{
+    // #1745: the launcher reads a ticket to tell whether a grant names its own machine; the dispatch that
+    // follows must not mint again for it.
+    Minting fix;
+    constexpr std::string_view Worker = "10.0.0.7:6676";
+    auto const looked = fix.tickets.Reserve(Worker);
+    CHECK(looked.credential.secret.View() == "ticket-for:10.0.0.7:6676");
+    CHECK(fix.Mints() == 1);
+
+    CredentialedExchange credentialed { fix.raw, fix.tickets };
+    std::ignore = credentialed.Exchange(Worker, Wire::EncodeFetch("k"), Credential {}, ExchangeBudget {});
+    CHECK(fix.Mints() == 1);
+    REQUIRE(fix.raw.seen.size() == 2);
+    CHECK(fix.raw.seen[1].endpoint == Worker);
+    CHECK(fix.raw.seen[1].credential.secret.View() == "ticket-for:10.0.0.7:6676");
+
+    // Handed over ONCE: a node spends a ticket once, so the next exchange mints its own.
+    std::ignore = fix.tickets.For(Worker);
+    CHECK(fix.Mints() == 2);
+}
+
+TEST_CASE("A reserved ticket goes to no other audience and not past its reuse window", "[cc][ticket][own-machine]")
+{
+    Minting fix;
+    std::ignore = fix.tickets.Reserve("10.0.0.7:6676");
+    // Another audience mints its own, and the reservation is gone with that exchange.
+    CHECK(fix.tickets.For("10.0.0.8:6676").secret.View() == "ticket-for:10.0.0.8:6676");
+    std::ignore = fix.tickets.For("10.0.0.7:6676");
+    CHECK(fix.Mints() == 3);
+
+    // One that waited past the window -- a long dispatch preprocess -- is minted afresh rather than presented
+    // close to its expiry.
+    std::ignore = fix.tickets.Reserve("10.0.0.7:6676");
+    fix.clock.advance(ReservedTicketReuse + std::chrono::seconds { 1 });
+    std::ignore = fix.tickets.For("10.0.0.7:6676");
+    CHECK(fix.Mints() == 5);
+
+    // Inside the window it is handed over.
+    std::ignore = fix.tickets.Reserve("10.0.0.7:6676");
+    fix.clock.advance(ReservedTicketReuse);
+    std::ignore = fix.tickets.For("10.0.0.7:6676");
+    CHECK(fix.Mints() == 6);
+
+    // Nothing is reserved where nothing is minted: a loopback audience presents nothing.
+    CHECK_FALSE(fix.tickets.Reserve("127.0.0.1:6674").credential.Configured());
+    CHECK(fix.Mints() == 6);
+}
+
+TEST_CASE("Asking whether a grant names this machine costs a dispatch no extra mint", "[cc][ticket][own-machine]")
+{
+    // The common case: the grant names another machine, and the COMPILE presents the ticket the check minted.
+    Minting fix;
+    constexpr std::string_view Worker = "10.0.0.7:6676";
+    CHECK_FALSE(GrantNamesOwnMachine(fix.tickets, Worker, Testing::TestWorkerPublicKey()));
+    CredentialedExchange credentialed { fix.raw, fix.tickets };
+    std::ignore = credentialed.Exchange(Worker, Wire::EncodeFetch("k"), Credential {}, ExchangeBudget {});
+    CHECK(fix.Mints() == 1);
+}
+
 TEST_CASE("The ticket source is this machine's node, at the port the cache address names", "[cc][ticket]")
 {
     CHECK(TicketSourceFor("127.0.0.1:6674") == std::optional<std::string> { "127.0.0.1:6674" });
@@ -749,4 +815,71 @@ TEST_CASE("Every mint goes to this machine's node over loopback, whatever the sc
                 CHECK(Unwrap(endpoint).second == Unwrap(cachePort).second);
             }
         }
+}
+
+namespace
+{
+/// Presents a fixed credential to every audience, and counts how often it was asked.
+class FixedCredential final: public ICredentialFor
+{
+  public:
+    explicit FixedCredential(Credential credential):
+        _credential(std::move(credential))
+    {
+    }
+
+    [[nodiscard]] PresentedCredential Present(std::string_view audience) override
+    {
+        _audiences.emplace_back(audience);
+        return PresentedCredential { .credential = _credential, .missing = std::nullopt };
+    }
+
+    /// Every audience asked for, in order.
+    [[nodiscard]] std::vector<std::string> const& Audiences() const noexcept
+    {
+        return _audiences;
+    }
+
+  private:
+    Credential _credential;
+    std::vector<std::string> _audiences;
+};
+
+/// A machine ticket for @p audience, signed by @p key as a node mints one.
+[[nodiscard]] Credential TicketSignedBy(Ed25519KeyPair const& key, std::string_view audience)
+{
+    auto const claims = Distributed::MachineTicketClaims {
+        .machineId = "this-machine", .audience = std::string { audience }, .expiresAtUnixSeconds = 1'000, .nonce = {}
+    };
+    return Credential { .kind = Wire::AuthKind::MachineTicket,
+                        .username = {},
+                        .secret = Distributed::MintMachineTicket(key, claims) };
+}
+} // namespace
+
+TEST_CASE("A grant names this machine exactly when its node signs under the granted key", "[ticket][own-machine]")
+{
+    // #1745: the launcher knows its own machine by the identity its node already proves with.
+    constexpr std::string_view Endpoint = "worker.corp:6674";
+    auto const own = Testing::TestKeyPair("this-machine");
+    FixedCredential minted { TicketSignedBy(own, Endpoint) };
+
+    CHECK(GrantNamesOwnMachine(minted, Endpoint, std::span<std::byte const> { own.PublicKey() }));
+    CHECK(minted.Audiences() == std::vector<std::string> { std::string { Endpoint } });
+    // Another machine's key, a key of the wrong width, and no key: not this machine.
+    CHECK_FALSE(GrantNamesOwnMachine(minted, Endpoint, Testing::TestWorkerPublicKey()));
+    CHECK_FALSE(GrantNamesOwnMachine(minted, Endpoint, Testing::TestWorkerPublicKey().first(16)));
+    CHECK_FALSE(GrantNamesOwnMachine(minted, Endpoint, {}));
+}
+
+TEST_CASE("A grant is never taken for this machine without a ticket to tell by", "[ticket][own-machine]")
+{
+    auto const own = Testing::TestKeyPair("this-machine");
+    auto const key = std::span<std::byte const> { own.PublicKey() };
+    FixedCredential none { Credential {} };
+    CHECK_FALSE(GrantNamesOwnMachine(none, "worker.corp:6674", key));
+    FixedCredential password { Credential { .kind = Wire::AuthKind::Password, .username = {}, .secret = "hunter2" } };
+    CHECK_FALSE(GrantNamesOwnMachine(password, "worker.corp:6674", key));
+    FixedCredential garbage { Credential { .kind = Wire::AuthKind::MachineTicket, .username = {}, .secret = "junk" } };
+    CHECK_FALSE(GrantNamesOwnMachine(garbage, "worker.corp:6674", key));
 }

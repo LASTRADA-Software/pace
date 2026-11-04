@@ -451,6 +451,8 @@ TEST_CASE("SchedulerAdmission.a-local-grant-of-a-dispatchable-request-says-why",
     // and its `unserved-toolchain` record, through `LocalGrantSignals`.
     std::uint64_t noWorker = 0;
     std::uint64_t allExcluded = 0;
+    std::uint64_t ownMachineOnly = 0;
+    std::optional<MachineId> caller;
     bool unserved = false;
 
     SECTION("no worker serves the toolchain")
@@ -467,6 +469,15 @@ TEST_CASE("SchedulerAdmission.a-local-grant-of-a-dispatchable-request-says-why",
         expected = Wire::LocalGrantReason::AllExcluded;
         allExcluded = 1;
     }
+    SECTION("the only worker serving it is on the machine that asked")
+    {
+        // A fleet of one: dispatching to yourself only adds a preprocess and a loopback transfer (#1745).
+        (void) fleet.RegisterWorker();
+        caller = MachineOf(fleet.workerKey.PublicKey());
+        fleet.Report(*caller);
+        expected = Wire::LocalGrantReason::OwnMachineOnly;
+        ownMachineOnly = 1;
+    }
     SECTION("a worker serves it and had no room")
     {
         // Its machine reported nothing, so the queue may not charge it. Ruling 15: an ordinary queue
@@ -480,7 +491,7 @@ TEST_CASE("SchedulerAdmission.a-local-grant-of-a-dispatchable-request-says-why",
         expected = Wire::LocalGrantReason::Asked;
     }
 
-    (void) fleet.Admit("k1", kind, false, {}, excluded);
+    (void) fleet.Admit("k1", kind, false, {}, excluded, caller);
     auto const verdicts = fleet.service.PumpAdmission();
     REQUIRE(verdicts.size() == 1);
     auto const grant = GrantOf(verdicts[0]);
@@ -491,6 +502,7 @@ TEST_CASE("SchedulerAdmission.a-local-grant-of-a-dispatchable-request-says-why",
 
     CHECK(fleet.metrics.Read(IMetricsSink::Counter::DispatchLeasesNoWorker) == noWorker);
     CHECK(fleet.metrics.Read(IMetricsSink::Counter::DispatchLeasesAllExcluded) == allExcluded);
+    CHECK(fleet.metrics.Read(IMetricsSink::Counter::DispatchLeasesOwnMachineOnly) == ownMachineOnly);
     CHECK(fleet.metrics.Read(IMetricsSink::Counter::DispatchLeasesNoCapacity) == 0);
     auto const named = fleet.service.UnservedToolchainsNow();
     CHECK(named.empty() == !unserved);
@@ -500,6 +512,37 @@ TEST_CASE("SchedulerAdmission.a-local-grant-of-a-dispatchable-request-says-why",
         CHECK(named[0].fingerprint == Toolchain);
         CHECK(named[0].label == ToolchainLabel);
     }
+}
+
+TEST_CASE("SchedulerAdmission.a-request-is-granted-another-machines-worker-never-its-own",
+          "[distributed][admission][scheduler]")
+{
+    // The caller's own machine runs a worker too; the queue places on the OTHER machine (#1745).
+    Fleet fleet;
+    (void) fleet.RegisterWorker();
+    fleet.Report(MachineOf(fleet.workerKey.PublicKey()));
+    auto const ownKey = Testing::TestKeyPair("admission-own-machine");
+    constexpr std::string_view OwnEndpoint = "10.0.0.9:7100";
+    auto const own = CallerContext { .membership = Membership::Member,
+                                     .peerId = "10.0.0.9",
+                                     .provenNodeId = "own-node",
+                                     .provenKey = ownKey.PublicKey(),
+                                     .identified = true };
+    REQUIRE(fleet.service
+                .Register(own,
+                          WorkerRegistration { .fingerprint = Toolchain, .endpoint = OwnEndpoint, .slots = 8, .codecs = {} })
+                .status
+            == Wire::Status::Ok);
+    auto const ownMachine = MachineOf(ownKey.PublicKey());
+    fleet.Report(ownMachine);
+
+    (void) fleet.Admit("k1", Wire::AdmitKind::Dispatchable, false, {}, {}, ownMachine);
+    auto const verdicts = fleet.service.PumpAdmission();
+    REQUIRE(verdicts.size() == 1);
+    auto const grant = GrantOf(verdicts[0]);
+    CHECK(grant.kind == Wire::GrantKind::Worker);
+    CHECK(grant.endpoint == WorkerEndpoint);
+    CHECK(fleet.metrics.Read(IMetricsSink::Counter::DispatchLeasesOwnMachineOnly) == 0);
 }
 
 TEST_CASE("SchedulerAdmission.local-grant-reason-reads-the-registry", "[distributed][admission][scheduler]")
@@ -519,13 +562,20 @@ TEST_CASE("SchedulerAdmission.local-grant-reason-reads-the-registry", "[distribu
     std::vector<std::string> const oneOfTwo { "a:1" };
     std::vector<std::string> const both { "a:1", "b:1" };
 
-    CHECK(LocalGrantReasonOf(live, "gcc-14", none) == Wire::LocalGrantReason::NoRoom);
-    CHECK(LocalGrantReasonOf(live, "gcc-14", oneOfTwo) == Wire::LocalGrantReason::NoRoom);
-    CHECK(LocalGrantReasonOf(live, "gcc-14", both) == Wire::LocalGrantReason::AllExcluded);
-    CHECK(LocalGrantReasonOf(live, "icc", none) == Wire::LocalGrantReason::NoWorker);
+    constexpr std::string_view stranger = "k-elsewhere";
+    CHECK(LocalGrantReasonOf(live, "gcc-14", none, stranger) == Wire::LocalGrantReason::NoRoom);
+    CHECK(LocalGrantReasonOf(live, "gcc-14", oneOfTwo, stranger) == Wire::LocalGrantReason::NoRoom);
+    CHECK(LocalGrantReasonOf(live, "gcc-14", both, stranger) == Wire::LocalGrantReason::AllExcluded);
+    CHECK(LocalGrantReasonOf(live, "icc", none, stranger) == Wire::LocalGrantReason::NoWorker);
     // A worker that proved no identity is one the queue never places on, so it serves nobody.
-    CHECK(LocalGrantReasonOf(live, "msvc", none) == Wire::LocalGrantReason::NoWorker);
-    CHECK(LocalGrantReasonOf({}, "gcc-14", none) == Wire::LocalGrantReason::NoWorker);
+    CHECK(LocalGrantReasonOf(live, "msvc", none, stranger) == Wire::LocalGrantReason::NoWorker);
+    CHECK(LocalGrantReasonOf({}, "gcc-14", none, stranger) == Wire::LocalGrantReason::NoWorker);
+    // The caller's own worker serves nobody it asks for (#1745): the only clang worker is the caller's...
+    CHECK(LocalGrantReasonOf(live, "clang-19", none, "kc") == Wire::LocalGrantReason::OwnMachineOnly);
+    // ...while another machine serving the toolchain still makes it a matter of room or reach.
+    CHECK(LocalGrantReasonOf(live, "gcc-14", none, "ka") == Wire::LocalGrantReason::NoRoom);
+    CHECK(LocalGrantReasonOf(live, "gcc-14", std::vector<std::string> { "b:1" }, "ka")
+          == Wire::LocalGrantReason::AllExcluded);
 }
 
 TEST_CASE("SchedulerAdmission.a-worker-gone-before-its-grant-sends-the-ticket-to-the-front",

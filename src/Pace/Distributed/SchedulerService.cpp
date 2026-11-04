@@ -418,6 +418,12 @@ namespace
           .counter = IMetricsSink::Counter::DispatchLeasesAllExcluded,
           .detail = "every worker serving this toolchain is on this client's exclusion list",
           .unservedToolchain = false },
+        // `Excluded`'s shape: `no-worker` on the wire, and its own counter (#1745).
+        { .error = PickError::OwnMachineOnly,
+          .reported = Wire::ErrorCode::NoWorker,
+          .counter = IMetricsSink::Counter::DispatchLeasesOwnMachineOnly,
+          .detail = "the only workers serving this toolchain are on this client's own machine; compile it there",
+          .unservedToolchain = false },
     } };
 
     static_assert(RowsInEnumeratorOrder(PickErrorTable, &PickErrorRow::error),
@@ -1501,6 +1507,19 @@ void SchedulerService::SetDemandSink(ICompileDemandSink* sink) noexcept
     _demand = sink;
 }
 
+MachineId SchedulerService::RequestingMachineOf(CallerContext const& caller) const
+{
+    // A ticket counts here though it attributes nothing in `ReportLeaseDemand`: it is signed by its machine's
+    // own live key, and a wrong answer only ever keeps a compile local. Bare loopback does NOT: the LEASE is
+    // the fallback for a launcher no queue answered, and a fleet of one is kept local by the queue, which
+    // does read loopback as this machine; a single-host fixture of scheduler and worker leases over it.
+    if (caller.provenKey.has_value())
+        return KeyAsMachineId(*caller.provenKey);
+    if (caller.ticketKey.has_value())
+        return KeyAsMachineId(*caller.ticketKey);
+    return {};
+}
+
 void SchedulerService::ReportLeaseDemand(CallerContext const& caller, std::string_view fingerprint)
 {
     // Attributed by the rule an admission's charge follows (`AdmissionResponder`): the key this connection PROVED,
@@ -1756,7 +1775,7 @@ SchedulerReply SchedulerService::Lease(CallerContext const& caller, Wire::LeaseR
         // clients that missed the same key, each of which compiles locally.
         return Refuse(Wire::ErrorCode::AlreadyInFlight);
 
-    auto const picked = _workers.Pick(request.fingerprint, request.excluded);
+    auto const picked = _workers.Pick(request.fingerprint, request.excluded, RequestingMachineOf(caller));
     if (!picked.has_value())
     {
         // Counted by the ROW rather than by `Refuse`'s code-keyed lookup: `Excluded`

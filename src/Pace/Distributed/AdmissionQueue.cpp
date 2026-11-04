@@ -334,11 +334,12 @@ std::vector<Decision> AdmissionQueue::Pump()
         }
 
         // Reported candidates in placement order, then the caller: the CPU never idles while the
-        // caller has room.
+        // caller has room. Never a worker on the caller's own machine: that is the local compile again,
+        // plus a second preprocess and a loopback transfer (#1745).
         std::vector<Target> targets;
         if (request.kind == AdmitKind::Dispatchable && entry.refusals < MaxWorkerRefusals)
             for (auto& placement: _placement.Candidates(request.fingerprint, request.excluded))
-                if (reported(placement.machine))
+                if (placement.machine != request.caller && reported(placement.machine))
                     targets.push_back(Target { .machine = placement.machine, .placement = std::move(placement) });
         if (reported(request.caller))
             targets.push_back(Target { .machine = request.caller, .placement = std::nullopt });

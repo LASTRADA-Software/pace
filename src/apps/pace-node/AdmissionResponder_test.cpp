@@ -306,6 +306,50 @@ TEST_CASE("AdmissionResponder.dispatchable-grant-names-the-worker-and-its-lease"
     CHECK(queue.service.AdmissionSnapshotNow().chargedBytes.empty());
 }
 
+TEST_CASE("AdmissionResponder.a-fleet-of-one-is-granted-its-own-machine-locally", "[node][admission][own-machine]")
+{
+    // #1745's topology: one node that schedules, serves its own worker, and fronts a launcher on loopback. The
+    // queue never places a compile on the machine that asked, so the grant is Local, held on this machine's
+    // own report like any loopback local lease -- the launcher compiles here under it.
+    Queue queue;
+    auto const port = queue.Serve();
+    REQUIRE(queue.service
+                .Register(Distributed::CallerContext { .membership = Distributed::Membership::Member,
+                                                       .peerId = "10.0.0.1",
+                                                       .provenNodeId = "scheduler",
+                                                       .provenKey = queue.signer.PublicKey(),
+                                                       .identified = true },
+                          Distributed::WorkerRegistration {
+                              .fingerprint = "gcc-14", .endpoint = "10.0.0.1:7100", .slots = 4, .codecs = {} })
+                .status
+            == Wire::Status::Ok);
+    queue.Report(1024 * MiB, 4);
+
+    auto const askAt = [&](Wire::WireVersion version) {
+        Client client { port };
+        client.Send(AdmitFrame(Wire::AdmitKind::Dispatchable, "k1", false, version));
+        auto const grant = GrantOf(Unwrap(client.ReadAnswer()));
+        CHECK(grant.kind == Wire::GrantKind::Local);
+        CHECK(grant.endpoint.empty());
+        // Charged here, on this machine's own report; the estimate is whatever the last settle taught.
+        CHECK(queue.held.Held().slots == 1);
+        client.Send(SettleFrame(Wire::SettleOutcome::Stored, 10 * MiB));
+        CHECK(Unwrap(client.ReadAnswer()).status == Wire::Status::Ok);
+        CHECK(WaitFor([&] { return queue.held.Held() == HeldCharges {}; }));
+        return grant.reason;
+    };
+
+    CHECK(askAt(Wire::CurrentVersion) == Wire::LocalGrantReason::OwnMachineOnly);
+    // A version-17 launcher cannot read OwnMachineOnly: it is told NoWorker, which it compiles here under too.
+    CHECK(askAt(17) == Wire::LocalGrantReason::NoWorker);
+
+    CHECK(Count(queue, IMetricsSink::Counter::AdmissionGrantedLocal) == 2);
+    CHECK(Count(queue, IMetricsSink::Counter::AdmissionGrantedWorker) == 0);
+    CHECK(Count(queue, IMetricsSink::Counter::DispatchLeasesOwnMachineOnly) == 2);
+    CHECK(Count(queue, IMetricsSink::Counter::DispatchLeasesNoWorker) == 0);
+    CHECK(queue.service.OutstandingLeases(4).total == 0);
+}
+
 TEST_CASE("AdmissionResponder.worker-refused-readmits-on-the-same-ticket", "[node][admission]")
 {
     // Ruling 9: a worker's refusal puts the SAME ticket back at the FRONT, and the connection's next

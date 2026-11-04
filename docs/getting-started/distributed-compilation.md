@@ -572,6 +572,7 @@ start it with `--admin-listen` and these count the outcomes.
 | `pace_dispatch_leases_no_capacity_total` | The fleet is **too small** — full of your own build — or, where a worker reads `limited-by: compile-budget`, its compiles hold its `--compile-inflight-max` instead: raise that on it. |
 | `pace_dispatch_leases_withdrawn_total` | The fleet is **unavailable** — slots free on paper, machines busy elsewhere or out of scratch space. |
 | `pace_dispatch_leases_all_excluded_total` | The fleet is **unreachable from its clients** — every matching worker was on the asking client's exclusion list. A network problem, not a missing toolchain. Check the VPN and the workers' advertised names. |
+| `pace_dispatch_leases_own_machine_only_total` | The only workers serving the toolchain are **on the machine that asked**, so the compile stayed there — a fleet of one, or a fleet whose other machines lack the toolchain. Ordinary; add a second machine with the toolchain if you expected distribution. |
 | `pace_dispatch_leases_duplicate_total` | Duplicate-work suppression is doing its job. Not a problem. |
 | `pace_dispatch_worker_registrations_total` | Workers registering. A steady rise means heartbeats are not arriving. |
 | `pace_dispatch_worker_registrations_malformed_total` | A peer named its toolchain, endpoint or version in bytes that are not UTF-8 and was refused. Any rise names a machine that is **not** in the fleet. |

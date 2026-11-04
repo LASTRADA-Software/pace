@@ -18,6 +18,7 @@
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -486,6 +487,136 @@ TEST_CASE("Launcher.a-worker-that-failed-the-compile-gives-its-grant-back-and-as
     CHECK(harness.granted[1].localReason == Wire::LocalGrantReason::Asked);
 }
 
+TEST_CASE("Launcher.a-fleet-of-one-compiles-here-under-its-local-grant", "[launcher][admission][own-machine]")
+{
+    // #1745: the leader keeps a fleet of one off its own worker and answers Local, saying why. The launcher
+    // compiles here under that grant -- no dispatch preprocess, no loopback transfer, no LEASE.
+    Harness harness;
+    harness.Open({ Grant(Wire::GrantKind::Local, 0, Wire::LocalGrantReason::OwnMachineOnly) });
+    harness.legacyDispatches = true;
+
+    auto const report = RunMiss(harness.Seams());
+
+    CHECK(report.code == 0);
+    CHECK(harness.events.log
+          == std::vector<std::string> { "open", "s0:await", "granted", "compile", "store", "s0:settle", "s0:closed" });
+    REQUIRE(harness.granted.size() == 1);
+    CHECK(harness.granted[0].localReason == Wire::LocalGrantReason::OwnMachineOnly);
+}
+
+TEST_CASE("Launcher.an-older-leaders-self-grant-is-settled-and-asked-again-local-only", "[launcher][admission][own-machine]")
+{
+    // #1745: a leader predating the fix grants a fleet of one its own worker. The launcher tells by the grant's
+    // key -- asked at the address the compile would dial first -- runs no dispatch (whose preprocess is the cost
+    // saved), settles the grant NotStored and asks again LocalOnly with that worker excluded, compiling here.
+    Harness harness;
+    auto self = Grant(Wire::GrantKind::Worker);
+    self.dialHint = "10.0.0.2:7100";
+    self.workerKey = std::vector<std::byte>(32, std::byte { 0x5A });
+    harness.Open({ self });
+    harness.Open({ Grant(Wire::GrantKind::Local) });
+
+    std::vector<std::string> askedAt;
+    std::size_t declined = 0;
+    auto seams = harness.Seams();
+    seams.dispatchAdmitted = [&](AdmitTicket const& ticket) {
+        return DispatchUnlessOwnMachine(
+            ticket,
+            [&](std::string_view firstDialed, std::span<std::byte const> workerKey) {
+                askedAt.emplace_back(firstDialed);
+                return std::ranges::equal(workerKey, self.workerKey);
+            },
+            [&] { ++declined; },
+            [&] {
+                harness.events.log.emplace_back("dispatch-admitted");
+                return AdmittedDispatch { .run = CompileRun { .exitCode = 0, .out = {}, .err = {} },
+                                          .workerRefused = false };
+            });
+    };
+
+    auto const report = RunMiss(seams);
+
+    CHECK(report.code == 0);
+    CHECK(askedAt == std::vector<std::string> { "10.0.0.2:7100" });
+    CHECK(declined == 1);
+    CHECK_FALSE(harness.events.Saw("dispatch-admitted"));
+    CHECK(harness.events.log
+          == std::vector<std::string> { "open",
+                                        "s0:await",
+                                        "granted",
+                                        "s0:settle",
+                                        "s0:closed",
+                                        "open",
+                                        "s1:await",
+                                        "granted",
+                                        "compile",
+                                        "store",
+                                        "s1:settle",
+                                        "s1:closed" });
+    REQUIRE(harness.events.settles.size() == 2);
+    CHECK(harness.events.settles[0].outcome == Wire::SettleOutcome::NotStored);
+    REQUIRE(harness.asked.size() == 2);
+    CHECK(harness.asked[1] == std::optional<std::string> { "worker:1" });
+}
+
+TEST_CASE("Launcher.a-grant-on-another-machine-is-dispatched", "[launcher][admission][own-machine]")
+{
+    Harness harness;
+    harness.Open({ Grant(Wire::GrantKind::Worker) });
+    auto seams = harness.Seams();
+    auto const dispatch = seams.dispatchAdmitted;
+    std::vector<std::string> askedAt;
+    seams.dispatchAdmitted = [&](AdmitTicket const& ticket) {
+        return DispatchUnlessOwnMachine(
+            ticket,
+            [&](std::string_view firstDialed, std::span<std::byte const>) {
+                askedAt.emplace_back(firstDialed);
+                return false;
+            },
+            [] { FAIL("declined a grant on another machine"); },
+            [&] { return dispatch(ticket); });
+    };
+
+    CHECK(RunMiss(seams).code == 0);
+    // No dial hint: the name is what the compile dials first.
+    CHECK(askedAt == std::vector<std::string> { "worker:1" });
+    CHECK(harness.events.Count("dispatch-admitted") == 1);
+    CHECK(harness.events.Count("open") == 1);
+}
+
+TEST_CASE("Launcher.distribution-switched-off-plans-nothing-sends-no-lease-and-admits-local-only",
+          "[launcher][admission][distribute]")
+{
+    // PACE_DISTRIBUTE=off (#1745): no dispatch plan, so no dispatch preprocess; no LEASE fallback; and the queue
+    // is still asked, LocalOnly, so this machine's memory bound still holds the compile.
+    constexpr auto Both = LauncherEndpoints { .cache = "127.0.0.1:6674", .scheduler = "sched.corp:6675" };
+    auto const off = GateDistribution(DistributeSetting::Off, Both);
+    CHECK_FALSE(off.planDispatch);
+    CHECK_FALSE(off.leaseFallback);
+    CHECK(off.AdmitKindFor(true) == Wire::AdmitKind::LocalOnly);
+    CHECK(off.AdmitKindFor(false) == Wire::AdmitKind::LocalOnly);
+    CHECK_FALSE(AdmissionEndpointOf(Both).empty());
+
+    for (auto const setting: { DistributeSetting::On, DistributeSetting::Unrecognised })
+    {
+        auto const on = GateDistribution(setting, Both);
+        CHECK(on.planDispatch);
+        CHECK(on.leaseFallback);
+        CHECK(on.AdmitKindFor(true) == Wire::AdmitKind::Dispatchable);
+        // No plan -- a command line a worker would not take -- still asks LocalOnly.
+        CHECK(on.AdmitKindFor(false) == Wire::AdmitKind::LocalOnly);
+    }
+
+    // On, the LEASE needs a scheduler named and the plan a queue; neither is the switch.
+    auto const queueOnly =
+        GateDistribution(DistributeSetting::On, LauncherEndpoints { .cache = "127.0.0.1:6674", .scheduler = {} });
+    CHECK(queueOnly.planDispatch);
+    CHECK_FALSE(queueOnly.leaseFallback);
+    auto const nothing = GateDistribution(DistributeSetting::On, LauncherEndpoints {});
+    CHECK_FALSE(nothing.planDispatch);
+    CHECK_FALSE(nothing.leaseFallback);
+}
+
 TEST_CASE("Launcher.a-worker-failure-with-no-local-grant-to-be-had-compiles-here-unadmitted", "[launcher][admission]")
 {
     Harness harness;
@@ -604,6 +735,15 @@ TEST_CASE("Launcher.a-local-grant-reads-as-the-refusal-the-lease-path-records", 
     CHECK(Unwrap(busy).recording.reason == RecordingFor(DispatchStatus::Declined, DeclineCause::NoCapacity).reason);
     // Two different tallies: a fleet that is too small is not a fleet with nobody on the toolchain.
     CHECK(Unwrap(busy).recording.reason != Unwrap(noWorker).recording.reason);
+
+    // A fleet of one (#1745): its own tally, which is neither "nobody serves this" nor "the fleet is full".
+    auto const own = ExplainLocalGrant(Wire::LocalGrantReason::OwnMachineOnly, "cl 19.51");
+    REQUIRE(own.has_value());
+    CHECK(Unwrap(own).line.contains("the only worker serving this toolchain (cl 19.51) is this machine"));
+    CHECK(Unwrap(own).recording.outcome == DispatchOutcome::Declined);
+    CHECK(Unwrap(own).recording.reason == RecordingFor(DispatchStatus::Declined, DeclineCause::OwnMachine).reason);
+    CHECK(Unwrap(own).recording.reason != Unwrap(noWorker).recording.reason);
+    CHECK(Unwrap(own).recording.reason != Unwrap(busy).recording.reason);
 
     // A request that asked to run here was refused nothing.
     CHECK_FALSE(ExplainLocalGrant(Wire::LocalGrantReason::Asked, "gcc").has_value());

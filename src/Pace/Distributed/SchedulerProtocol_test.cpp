@@ -250,7 +250,7 @@ TEST_CASE("A version-14 LEASE in its own three-field grammar is refused by numbe
     auto const reply = fixture.protocol.Answer(frame, Insider);
     REQUIRE(ErrorOf(reply) == Wire::ErrorCode::UnsupportedVersion);
     auto const text = PayloadOf(reply).subspan(1);
-    CHECK(std::string_view { reinterpret_cast<char const*>(text.data()), text.size() } == "supported versions 17..17");
+    CHECK(std::string_view { reinterpret_cast<char const*>(text.data()), text.size() } == "supported versions 17..18");
     CHECK(fixture.metrics.Read(IMetricsSink::Counter::DispatchFramesRefusedUnsupportedVersion) == 1);
     CHECK(ErrorOf(reply) != Wire::ErrorCode::MalformedFrame);
 }

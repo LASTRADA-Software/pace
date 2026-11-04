@@ -741,6 +741,41 @@ TEST_CASE("A lease that excludes every worker is NoWorker on the wire and counte
     CHECK(fleet.metrics.Read(IMetricsSink::Counter::DispatchLeasesAllExcluded) == 1);
 }
 
+TEST_CASE("A lease is never granted on the asking machine's own worker", "[distributed][scheduler][own-machine]")
+{
+    // A fleet of one (#1745): the only worker is the client's own machine, and dispatching there only adds a
+    // second preprocess and a loopback transfer. The ticket names the machine, as a launcher's does.
+    Leading fleet;
+    auto const ownKey = Testing::TestKeyPair("own-machine").PublicKey();
+    auto const worker = CallerContext { .membership = Membership::Member,
+                                        .peerId = "10.0.0.7",
+                                        .provenNodeId = "own-machine",
+                                        .provenKey = ownKey,
+                                        .identified = true };
+    REQUIRE(fleet.service.Register(worker, OneSlot("gcc-14", "10.0.0.7:7100")).status == Wire::Status::Ok);
+    auto const launcher =
+        CallerContext { .membership = Membership::Member, .peerId = "10.0.0.7", .ticketKey = ownKey, .identified = true };
+
+    auto const refused = fleet.service.Lease(launcher, Ask("gcc-14", "k1"));
+    CHECK(refused.error == Wire::ErrorCode::NoWorker);
+    CHECK(refused.message.contains("own machine"));
+    CHECK(fleet.metrics.Read(IMetricsSink::Counter::DispatchLeasesOwnMachineOnly) == 1);
+    CHECK(fleet.metrics.Read(IMetricsSink::Counter::DispatchLeasesNoWorker) == 0);
+    CHECK(fleet.service.UnservedToolchainsNow().empty());
+
+    // Another machine serving the toolchain is granted instead; one that names no machine is unaffected.
+    auto const other = CallerContext { .membership = Membership::Member,
+                                       .peerId = "10.0.0.8",
+                                       .provenNodeId = "other-machine",
+                                       .provenKey = Testing::TestKeyPair("other-machine").PublicKey(),
+                                       .identified = true };
+    REQUIRE(fleet.service.Register(other, OneSlot("gcc-14", "10.0.0.8:7100")).status == Wire::Status::Ok);
+    auto const granted = fleet.service.Lease(launcher, Ask("gcc-14", "k2"));
+    REQUIRE(granted.status == Wire::Status::Ok);
+    CHECK(Wire::AsStringView(Unwrap(Wire::DecodeLeaseGrant(granted.payload)).endpoint) == "10.0.0.8:7100");
+    CHECK(fleet.metrics.Read(IMetricsSink::Counter::DispatchLeasesOwnMachineOnly) == 1);
+}
+
 TEST_CASE("Every refusal this service makes is describable on the wire", "[distributed][scheduler][wire]")
 {
     // A code the error table does not know reaches a client as a number with no

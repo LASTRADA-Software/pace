@@ -4,6 +4,7 @@
 #include <Pace/Cli/Options.hpp>
 #include <Pace/Cli/UsageDoc.hpp>
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <optional>
@@ -166,6 +167,7 @@ namespace EnvName
     constexpr std::string_view ConnectTimeout = "PACE_CONNECT_TIMEOUT";
     constexpr std::string_view MaxStoreBytes = "PACE_MAX_STORE_BYTES";
     constexpr std::string_view Scheduler = "PACE_SCHEDULER";
+    constexpr std::string_view Distribute = "PACE_DISTRIBUTE";
     constexpr std::string_view Token = "PACE_TOKEN";
     constexpr std::string_view User = "PACE_USER";
     constexpr std::string_view Verify = "PACE_VERIFY";
@@ -202,6 +204,40 @@ struct EnvVarSpec
 /// @return The duration, or @p fallback.
 [[nodiscard]] std::chrono::milliseconds EnvironmentDuration(std::string_view text,
                                                             std::chrono::milliseconds fallback) noexcept;
+
+/// What `PACE_DISTRIBUTE` asks for (#1745). Private: never stored or sent. `Last` is the count.
+enum class DistributeSetting : std::uint8_t
+{
+    On,           ///< Unset, or one of the "on" spellings: dispatch as configured.
+    Off,          ///< An "off" spelling: every miss compiles here and nothing is dispatched.
+    Unrecognised, ///< Any other value: read as `On`, and said under `PACE_VERBOSE`.
+    Last
+};
+
+/// One spelling `PACE_DISTRIBUTE` accepts, matched without regard to ASCII case.
+struct DistributeSpelling
+{
+    std::string_view text;     ///< The value as an operator writes it.
+    DistributeSetting setting; ///< What it asks for.
+};
+
+/// Every spelling `PACE_DISTRIBUTE` accepts; anything else is `DistributeSetting::Unrecognised`.
+inline constexpr std::array DistributeSpellings {
+    DistributeSpelling { .text = "off", .setting = DistributeSetting::Off },
+    DistributeSpelling { .text = "0", .setting = DistributeSetting::Off },
+    DistributeSpelling { .text = "false", .setting = DistributeSetting::Off },
+    DistributeSpelling { .text = "no", .setting = DistributeSetting::Off },
+    DistributeSpelling { .text = "on", .setting = DistributeSetting::On },
+    DistributeSpelling { .text = "1", .setting = DistributeSetting::On },
+    DistributeSpelling { .text = "true", .setting = DistributeSetting::On },
+    DistributeSpelling { .text = "yes", .setting = DistributeSetting::On },
+};
+
+/// Read `PACE_DISTRIBUTE`. Unset is `On` -- the variable is a switch to turn distribution OFF, since an
+/// empty `PACE_SCHEDULER` cannot be one on Windows -- and an unknown value is never a failed build.
+/// @param text The variable's value; empty when it is unset.
+/// @return What it asks for.
+[[nodiscard]] DistributeSetting ParseDistribute(std::string_view text) noexcept;
 
 /// The `PACE_*` variables, in the order `--help` documents them.
 /// @return A view of the static table; never empty.

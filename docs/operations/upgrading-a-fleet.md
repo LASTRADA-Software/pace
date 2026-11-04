@@ -9,10 +9,10 @@ Read this before upgrading more than one machine.
 
 ## Why
 
-Every `0xFC` exchange carries a wire version. A build accepts exactly one:
-`MinSupportedVersion` equals `CurrentVersion` in `CompileCacheWire.hpp`, and has at
-every point in this project's history. So the moment one end moves, every peer still on
-the old version is refused.
+Every `0xFC` exchange carries a wire version. Until version 18 a build accepted exactly one:
+`MinSupportedVersion` equalled `CurrentVersion` in `CompileCacheWire.hpp`. So the moment one end
+moved, every peer still on the old version was refused. Version 18 is the first exception, and a
+narrow one (below): it still accepts 17.
 
 That is a deliberate choice rather than an omission, and the reasoning is recorded at
 the constants themselves. In short: a reply on this wire carries a status byte and a
@@ -33,13 +33,20 @@ What makes it a *fleet* problem rather than a daemon problem is that a fleet has
 than one process. A cache daemon is upgraded, restarted, and done; twenty nodes cannot
 be.
 
-## This release: 0xFC version 17, discovery version 3, consensus version 5
+## This release: 0xFC version 18, discovery version 3, consensus version 5
 
 Every one of the three wires changed its grammar, so every node, every `pace-kv` serving
 `0xFC`, every `pace-cc` and every `pacectl` moves together (the supported procedure
 below).
 
-- **`0xFC` 17** (on top of 16's changes below):
+- **`0xFC` 18** (on top of 17's changes below):
+  - An ADMIT grant can say the compile stays on the machine that asked because the only workers
+    serving its toolchain run there (`own-machine-only`, #1745).
+  - **A version-17 peer is still served** (range `17..18`): a version-17 launcher is told *no worker*
+    instead, which it compiles locally under its grant just the same. Only this step is one-way: a
+    version-17 node refuses a version-18 client `unsupported-version`, so a node left behind still
+    loses every upgraded launcher. Upgrade nodes before launchers if the two cannot move together.
+- **`0xFC` 17:**
   - FLEET-TEXT carries a trailing format field, so it can return the fleet JSON `/fleet.json` serves
     (the MCP surface reads the fleet that way), and NODE-STATUS can list the MCP surface.
   - A version-16 peer is refused `unsupported-version`, naming the range.

@@ -210,8 +210,8 @@ std::expected<std::string, std::string> InterpretClusterReply(ClusterAction acti
             auto const receipt = Wire::DecodeClusterAdmitReceipt(reply);
             if (!receipt.has_value())
                 // NOT *an older leader*, which is the tempting sentence and is wrong
-                // here: `MinSupportedVersion` equals `CurrentVersion`, so a leader that
-                // does not speak this version is refused by name at the header and
+                // here: every version this build accepts reads this receipt alike, so a
+                // leader that speaks no such version is refused by name at the header and
                 // never reaches this arm. A body that arrives and will not read is a
                 // damaged reply or a defect, and saying *upgrade something* would send
                 // an operator to fix a machine that is fine.

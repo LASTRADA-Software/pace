@@ -100,6 +100,10 @@ enum class DispatchOutcome : std::uint8_t
     /// No scheduler is configured: this launcher does not distribute at all. An
     /// absence, never a failure, and the whole reason it is not a `bool`.
     NotConfigured,
+    /// Distribution was switched off on purpose (`PACE_DISTRIBUTE=off`, #1745): every miss compiles here
+    /// and no scheduler or worker is asked. Apart from `NotConfigured` so the provenance survives -- an
+    /// operator who turned it off and one whose fleet was never set up read two different things.
+    SwitchedOff,
     /// A scheduler is configured and this compile never reached the dispatch
     /// decision — the cache served it, or it was uncacheable, or the key was never
     /// derived. Nothing about the fleet can be read from it either way.
