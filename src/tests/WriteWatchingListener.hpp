@@ -9,6 +9,8 @@
 #include <expected>
 #include <format>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
@@ -18,18 +20,74 @@
 #include <core/net/ISocket.hpp>
 #include <core/net/IoAwaitable.hpp>
 #include <core/net/IoResult.hpp>
+#include <core/net/NetError.hpp>
 #include <tests/BoundedWait.hpp>
 
 namespace Pace::Testing
 {
 
 /// What the server's writes on a `WriteWatchingListener`'s connections have done so far, read from the case's thread.
-struct WriteWatch
+class WriteWatch
 {
-    /// Every byte the kernel has taken off a write.
-    std::atomic<std::size_t> written { 0 };
-    /// Whether a write call is under way at this moment.
-    std::atomic<bool> inWrite { false };
+  public:
+    /// @return Every byte the kernel has taken off a write.
+    [[nodiscard]] std::size_t Written() const noexcept
+    {
+        return _written.load();
+    }
+
+    /// @return Whether a write call is under way at this moment.
+    [[nodiscard]] bool InWrite() const noexcept
+    {
+        return _inWrite.load();
+    }
+
+    /// Record that a write call is starting.
+    void Entering() noexcept
+    {
+        _inWrite.store(true);
+    }
+
+    /// Record that a write call returned, having moved @p bytes.
+    /// @param bytes What the kernel took; zero for a call that failed.
+    void Left(std::size_t bytes) noexcept
+    {
+        _inWrite.store(false);
+        _written.fetch_add(bytes);
+    }
+
+    /// Record that a write ended in @p error, now.
+    /// @param error What the inner socket answered.
+    void Failed(core::net::NetError const& error)
+    {
+        auto const guard = std::scoped_lock { _mutex };
+        _error = error.toString();
+        _failedAt = std::chrono::steady_clock::now();
+    }
+
+    /// What ended the connection's writes, in words a failure message can carry: the error and when it came,
+    /// relative to @p since -- so a red on a platform nobody here can run says whether a send timeout, a reset or the
+    /// cancel ended the write, and how long after the stop began.
+    /// @param since The instant the times are measured from.
+    /// @return The account.
+    [[nodiscard]] std::string Describe(std::chrono::steady_clock::time_point since) const
+    {
+        auto const guard = std::scoped_lock { _mutex };
+        auto const account = std::format("written {}, in a write {}", Written(), InWrite());
+        if (!_failedAt.has_value())
+            return account + ", no write failed";
+        return std::format("{}, a write failed {} ms after that with {}",
+                           account,
+                           std::chrono::duration_cast<std::chrono::milliseconds>(*_failedAt - since).count(),
+                           _error);
+    }
+
+  private:
+    std::atomic<std::size_t> _written { 0 };
+    std::atomic<bool> _inWrite { false };
+    mutable std::mutex _mutex;
+    std::string _error;
+    std::optional<std::chrono::steady_clock::time_point> _failedAt;
 };
 
 /// An accepted connection whose writes go to the kernel in chunks of `Chunk`, saying how far each has got.
@@ -46,10 +104,8 @@ struct WriteWatch
 class WriteWatchingSocket final: public core::net::ISocket
 {
   public:
-    /// How much one write call hands the kernel at most. Small, so a client reading a KiB at a time drains a whole
-    /// chunk well inside one send timeout (`AdminHttpServer::RequestTimeout`): a chunk a slow reader takes longer than
-    /// that to empty would end the write on a TIMEOUT -- on Windows a send that times out leaves the socket unusable --
-    /// and the case would be measuring the send timeout rather than the cancel.
+    /// How much one write call hands the kernel at most: well under any send buffer, so the kernel refuses a chunk
+    /// once the buffers under the connection are full rather than taking it whole.
     static constexpr std::size_t Chunk = std::size_t { 8 } * 1024;
 
     /// @param inner The accepted socket (owned).
@@ -139,13 +195,15 @@ class WriteWatchingSocket final: public core::net::ISocket
         while (total < buffer.size())
         {
             auto const chunk = buffer.subspan(total, std::min(Chunk, buffer.size() - total));
-            watch->inWrite.store(true);
+            watch->Entering();
             auto const wrote = co_await inner->write(chunk);
-            watch->inWrite.store(false);
+            watch->Left(wrote.has_value() ? *wrote : 0);
             if (!wrote.has_value())
+            {
+                watch->Failed(wrote.error());
                 co_return std::unexpected(wrote.error());
+            }
             total += *wrote;
-            watch->written.fetch_add(*wrote);
         }
         co_return total;
     }
@@ -153,19 +211,6 @@ class WriteWatchingSocket final: public core::net::ISocket
     std::unique_ptr<core::net::ISocket> _inner;
     std::shared_ptr<WriteWatch> _watch;
 };
-
-/// Whether a reader taking @p bytes every @p step empties one `WriteWatchingSocket::Chunk` in under half of
-/// @p sendTimeout, so every write call of a slow-reader case makes progress rather than timing out.
-/// @param bytes What the reader takes per step.
-/// @param step How long it waits between steps.
-/// @param sendTimeout The server's per-call send timeout.
-/// @return True when the chunk drains with room to spare.
-[[nodiscard]] constexpr bool WriteWatchingSocketChunkDrains(std::size_t bytes,
-                                                            std::chrono::milliseconds step,
-                                                            std::chrono::milliseconds sendTimeout) noexcept
-{
-    return bytes > 0 && step * static_cast<std::int64_t>(WriteWatchingSocket::Chunk / bytes) < sendTimeout / 2;
-}
 
 /// A bound listener whose accepted connections write in watched chunks (`WriteWatchingSocket`), all recording into
 /// one `WriteWatch` -- the stop cases serve one connection, so one record is unambiguous.
@@ -220,20 +265,20 @@ class WriteWatchingListener final: public core::net::IListener
                                                  std::chrono::milliseconds still,
                                                  std::chrono::milliseconds bound)
 {
-    auto lastWritten = watch.written.load();
+    auto lastWritten = watch.Written();
     auto lastMoved = std::chrono::steady_clock::now();
     return WaitUntil(
         "the server to be parked in a write that moves nothing",
         [&] {
             auto const now = std::chrono::steady_clock::now();
-            if (auto const seen = watch.written.load(); seen != lastWritten)
+            if (auto const seen = watch.Written(); seen != lastWritten)
             {
                 lastWritten = seen;
                 lastMoved = now;
             }
-            return watch.inWrite.load() && now - lastMoved >= still;
+            return watch.InWrite() && now - lastMoved >= still;
         },
-        [&] { return std::format("written {}, in a write {}", watch.written.load(), watch.inWrite.load()); },
+        [&] { return std::format("written {}, in a write {}", watch.Written(), watch.InWrite()); },
         WaitOptions { .step = {}, .context = {}, .bound = bound });
 }
 

@@ -2524,8 +2524,10 @@ gives it none, so each rule below is what keeps a session's fleet controls on th
   `SO_SNDBUF`, so a large answer is not evidence of a parked write, and a test that inferred one went
   green on Linux and red on Windows. Nor can a fixture shrink the buffer from outside: every accept sets
   `ClientSocketBufferBytes` on the accepted socket (`ApplyHotSocketOptions`), overwriting whatever the
-  listening socket would have passed on. A slow reader must also keep MOVING -- a KiB into a 4 KiB
-  window stalled a macOS send past its timeout, ending the connection before any cancel could.
+  listening socket would have passed on. And a stop case takes the SEND TIMEOUT out of the race --
+  the listener's column, armed longer than the case, with a client that reads nothing -- rather than
+  tuning a trickle against platform timers: every trickle tried let a macOS send time out first, which
+  ends the connection before any cancel can and reads as a cancel that never happened.
   A stop case SEES the write parked first
   (`tests/WriteWatchingListener.hpp`: a write under way that moves no byte for a stretch).
 - **No credential is added, and the node acts AS ITSELF.** A forwarded call rides the node's own
