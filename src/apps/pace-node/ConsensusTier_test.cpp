@@ -1597,7 +1597,7 @@ TEST_CASE("A node whose own consensus state this build cannot read refuses to st
         CHECK(refusal.contains("the snapshot as of log entry 3"));
         CHECK(refusal.contains(std::format("cluster state encoding version {}", Testing::PreviousClusterStateVersion)));
         CHECK(refusal.contains("reads 11"));
-        CHECK(refusal.contains("it is intact, and there is no conversion"));
+        CHECK(refusal.contains("it is intact, and this build has no conversion from its version"));
         CHECK(refusal.contains(Consensus::UnreadableStateRemedy));
         CHECK(published->load() == 0);
     }
@@ -1642,6 +1642,29 @@ TEST_CASE("A node whose own consensus state this build cannot read refuses to st
         CHECK(refusal.contains("log entry 4"));
         CHECK(refusal.contains(std::format("cluster command encoding version {}", Testing::PreviousClusterCommandVersion)));
         CHECK(refusal.contains("reads 7"));
+        CHECK(refusal.contains("it is intact, and this build has no conversion from its version"));
+        CHECK(refusal.contains(Consensus::UnreadableStateRemedy));
+        CHECK(published->load() == 0);
+    }
+
+    SECTION("a retained last-release command carrying a verb that release never had refuses the start as damage")
+    {
+        // v6 is a layout this build converts, and its writer had no verb past `DissolveInto`: the pair is bytes no
+        // build wrote. Damage, then -- never "intact, and this build has no conversion from its version", which would send
+        // an operator to move a healthy-looking store aside instead of looking at the disk.
+        PlantConsensusState(
+            directory,
+            currentSnapshot,
+            Testing::EncodeNamelessClusterCommandWithVerb(static_cast<std::uint8_t>(Cluster::CommandKind::SetDisplayName)));
+        auto const started = start();
+        REQUIRE_FALSE(started.has_value());
+        CHECK(started.error().cause == NodeRefusalCause::ConsensusState);
+        auto const& refusal = started.error().reason;
+        CAPTURE(refusal);
+        CHECK(refusal.contains("log entry 4"));
+        CHECK(refusal.contains("under encoding version 6"));
+        CHECK(refusal.contains("it is damaged, which is a disk or a crash to investigate first"));
+        CHECK_FALSE(refusal.contains("it is intact"));
         CHECK(refusal.contains(Consensus::UnreadableStateRemedy));
         CHECK(published->load() == 0);
     }

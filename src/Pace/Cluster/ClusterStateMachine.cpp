@@ -21,7 +21,9 @@ namespace
     /// and bytes that are not a state or a command at all are `MalformedFrame`. The first
     /// two are INTACT bytes a different build laid out, which the storage rule calls
     /// `UnsupportedFormatVersion` -- never the damage code, because damage is what gets a
-    /// healthy state deleted rather than an upgrade finished. Only the third is damage.
+    /// healthy state deleted rather than an upgrade finished. Only the third is damage, and
+    /// it includes a converted layout carrying a verb its writer never had: that pair names
+    /// a build this one knows, which never wrote it, so the decoder already says `MalformedFrame`.
     /// @param decoded What the decoder said; its context is kept.
     /// @return The same refusal, in the two codes `IRaftStateMachine` refuses with.
     [[nodiscard]] ConsensusError AsHeldStateRefusal(ConsensusError decoded)

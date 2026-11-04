@@ -188,14 +188,15 @@ std::string DescribeTermAdoption(Consensus::Term adopted, Consensus::TermAdoptio
 std::string UnreadableConsensusStateRefusal(std::filesystem::path const& directory, ConsensusError const& refusal)
 {
     // Which of the two the application found decides the middle clause: another build's
-    // layout is intact and has no conversion, while bytes no build wrote are damage -- a
-    // disk or a crash to look at before anything is moved. The remedy after it is the
-    // same either way, because either way this directory cannot be run on.
+    // layout is intact and is not one this build converts -- the context names the ones it
+    // does convert, so the clause must not deny that any exist -- while bytes no build wrote
+    // are damage, a disk or a crash to look at before anything is moved. The remedy after it
+    // is the same either way, because either way this directory cannot be run on.
     auto const intact = refusal.code == ConsensusErrorCode::UnsupportedFormatVersion;
     return std::format("cannot start consensus on the state in {}: {}; {}: {}",
                        directory.string(),
                        refusal.context,
-                       intact ? "it is intact, and there is no conversion"
+                       intact ? "it is intact, and this build has no conversion from its version"
                               : "it is damaged, which is a disk or a crash to investigate first",
                        Consensus::UnreadableStateRemedy);
 }

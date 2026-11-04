@@ -17,6 +17,7 @@
 #include <chrono>
 #include <cstdint>
 #include <format>
+#include <functional>
 #include <iterator>
 #include <optional>
 #include <ranges>
@@ -152,6 +153,19 @@ namespace
     /// stamp, the override a report names, and who set it.
     constexpr std::size_t CommandFields = 12;
 
+    /// Whether a table of layouts names each version once, oldest first.
+    ///
+    /// The tables are searched for the FIRST row naming a version, so a repeated version would silently shadow its
+    /// second row; and "the current one last" is asserted of the last row only, which an older version placed after
+    /// it would not trip. One strictly increasing walk answers both.
+    /// @param layouts A table of layouts, each with a `version`.
+    /// @return true when every version is greater than the one before it.
+    template <typename Layout, std::size_t N>
+    [[nodiscard]] constexpr bool VersionsStrictlyAscend(std::array<Layout, N> const& layouts)
+    {
+        return std::ranges::adjacent_find(layouts, std::ranges::greater_equal {}, &Layout::version) == layouts.end();
+    }
+
     /// One command layout this build reads: the version that names it, how many fields it carries, and the first
     /// verb its writer did not have.
     struct CommandLayout
@@ -180,6 +194,8 @@ namespace
                   "the current command layout is the table's last row");
     static_assert(std::ranges::all_of(ReadableCommandLayouts, [](auto const& row) { return row.fields <= CommandFields; }),
                   "an older command layout is a prefix of this build's, never longer");
+    static_assert(VersionsStrictlyAscend(ReadableCommandLayouts),
+                  "each command layout version is named once, oldest first, so the current one is the newest");
 
     /// Wire tag in front of every encoded state: a snapshot, and a `ClusterStatus` body.
     ///
@@ -230,6 +246,8 @@ namespace
     static_assert(std::ranges::all_of(ReadableStateLayouts,
                                       [](auto const& row) { return row.memberFields <= MemberFields; }),
                   "an older member layout is a prefix of this build's, never longer");
+    static_assert(VersionsStrictlyAscend(ReadableStateLayouts),
+                  "each state layout version is named once, oldest first, so the current one is the newest");
 
     /// The versions a table of layouts names, for a refusal: "11, and converts 10".
     /// @param layouts The table, the current layout last.
@@ -744,9 +762,11 @@ std::expected<Command, ConsensusError> DecodeCommand(std::span<std::byte const> 
         return std::unexpected(UnknownWireMessage(
             std::format("cluster command verb {} this build does not know", static_cast<unsigned>(header[1]))));
     // A verb the layout's writer did not have is no entry that build wrote: read as this build's verb it would be a
-    // claim nobody made.
+    // claim nobody made. And it is DAMAGE, not another build's layout -- the byte past `Last` above is a build this one
+    // has not met, while this one names a build it HAS met, which never wrote the pair. So the malformed code, which a
+    // held entry reports as a damaged store rather than an intact one with no conversion (storage.md).
     if (static_cast<std::uint8_t>(*kind) >= static_cast<std::uint8_t>(layout->firstUnknownVerb))
-        return std::unexpected(UnknownWireMessage(std::format("cluster command verb {} under encoding version {}, "
+        return std::unexpected(MalformedWireFrame(std::format("cluster command verb {} under encoding version {}, "
                                                               "which had no such verb",
                                                               static_cast<unsigned>(header[1]),
                                                               version)));

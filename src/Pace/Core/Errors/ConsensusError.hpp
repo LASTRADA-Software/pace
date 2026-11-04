@@ -297,7 +297,8 @@ struct ConsensusError
 /// Build an `UnsupportedFormatVersion` error.
 ///
 /// Separate from `StorageFailure` because the remedy is: an intact store another
-/// build wrote is moved aside -- there is no conversion before production-ready --
+/// build wrote, in a layout this build does not convert, is moved aside -- before
+/// production-ready the only conversion kept is from the last release's layout --
 /// while a damaged one is a disk or a crash to investigate. Refused by NAME, with
 /// both versions in the context, so nobody reads a layout change as damage.
 /// @param context Which file, the version it carries and the one this build reads.

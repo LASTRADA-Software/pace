@@ -694,14 +694,15 @@ TEST_CASE("The last release's command is converted: its seven fields are this bu
     CHECK(Unwrap(decoded)
           == Command { .kind = CommandKind::Forget, .key = "w2", .value = {}, .schedulerEndpoint = {}, .publicKey = key });
 
-    // A verb the build that wrote v6 never had is no entry it wrote: refused by name rather than read as this build's.
+    // A verb the build that wrote v6 never had is no entry it wrote: refused rather than read as this build's, and as
+    // DAMAGE -- that build is known, and never wrote the pair -- so a held one reads as a damaged store, not an intact one.
     REQUIRE(static_cast<std::uint8_t>(CommandKind::SetDisplayName) == 8);
     for (auto const verb: { CommandKind::SetDisplayName, CommandKind::SetBudget, CommandKind::RecordBaseline })
     {
         INFO("verb " << static_cast<unsigned>(verb));
         auto const refused = DecodeCommand(Testing::EncodeNamelessClusterCommandWithVerb(static_cast<std::uint8_t>(verb)));
         REQUIRE_FALSE(refused.has_value());
-        CHECK(refused.error().code == ConsensusErrorCode::UnknownMessageType);
+        CHECK(refused.error().code == ConsensusErrorCode::MalformedFrame);
         CHECK(refused.error().context.contains("version 6"));
     }
     // ...while the last verb it did have still reads: the boundary is the table's, not one past it.
