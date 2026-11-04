@@ -6,6 +6,7 @@
 #include <expected>
 #include <map>
 #include <mutex>
+#include <ranges>
 #include <span>
 #include <string>
 #include <tuple>
@@ -22,16 +23,24 @@
 namespace Pace
 {
 
+/// One tracked connection still open.
+struct TrackedConnectionRow
+{
+    core::platform::NativeHandle handle;
+    /// Whether a cancel has shut it down already, so no later one counts it again.
+    bool cancelled { false };
+};
+
 struct OpenConnections::State
 {
     std::mutex mutex;
     /// Every tracked connection still open, by the serial `Track` gave it.
-    std::map<std::uint64_t, core::platform::NativeHandle> open;
+    std::map<std::uint64_t, TrackedConnectionRow> open;
     std::uint64_t nextSerial { 0 };
     /// Raised by the first `CancelOpenConnections`; a connection tracked afterwards is cancelled at once.
-    bool cancelled { false };
-    /// Every serial below this has been cancelled already, so a later cancel does not count it twice.
-    std::uint64_t cancelledBelow { 0 };
+    bool latched { false };
+    /// Every connection a cancel has shut down, at a `CancelOpenConnections` or at `Track` once latched.
+    std::size_t cancelledTotal { 0 };
 };
 
 namespace
@@ -173,33 +182,48 @@ OpenConnections::~OpenConnections() = default;
 std::unique_ptr<core::net::ISocket> OpenConnections::Track(std::unique_ptr<core::net::ISocket> socket,
                                                            core::platform::NativeHandle handle)
 {
+    auto const serial = [this] {
+        auto const guard = std::scoped_lock { _state->mutex };
+        return _state->nextSerial++;
+    }();
+    // Built BEFORE the handle is registered, outside the lock its destructor takes: an allocation that fails here
+    // closes @p socket with nothing registered, and a row can never outlive the descriptor it names. Should the
+    // registration below fail instead, `tracked` unwinds after the lock is released and erases a row that is absent.
+    auto tracked = std::make_unique<TrackedSocket>(std::move(socket), _state, serial);
     auto const guard = std::scoped_lock { _state->mutex };
-    auto const serial = _state->nextSerial++;
-    _state->open.emplace(serial, handle);
-    if (_state->cancelled)
+    auto& entry = _state->open.emplace(serial, TrackedConnectionRow { .handle = handle }).first->second;
+    if (_state->latched)
     {
         CancelNative(handle);
-        _state->cancelledBelow = _state->nextSerial;
+        entry.cancelled = true;
+        ++_state->cancelledTotal;
     }
-    return std::make_unique<TrackedSocket>(std::move(socket), _state, serial);
+    return tracked;
 }
 
 std::size_t OpenConnections::CancelOpenConnections() noexcept
 {
     auto const guard = std::scoped_lock { _state->mutex };
-    _state->cancelled = true;
+    _state->latched = true;
     std::size_t cancelled = 0;
     // Each is counted once: a connection a cancel has shut down stays tracked until its owner closes it, and a
-    // second cancel names only what was opened since the first.
-    for (auto const& [serial, handle]: _state->open)
+    // second cancel shuts down -- and names -- only what was opened since.
+    for (auto& entry: _state->open | std::views::values)
     {
-        if (serial < _state->cancelledBelow)
+        if (entry.cancelled)
             continue;
-        CancelNative(handle);
+        CancelNative(entry.handle);
+        entry.cancelled = true;
         ++cancelled;
     }
-    _state->cancelledBelow = _state->nextSerial;
+    _state->cancelledTotal += cancelled;
     return cancelled;
+}
+
+std::size_t OpenConnections::CancelledTotal() const noexcept
+{
+    auto const guard = std::scoped_lock { _state->mutex };
+    return _state->cancelledTotal;
 }
 
 std::size_t OpenConnections::OpenCount() const noexcept

@@ -1110,25 +1110,34 @@ void AdminHttpServer::RequestStop() noexcept
 void AdminHttpServer::Shutdown() noexcept
 {
     RequestStop();
-    _listener.close();
+    CloseListener();
     // Detached request coroutines may still be in flight. They borrow the
     // metrics sink, snapshot provider and routes held on this object, so we must
     // wait for them to drain before letting Shutdown return — otherwise an admin
     // handler that suspends on a slow write could touch freed members after
     // the server object is destroyed.
     DrainOrCancel();
+    ReportCancelled();
 }
 
 void AdminHttpServer::Stop(std::jthread& acceptThread) noexcept
 {
     RequestStop();
     // Before the join: on the accept thread's own profile the request in flight is served ON the thread being
-    // joined, so the drain -- and the cancel that bounds it -- must not wait behind it.
+    // joined, so the drain -- and the cancel that bounds it -- must not wait behind it. Once, so the bound is
+    // `WorstCaseStopUnder` as written: nothing after it waits on a request again.
     DrainOrCancel();
     if (acceptThread.joinable())
         acceptThread.join();
-    // Closes the listener once nothing reads it (#260); its own drain finds nothing left.
-    Shutdown();
+    // Closed once nothing reads it (#260).
+    CloseListener();
+    // After the join, so a connection the latch cancelled as an in-flight accept handed it out is counted too.
+    ReportCancelled();
+}
+
+void AdminHttpServer::CloseListener() noexcept
+{
+    _listener.close();
 }
 
 void AdminHttpServer::DrainOrCancel() noexcept
@@ -1142,18 +1151,26 @@ void AdminHttpServer::DrainOrCancel() noexcept
     // blocks -- for as long as it likes. Past the drain the stop stops waiting for clients: every connection still
     // open is shut down under whatever it is blocked in, and so is one an in-flight accept hands out from here on.
     // Asked whether or not the drain ran out, since an accept already past its poll can still produce a connection.
-    auto const cancelled = _openConnections.CancelOpenConnections();
-    if (cancelled > 0)
-        _logger.Logf(LogLevel::Warn,
-                     "{}: stopping, cancelled {} connection(s) still open after the {} ms drain",
-                     _profile.surface,
-                     cancelled,
-                     _profile.deadlines.drain.count());
+    // What it shut down is reported by `ReportCancelled`, once the count can no longer grow.
+    std::ignore = _openConnections.CancelOpenConnections();
     if (DrainWithin(busy, DrainBound { .ceiling = _profile.deadlines.afterCancel }) == DrainResult::Ceiling)
         _logger.Logf(LogLevel::Error,
                      "{}: {} request(s) did not finish within the stop ceiling",
                      _profile.surface,
                      _inFlight.load(std::memory_order_acquire));
+}
+
+void AdminHttpServer::ReportCancelled() noexcept
+{
+    // Every connection the registry actually shut down: open when the drain ended, whether its answer was still
+    // being written, its request still being read, or it was handed out by an accept already in flight. Not a count
+    // of slow clients, which the stop cannot tell apart from the rest, and so does not claim to be.
+    if (auto const cancelled = _openConnections.CancelledTotal(); cancelled > 0)
+        _logger.Logf(LogLevel::Warn,
+                     "{}: stopping, cancelled {} connection(s) still open when its {} ms drain ended",
+                     _profile.surface,
+                     cancelled,
+                     _profile.deadlines.drain.count());
 }
 
 } // namespace Pace

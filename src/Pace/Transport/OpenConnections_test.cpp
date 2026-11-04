@@ -9,7 +9,9 @@
 #include <cstddef>
 #include <format>
 #include <memory>
+#include <ranges>
 #include <span>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -19,6 +21,7 @@
 #include <core/net/ISocket.hpp>
 #include <core/net/IoResult.hpp>
 #include <tests/BoundedWait.hpp>
+#include <tests/SmallSendBufferListener.hpp>
 
 using namespace std::chrono_literals;
 
@@ -50,25 +53,26 @@ struct Connected
     std::unique_ptr<core::net::ISocket> served;
 };
 
-/// A listener with NO send timeout armed, so a blocking write to a client that does not read blocks until something
-/// ends it from outside -- the arrangement a cancel exists for, with nothing else that could pass for it.
+/// A listener with NO send timeout armed and a small send buffer, so a blocking write to a client that does not read
+/// fills what is under it at once and then blocks until something ends it from outside -- the arrangement a cancel
+/// exists for, with nothing else that could pass for it and nothing that depends on the host's buffer tuning.
 [[nodiscard]] std::unique_ptr<Pace::BlockingListener> Listening()
 {
-    auto listener = Pace::BlockingListener::Bind("127.0.0.1", 0);
-    REQUIRE(listener != nullptr);
-    REQUIRE(listener->IsBound());
+    auto listener = Pace::Testing::BindWithSmallSendBuffer();
     listener->SetTimeouts(std::chrono::milliseconds { 2000 }, std::chrono::milliseconds { 0 });
     return listener;
 }
 
-/// Dial @p listener and accept the connection.
+/// Dial @p listener, with a small receive buffer, and accept the connection.
 /// @param listener Where to connect.
 /// @return Both ends.
 [[nodiscard]] Connected Connect(Pace::BlockingListener& listener)
 {
     core::net::BlockingConnector connector;
-    auto client = core::async::syncRun(
-        connector.connect("127.0.0.1", listener.boundPort(), core::net::DialOptions { .connectTimeout = 5s }));
+    auto client = core::async::syncRun(connector.connect(
+        "127.0.0.1",
+        listener.boundPort(),
+        core::net::DialOptions { .connectTimeout = 5s, .buffers = { .send = {}, .receive = std::size_t { 4096 } } }));
     REQUIRE(client.has_value());
     auto served = core::async::syncRun(listener.accept());
     REQUIRE(served.has_value());
@@ -85,20 +89,51 @@ TEST_CASE("OpenConnections: a cancel ends a blocking write another thread is ins
     auto [client, served] = Connect(*listener);
     REQUIRE(listener->Connections().OpenCount() == 1);
 
+    // Chunk after chunk, counting what the kernel took and saying when a write is under way: a write that has begun
+    // and moves no byte for a stretch is one the kernel has parked, which a fixed sleep could only have hoped for.
+    // Bounded by its count -- far past what the buffers hold -- so a writer nothing blocks ends on its own.
+    constexpr auto Chunk = std::size_t { 64 } * 1024;
+    std::atomic<std::size_t> written { 0 };
+    std::atomic<bool> inWrite { false };
     std::atomic<bool> writeReturned { false };
     std::atomic<bool> writeFailed { false };
     std::jthread writer { [&, socket = served.get()] {
-        std::vector<std::byte> const payload(std::size_t { 64 } * 1024 * 1024);
-        auto const written = core::async::syncRun(WriteOnce(socket, std::span<std::byte const> { payload }));
-        writeFailed.store(!written.has_value());
+        std::vector<std::byte> const payload(Chunk);
+        for ([[maybe_unused]] auto const step: std::views::iota(0, 1024))
+        {
+            inWrite.store(true);
+            auto const wrote = core::async::syncRun(WriteOnce(socket, std::span<std::byte const> { payload }));
+            inWrite.store(false);
+            if (!wrote.has_value())
+            {
+                writeFailed.store(true);
+                break;
+            }
+            written.fetch_add(*wrote);
+        }
         writeReturned.store(true);
     } };
-    // The write is parked in the kernel, not merely late: it would never return by itself.
-    std::this_thread::sleep_for(300ms);
+    auto lastWritten = written.load();
+    auto lastMoved = std::chrono::steady_clock::now();
+    auto const parked = Pace::Testing::WaitUntil(
+        "the writer to be parked in a write that moves nothing",
+        [&] {
+            auto const now = std::chrono::steady_clock::now();
+            if (auto const seen = written.load(); seen != lastWritten)
+            {
+                lastWritten = seen;
+                lastMoved = now;
+            }
+            return inWrite.load() && !writeReturned.load() && now - lastMoved >= 250ms;
+        },
+        [&] { return std::format("written {}, in a write {}", written.load(), inWrite.load()); },
+        Pace::Testing::WaitOptions { .step = {}, .context = {}, .bound = 5s });
     // CHECK, never REQUIRE: an unwinding failure here would leave the join below waiting on a write nobody ends.
+    CHECK(parked);
     CHECK_FALSE(writeReturned.load());
 
     CHECK(listener->Connections().CancelOpenConnections() == 1);
+    CHECK(listener->Connections().CancelledTotal() == 1);
     auto const ended = Pace::Testing::WaitUntil(
         "the cancelled write to return",
         [&] { return writeReturned.load(); },
@@ -147,16 +182,23 @@ TEST_CASE("OpenConnections: a cancel latches, so a connection handed out after i
     auto listener = Listening();
     REQUIRE(listener->Connections().CancelOpenConnections() == 0);
     auto late = Connect(*listener);
-    late.served->setReceiveDeadline(5s);
+    // Counted where it was shut down, at the handing out, so a stop's report includes it.
+    CHECK(listener->Connections().CancelledTotal() == 1);
+    constexpr auto Deadline = 5s;
+    late.served->setReceiveDeadline(Deadline);
     std::vector<std::byte> buffer(16);
+    auto const began = std::chrono::steady_clock::now();
     auto const read = core::async::syncRun(ReadOnce(late.served.get(), std::span<std::byte> { buffer }));
-    // A shut-down read side answers end-of-stream at once, where an open one would wait out the deadline.
-    REQUIRE(read.has_value());
-    CHECK(*read == 0);
+    auto const took = std::chrono::steady_clock::now() - began;
+    // A shut-down read side answers AT ONCE, where an open one would wait out the deadline: end-of-stream on POSIX,
+    // `WSAESHUTDOWN` on Windows. What it answers is the platform's; that it did not wait is the cancel's.
+    CHECK((!read.has_value() || *read == 0));
+    CHECK(took < Deadline / 5);
 
     SECTION("and a later cancel does not count it a second time")
     {
         CHECK(listener->Connections().CancelOpenConnections() == 0);
+        CHECK(listener->Connections().CancelledTotal() == 1);
         CHECK(listener->Connections().OpenCount() == 1);
     }
     SECTION("the control: before any cancel, an accepted connection is served")

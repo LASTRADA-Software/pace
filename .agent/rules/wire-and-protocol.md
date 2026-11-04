@@ -2507,7 +2507,7 @@ gives it none, so each rule below is what keeps a session's fleet controls on th
   614 s measured before this. A forwarded call is posted onto `NodeIoLoop`, which dials through the connector,
   and the MCP thread waits on a condition variable bounded by `McpUpstream::CallDeadline`. A wait
   that runs out CANCELS what it waited for, so no frame stays parked for a reply nobody reads.
-- **A stop is bounded whatever a CLIENT does, because past its drain it CANCELS.** A blocking write
+- **A stop CANCELS what its drain cannot wait for, so it is bounded whatever a CLIENT does.** A blocking write
   is bounded per CALL (`SO_SNDTIMEO`), never per answer, so a local client reading just fast enough
   to keep each call moving held a response write -- and the thread it blocks, which the stop then
   joins -- for as long as it liked, past `TimeoutStopSec` into a `SIGKILL`. So every socket a

@@ -45,6 +45,7 @@
 #include <tests/HostNamingFakes.hpp>
 #include <tests/NodeFormationFakes.hpp>
 #include <tests/RelabelledPeerListener.hpp>
+#include <tests/SmallSendBufferListener.hpp>
 #include <tests/Unwrap.hpp>
 
 using namespace Pace;
@@ -628,9 +629,13 @@ TEST_CASE("an MCP stop cancels a client reading its answer too slowly, within Wo
     // A local client that reads its answer just often enough to keep every blocking write call inside its send
     // timeout would hold the serving thread -- and the stop that joins it -- for as long as it read. The drain cannot
     // wait for it, so past the drain the connection is cancelled and the stop ends inside `WorstCaseStop` regardless.
-    // Past what the server's send buffer absorbs (`tcp_wmem`'s ceiling, 4 MiB by default) with the client's receive
-    // buffer held small, and no larger: a sanitized debug build serializes the answer a code point at a time.
-    constexpr auto AnswerBytes = std::size_t { 6 } * 1024 * 1024;
+    // Many times what the server's send buffer (`Testing::BindWithSmallSendBuffer`, refused past its grant ceiling)
+    // and the client's receive buffer hold between them, so the case does not depend on `net.ipv4.tcp_wmem` -- and no
+    // larger, since a sanitized debug build serializes the answer a code point at a time.
+    constexpr auto ClientReceiveBytes = std::size_t { 4096 };
+    constexpr auto AnswerBytes = std::size_t { 4 } * 1024 * 1024;
+    static_assert(AnswerBytes > 4 * (Testing::SmallSendBufferGrantCeiling + ClientReceiveBytes),
+                  "the answer must outlast every buffer under it");
     auto tools = std::vector<Mcp::ToolRow> { Mcp::ToolRow {
         .name = "huge_answer",
         .title = "Huge answer",
@@ -648,9 +653,7 @@ TEST_CASE("an MCP stop cancels a client reading its answer too slowly, within Wo
     CapturingLogger logger;
     core::net::AcceptLoopHealth acceptLoops;
     McpStopFlag stopping;
-    auto bound = BlockingListener::Bind("127.0.0.1", 0);
-    REQUIRE(bound != nullptr);
-    REQUIRE(bound->IsBound());
+    auto bound = Testing::BindWithSmallSendBuffer();
     bound->SetTimeouts(AdminHttpServer::AcceptPoll, AdminHttpServer::RequestTimeout);
     auto const port = bound->boundPort();
     auto& connections = bound->Connections();
@@ -673,7 +676,7 @@ TEST_CASE("an MCP stop cancels a client reading its answer too slowly, within Wo
     auto client = core::async::syncRun(connector.connect(
         "127.0.0.1",
         port,
-        core::net::DialOptions { .connectTimeout = 5s, .buffers = { .send = {}, .receive = std::size_t { 4096 } } }));
+        core::net::DialOptions { .connectTimeout = 5s, .buffers = { .send = {}, .receive = ClientReceiveBytes } }));
     REQUIRE(client.has_value());
     (*client)->setReceiveDeadline(5s);
     REQUIRE(core::async::syncRun(

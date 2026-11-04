@@ -488,7 +488,7 @@ class AdminHttpServer
 
     /// The whole stop, in its one order: ask the loop to stop, drain the requests in flight -- CANCELLING the
     /// connections still open once `AdminDeadlines::drain` runs out -- then join @p acceptThread, and only then
-    /// close the listener (`Shutdown`).
+    /// close the listener.
     ///
     /// **The drain comes BEFORE the join**, because on an `OnAcceptThread` profile the request is served on the
     /// accept thread itself: a join first would wait for a client that reads its answer slowly, for as long as it
@@ -519,8 +519,14 @@ class AdminHttpServer
 
   private:
     /// Wait for the requests in flight up to `AdminDeadlines::drain`, then cancel every connection still open
-    /// and wait `afterCancel` for what they held to end, saying how many were cancelled.
+    /// and wait `afterCancel` for what they held to end. Run ONCE per stop, so `WorstCaseStopUnder` is literal.
     void DrainOrCancel() noexcept;
+
+    /// Close the listener: after the accept thread is joined, since closing writes what it reads (#260).
+    void CloseListener() noexcept;
+
+    /// Say, as a `Warn`, how many connections the stop's cancel shut down, once no accept can add to the count.
+    void ReportCancelled() noexcept;
 
     core::net::IListener& _listener;
     IConnectionCanceller& _openConnections;

@@ -37,8 +37,13 @@ class IConnectionCanceller
     /// accepted after the call -- by an accept that was already in flight -- would otherwise be served to
     /// a client the stop has stopped waiting for. Idempotent; a later call counts only what was opened
     /// since.
-    /// @return How many connections were open, and are now cancelled.
+    /// @return How many connections this call shut down: open, and not cancelled by an earlier call.
     [[nodiscard]] virtual std::size_t CancelOpenConnections() noexcept = 0;
+
+    /// Every connection a cancel has shut down so far, those cancelled as they were handed out after the latch
+    /// included -- what a stop reports once nothing more can be accepted.
+    /// @return The running total.
+    [[nodiscard]] virtual std::size_t CancelledTotal() const noexcept = 0;
 };
 
 /// The connections a blocking listener has handed out and the owner has not yet closed, so that a
@@ -53,8 +58,9 @@ class IConnectionCanceller
 /// cancel can reach it.
 ///
 /// **What a cancel does is a shutdown, never a close.** A shutdown makes the owner's write in flight
-/// fail and every later read answer end-of-stream, and leaves the descriptor to its owner, who still
-/// closes it exactly once. On Windows a blocking call another thread is inside is also cancelled at the
+/// fail and every later read answer AT ONCE -- end-of-stream on POSIX, `WSAESHUTDOWN` on Windows, so a
+/// caller asks only that it did not wait -- and leaves the descriptor to its owner, who still closes it
+/// exactly once. On Windows a blocking call another thread is inside is also cancelled at the
 /// handle (`CancelIoEx`), since a shutdown alone does not promise to end one there.
 class OpenConnections final: public IConnectionCanceller
 {
@@ -78,6 +84,9 @@ class OpenConnections final: public IConnectionCanceller
 
     /// @copydoc IConnectionCanceller::CancelOpenConnections
     [[nodiscard]] std::size_t CancelOpenConnections() noexcept override;
+
+    /// @copydoc IConnectionCanceller::CancelledTotal
+    [[nodiscard]] std::size_t CancelledTotal() const noexcept override;
 
     /// @return How many tracked connections are still open.
     [[nodiscard]] std::size_t OpenCount() const noexcept;

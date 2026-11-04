@@ -40,6 +40,7 @@
 #include <tests/BoundedWait.hpp>
 #include <tests/HalfClose.hpp>
 #include <tests/ScopedSignalHandler.hpp>
+#include <tests/SmallSendBufferListener.hpp>
 #include <tests/SocketDoubles.hpp>
 
 namespace
@@ -51,6 +52,11 @@ class NothingToCancel final: public Pace::IConnectionCanceller
 {
   public:
     [[nodiscard]] std::size_t CancelOpenConnections() noexcept override
+    {
+        return 0;
+    }
+
+    [[nodiscard]] std::size_t CancelledTotal() const noexcept override
     {
         return 0;
     }
@@ -1510,9 +1516,15 @@ constexpr Pace::AdminDeadlines StopCaseDeadlines {
 static_assert(Pace::AdminHttpServer::WorstCaseStopUnder(StopCaseDeadlines) < Pace::AdminHttpServer::RequestTimeout,
               "the bound must sit below one send timeout, or a write that merely timed out would pass for a cancel");
 
-/// Large enough that a client reading it slowly is still being written to when the drain runs out, whatever the
-/// loopback's buffers absorb at once (a few MiB, autotuned).
-constexpr std::size_t SlowReaderBodyBytes = std::size_t { 32 } * 1024 * 1024;
+/// The receive buffer the slow client asks for, so what it can hold unread is this and not the host's tuning.
+constexpr std::size_t SlowClientReceiveBytes = 4096;
+
+/// Large enough that a client reading it slowly is still being written to when the drain runs out: many times what
+/// the server's send buffer (`Testing::BindWithSmallSendBuffer`, refused past its grant ceiling) and the client's
+/// receive buffer can hold between them, so the case does not depend on `net.ipv4.tcp_wmem`.
+constexpr std::size_t SlowReaderBodyBytes = std::size_t { 4 } * 1024 * 1024;
+static_assert(SlowReaderBodyBytes > 4 * (Pace::Testing::SmallSendBufferGrantCeiling + SlowClientReceiveBytes),
+              "the answer must outlast every buffer under it");
 
 /// A route answering `GET /big` with @p bytes of body, after holding for @p hold.
 /// @param bytes The body's length.
@@ -1541,7 +1553,7 @@ struct StopCaseServer
                    Pace::AdminDeadlines deadlines,
                    std::size_t bodyBytes,
                    std::chrono::milliseconds hold):
-        listener { Pace::BlockingListener::Bind("127.0.0.1", 0) },
+        listener { Pace::Testing::BindWithSmallSendBuffer() },
         server { *listener,
                  listener->Connections(),
                  metrics,
@@ -1569,8 +1581,10 @@ struct StopCaseServer
     {
         using namespace std::chrono_literals;
         core::net::BlockingConnector connector;
-        auto client = core::async::syncRun(
-            connector.connect("127.0.0.1", listener->boundPort(), core::net::DialOptions { .connectTimeout = 5s }));
+        auto client = core::async::syncRun(connector.connect(
+            "127.0.0.1",
+            listener->boundPort(),
+            core::net::DialOptions { .connectTimeout = 5s, .buffers = { .send = {}, .receive = SlowClientReceiveBytes } }));
         REQUIRE(client.has_value());
         (*client)->setReceiveDeadline(5s);
         REQUIRE(core::async::syncRun(WriteString(client->get(), "GET /big HTTP/1.1\r\n\r\n")));
@@ -1585,6 +1599,18 @@ struct StopCaseServer
     std::unique_ptr<Pace::BlockingListener> listener;
     Pace::AdminHttpServer server;
     std::jthread acceptThread;
+
+    StopCaseServer(StopCaseServer const&) = delete;
+    StopCaseServer(StopCaseServer&&) = delete;
+    StopCaseServer& operator=(StopCaseServer const&) = delete;
+    StopCaseServer& operator=(StopCaseServer&&) = delete;
+
+    /// Asks the loop to stop before `acceptThread` joins it, so a failed `REQUIRE` anywhere in a case -- `Request`'s
+    /// included, before the case has armed anything of its own -- ends the case red rather than hanging it.
+    ~StopCaseServer()
+    {
+        server.RequestStop();
+    }
 };
 
 /// `AdminHttpServer::Stop` on a thread of its own, so the case's thread can bound the wait for it.
@@ -1771,4 +1797,34 @@ TEST_CASE("AdminHttp: a client that reads its answer still gets all of it from a
     CHECK(std::ranges::none_of(fixture.logger.Snapshot(), [](Pace::CapturingLogger::Record const& record) {
         return record.message.contains("cancelled");
     }));
+}
+
+TEST_CASE("AdminHttp: a stop waits for a stuck handler once, and says so once", "[admin][http][stop]")
+{
+    // A handler that outlasts the drain and the wait after the cancel is not a client, and the cancel cannot end it.
+    // The stop waits for it ONCE -- so `WorstCaseStopUnder` is the bound as written -- and reports it once, where a
+    // second drain inside the listener's close doubled both.
+    using namespace std::chrono_literals;
+    // Past TWO stop ceilings, so a stop that waited twice would also have reported twice.
+    constexpr auto Hold = 2 * (StopCaseDeadlines.drain + StopCaseDeadlines.afterCancel) + 1000ms;
+    StopCaseServer fixture { Pace::AdminConnectionServing::OnOwnThreads, StopCaseDeadlines, 16, Hold };
+    auto client = fixture.Request();
+    REQUIRE(Pace::Testing::WaitUntil(
+        "the handler to be running",
+        [&] { return fixture.entered.load(); },
+        [] { return std::string { "not entered" }; },
+        Pace::Testing::WaitOptions { .step = {}, .context = {}, .bound = 5s }));
+
+    auto const began = std::chrono::steady_clock::now();
+    fixture.server.Stop(fixture.acceptThread);
+    auto const took = std::chrono::steady_clock::now() - began;
+
+    CHECK(took < Pace::AdminHttpServer::WorstCaseStopUnder(StopCaseDeadlines) + 250ms);
+    auto const records = fixture.logger.Snapshot();
+    CHECK(std::ranges::count_if(records,
+                                [](Pace::CapturingLogger::Record const& record) {
+                                    return record.level == Pace::LogLevel::Error
+                                           && record.message.contains("did not finish within the stop ceiling");
+                                })
+          == 1);
 }
