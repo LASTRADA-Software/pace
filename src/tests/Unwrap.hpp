@@ -74,19 +74,11 @@ template <typename T>
     return *value;
 }
 
-/// `Unwrap` for a caller that must MUTATE or call a non-const member of what the optional holds -- a
-/// component a fixture builds late, held in an `std::optional` because it cannot be constructed in place.
-///
-/// The same terms as the overloads above: the `REQUIRE` that precedes every call has already failed the
-/// test when the optional is empty, so what would follow is a defect in the case itself, and it stops.
-/// There is no shared default to hand back here, since a reference to one would be written through.
-/// @tparam T The contained type.
-/// @param value The optional, already `REQUIRE`d to hold a value.
-/// @return A mutable reference to its value.
 /// The object a pointer names, for an accessor that answers null when the shape is wrong (`Json::Value::AsString`).
 ///
-/// The same contract as the `optional` overload above: a `REQUIRE` precedes every call, and the shared default is
-/// never observed. Spelled as a function rather than `*p` so the null branch is VISIBLE to the optimiser -- GCC's
+/// The same contract as the default-initializable `optional` overload above: a `REQUIRE` precedes every call, and the
+/// shared default is never observed. Spelled as a function rather than `*p` so the null branch is VISIBLE to the optimiser
+/// -- GCC's
 /// `-Wnull-dereference` at `-O3` does not carry a `REQUIRE(p != nullptr)` into the dereference after it, and it
 /// cannot: a failed `REQUIRE` returns through Catch2's handler as far as the compiler can see.
 /// @param value The pointer.
@@ -99,6 +91,15 @@ template <typename T>
     return value != nullptr ? *value : absent;
 }
 
+/// `Unwrap` for a caller that must MUTATE or call a non-const member of what the optional holds -- a
+/// component a fixture builds late, held in an `std::optional` because it cannot be constructed in place.
+///
+/// The same terms as the overloads above: the `REQUIRE` that precedes every call has already failed the
+/// test when the optional is empty, so what would follow is a defect in the case itself, and it stops.
+/// There is no shared default to hand back here, since a reference to one would be written through.
+/// @tparam T The contained type.
+/// @param value The optional, already `REQUIRE`d to hold a value.
+/// @return A mutable reference to its value.
 template <typename T>
 [[nodiscard]] T& UnwrapMutable(std::optional<T>& value)
 {

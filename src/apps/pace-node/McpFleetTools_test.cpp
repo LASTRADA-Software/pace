@@ -426,10 +426,19 @@ TEST_CASE("Every fleet tool reads the leader's fleet document and reports what i
         auto const& conditions = Elements(At(machines[0], "conditions"));
         auto const& documentRows = Elements(At(document, "conditions"));
         REQUIRE(conditions.size() == 2);
+        // Required, not assumed: a short document would subscript past its end, a row that is not an object would
+        // iterate nothing and pass, and a row filed under another machine would compare the wrong condition. The
+        // document lists this machine's two rows first, then the other machine's.
+        REQUIRE(documentRows.size() >= conditions.size());
         for (auto const index: std::views::iota(std::size_t { 0 }, conditions.size()))
-            for (auto const& [key, value]: Unwrap(documentRows[index].AsObject()))
+        {
+            auto const* const documentRow = documentRows[index].AsObject();
+            REQUIRE(documentRow != nullptr);
+            REQUIRE(Text(At(documentRows[index], "endpoint")) == R"("10.0.0.1:6674")");
+            for (auto const& [key, value]: Unwrap(documentRow))
                 if (key != "endpoint")
                     CHECK(Text(At(conditions[index], key)) == Text(value));
+        }
     }
 }
 
