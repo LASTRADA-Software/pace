@@ -852,6 +852,7 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
 /// @param logger Where the node reports.
 /// @param reloader The live configuration; null with no file.
 /// @param hostEvents Where the host's suspend, resume and network events arrive.
+/// @param budgetDrops Whether this process dropped a cluster budget override; outlives every body.
 /// @param routeAt Where this machine's route is asked, and where the last one is kept for the process.
 /// @return The process's exit status.
 [[nodiscard]] int WorkerBody(NodeConfig const& cfg,
@@ -862,6 +863,7 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
                              Node::FormationBody const& formation,
                              std::optional<int> activated,
                              Node::LeaseCheckInForce& leaseCheck,
+                             Node::BudgetDropLatch& budgetDrops,
                              RouteParts const& routeAt)
 {
     // ONE origin for every uptime this process reports. `/healthz` and the `0xFC`
@@ -1435,6 +1437,7 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
                                                   endpointConfig,
                                                   logger,
                                                   AddressWhen(Node::RunsConsensus(cfg), conditions),
+                                                  budgetDrops,
                                                   cfg.nodeId,
                                                   Node::ReconcileOn::OwnThread };
 
@@ -1693,6 +1696,10 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     // above rather than as a null. See `BindFailurePolicy` in NodeSurfaces.hpp.
     auto const nodeSurface = std::move(*nodeSurfaceOrRefusal);
     mcpForwarding.RouteLocalThrough(nodeSurface.get());
+    // And on EVERY way out from here -- a later refusal's early return as well as the drain -- the budget applier is
+    // stopped before this surface, whose router its in-process reports reach, is destroyed: declared after it, so
+    // destroyed first. The drain below stops it earlier still; `Stop` is idempotent.
+    Node::StopBeforeTeardown const budgetsStopFirst { budgetOverrides };
 
     // Says, once a minute and for as long as any is waiting, that machines have asked to join
     // and nobody has decided about them.
@@ -2117,6 +2124,11 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     }
     logger.Log(LogLevel::Info, Node::DrainSentence(formation.durables.reform.Pending()));
 
+    // **The budget applier stops FIRST, before anything below tears a surface down.** On the leader its MEMBER-REPORT
+    // is answered in-process through this node's own `0xFC` router, which goes before the applier would; a pass in
+    // that window would post onto a freed responder or wait out the call deadline (`BudgetOverrideApplier::Stop`).
+    budgetOverrides.Stop();
+
     // **Every compile drained HERE, while the node's reactor is still turning** -- see
     // `WorkerTier::StopAndDrain` for why destruction order cannot express it.
     if (workerTier != nullptr)
@@ -2165,6 +2177,7 @@ struct ServingParts
     Node::ReformRequest& reform;            ///< Raised by a move; ends a body and starts the next.
     Node::FormationRuntimeParts runtime;    ///< What every body's formation acts through.
     Node::LeaseCheckInForce& leaseCheck;    ///< Where every body's worker records the lease check it built.
+    Node::BudgetDropLatch& budgetDrops;     ///< Whether this process dropped a cluster budget override, across bodies.
     RouteParts route;                       ///< Where every body's endpoint resolver asks and keeps the route.
 };
 
@@ -2240,6 +2253,7 @@ void PauseUnlessStopped(std::chrono::milliseconds wait)
                               Node::FormationBody { .record = record, .durables = durables, .reloader = reloader },
                               served,
                               parts.leaseCheck,
+                              parts.budgetDrops,
                               parts.route);
         },
         logger);
@@ -3138,6 +3152,9 @@ int main(int argc, char** argv)
     // the unchecked one (`Node::ReloadCheckWith`). Recorded by the factory that builds the check,
     // in whichever body runs, so the guard asks what was BUILT rather than a flag shape.
     Node::LeaseCheckInForce leaseCheck;
+    // And whether this process has dropped a cluster cache budget override for a later local edit: the latch behind
+    // `cache-budget-override-dropped`, held across every body so a reform does not clear a row nobody has seen.
+    Node::BudgetDropLatch budgetDrops;
     std::optional<NodeReloader> reloader;
     if (!lookup.path.empty())
         reloader.emplace(cfg,
@@ -3324,6 +3341,7 @@ int main(int argc, char** argv)
                                               .wait = formationWait,
                                           },
                                       .leaseCheck = leaseCheck,
+                                      .budgetDrops = budgetDrops,
                                       .route = RouteParts { .probe = *routeProbe, .cell = routeHost } };
     return host->Run([&cfg,
                       &identityKey,

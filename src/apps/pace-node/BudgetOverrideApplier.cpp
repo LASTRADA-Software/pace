@@ -127,6 +127,7 @@ BudgetOverrideApplier::BudgetOverrideApplier(ITierBudgets& tiers,
                                              INodeConfigSource const& config,
                                              ILogger& logger,
                                              NodeConditions* conditions,
+                                             BudgetDropLatch& dropped,
                                              std::string selfId,
                                              ReconcileOn on):
     _tiers { tiers },
@@ -134,6 +135,7 @@ BudgetOverrideApplier::BudgetOverrideApplier(ITierBudgets& tiers,
     _config { config },
     _logger { logger },
     _conditions { conditions },
+    _dropped { dropped },
     _selfId { std::move(selfId) }
 {
     // What the tiers were built with: the configuration in force as this is constructed, which is the one the cache
@@ -143,10 +145,16 @@ BudgetOverrideApplier::BudgetOverrideApplier(ITierBudgets& tiers,
         _inForce[static_cast<std::size_t>(row.tier)] =
             InForce { .bytes = cfg.*row.field, .source = BudgetSource::Configured, .overrideId = 0 };
 
-    // Answered at construction, so the row is never `Undecided` on a node that runs consensus: nothing has been dropped
-    // until a pass finds a baseline the configuration has moved away from.
+    // Answered at construction, so the row is never `Undecided` on a node that runs consensus -- and from the PROCESS's
+    // latch, never from nothing: a body a reform starts builds a new applier and a new registry, and a drop an earlier
+    // body made is still one nobody may have seen. Clear only while this process has dropped nothing.
     if (_conditions != nullptr)
-        _conditions->Clear(NodeCondition::CacheBudgetOverrideDropped);
+    {
+        if (auto const detail = _dropped.Detail(); detail.has_value())
+            _conditions->Raise(NodeCondition::CacheBudgetOverrideDropped, *detail);
+        else
+            _conditions->Clear(NodeCondition::CacheBudgetOverrideDropped);
+    }
 
     // The first pass runs with no state yet, so the status says what is configured from the first `node-status`.
     if (on == ReconcileOn::OwnThread)
@@ -157,6 +165,17 @@ BudgetOverrideApplier::BudgetOverrideApplier(ITierBudgets& tiers,
 
 BudgetOverrideApplier::~BudgetOverrideApplier()
 {
+    Stop();
+}
+
+void BudgetOverrideApplier::Stop()
+{
+    {
+        std::scoped_lock const lock { _mutex };
+        _stopped = true;
+    }
+    // Joined: a pass already running finishes the tier it is on -- a report in flight ends within its own deadline,
+    // against surfaces that are still up because this runs before any of them is torn down -- and starts nothing more.
     if (_thread.joinable())
     {
         _thread.request_stop();
@@ -164,10 +183,18 @@ BudgetOverrideApplier::~BudgetOverrideApplier()
     }
 }
 
+bool BudgetOverrideApplier::Stopped() const
+{
+    std::scoped_lock const lock { _mutex };
+    return _stopped;
+}
+
 void BudgetOverrideApplier::OnState(Cluster::ClusterState const& state)
 {
     {
         std::scoped_lock const lock { _mutex };
+        if (_stopped)
+            return;
         _pending = state;
         _dirty = true;
     }
@@ -178,6 +205,8 @@ void BudgetOverrideApplier::ReloadAccepted()
 {
     {
         std::scoped_lock const lock { _mutex };
+        if (_stopped)
+            return;
         _dirty = true;
     }
     _wake.notify_one();
@@ -203,6 +232,8 @@ void BudgetOverrideApplier::Reconcile()
     auto state = std::optional<Cluster::ClusterState> {};
     {
         std::scoped_lock const lock { _mutex };
+        if (_stopped)
+            return;
         state = _pending;
         _dirty = false;
     }
@@ -213,6 +244,9 @@ void BudgetOverrideApplier::Reconcile()
     auto owed = false;
     for (auto const& row: ConfiguredBudgetTable)
     {
+        // A stop between two tiers starts no further report or resize: the pass is abandoned, status and all.
+        if (Stopped())
+            return;
         auto const recorded =
             member != nullptr ? Cluster::BudgetOf(*member, row.tier) : std::optional<Cluster::BudgetOverride> {};
         auto [tierStatus, reportOwed] = ReconcileTier(row.tier, recorded, cfg.*row.field);
@@ -262,6 +296,16 @@ std::pair<TierBudgetStatus, bool> BudgetOverrideApplier::ReconcileTier(
                 // recorded could not be told from a local edit made meanwhile.
                 if (auto const reported = _reports.RecordBaseline(tier, configured, over.id); reported.has_value())
                     target = asOverride;
+                else if (alreadyApplied)
+                {
+                    // Already in force: a baseline appended and not yet committed is reported again, and a failure of
+                    // that re-report changes nothing on the tier -- reverting would grow it now and shrink it again,
+                    // evicting, once the report goes through.
+                    target = asOverride;
+                    owed = true;
+                    status.note =
+                        std::format("in force; reporting its baseline to the leader again ({}); retrying", reported.error());
+                }
                 else
                 {
                     owed = true;
@@ -317,6 +361,7 @@ std::expected<void, std::string> BudgetOverrideApplier::DropLocalNewer(StorageTi
                                         BudgetText(recorded.bytes),
                                         BudgetText(baseline));
         _logger.Logf(LogLevel::Warn, "cache budget override dropped -- {}", detail);
+        _dropped.Record(detail);
         if (_conditions != nullptr)
             _conditions->Raise(NodeCondition::CacheBudgetOverrideDropped, detail);
     }
@@ -357,6 +402,18 @@ std::expected<void, std::string> BudgetOverrideApplier::Enforce(StorageTier tier
                  BudgetText(bytes),
                  BudgetSourceName(source));
     return {};
+}
+
+void BudgetDropLatch::Record(std::string detail)
+{
+    std::scoped_lock const lock { _mutex };
+    _detail = std::move(detail);
+}
+
+std::optional<std::string> BudgetDropLatch::Detail() const
+{
+    std::scoped_lock const lock { _mutex };
+    return _detail;
 }
 
 std::vector<TierBudgetStatus> BudgetOverrideApplier::BudgetStatus() const

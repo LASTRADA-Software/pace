@@ -2593,6 +2593,15 @@ TEST_CASE("A budget edit names its setter by the machine a route identified, and
         CHECK(fleet.cluster.proposed.back().setBy == "node-a");
     }
 
+    SECTION("a caller on this machine that proved a key no member holds is still this machine")
+    {
+        auto stranger = Proven("stranger", true);
+        stranger.peerId = "127.0.0.1";
+        REQUIRE(fleet.Service().MemberEdit(stranger, SetBudgetEdit, "node-b", BudgetValue(MiB, {})).status
+                == Wire::Status::Ok);
+        CHECK(fleet.cluster.proposed.back().setBy == "leader-self");
+    }
+
     SECTION("a caller nothing identified -- --fleet-open from another machine -- names nobody")
     {
         auto open = OperatorCaller;

@@ -313,7 +313,18 @@ namespace
         R"("tiers":{"type":["array","null"],"description":"One row per cache tier; present:false is a tier this cache lacks (every figure null); budget_unbounded when the budget is zero; hit_ratio null with no lookups. null: no cache."},)"
         R"("surfaces":{"type":"array"},)"
         R"("effective_config":{"type":["array","null"],"description":"The configuration in force after reloads: {name, values}; values null when unset; a credential reads <redacted> and never leaves its node; non_utf8 true when a value was not UTF-8 and is shown escaped as <non-utf8: ...> with each such byte as \\xHH."},)"
-        R"("budget_overrides":{"type":["array","null"],"description":"null: the node does not say."}}})";
+        R"("budget_overrides":{"type":["array","null"],"description":"Each cache tier's budget: one row per tier the node has, or that the cluster records an override for. null: the node does not say.",)"
+        R"("items":{"type":"object","required":["tier","bytes","source","configured_bytes","override_bytes","baseline_bytes","set_at","set_by","set_by_name","excess_bytes","note","text"],"properties":{)"
+        R"("tier":{"type":"string"},"bytes":{"type":["integer","null"],"description":"The budget in force; 0 is unbounded; null when the node has no such tier."},)"
+        R"("source":{"type":"string","description":"cluster (an override) or configured (the machine's own flag)."},)"
+        R"("configured_bytes":{"type":"integer","description":"The machine's own budget in the configuration in force; 0 is unbounded."},)"
+        R"("override_bytes":{"type":["integer","null"],"description":"The override the cluster records; null when none is."},)"
+        R"("baseline_bytes":{"type":["integer","null"],"description":"The configured value the override was set against, reported by the node; null until reported, or with no override."},)"
+        R"("set_at":{"type":["string","null"],"description":"When the leader recorded the override, UTC, by the leader's clock; display only."},)"
+        R"("set_by":{"type":["string","null"],"description":"The member the override is attributed to: the machine the operator acted from."},)"
+        R"("set_by_name":{"type":["string","null"]},"excess_bytes":{"type":["integer","null"],"description":"Bytes still over the budget in force while a shrink converges; null with no tier."},)"
+        R"("note":{"type":["string","null"],"description":"Why the recorded override is not in force, or a budget was refused; null when all is."},)"
+        R"("text":{"type":"string","description":"The row as pacectl node prints it."}}}}}})";
 
 } // namespace
 

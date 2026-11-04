@@ -188,8 +188,9 @@ struct Rig
     RecordingReports reports;
     CapturingLogger logger;
     NodeConditions conditions;
+    BudgetDropLatch drops;
     BudgetOverrideApplier applier {
-        tiers, reports, config, logger, &conditions, std::string { SelfId }, ReconcileOn::Caller
+        tiers, reports, config, logger, &conditions, drops, std::string { SelfId }, ReconcileOn::Caller
     };
 };
 
@@ -281,6 +282,7 @@ TEST_CASE("The applier never compares clocks: it is built with no clock, and dec
                                                core::platform::IClock&,
                                                ILogger&,
                                                NodeConditions*,
+                                               BudgetDropLatch&,
                                                std::string,
                                                ReconcileOn>);
     STATIC_CHECK(std::is_constructible_v<BudgetOverrideApplier,
@@ -289,6 +291,7 @@ TEST_CASE("The applier never compares clocks: it is built with no clock, and dec
                                          INodeConfigSource const&,
                                          ILogger&,
                                          NodeConditions*,
+                                         BudgetDropLatch&,
                                          std::string,
                                          ReconcileOn>);
 
@@ -502,8 +505,9 @@ TEST_CASE("An applied state reaches the tiers on the applier's own thread, never
     } tiers;
     RecordingReports reports;
     NullLogger logger;
+    BudgetDropLatch drops;
     BudgetOverrideApplier applier {
-        tiers, reports, config, logger, nullptr, std::string { SelfId }, ReconcileOn::OwnThread
+        tiers, reports, config, logger, nullptr, drops, std::string { SelfId }, ReconcileOn::OwnThread
     };
     applier.OnState(StateWith(Override(64 * MiB, 512 * MiB, 7)));
     auto const reached = [&tiers] {
@@ -615,4 +619,73 @@ TEST_CASE("The leader's own MEMBER-REPORT rides its in-process path under its ow
         CHECK(anonymousUpstream.lastError == std::optional { Wire::ErrorCode::NodeIdentityRequired });
         CHECK(leader.cluster.proposed.size() == 1);
     }
+}
+
+TEST_CASE("An override in force stays in force while its baseline's re-report fails", "[node][budget][budget-applier]")
+{
+    // Applied on an accepted report whose entry has not committed yet: the next state still shows no baseline, so it is
+    // reported again -- and a failure of THAT changes nothing on the tier, never a grow and a re-shrink.
+    Rig rig { 512 * MiB };
+    rig.applier.OnState(StateWith(Override(64 * MiB, std::nullopt, 7)));
+    rig.applier.Reconcile();
+    REQUIRE(rig.Memory().source == BudgetSource::Cluster);
+    REQUIRE(rig.tiers.applied.size() == 1);
+
+    rig.reports.reachable = false;
+    rig.applier.OnState(StateWith(Override(64 * MiB, std::nullopt, 7)));
+    rig.applier.Reconcile();
+    CHECK(rig.tiers.applied.size() == 1); // no RestoreConfigured
+    CHECK(rig.Memory().source == BudgetSource::Cluster);
+    CHECK(rig.Memory().effective == std::optional { 64 * MiB });
+    CHECK(rig.Memory().note.contains("in force"));
+}
+
+TEST_CASE("After Stop no pass runs: a state or a reload reports nothing and resizes nothing",
+          "[node][budget][budget-applier]")
+{
+    Rig rig { 512 * MiB };
+    rig.applier.Stop();
+    rig.applier.Stop(); // idempotent
+    rig.applier.OnState(StateWith(Override(64 * MiB, std::nullopt, 7)));
+    rig.config.SetMemory(256 * MiB);
+    rig.applier.ReloadAccepted();
+    rig.applier.Reconcile();
+    CHECK(rig.reports.baselines.empty());
+    CHECK(rig.reports.drops.empty());
+    CHECK(rig.tiers.applied.empty());
+    CHECK(rig.Memory().source == BudgetSource::Configured);
+    CHECK(rig.Memory().effective == std::optional { 512 * MiB });
+}
+
+TEST_CASE("A reform keeps cache-budget-override-dropped raised: the latch outlives the body",
+          "[node][budget][budget-applier][conditions]")
+{
+    // A reform is a new body: a new registry and a new applier, over the process's one latch.
+    BudgetDropLatch drops;
+    SwappableConfig config { ConfigWith(1024 * MiB) };
+    RecordingTiers tiers;
+    RecordingReports reports;
+    NullLogger logger;
+    {
+        NodeConditions first;
+        BudgetOverrideApplier applier {
+            tiers, reports, config, logger, &first, drops, std::string { SelfId }, ReconcileOn::Caller
+        };
+        applier.OnState(StateWith(Override(64 * MiB, 512 * MiB, 7)));
+        applier.Reconcile();
+        REQUIRE(DroppedState(first) == Wire::ConditionState::Raised);
+    }
+    NodeConditions second;
+    BudgetOverrideApplier reformed {
+        tiers, reports, config, logger, &second, drops, std::string { SelfId }, ReconcileOn::Caller
+    };
+    CHECK(DroppedState(second) == Wire::ConditionState::Raised);
+
+    // The control: a process that dropped nothing starts the row clear.
+    BudgetDropLatch none;
+    NodeConditions third;
+    BudgetOverrideApplier fresh {
+        tiers, reports, config, logger, &third, none, std::string { SelfId }, ReconcileOn::Caller
+    };
+    CHECK(DroppedState(third) == Wire::ConditionState::Clear);
 }

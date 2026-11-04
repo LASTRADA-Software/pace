@@ -236,6 +236,27 @@ class UpstreamMemberReportClient final: public IMemberReportClient
     IMcpUpstream& _upstream;
 };
 
+/// Whether this PROCESS has dropped a cluster override for a later local edit, and what was said: the latch behind
+/// `cache-budget-override-dropped`.
+///
+/// **Owned by `main`, across every body**, beside `LeaseCheckInForce`: a reform builds a new body -- a new condition
+/// registry and a new applier -- and a latched row is the claim that nothing this process does clears it, a reform
+/// included. Each applier raises the row from here at construction, so a drop an earlier body made stays raised.
+class BudgetDropLatch
+{
+  public:
+    /// Record a drop, the newest detail kept. Any thread.
+    /// @param detail What was said about it.
+    void Record(std::string detail);
+
+    /// @return The newest drop's detail, or nothing while this process has dropped none. Any thread.
+    [[nodiscard]] std::optional<std::string> Detail() const;
+
+  private:
+    mutable std::mutex _mutex;
+    std::optional<std::string> _detail; ///< Guarded by `_mutex`.
+};
+
 /// How long a report the leader did not take waits before the applier asks again with nothing else changing.
 ///
 /// A retry, not a correctness bound: a report also goes again at the next applied state or accepted reload. It is what
@@ -254,9 +275,11 @@ inline constexpr std::chrono::seconds BudgetReportRetryInterval { 30 };
 /// **The configuration in force, never the start's** (`INodeConfigSource`): a reload that changed `--cache-memory`
 /// is what the next pass compares the baseline with.
 ///
-/// **Shutdown.** The destructor stops and joins the thread; a report in flight ends within
-/// `McpUpstream::CallDeadline`. Declared after the cache tier and the upstream it reaches, and before the consensus
-/// tier that tells it states, so it is destroyed before both of the former and after the latter.
+/// **Shutdown is `Stop()`, called by `WorkerBody` as soon as its serve loop ends** -- before any surface is torn down.
+/// Destruction order alone is not enough: on the leader a report is answered in-process through the node's own `0xFC`
+/// router (`FrameRouterAnswerer`), and that router is torn down BEFORE this object is destroyed, so a pass run in that
+/// window would post onto a freed responder or wait out `McpUpstream::CallDeadline` on a loop nobody turns. After
+/// `Stop()` no pass starts and `OnState`/`ReloadAccepted` do nothing; the destructor calls it again, harmlessly.
 class BudgetOverrideApplier final: public IBudgetOverrideStatusSource, public IAcceptedReloadListener
 {
   public:
@@ -266,6 +289,7 @@ class BudgetOverrideApplier final: public IBudgetOverrideStatusSource, public IA
     /// @param logger Where a dropped override is said at Warn, and a failure once per change.
     /// @param conditions Where `cache-budget-override-dropped` is raised, or null on a node running no consensus,
     ///        whose conditions answer the row from its scope.
+    /// @param dropped The process's latch for that row, which outlives every body; must outlive this.
     /// @param selfId This node's member id: whose record the overrides are read from.
     /// @param on Where reconciliation runs: the applier's own thread, or only a caller of `Reconcile` (a test).
     BudgetOverrideApplier(ITierBudgets& tiers,
@@ -273,6 +297,7 @@ class BudgetOverrideApplier final: public IBudgetOverrideStatusSource, public IA
                           INodeConfigSource const& config,
                           ILogger& logger,
                           NodeConditions* conditions,
+                          BudgetDropLatch& dropped,
                           std::string selfId,
                           ReconcileOn on);
 
@@ -281,8 +306,13 @@ class BudgetOverrideApplier final: public IBudgetOverrideStatusSource, public IA
     BudgetOverrideApplier(BudgetOverrideApplier&&) = delete;
     BudgetOverrideApplier& operator=(BudgetOverrideApplier&&) = delete;
 
-    /// Stops and joins the applier's thread.
+    /// `Stop()`.
     ~BudgetOverrideApplier() override;
+
+    /// Stop for good: no pass starts after this returns, and `OnState`/`ReloadAccepted` are no-ops. Joins the
+    /// applier's thread, so a pass already running finishes the tier it is on first. Idempotent; any thread but the
+    /// applier's own.
+    void Stop();
 
     /// Record @p state as the newest the cluster applied and wake the applier. Any thread; never applies or reports.
     /// @param state The state the cluster just applied.
@@ -306,6 +336,9 @@ class BudgetOverrideApplier final: public IBudgetOverrideStatusSource, public IA
         BudgetSource source { BudgetSource::Configured }; ///< Where it came from.
         std::uint64_t overrideId { 0 };                   ///< The override in force, when `source` is `Cluster`.
     };
+
+    /// @return Whether `Stop()` was called.
+    [[nodiscard]] bool Stopped() const;
 
     /// The thread's body.
     /// @param stop Requested by the destructor.
@@ -347,13 +380,15 @@ class BudgetOverrideApplier final: public IBudgetOverrideStatusSource, public IA
     INodeConfigSource const& _config;
     ILogger& _logger;
     NodeConditions* _conditions;
+    BudgetDropLatch& _dropped;
     std::string _selfId;
 
-    std::mutex _mutex;                                ///< Guards `_pending`, `_dirty` and `_retry`.
+    mutable std::mutex _mutex;                        ///< Guards `_pending`, `_dirty`, `_retry` and `_stopped`.
     std::condition_variable_any _wake;                ///< States, reloads and stops.
     std::optional<Cluster::ClusterState> _pending {}; ///< The newest state applied; guarded by `_mutex`.
     bool _dirty { true };                             ///< A pass is owed; guarded by `_mutex`.
     bool _retry { false };                            ///< A report is still owed; guarded by `_mutex`.
+    bool _stopped { false };                          ///< `Stop()` was called; guarded by `_mutex`.
 
     /// Reconciler-only: one pass at a time (`Reconcile` may also be called by a test).
     std::mutex _reconcileMutex;
@@ -366,6 +401,32 @@ class BudgetOverrideApplier final: public IBudgetOverrideStatusSource, public IA
 
     /// Last, so it stops and joins before anything above it goes.
     std::jthread _thread;
+};
+
+/// Stops a `BudgetOverrideApplier` when it goes out of scope: declared after whatever the applier's reports reach, so on
+/// every way out of the owner's scope -- an early return included -- the applier stops before that is destroyed.
+class StopBeforeTeardown
+{
+  public:
+    /// @param applier Stopped by the destructor; must outlive this.
+    explicit StopBeforeTeardown(BudgetOverrideApplier& applier) noexcept:
+        _applier { applier }
+    {
+    }
+
+    StopBeforeTeardown(StopBeforeTeardown const&) = delete;
+    StopBeforeTeardown& operator=(StopBeforeTeardown const&) = delete;
+    StopBeforeTeardown(StopBeforeTeardown&&) = delete;
+    StopBeforeTeardown& operator=(StopBeforeTeardown&&) = delete;
+
+    /// `BudgetOverrideApplier::Stop()`.
+    ~StopBeforeTeardown()
+    {
+        _applier.Stop();
+    }
+
+  private:
+    BudgetOverrideApplier& _applier;
 };
 
 } // namespace Pace::Node

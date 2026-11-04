@@ -1109,7 +1109,8 @@ namespace
     ///
     /// The member holding the key the connection PROVED; else the one holding the key a verified machine TICKET was
     /// signed by, since that is the minting machine's own live key exactly as a proof's is; else, for a caller on THIS
-    /// machine, the member holding this leader's own key -- the rule an admission's charge follows
+    /// machine -- one that proved or presented a key no member holds included -- the member holding this leader's own
+    /// key -- the rule an admission's charge follows
     /// (`ReportLeaseDemand`), since a loopback route is by definition this machine. Empty when none of them names a
     /// member: `--fleet-open` identifies nobody.
     /// @param caller Who is asking.
@@ -1126,9 +1127,12 @@ namespace
             caller.ticketKey,
             IsLoopbackHost(caller.peerId) ? std::optional { ownKey } : std::nullopt,
         };
+        // The first candidate a member HOLDS: a proof or a ticket under a key the roster does not hold names nobody, so
+        // a caller on this machine that proved such a key is still this machine.
         for (auto const& candidate: candidates)
             if (candidate.has_value())
-                return state.HolderOf(*candidate).value_or(std::string {});
+                if (auto holder = state.HolderOf(*candidate); holder.has_value())
+                    return std::move(*holder);
         return {};
     }
 } // namespace

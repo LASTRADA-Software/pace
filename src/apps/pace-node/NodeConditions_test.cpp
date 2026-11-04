@@ -478,7 +478,9 @@ TEST_CASE("Every condition row is evaluated on a fully configured node", "[node]
         }
     } reports;
     LiveNodeConfig const budgetConfig { clusteredNode, nullptr };
-    BudgetOverrideApplier const budgets { noTier, reports, budgetConfig, logger, &conditions, "n1", ReconcileOn::Caller };
+    BudgetDropLatch budgetDrops;
+    BudgetOverrideApplier const budgets { noTier,      reports,     budgetConfig, logger,
+                                          &conditions, budgetDrops, "n1",         ReconcileOn::Caller };
 
     // The formation, built the way `main` builds it over the consensus node: it answers
     // `formation-move-refused` as its controller starts.
