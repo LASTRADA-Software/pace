@@ -687,8 +687,7 @@ framing, the auth gate, sockets, dialling and coroutine lifetime. Before
   that never published it. Check both before changing either.
 - A reclaim is reported **before** the call that caused it: `ADD` on a lapsed TTL names the same
   key twice, and the wrong order tells a subscriber a live key is gone.
-- In a layered cache no single tier's eviction is total, so none is reported. An expiry is, because
-  both tiers hold the same TTL.
+- In a layered cache no tier's eviction is total, so none is reported; an expiry is, on a shared TTL.
 - A reclaimer nothing constructs is the bug it was written to fix: `PurgeExpired` was correct and
   tested, and had no production caller at all. Assert the wiring.
 - The expiry cycle sweeps `engine.Storage()` — the notifying decorator. One layer down it frees the
@@ -705,6 +704,7 @@ framing, the auth gate, sockets, dialling and coroutine lifetime. Before
   and fires `expired` again.
 - MCP is LOOPBACK ONLY, asked twice (a startup refusal AND `McpAdmits` per request), adds no
   credential, and every answer SHARES ITS DERIVATION with the dashboard or `pacectl`.
+- A stop CANCELS what its drain cannot wait for, a slow reader included (`AdminHttpServer::Stop`).
 
 **[`.agent/rules/platform-service-and-config.md`](.agent/rules/platform-service-and-config.md)**
 — service registration, config lookup, the CLI table. Before `Platform/`, `Config/`,

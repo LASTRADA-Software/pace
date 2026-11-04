@@ -447,6 +447,107 @@ TEST_CASE("AdmissionResponder.a-departure-the-endpoint-counted-is-not-counted-ag
     CHECK(queue.held.Held() == HeldCharges {});
 }
 
+namespace
+{
+/// Forwards every count to the queue's own sink, and records what this machine held at the moment
+/// one chosen counter was COUNTED -- the instant an observer polling that counter acts on it.
+class HeldAtCountSink final: public IMetricsSink
+{
+  public:
+    /// @param inner Where the counts go.
+    /// @param held The machine's own record, read at the bump.
+    /// @param watched The counter whose bump is the moment recorded.
+    HeldAtCountSink(IMetricsSink& inner, HeldChargeRegistry const& held, Counter watched) noexcept:
+        _inner { inner },
+        _held { held },
+        _watched { watched }
+    {
+    }
+
+    void Increment(Counter counter, std::uint64_t by = 1) noexcept override
+    {
+        if (counter == _watched)
+            _heldAtCount = _held.Held();
+        _inner.Increment(counter, by);
+    }
+
+    [[nodiscard]] std::uint64_t Read(Counter counter) const noexcept override
+    {
+        return _inner.Read(counter);
+    }
+
+    [[nodiscard]] bool Carries(Counter counter) const noexcept override
+    {
+        return _inner.Carries(counter);
+    }
+
+    /// @return What was held when the watched counter was last counted; disengaged when it never was.
+    [[nodiscard]] std::optional<HeldCharges> HeldAtCount() const noexcept
+    {
+        return _heldAtCount;
+    }
+
+  private:
+    IMetricsSink& _inner;
+    HeldChargeRegistry const& _held;
+    Counter _watched;
+    std::optional<HeldCharges> _heldAtCount;
+};
+} // namespace
+
+TEST_CASE("AdmissionResponder.an-abandonment-is-counted-after-its-charge-is-released", "[node][admission]")
+{
+    // The counter is what an observer acts on: a scrape, a dashboard, a case waiting for the close to be
+    // filed. Counted while the hold's machine-own charge was still recorded, it announced a release that
+    // had not happened yet, and a reader on another thread saw the slot still held (the flake this pins).
+    // Driven on this thread through the scope, so the ordering is the destructor's and nothing else's.
+    Queue queue;
+    queue.Report(1024 * MiB, 2);
+    HeldAtCountSink recorder { queue.metrics, queue.held, IMetricsSink::Counter::AdmissionAbandoned };
+    AdmissionResponder admission { queue.service, queue.fold.admitted, queue.io->Reactor(), recorder, &queue.held, 20ms };
+    auto const scope = std::make_shared<ConnectionScope>();
+    auto const reply = core::async::syncRun(admission.Answer(AdmitFrame(Wire::AdmitKind::LocalOnly, "k1"),
+                                                             PeerIdentity { .host = "127.0.0.1", .scope = scope }));
+    REQUIRE(Pace::Testing::StatusOf(reply.bytes) == Wire::Status::Ok);
+    REQUIRE(queue.held.Held() == HeldCharges { .slots = 1, .bytes = 64 * MiB });
+
+    scope->End();
+
+    // Counted once, and by then nothing of it was held here.
+    CHECK(Count(queue, IMetricsSink::Counter::AdmissionAbandoned) == 1);
+    auto const heldAtAbandon = recorder.HeldAtCount();
+    REQUIRE(heldAtAbandon.has_value());
+    CHECK(Unwrap(heldAtAbandon).slots == 0);
+    CHECK(Unwrap(heldAtAbandon).bytes == 0);
+}
+
+TEST_CASE("AdmissionResponder.a-worker-refusal-is-counted-after-its-charge-is-released", "[node][admission]")
+{
+    // The settle's sibling of the case above: a `WorkerRefused` settle ends the grant this machine
+    // recorded, and `AdmissionWorkerRefused` must not be counted while that charge is still held.
+    // Settled on this thread through the scope, so the ordering is `SettleHeld`'s and nothing else's.
+    Queue queue;
+    queue.Report(1024 * MiB, 2);
+    HeldAtCountSink recorder { queue.metrics, queue.held, IMetricsSink::Counter::AdmissionWorkerRefused };
+    AdmissionResponder admission { queue.service, queue.fold.admitted, queue.io->Reactor(), recorder, &queue.held, 20ms };
+    auto const scope = std::make_shared<ConnectionScope>();
+    auto const peer = PeerIdentity { .host = "127.0.0.1", .scope = scope };
+    auto const granted = core::async::syncRun(admission.Answer(AdmitFrame(Wire::AdmitKind::LocalOnly, "k1"), peer));
+    REQUIRE(Pace::Testing::StatusOf(granted.bytes) == Wire::Status::Ok);
+    REQUIRE(queue.held.Held() == HeldCharges { .slots = 1, .bytes = 64 * MiB });
+
+    auto const settled = core::async::syncRun(admission.Answer(SettleFrame(Wire::SettleOutcome::WorkerRefused), peer));
+    REQUIRE(Pace::Testing::StatusOf(settled.bytes) == Wire::Status::Ok);
+
+    // Counted once, and by then nothing of the refused grant was held here.
+    CHECK(Count(queue, IMetricsSink::Counter::AdmissionWorkerRefused) == 1);
+    auto const heldAtRefusal = recorder.HeldAtCount();
+    REQUIRE(heldAtRefusal.has_value());
+    CHECK(Unwrap(heldAtRefusal).slots == 0);
+    CHECK(Unwrap(heldAtRefusal).bytes == 0);
+    scope->End();
+}
+
 TEST_CASE("AdmissionResponder.a-parked-wait-has-no-ceiling-while-pulses-flow", "[node][admission]")
 {
     // The answer window of a parked ADMIT is the SILENCE it may keep -- six pulses at this cadence --

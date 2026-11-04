@@ -47,9 +47,11 @@ namespace Pace::Node
 /// open -- a local process that keeps reconnecting keeps MCP refusing for as long as it keeps going -- and
 /// never make it wait. Hostile or slow MCP input stalls only MCP.
 ///
-/// **A stop is bounded for a client that reads its answer, and the bound is derived** (`McpEndpoint::WorstCaseStop`):
-/// the stop flag is raised before the accept loop is asked to stop, so a tool asks nothing more (`LoopGatedUpstream`),
-/// and the drain waits out the one forwarded call a request can have in flight.
+/// **A stop is bounded whatever a client does, and the bound is derived** (`McpEndpoint::WorstCaseStop`): the stop
+/// flag is raised before the accept loop is asked to stop, so a tool asks nothing more (`LoopGatedUpstream`), the drain
+/// waits out the one forwarded call a request can have in flight, and once it runs out every connection still open is
+/// CANCELLED (`IConnectionCanceller`) -- shut down under the write a slow reader was holding, so the serving thread
+/// ends and is joined.
 
 /// Whether the MCP surface is stopping: raised by `~McpEndpoint` BEFORE it asks its accept loop to stop, read by
 /// `LoopGatedUpstream` on every forwarded call.
@@ -123,7 +125,9 @@ class McpEndpoint
     /// can still run once the stop flag is raised: either the forwarded call it is waiting on
     /// (`McpUpstream::CallDeadline`; every later call is refused `Stopping` at once), or what is left of reading
     /// its head and body -- then its response write and its linger (`DrainMargin`). The dashboard's five seconds
-    /// would log every stop that lands during a call as a request abandoned.
+    /// would log every stop that lands during a call as a request abandoned. Past it, every connection still open is
+    /// cancelled, and `afterCancel` is how long the stop then waits for the serving threads to end: a cancelled write
+    /// fails at once, so the dashboard's one second is plenty.
     static constexpr AdminDeadlines Deadlines {
         .firstByte = std::chrono::milliseconds { 2000 },
         .request = std::chrono::milliseconds { 2000 },
@@ -132,10 +136,12 @@ class McpEndpoint
         .linger =
             LingerBounds { .total = std::chrono::milliseconds { 400 }, .maxBytes = std::size_t { 64 } * 1024, .reads = 4 },
         .drain = McpUpstream::CallDeadline + std::chrono::seconds { 5 },
+        .afterCancel = std::chrono::milliseconds { 1000 },
     };
 
-    /// What `Deadlines.drain` allows beyond the forwarded call: one response write (each blocking write is bounded
-    /// by `AdminHttpServer::RequestTimeout`, which `Start` arms on the listener) and one linger.
+    /// What `Deadlines.drain` allows beyond the forwarded call: one response write to a client that reads it (each
+    /// blocking write CALL is bounded by `AdminHttpServer::RequestTimeout`, which `Start` arms on the listener) and one
+    /// linger. A client that does not read is not waited for: past the drain its connection is cancelled.
     static constexpr auto DrainMargin = Deadlines.drain - McpUpstream::CallDeadline;
     static_assert(DrainMargin >= AdminHttpServer::RequestTimeout + Deadlines.linger.total,
                   "the drain must outlast a forwarded call, the response write after it and the linger");
@@ -144,16 +150,15 @@ class McpEndpoint
                   "the drain must outlast a request still being read when the stop began, its refused calls answered "
                   "at once");
 
-    /// The longest `~McpEndpoint` takes when every client reads its answer: one accept poll for the accept thread to
-    /// see the stop, then the drain. The serving threads are joined after it, and a request the flag let finish has
-    /// finished by then.
+    /// The longest `~McpEndpoint` takes, whatever a client does: one accept poll for the accept thread to see the
+    /// stop, the drain, and `Deadlines.afterCancel` for the connections the drain left open to end once they are
+    /// cancelled (`AdminHttpServer::WorstCaseStopUnder`). The serving threads are joined after it.
     ///
-    /// **Not a bound over a client that will not read.** Each blocking write is bounded by `RequestTimeout`, but a
-    /// loopback peer that reads just often enough to keep every write moving holds a response write -- and its
-    /// serving thread, which the join then waits for -- past the drain. Nor does the formula count a `503` the
-    /// accept thread is lingering on when the stop arrives: up to `Deadlines.linger` (400 ms) more before the
-    /// accept thread is joined.
-    static constexpr auto WorstCaseStop = AdminHttpServer::AcceptPoll + Deadlines.drain;
+    /// **A client that will not read is covered.** Each blocking write is bounded only per CALL by `RequestTimeout`,
+    /// so a loopback peer that reads just often enough to keep every write moving would hold a response write -- and
+    /// its serving thread -- for as long as it liked; past the drain its connection is shut down under the write,
+    /// which fails at once. So is a `503` the accept thread is lingering on: that connection is tracked too.
+    static constexpr auto WorstCaseStop = AdminHttpServer::WorstCaseStopUnder(Deadlines);
     /// A quarter of the packaged units' `TimeoutStopSec=120` (`packaging/linux/pace-node.service`): the node's
     /// other surfaces and tiers stop inside the same supervisor budget, so MCP may take no more than its share.
     static_assert(WorstCaseStop <= std::chrono::seconds { 30 },
@@ -187,6 +192,8 @@ class McpEndpoint
 
     /// Serve an already-bound listener: the seam a test hands a relabelled listener through.
     /// @param listener The bound listener, its accept poll already armed (owned).
+    /// @param connections Cancels what @p listener accepted, at a stop whose drain ran out: the `BlockingListener`'s
+    ///        own `Connections()`, taken before it is wrapped or moved; must outlive the endpoint.
     /// @param boundEndpoint What `BoundEndpoint()` reports.
     /// @param tools The tool table.
     /// @param stopping Raised when the endpoint begins to stop; must outlive the endpoint.
@@ -195,6 +202,7 @@ class McpEndpoint
     /// @param acceptLoops The node's accept-loop registry; must outlive the endpoint.
     /// @return The running endpoint.
     [[nodiscard]] static std::unique_ptr<McpEndpoint> StartWithListener(std::unique_ptr<core::net::IListener> listener,
+                                                                        IConnectionCanceller& connections,
                                                                         std::string boundEndpoint,
                                                                         std::vector<Mcp::ToolRow> tools,
                                                                         McpStopFlag& stopping,
@@ -202,8 +210,8 @@ class McpEndpoint
                                                                         ILogger& logger,
                                                                         core::net::AcceptLoopHealth& acceptLoops);
 
-    /// Raise the stop flag, stop accepting, drain the requests in flight and join every thread; within
-    /// `WorstCaseStop` while every client reads its answer.
+    /// Raise the stop flag, stop accepting, drain the requests in flight -- cancelling every connection still open
+    /// once the drain runs out -- and join every thread; within `WorstCaseStop` whatever a client does.
     ~McpEndpoint();
 
     McpEndpoint(McpEndpoint const&) = delete;
@@ -222,6 +230,7 @@ class McpEndpoint
 
   private:
     McpEndpoint(std::unique_ptr<core::net::IListener> listener,
+                IConnectionCanceller& connections,
                 std::string boundEndpoint,
                 std::vector<Mcp::ToolRow> tools,
                 McpStopFlag& stopping,

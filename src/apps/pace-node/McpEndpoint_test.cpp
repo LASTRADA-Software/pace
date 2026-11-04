@@ -20,6 +20,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <format>
@@ -40,11 +41,13 @@
 #include <core/net/AcceptLoopHealth.hpp>
 #include <core/net/BlockingConnector.hpp>
 #include <core/net/ISocket.hpp>
+#include <core/net/NetError.hpp>
 #include <tests/BoundedWait.hpp>
 #include <tests/HostNamingFakes.hpp>
 #include <tests/NodeFormationFakes.hpp>
 #include <tests/RelabelledPeerListener.hpp>
 #include <tests/Unwrap.hpp>
+#include <tests/WriteWatchingListener.hpp>
 
 using namespace Pace;
 using namespace Pace::Node;
@@ -64,6 +67,15 @@ namespace
     INFO((flow.has_value() ? std::string {} : flow.error().ToString()));
     REQUIRE(flow.has_value());
     return cfg;
+}
+
+/// One read, as a task a thread can run to its end.
+/// @param socket Where to read.
+/// @param buffer Where the bytes go; non-empty.
+/// @return What the read answered.
+core::async::Task<core::net::IoResult> ReadOnce(core::net::ISocket* socket, std::span<std::byte> buffer)
+{
+    co_return co_await socket->read(buffer);
 }
 
 core::async::Task<bool> WriteAll(core::net::ISocket* socket, std::string_view payload)
@@ -173,10 +185,12 @@ struct RunningEndpoint
         // As `McpEndpoint::Start` arms its own listener.
         bound->SetTimeouts(AdminHttpServer::AcceptPoll, AdminHttpServer::RequestTimeout);
         port = bound->boundPort();
+        auto& connections = bound->Connections();
         std::unique_ptr<core::net::IListener> listener = std::move(bound);
         if (!relabelAs.empty())
             listener = std::make_unique<Testing::RelabelledPeerListener>(std::move(listener), std::move(relabelAs));
         endpoint = McpEndpoint::StartWithListener(std::move(listener),
+                                                  connections,
                                                   std::format("127.0.0.1:{}", port),
                                                   std::vector<Mcp::ToolRow> {},
                                                   stopping,
@@ -556,8 +570,15 @@ TEST_CASE("an MCP stop during a forwarded call is bounded and refuses later call
     REQUIRE(bound->IsBound());
     bound->SetTimeouts(AdminHttpServer::AcceptPoll, AdminHttpServer::RequestTimeout);
     auto const port = bound->boundPort();
-    auto endpoint = McpEndpoint::StartWithListener(
-        std::move(bound), std::format("127.0.0.1:{}", port), std::move(tools), stopping, metrics, logger, acceptLoops);
+    auto& connections = bound->Connections();
+    auto endpoint = McpEndpoint::StartWithListener(std::move(bound),
+                                                   connections,
+                                                   std::format("127.0.0.1:{}", port),
+                                                   std::move(tools),
+                                                   stopping,
+                                                   metrics,
+                                                   logger,
+                                                   acceptLoops);
     REQUIRE(endpoint != nullptr);
 
     // Sent and left open: the response is never read, as a client that went quiet would leave it.
@@ -598,5 +619,151 @@ TEST_CASE("an MCP stop during a forwarded call is bounded and refuses later call
     auto const records = logger.Snapshot();
     CHECK(std::ranges::none_of(records, [](CapturingLogger::Record const& record) {
         return record.message.contains("did not finish within the stop ceiling");
+    }));
+    // Nor did it cancel anything: the client was waiting for its answer, which the drain let finish.
+    CHECK(std::ranges::none_of(records,
+                               [](CapturingLogger::Record const& record) { return record.message.contains("cancelled"); }));
+}
+
+TEST_CASE("an MCP stop cancels a client that does not read its answer, within WorstCaseStop", "[node][mcp][hostile]")
+{
+    // A local client that reads its answer just often enough to keep every blocking write call inside its send
+    // timeout holds the serving thread -- and the stop that joins it -- for as long as it likes. The drain cannot wait
+    // for it, so past the drain the connection is cancelled and the stop ends inside `WorstCaseStop` regardless.
+    //
+    // **The case takes the send timeout OUT of the race, so the cancel is the only thing that can end the write.** The
+    // shape it stands for -- a reader slow but moving -- defeats the send timeout by construction; reproducing it with
+    // a trickle means tuning against every platform's timers, and a macOS send timed out under each trickle tried,
+    // ending the connection before the drain did. So the listener is armed with a send timeout longer than the whole
+    // case (`NoSendTimeoutInTheCase`) and the client reads NOTHING until the stop has returned: the server's write
+    // parks once the buffers under the connection are full, and stays parked until something ends it from outside.
+    // That is the listener's own column (`BlockingListener::SetTimeouts`), never the surface's deadlines row, so
+    // drain, afterCancel and linger -- and `WorstCaseStop`, which is what is asserted -- are production's.
+    //
+    // Size does not stand in for a parked write -- Winsock took a 4 MiB send whole -- so the case SEES one
+    // (`Testing::WaitUntilParkedInWrite`). The answer has only to outlast what the buffers under the connection hold:
+    // the accepted socket's send buffer (`ClientSocketBufferBytes`, which every accept sets and Linux doubles) and the
+    // client's receive buffer. No larger: the server serializes it, and a sanitized build pays for every byte.
+    constexpr auto NoSendTimeoutInTheCase = std::chrono::milliseconds { std::chrono::minutes { 10 } };
+    static_assert(NoSendTimeoutInTheCase > 4 * McpEndpoint::WorstCaseStop, "the send timeout must outlast the case");
+    constexpr auto ClientReceiveBytes = std::size_t { 64 } * 1024;
+    constexpr auto AnswerBytes = std::size_t { 6 } * 1024 * 1024;
+    static_assert(AnswerBytes > 2 * ((2 * ClientSocketBufferBytes) + (2 * ClientReceiveBytes)),
+                  "the answer must outlast every buffer under it");
+    auto tools = std::vector<Mcp::ToolRow> { Mcp::ToolRow {
+        .name = "huge_answer",
+        .title = "Huge answer",
+        .description = "Answers more than a socket buffers.",
+        .inputSchema = R"({"type":"object"})",
+        .outputSchema = {},
+        .effect = Mcp::ToolEffect::ReadOnly,
+        .handler =
+            [](Mcp::ToolCall const& /*call*/) {
+                return Mcp::ToolResult { .structured = {}, .text = std::string(AnswerBytes, 'x'), .isError = false };
+            },
+    } };
+
+    AtomicMetricsSink metrics;
+    CapturingLogger logger;
+    core::net::AcceptLoopHealth acceptLoops;
+    McpStopFlag stopping;
+    auto bound = BlockingListener::Bind("127.0.0.1", 0);
+    REQUIRE(bound != nullptr);
+    REQUIRE(bound->IsBound());
+    bound->SetTimeouts(AdminHttpServer::AcceptPoll, NoSendTimeoutInTheCase);
+    auto const port = bound->boundPort();
+    auto& connections = bound->Connections();
+    auto watched = std::make_unique<Testing::WriteWatchingListener>(std::move(bound));
+    auto const watch = watched->Watch();
+    auto endpoint = McpEndpoint::StartWithListener(std::move(watched),
+                                                   connections,
+                                                   std::format("127.0.0.1:{}", port),
+                                                   std::move(tools),
+                                                   stopping,
+                                                   metrics,
+                                                   logger,
+                                                   acceptLoops);
+    REQUIRE(endpoint != nullptr);
+
+    constexpr std::string_view HugeCallBody {
+        R"({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"_meta":{)"
+        R"("io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}},)"
+        R"("name":"huge_answer","arguments":{}}})"
+    };
+    core::net::BlockingConnector connector;
+    auto client = core::async::syncRun(connector.connect(
+        "127.0.0.1",
+        port,
+        core::net::DialOptions { .connectTimeout = 5s, .buffers = { .send = {}, .receive = ClientReceiveBytes } }));
+    REQUIRE(client.has_value());
+    REQUIRE(core::async::syncRun(
+        WriteAll(client->get(),
+                 std::format("POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n"
+                             "MCP-Protocol-Version: 2026-07-28\r\nMcp-Method: tools/call\r\nMcp-Name: huge_answer\r\n"
+                             "Content-Length: {}\r\n\r\n{}",
+                             HugeCallBody.size(),
+                             HugeCallBody))));
+
+    // Nothing read: the server serializes the answer, fills what is under the connection and parks in a write. A
+    // failure from here on leaves the endpoint to stop at the end of the scope, which its own cancel bounds.
+    REQUIRE(Testing::WaitUntilParkedInWrite(*watch, 250ms, 60s));
+
+    auto const stopBegan = std::chrono::steady_clock::now();
+    std::atomic<bool> stopped { false };
+    std::atomic<std::int64_t> stopTookMs { -1 };
+    std::jthread stopper { [&] {
+        endpoint.reset();
+        stopTookMs.store(
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - stopBegan).count());
+        stopped.store(true);
+    } };
+    auto const ended = Testing::WaitUntil(
+        "the MCP stop to cancel the parked write and return",
+        [&] { return stopped.load(); },
+        [&] { return watch->Describe(stopBegan); },
+        Testing::WaitOptions { .step = {}, .context = {}, .bound = McpEndpoint::WorstCaseStop + 3s });
+    // What the client was left to read, at full speed: what tells a connection the SERVER ended from one the case
+    // merely stopped reading is that the stream then ENDS -- with end-of-stream or a reset, never a read timing out --
+    // short of the answer. A stop that never returned is released by closing the client, so its thread joins.
+    auto received = std::size_t { 0 };
+    auto endedByServer = false;
+    if (stopped)
+    {
+        (*client)->setReceiveDeadline(5s);
+        std::vector<std::byte> chunk(std::size_t { 64 } * 1024);
+        while (true)
+        {
+            auto const read = core::async::syncRun(ReadOnce(client->get(), std::span<std::byte> { chunk }));
+            if (read.has_value() && *read > 0)
+            {
+                received += *read;
+                continue;
+            }
+            endedByServer = read.has_value() || !core::net::isDeadlineExpiry(read.error().code);
+            break;
+        }
+    }
+    (*client)->close();
+    stopper.join();
+
+    auto const records = logger.Snapshot();
+    // Every Warn and Error the stop logged, and what ended the server's write, so a red names what ended the
+    // connection rather than only that the cancel did not.
+    auto const said = [&records] {
+        auto text = std::string {};
+        for (auto const& record: records)
+            if (record.level == LogLevel::Warn || record.level == LogLevel::Error)
+                text += std::format("\n  {}", record.message);
+        return text.empty() ? std::string { " (none)" } : text;
+    }();
+    INFO("the stop logged:" << said);
+    INFO("the server's write, from the stop's start: " << watch->Describe(stopBegan));
+    CHECK(ended);
+    CHECK(stopTookMs.load() < std::chrono::duration_cast<std::chrono::milliseconds>(McpEndpoint::WorstCaseStop).count());
+    // The SERVER ended the connection: the client was cut short of the answer, and its read did not merely time out.
+    CHECK(endedByServer);
+    CHECK(received < AnswerBytes);
+    CHECK(std::ranges::any_of(records, [](CapturingLogger::Record const& record) {
+        return record.level == LogLevel::Warn && record.message.contains("mcp: stopping, cancelled 1 connection(s)");
     }));
 }

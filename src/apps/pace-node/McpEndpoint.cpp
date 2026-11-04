@@ -69,6 +69,7 @@ AdminRoute MakeMcpRoute(Mcp::McpServer const& server, IMetricsSink& metrics)
 }
 
 McpEndpoint::McpEndpoint(std::unique_ptr<core::net::IListener> listener,
+                         IConnectionCanceller& connections,
                          std::string boundEndpoint,
                          std::vector<Mcp::ToolRow> tools,
                          McpStopFlag& stopping,
@@ -80,6 +81,7 @@ McpEndpoint::McpEndpoint(std::unique_ptr<core::net::IListener> listener,
     _server { std::move(tools), VersionString, logger },
     _http { std::make_unique<AdminHttpServer>(
         *_listener,
+        connections,
         metrics,
         // Never called: the profile serves no `/metrics`, so there is no snapshot to take.
         AdminHttpServer::SnapshotProvider {},
@@ -106,15 +108,14 @@ McpEndpoint::~McpEndpoint()
     // The flag FIRST: from here every forwarded call a running request makes is refused at once, so the drain
     // below waits for the one call each request has in flight rather than for every call a tool would go on making.
     _stopping.Raise();
-    // Ask, join, then close: `AdminEndpoint::~AdminEndpoint`'s order, for its reason (#260) -- closing
-    // the listener while the accept thread reads it is a data race, and closing is not what wakes it.
-    _http->RequestStop();
-    if (_thread.joinable())
-        _thread.join();
-    _http->Shutdown();
+    // Ask, drain, join, then close: `AdminHttpServer::Stop`'s one order (#260) -- closing the listener while the
+    // accept thread reads it is a data race, and closing is not what wakes it. Past the drain every connection still
+    // open is cancelled, so a client reading its answer slowly cannot hold the serving threads' join.
+    _http->Stop(_thread);
 }
 
 std::unique_ptr<McpEndpoint> McpEndpoint::StartWithListener(std::unique_ptr<core::net::IListener> listener,
+                                                            IConnectionCanceller& connections,
                                                             std::string boundEndpoint,
                                                             std::vector<Mcp::ToolRow> tools,
                                                             McpStopFlag& stopping,
@@ -123,8 +124,14 @@ std::unique_ptr<McpEndpoint> McpEndpoint::StartWithListener(std::unique_ptr<core
                                                             core::net::AcceptLoopHealth& acceptLoops)
 {
     // `new` because the constructor is private: this and `Start` are the only ways to reach it.
-    return std::unique_ptr<McpEndpoint> { new McpEndpoint {
-        std::move(listener), std::move(boundEndpoint), std::move(tools), stopping, metrics, logger, acceptLoops } };
+    return std::unique_ptr<McpEndpoint> { new McpEndpoint { std::move(listener),
+                                                            connections,
+                                                            std::move(boundEndpoint),
+                                                            std::move(tools),
+                                                            stopping,
+                                                            metrics,
+                                                            logger,
+                                                            acceptLoops } };
 }
 
 std::expected<std::unique_ptr<McpEndpoint>, std::string> McpEndpoint::Start(NodeConfig const& cfg,
@@ -158,7 +165,10 @@ std::expected<std::unique_ptr<McpEndpoint>, std::string> McpEndpoint::Start(Node
 
     // The admin surface's own figures: the same HTTP code, on the same terms.
     listener->SetTimeouts(AdminHttpServer::AcceptPoll, AdminHttpServer::RequestTimeout);
+    // Taken before the listener moves: the registry is the listener's, and lives exactly as long.
+    auto& connections = listener->Connections();
     return StartWithListener(std::move(listener),
+                             connections,
                              FormatHostPort(endpoint.host, endpoint.port),
                              std::move(tools),
                              stopping,

@@ -56,6 +56,8 @@ namespace
 
     /// First control character: below it a string may not carry a byte raw.
     inline constexpr unsigned char FirstUnescapedByte = 0x20;
+    /// First byte that is not ASCII: from it on a byte is part of a multi-byte code point, or of none.
+    inline constexpr unsigned char FirstNonAsciiByte = 0x80;
     inline constexpr char32_t FirstHighSurrogate = 0xD800;
     inline constexpr char32_t FirstLowSurrogate = 0xDC00;
     inline constexpr char32_t SurrogateSpan = 0x400;
@@ -559,9 +561,22 @@ std::string Serialize(Value const& value)
 
 void AppendString(std::string& out, std::string_view utf8)
 {
+    // A byte that is its own spelling: printable ASCII that no short escape claims. A run of them is appended whole,
+    // so a long plain string costs one copy rather than a UTF-8 decode per byte -- the same output, since each such
+    // byte is a one-byte code point the per-character path below would have copied unchanged.
+    auto const isPlain = [](char byte) {
+        auto const value = static_cast<unsigned char>(byte);
+        return value >= FirstUnescapedByte && value < FirstNonAsciiByte && EscapeFor(JsonShortEscapes, byte).empty();
+    };
     out += '"';
     while (!utf8.empty())
     {
+        if (auto const run = static_cast<std::size_t>(std::ranges::find_if_not(utf8, isPlain) - utf8.begin()); run > 0)
+        {
+            out += utf8.substr(0, run);
+            utf8.remove_prefix(run);
+            continue;
+        }
         auto const ch = utf8.front();
         if (auto const escape = EscapeFor(JsonShortEscapes, ch); !escape.empty())
         {

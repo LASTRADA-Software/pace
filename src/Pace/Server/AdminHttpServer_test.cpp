@@ -16,7 +16,9 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <format>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -31,6 +33,7 @@
 #include <core/async/Task.hpp>
 #include <core/net/AcceptLoopHealth.hpp>
 #include <core/net/BlockingConnector.hpp>
+#include <core/net/NetError.hpp>
 #include <core/net/testing/FailingListener.hpp>
 #include <core/net/testing/InMemorySocket.hpp>
 #include <core/net/testing/ParkingReadableSocket.hpp>
@@ -39,9 +42,43 @@
 #include <tests/HalfClose.hpp>
 #include <tests/ScopedSignalHandler.hpp>
 #include <tests/SocketDoubles.hpp>
+#include <tests/WriteWatchingListener.hpp>
 
 namespace
 {
+
+/// The canceller of a listener whose connections are not native sockets: an in-memory transport has nothing a stop
+/// could shut down under a write, and its cases never ask it to.
+class NothingToCancel final: public Pace::IConnectionCanceller
+{
+  public:
+    [[nodiscard]] std::size_t CancelOpenConnections() noexcept override
+    {
+        return 0;
+    }
+
+    [[nodiscard]] std::size_t CancelledTotal() const noexcept override
+    {
+        return 0;
+    }
+};
+
+/// Shared by every in-memory case: it holds no state worth isolating.
+/// @return The one instance.
+[[nodiscard]] Pace::IConnectionCanceller& NothingToCancelHere()
+{
+    static NothingToCancel instance;
+    return instance;
+}
+
+/// One read, as a task a thread can run to its end.
+/// @param socket Where to read.
+/// @param buffer Where the bytes go; non-empty.
+/// @return What the read answered.
+core::async::Task<core::net::IoResult> ReadOnce(core::net::ISocket* socket, std::span<std::byte> buffer)
+{
+    co_return co_await socket->read(buffer);
+}
 
 core::async::Task<bool> WriteString(core::net::ISocket* socket, std::string_view payload)
 {
@@ -711,9 +748,10 @@ TEST_CASE("AdminHttp: a served connection's refusal over a head it did not finis
     Pace::NullLogger logger;
     core::platform::SteadyClock clock;
     core::net::AcceptLoopHealth acceptLoops;
-    Pace::AdminHttpServer server {
-        listener, metrics, [] { return Pace::MetricsSnapshot {}; }, logger, clock, acceptLoops, Pace::DefaultDrainWait()
-    };
+    Pace::AdminHttpServer server { listener,    NothingToCancelHere(),
+                                   metrics,     [] { return Pace::MetricsSnapshot {}; },
+                                   logger,      clock,
+                                   acceptLoops, Pace::DefaultDrainWait() };
 
     auto client = listener.connectClient();
     std::string request = "GET /healthz HTTP/1.1\r\nHost: x\r\n";
@@ -804,9 +842,10 @@ namespace
 {
     Pace::AtomicMetricsSink metrics;
     core::platform::SteadyClock clock;
-    Pace::AdminHttpServer server {
-        listener, metrics, [] { return Pace::MetricsSnapshot {}; }, logger, clock, acceptLoops, Pace::DefaultDrainWait()
-    };
+    Pace::AdminHttpServer server { listener,    NothingToCancelHere(),
+                                   metrics,     [] { return Pace::MetricsSnapshot {}; },
+                                   logger,      clock,
+                                   acceptLoops, Pace::DefaultDrainWait() };
     auto client = inner.connectClient();
     REQUIRE(core::async::syncRun(WriteString(client.get(), "GET /healthz HTTP/1.1\r\nHost: x\r\n\r\n")));
     REQUIRE(Pace::Testing::ShutdownWrite(*client).has_value());
@@ -919,9 +958,10 @@ TEST_CASE("AdminHttp: signals landing on the accept thread do not stop /healthz"
     Pace::AtomicMetricsSink metrics;
     core::platform::SteadyClock clock;
     core::net::AcceptLoopHealth acceptLoops;
-    Pace::AdminHttpServer server {
-        *listener, metrics, [] { return Pace::MetricsSnapshot {}; }, logger, clock, acceptLoops, Pace::DefaultDrainWait()
-    };
+    Pace::AdminHttpServer server { *listener,   listener->Connections(),
+                                   metrics,     [] { return Pace::MetricsSnapshot {}; },
+                                   logger,      clock,
+                                   acceptLoops, Pace::DefaultDrainWait() };
     std::atomic<bool> ended { false };
     std::jthread acceptThread { [&server, &ended] {
         core::async::syncRun(server.Run());
@@ -1302,6 +1342,7 @@ namespace
     core::platform::SteadyClock clock;
     core::net::AcceptLoopHealth acceptLoops;
     Pace::AdminHttpServer server { listener,
+                                   NothingToCancelHere(),
                                    metrics,
                                    [] { return Pace::MetricsSnapshot {}; },
                                    logger,
@@ -1366,6 +1407,7 @@ TEST_CASE("admin a profile's request cap and surface name are the ones the loop 
         core::platform::SteadyClock clock;
         core::net::AcceptLoopHealth acceptLoops;
         Pace::AdminHttpServer server { listener,
+                                       NothingToCancelHere(),
                                        metrics,
                                        [] { return Pace::MetricsSnapshot {}; },
                                        capturing,
@@ -1412,6 +1454,7 @@ namespace
     core::platform::SteadyClock clock;
     core::net::AcceptLoopHealth acceptLoops;
     Pace::AdminHttpServer server { *listener,
+                                   listener->Connections(),
                                    metrics,
                                    [] { return Pace::MetricsSnapshot {}; },
                                    logger,
@@ -1460,4 +1503,352 @@ TEST_CASE("admin a real IPv6 loopback connection's peerHost is ::1, unbracketed"
         SKIP("this host has no IPv6 loopback to bind or dial");
     CHECK(*peer == "::1");
     CHECK(Pace::IsLoopbackHost(*peer));
+}
+
+namespace
+{
+
+/// The bounds a stop case runs under: a short drain, so a stop that waits for a client rather than cancelling it
+/// shows as a wait far past `WorstCaseStopUnder`, and every read bound left at the admin surface's.
+constexpr Pace::AdminDeadlines StopCaseDeadlines {
+    .drain = std::chrono::milliseconds { 300 },
+    .afterCancel = std::chrono::milliseconds { 1000 },
+};
+
+/// The send timeout every stop case's listener arms (`BlockingListener::SetTimeouts`): longer than any case, so the
+/// cancel is the only thing that can end a write the client has stopped reading. The shape a stop must cancel -- a
+/// reader slow but moving -- defeats the send timeout by construction, and reproducing it with a trickle means tuning
+/// against every platform's timers: a macOS send timed out under each trickle tried, ending the connection before any
+/// cancel could. It is the LISTENER's column, never the deadlines row, so every bound a stop is held to is the row's.
+constexpr auto StopCaseSendTimeout = std::chrono::milliseconds { std::chrono::minutes { 10 } };
+static_assert(StopCaseSendTimeout > 100 * Pace::AdminHttpServer::WorstCaseStopUnder(StopCaseDeadlines),
+              "the send timeout must outlast every stop case");
+
+/// The receive buffer the client asks for, so what it can hold unread is this and not the host's tuning.
+constexpr std::size_t SlowClientReceiveBytes = std::size_t { 64 } * 1024;
+
+/// Large enough that a client reading nothing leaves the server parked in its write: many times what the accepted
+/// socket's send buffer (`ClientSocketBufferBytes`, set by every accept, doubled by Linux) and the client's receive
+/// buffer hold between them. Necessary and NOT sufficient -- Winsock took a 4 MiB send whole -- so the case also
+/// waits to SEE the server parked in a write (`Testing::WaitUntilParkedInWrite`) before it stops.
+constexpr std::size_t SlowReaderBodyBytes = std::size_t { 16 } * 1024 * 1024;
+static_assert(SlowReaderBodyBytes > 4 * ((2 * Pace::ClientSocketBufferBytes) + SlowClientReceiveBytes),
+              "the answer must outlast every buffer under it");
+
+/// A route answering `GET /big` with @p bytes of body, after holding for @p hold.
+/// @param bytes The body's length.
+/// @param hold How long the handler runs before it answers.
+/// @param entered Raised as the handler starts.
+/// @return The route.
+[[nodiscard]] Pace::AdminRoute BigRoute(std::size_t bytes, std::chrono::milliseconds hold, std::atomic<bool>& entered)
+{
+    return Pace::AdminRoute { .path = "/big", .handler = [bytes, hold, &entered](Pace::AdminRequest const&) {
+                                 entered.store(true);
+                                 std::this_thread::sleep_for(hold);
+                                 return Pace::AdminResponse { .status = "200 OK",
+                                                              .contentType = "application/octet-stream",
+                                                              .body = std::string(bytes, 'x') };
+                             } };
+}
+
+/// A loopback listener, armed as `AdminEndpoint::Start` arms its own but for the send timeout (`StopCaseSendTimeout`).
+/// @return The listener.
+[[nodiscard]] std::unique_ptr<Pace::BlockingListener> ArmedStopCaseListener()
+{
+    auto listener = Pace::BlockingListener::Bind("127.0.0.1", 0);
+    REQUIRE(listener != nullptr);
+    REQUIRE(listener->IsBound());
+    listener->SetTimeouts(Pace::AdminHttpServer::AcceptPoll, StopCaseSendTimeout);
+    return listener;
+}
+
+/// A server over a real loopback listener, run on an accept thread, under the serving and bounds a case names. Its
+/// connections write in watched chunks (`Testing::WriteWatchingListener`), so a case can SEE the answer parked in a
+/// write before it stops anything.
+struct StopCaseServer
+{
+    /// @param serving Where a connection is served.
+    /// @param deadlines The bounds, the drain among them.
+    /// @param bodyBytes How long `GET /big`'s body is.
+    /// @param hold How long its handler runs first.
+    StopCaseServer(Pace::AdminConnectionServing serving,
+                   Pace::AdminDeadlines deadlines,
+                   std::size_t bodyBytes,
+                   std::chrono::milliseconds hold):
+        StopCaseServer(ArmedStopCaseListener(), serving, deadlines, bodyBytes, hold)
+    {
+    }
+
+    /// @param armed The bound, armed listener; its registry is taken before it is wrapped.
+    /// @param serving Where a connection is served.
+    /// @param deadlines The bounds, the drain among them.
+    /// @param bodyBytes How long `GET /big`'s body is.
+    /// @param hold How long its handler runs first.
+    StopCaseServer(std::unique_ptr<Pace::BlockingListener> armed,
+                   Pace::AdminConnectionServing serving,
+                   Pace::AdminDeadlines deadlines,
+                   std::size_t bodyBytes,
+                   std::chrono::milliseconds hold):
+        connections { &armed->Connections() },
+        port { armed->boundPort() },
+        listener { std::make_unique<Pace::Testing::WriteWatchingListener>(std::move(armed)) },
+        server { *listener,
+                 *connections,
+                 metrics,
+                 [] { return Pace::MetricsSnapshot {}; },
+                 logger,
+                 clock,
+                 acceptLoops,
+                 Pace::DefaultDrainWait(),
+                 { BigRoute(bodyBytes, hold, entered) },
+                 nullptr,
+                 Pace::EverySurface,
+                 { .surface = "stopcase",
+                   .maxConcurrentRequests = 4,
+                   .deadlines = deadlines,
+                   .builtIns = Pace::AdminBuiltInRoutes::None,
+                   .serving = serving } }
+    {
+        acceptThread = std::jthread { [this] { core::async::syncRun(server.Run()); } };
+    }
+
+    /// The case's one connection: dialled, and the request written.
+    /// @return The client's socket.
+    [[nodiscard]] std::unique_ptr<core::net::ISocket> Request() const
+    {
+        using namespace std::chrono_literals;
+        core::net::BlockingConnector connector;
+        auto client = core::async::syncRun(connector.connect(
+            "127.0.0.1",
+            port,
+            core::net::DialOptions { .connectTimeout = 5s, .buffers = { .send = {}, .receive = SlowClientReceiveBytes } }));
+        REQUIRE(client.has_value());
+        (*client)->setReceiveDeadline(5s);
+        REQUIRE(core::async::syncRun(WriteString(client->get(), "GET /big HTTP/1.1\r\n\r\n")));
+        return std::move(*client);
+    }
+
+    std::atomic<bool> entered { false };
+    Pace::CapturingLogger logger;
+    Pace::AtomicMetricsSink metrics;
+    core::platform::SteadyClock clock;
+    core::net::AcceptLoopHealth acceptLoops;
+    /// The registry of the listener `listener` wraps, and owned by it.
+    Pace::OpenConnections* connections;
+    std::uint16_t port;
+    std::unique_ptr<Pace::Testing::WriteWatchingListener> listener;
+    Pace::AdminHttpServer server;
+    std::jthread acceptThread;
+
+    StopCaseServer(StopCaseServer const&) = delete;
+    StopCaseServer(StopCaseServer&&) = delete;
+    StopCaseServer& operator=(StopCaseServer const&) = delete;
+    StopCaseServer& operator=(StopCaseServer&&) = delete;
+
+    /// Asks the loop to stop before `acceptThread` joins it, so a failed `REQUIRE` anywhere in a case -- `Request`'s
+    /// included, before the case has armed anything of its own -- ends the case red rather than hanging it.
+    ~StopCaseServer()
+    {
+        server.RequestStop();
+    }
+};
+
+/// `AdminHttpServer::Stop` on a thread of its own, so the case's thread can bound the wait for it.
+struct StopRun
+{
+    std::atomic<bool> done { false };
+    std::atomic<std::int64_t> tookMs { -1 };
+    std::jthread thread;
+
+    /// Start the stop of @p fixture's server.
+    /// @param fixture The server; must outlive the stop's thread.
+    void Begin(StopCaseServer& fixture)
+    {
+        thread = std::jthread { [this, &fixture] {
+            auto const began = std::chrono::steady_clock::now();
+            fixture.server.Stop(fixture.acceptThread);
+            tookMs.store(
+                std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - began).count());
+            done.store(true);
+        } };
+    }
+};
+
+/// Read until the server closes, however the bytes arrive: a large answer comes in short reads.
+/// @param socket The client's socket.
+/// @return Everything read.
+core::async::Task<std::string> ReadToEnd(core::net::ISocket* socket)
+{
+    std::string out;
+    std::vector<std::byte> chunk(std::size_t { 64 } * 1024);
+    while (true)
+    {
+        auto const result = co_await socket->read(std::span<std::byte> { chunk.data(), chunk.size() });
+        if (!result.has_value() || *result == 0)
+            break;
+        std::ranges::transform(
+            std::span { chunk }.first(*result), std::back_inserter(out), [](std::byte b) { return static_cast<char>(b); });
+    }
+    co_return out;
+}
+
+/// Whether @p record reports a cancel of @p count connections.
+/// @param record A captured record.
+/// @param count How many connections it must name.
+/// @return True for the stop's cancel `Warn`.
+[[nodiscard]] bool NamesCancel(Pace::CapturingLogger::Record const& record, std::size_t count)
+{
+    return record.level == Pace::LogLevel::Warn
+           && record.message.contains(std::format("stopcase: stopping, cancelled {} connection(s)", count));
+}
+
+} // namespace
+
+TEST_CASE("AdminHttp: a stop cancels a client that does not read its answer, within its bound", "[admin][http][stop]")
+{
+    // The defect's own shape: a client that reads just often enough to keep every blocking write CALL inside its send
+    // timeout holds the response write -- and the thread it blocks -- for as long as it likes, so a stop that waits for
+    // it waits with it. With the send timeout out of the race (`StopCaseSendTimeout`), a client that reads NOTHING is
+    // that client, deterministically. Both servings: on the accept thread the join itself would wait, on threads of
+    // their own the serving threads' join would.
+    using namespace std::chrono_literals;
+    auto const serving = GENERATE(Pace::AdminConnectionServing::OnAcceptThread, Pace::AdminConnectionServing::OnOwnThreads);
+    INFO("serving " << static_cast<int>(serving));
+    StopCaseServer fixture { serving, StopCaseDeadlines, SlowReaderBodyBytes, 0ms };
+    auto client = fixture.Request();
+    auto const watch = fixture.listener->Watch();
+
+    // Nothing read: the server fills what is under the connection and parks in a write. A failure from here on is
+    // released by the fixture's own stop, which its cancel bounds.
+    REQUIRE(Pace::Testing::WaitUntilParkedInWrite(*watch, 250ms, 10s));
+
+    auto const stopBegan = std::chrono::steady_clock::now();
+    StopRun stop;
+    stop.Begin(fixture);
+    constexpr auto Bound = Pace::AdminHttpServer::WorstCaseStopUnder(StopCaseDeadlines);
+    auto const stopped = Pace::Testing::WaitUntil(
+        "the stop to cancel the parked write and return",
+        [&] { return stop.done.load(); },
+        [&] { return watch->Describe(stopBegan); },
+        Pace::Testing::WaitOptions { .step = {}, .context = {}, .bound = Bound + 2s });
+    // What the client was left to read, at full speed: what tells a connection the SERVER ended from one the case
+    // merely stopped reading is that the stream then ENDS -- end-of-stream or a reset, never a read timing out --
+    // short of the body. A stop that never returned is released by closing the client, so its thread joins.
+    auto received = std::size_t { 0 };
+    auto endedByServer = false;
+    if (stopped)
+    {
+        std::vector<std::byte> chunk(std::size_t { 64 } * 1024);
+        while (true)
+        {
+            auto const read = core::async::syncRun(ReadOnce(client.get(), std::span<std::byte> { chunk }));
+            if (read.has_value() && *read > 0)
+            {
+                received += *read;
+                continue;
+            }
+            endedByServer = read.has_value() || !core::net::isDeadlineExpiry(read.error().code);
+            break;
+        }
+    }
+    client->close();
+    if (stop.thread.joinable())
+        stop.thread.join();
+
+    auto const records = fixture.logger.Snapshot();
+    // Every Warn and Error the stop logged, and what ended the server's write, so a red names what ended the
+    // connection rather than only that the cancel did not.
+    auto const said = [&records] {
+        auto text = std::string {};
+        for (auto const& record: records)
+            if (record.level == Pace::LogLevel::Warn || record.level == Pace::LogLevel::Error)
+                text += std::format("\n  {}", record.message);
+        return text.empty() ? std::string { " (none)" } : text;
+    }();
+    INFO("the stop logged:" << said);
+    INFO("the server's write, from the stop's start: " << watch->Describe(stopBegan));
+    CHECK(stopped);
+    CHECK(stop.tookMs.load() < Bound.count());
+    // The SERVER ended the connection: the client was cut short of the body, and its read did not merely time out.
+    CHECK(endedByServer);
+    CHECK(received < SlowReaderBodyBytes);
+    // And the cancel is what did it, named with its count.
+    CHECK(std::ranges::any_of(records, [](Pace::CapturingLogger::Record const& record) { return NamesCancel(record, 1); }));
+    CHECK(std::ranges::none_of(records, [](Pace::CapturingLogger::Record const& record) {
+        return record.message.contains("did not finish within the stop ceiling");
+    }));
+}
+
+TEST_CASE("AdminHttp: a client that reads its answer still gets all of it from a stop that began during it",
+          "[admin][http][stop]")
+{
+    // The control: the cancel is for a client the drain cannot wait for, never for one it can. The stop lands while
+    // the handler runs; the client reads at full speed and receives every byte, and nothing is cancelled.
+    using namespace std::chrono_literals;
+    auto const serving = GENERATE(Pace::AdminConnectionServing::OnAcceptThread, Pace::AdminConnectionServing::OnOwnThreads);
+    INFO("serving " << static_cast<int>(serving));
+    constexpr auto Body = std::size_t { 1024 } * 1024;
+    constexpr Pace::AdminDeadlines Roomy { .drain = 3000ms, .afterCancel = 1000ms };
+    StopCaseServer fixture { serving, Roomy, Body, 300ms };
+    auto client = fixture.Request();
+    StopRun stop;
+    auto const release = [](Pace::AdminHttpServer* server) {
+        server->RequestStop();
+    };
+    std::unique_ptr<Pace::AdminHttpServer, decltype(release)> const releaseFirst { &fixture.server, release };
+
+    REQUIRE(Pace::Testing::WaitUntil(
+        "the handler to be running",
+        [&] { return fixture.entered.load(); },
+        [] { return std::string { "not entered" }; },
+        Pace::Testing::WaitOptions { .step = {}, .context = {}, .bound = 5s }));
+    stop.Begin(fixture);
+    auto const response = core::async::syncRun(ReadToEnd(client.get()));
+    auto const stopped = Pace::Testing::WaitUntil(
+        "the stop to return",
+        [&] { return stop.done.load(); },
+        [] { return std::string { "stopping" }; },
+        Pace::Testing::WaitOptions { .step = {}, .context = {}, .bound = Pace::AdminHttpServer::WorstCaseStopUnder(Roomy) });
+    if (stop.thread.joinable())
+        stop.thread.join();
+
+    CHECK(stopped);
+    REQUIRE(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    auto const split = response.find("\r\n\r\n");
+    REQUIRE(split != std::string::npos);
+    CHECK(response.size() - (split + 4) == Body);
+    CHECK(stop.tookMs.load() < Roomy.drain.count());
+    CHECK(std::ranges::none_of(fixture.logger.Snapshot(), [](Pace::CapturingLogger::Record const& record) {
+        return record.message.contains("cancelled");
+    }));
+}
+
+TEST_CASE("AdminHttp: a stop waits for a stuck handler once, and says so once", "[admin][http][stop]")
+{
+    // A handler that outlasts the drain and the wait after the cancel is not a client, and the cancel cannot end it.
+    // The stop waits for it ONCE -- so `WorstCaseStopUnder` is the bound as written -- and reports it once, where a
+    // second drain inside the listener's close doubled both.
+    using namespace std::chrono_literals;
+    // Past TWO stop ceilings, so a stop that waited twice would also have reported twice.
+    constexpr auto Hold = 2 * (StopCaseDeadlines.drain + StopCaseDeadlines.afterCancel) + 1000ms;
+    StopCaseServer fixture { Pace::AdminConnectionServing::OnOwnThreads, StopCaseDeadlines, 16, Hold };
+    auto client = fixture.Request();
+    REQUIRE(Pace::Testing::WaitUntil(
+        "the handler to be running",
+        [&] { return fixture.entered.load(); },
+        [] { return std::string { "not entered" }; },
+        Pace::Testing::WaitOptions { .step = {}, .context = {}, .bound = 5s }));
+
+    auto const began = std::chrono::steady_clock::now();
+    fixture.server.Stop(fixture.acceptThread);
+    auto const took = std::chrono::steady_clock::now() - began;
+
+    CHECK(took < Pace::AdminHttpServer::WorstCaseStopUnder(StopCaseDeadlines) + 250ms);
+    auto const records = fixture.logger.Snapshot();
+    CHECK(std::ranges::count_if(records,
+                                [](Pace::CapturingLogger::Record const& record) {
+                                    return record.level == Pace::LogLevel::Error
+                                           && record.message.contains("did not finish within the stop ceiling");
+                                })
+          == 1);
 }

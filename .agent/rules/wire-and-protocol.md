@@ -2507,6 +2507,29 @@ gives it none, so each rule below is what keeps a session's fleet controls on th
   614 s measured before this. A forwarded call is posted onto `NodeIoLoop`, which dials through the connector,
   and the MCP thread waits on a condition variable bounded by `McpUpstream::CallDeadline`. A wait
   that runs out CANCELS what it waited for, so no frame stays parked for a reply nobody reads.
+- **A stop CANCELS what its drain cannot wait for, so it is bounded whatever a CLIENT does.** A blocking write
+  is bounded per CALL (`SO_SNDTIMEO`), never per answer, so a local client reading just fast enough
+  to keep each call moving held a response write -- and the thread it blocks, which the stop then
+  joins -- for as long as it liked, past `TimeoutStopSec` into a `SIGKILL`. So every socket a
+  `BlockingListener` accepts is tracked (`OpenConnections`, behind `IConnectionCanceller`), and once
+  `AdminDeadlines::drain` runs out `AdminHttpServer::Stop` shuts every one still open down under
+  whatever it is blocked in, logs a `Warn` naming the count, and waits `afterCancel`. Three parts
+  are load-bearing: it is a `shutdown`, never a `close` (the descriptor stays its owner's, and a
+  socket leaves the registry UNDER ITS LOCK before it closes, so a cancel never reaches a reused
+  number); it LATCHES, so an accept already in flight cannot hand out a connection the stop has
+  stopped waiting for; and the drain runs BEFORE the accept thread's join, because the dashboard
+  (`OnAcceptThread`) serves its request ON that thread. The dashboard and MCP share it as one
+  mechanism, the bound being `AdminHttpServer::WorstCaseStopUnder` of the surface's own row.
+  **Only a write the kernel REFUSED is blocked**: Winsock took a 4 MiB send whole past its 1 MiB
+  `SO_SNDBUF`, so a large answer is not evidence of a parked write, and a test that inferred one went
+  green on Linux and red on Windows. Nor can a fixture shrink the buffer from outside: every accept sets
+  `ClientSocketBufferBytes` on the accepted socket (`ApplyHotSocketOptions`), overwriting whatever the
+  listening socket would have passed on. And a stop case takes the SEND TIMEOUT out of the race --
+  the listener's column, armed longer than the case, with a client that reads nothing -- rather than
+  tuning a trickle against platform timers: every trickle tried let a macOS send time out first, which
+  ends the connection before any cancel can and reads as a cancel that never happened.
+  A stop case SEES the write parked first
+  (`tests/WriteWatchingListener.hpp`: a write under way that moves no byte for a stretch).
 - **No credential is added, and the node acts AS ITSELF.** A forwarded call rides the node's own
   proven, sealed `0xFC` connection; a call this node answers goes to its own router in process
   (`FrameRouterAnswerer`), stating the proof it holds. That self-call is answered as PROVEN and

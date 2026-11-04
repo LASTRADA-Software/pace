@@ -693,8 +693,9 @@ core::net::AcceptResult BlockingListener::AcceptNow()
     // admin endpoint stays available under slowloris.
     if (_ioTimeout.count() > 0)
         SetIoTimeouts(ToSocket(accepted->handle), _ioTimeout, _ioTimeout);
-    return core::net::AcceptResult { std::make_unique<core::net::BlockingSocket>(accepted->handle,
-                                                                                 std::move(accepted->peer)) };
+    // Tracked, so a stop can end a write a slow reader holds open (`Connections`).
+    return core::net::AcceptResult { _connections.Track(
+        std::make_unique<core::net::BlockingSocket>(accepted->handle, std::move(accepted->peer)), accepted->handle) };
 }
 
 } // namespace Pace

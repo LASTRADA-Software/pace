@@ -182,6 +182,19 @@ TEST_CASE("json escapes strings per RFC 8259", "[json]")
     CHECK(prefixed == "k=\"v\"");
 }
 
+TEST_CASE("json copies a run of plain ASCII whole and escapes what interrupts it", "[json]")
+{
+    // The plain-run fast path must change nothing but the cost: runs at the start, between every kind of byte the
+    // per-character path handles, and at the end, each spelled exactly as before.
+    auto const run = std::string(256, 'x');
+    auto const input = std::format("{0}\"{0}\n{0}\x01{0}\xC3\xA9{0}\xff{0}", run);
+    auto const expected = std::format("\"{0}\\\"{0}\\n{0}\\u0001{0}\xC3\xA9{0}\\ufffd{0}\"", run);
+    auto out = std::string {};
+    J::AppendString(out, input);
+    CHECK(out == expected);
+    CHECK(J::Parse(out).has_value());
+}
+
 TEST_CASE("json decodes escapes and surrogate pairs", "[json]")
 {
     CHECK(Unwrap(Unwrap(J::Parse("\"\\\"\\\\\\/\\b\\f\\n\\r\\t\""sv)).AsString()) == "\"\\/\b\f\n\r\t"sv);

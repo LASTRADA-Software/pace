@@ -2,6 +2,7 @@
 #pragma once
 
 #include <Pace/Transport/ListenQueue.hpp>
+#include <Pace/Transport/OpenConnections.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -263,6 +264,15 @@ class BlockingListener final: public core::net::IListener
         return _bindError;
     }
 
+    /// The connections this listener accepted that are still open, which a stop cancels when its drain runs
+    /// out (`AdminHttpServer::Stop`): a blocking write is bounded per call, so a client reading just fast enough
+    /// would otherwise hold the thread it blocks past any stop. Safe to cancel from any thread.
+    /// @return The registry every accepted socket is tracked in; lives as long as this listener.
+    [[nodiscard]] OpenConnections& Connections() noexcept
+    {
+        return _connections;
+    }
+
     /// Hand the listening socket out and own it no longer -- to `AdoptBoundListener`, so a
     /// loop serves the port this bound without it ever being released in between.
     /// @return The socket, or `InvalidHandle` when none is bound; the caller owns it.
@@ -286,6 +296,8 @@ class BlockingListener final: public core::net::IListener
     std::string _bindError;
     std::chrono::milliseconds _ioTimeout { 0 };
     std::chrono::milliseconds _acceptPoll { 0 };
+    /// Every socket `AcceptNow` hands out is tracked here until it closes.
+    OpenConnections _connections;
 };
 
 } // namespace Pace

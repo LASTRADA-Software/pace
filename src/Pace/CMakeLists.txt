@@ -150,6 +150,7 @@ target_sources(Pace
         Transport/AcceptLoopReporter.cpp
         Transport/LingeringClose.cpp
         Transport/NativeListen.cpp
+        Transport/OpenConnections.cpp
 )
 
 # The DNS SRV lookup behind Platform/SrvResolver: DnsQueryEx lives in dnsapi on Windows, and

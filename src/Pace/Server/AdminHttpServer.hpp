@@ -7,6 +7,7 @@
 #include <Pace/Metrics/IMetricsSink.hpp>
 #include <Pace/Metrics/PrometheusFormatter.hpp>
 #include <Pace/Transport/LingeringClose.hpp>
+#include <Pace/Transport/OpenConnections.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -17,6 +18,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include <core/async/Task.hpp>
@@ -266,6 +268,11 @@ struct AdminDeadlines
     /// longer than that (MCP: a forwarded call) states a ceiling above its own longest request, or every stop that
     /// lands during one is logged as a request abandoned.
     std::chrono::milliseconds drain { DrainBound {}.ceiling };
+    /// How long a stop waits, once `drain` ran out and it CANCELLED every connection still open
+    /// (`IConnectionCanceller`), for the requests those connections held to end. A cancelled write or linger
+    /// fails at once, so this covers a thread being scheduled and a handler finishing, never a client: what a
+    /// client does can no longer hold the stop past `drain` plus this.
+    std::chrono::milliseconds afterCancel { 1000 };
 };
 
 /// How one instance of this server is shaped, beside the routes it serves.
@@ -422,6 +429,9 @@ class AdminHttpServer
 
     /// Construct over its collaborators; all must outlive the server.
     /// @param listener Bound listener for the admin port.
+    /// @param connections Cancels the connections @p listener accepted that are still open, which a stop does once
+    ///        its drain runs out (`Stop`). A `BlockingListener`'s own `Connections()`. Required, because without it
+    ///        a client that reads its answer slowly enough holds the stop for as long as it likes.
     /// @param metrics Connection-level counter sink to expose.
     /// @param snapshotProvider Returns a fresh storage snapshot + uptime per scrape.
     /// @param logger Shared logger.
@@ -438,6 +448,7 @@ class AdminHttpServer
     /// @param profile What this instance reports as, how many requests it serves at once and
     ///                whether it answers the built-in routes. Defaults to the admin surface's.
     AdminHttpServer(core::net::IListener& listener,
+                    IConnectionCanceller& connections,
                     IMetricsSink const& metrics,
                     SnapshotProvider snapshotProvider,
                     ILogger& logger,
@@ -468,12 +479,32 @@ class AdminHttpServer
     /// cannot both precede and follow the join.
     void RequestStop() noexcept;
 
-    /// Stop accepting and close the listener, then drain in-flight requests.
+    /// Stop accepting and close the listener, then drain in-flight requests (`DrainOrCancel`).
     ///
     /// Safe to call after the accept thread has been joined; see `RequestStop()`
     /// for why that order matters. Calling it alone still works and still stops
     /// the loop -- it simply races the accept thread while doing so.
     void Shutdown() noexcept;
+
+    /// The whole stop, in its one order: ask the loop to stop, drain the requests in flight -- CANCELLING the
+    /// connections still open once `AdminDeadlines::drain` runs out -- then join @p acceptThread, and only then
+    /// close the listener.
+    ///
+    /// **The drain comes BEFORE the join**, because on an `OnAcceptThread` profile the request is served on the
+    /// accept thread itself: a join first would wait for a client that reads its answer slowly, for as long as it
+    /// reads, and the drain after it would never get to cancel anything. So the stop is bounded whatever a client
+    /// does: one `AcceptPoll`, `drain`, then `afterCancel`.
+    /// @param acceptThread The thread running `Run()`; joined here.
+    void Stop(std::jthread& acceptThread) noexcept;
+
+    /// The longest `Stop` takes under @p deadlines, whatever a client does: one accept poll, the drain, and the wait
+    /// after the cancel. A handler that does not return is not a client and is not covered.
+    /// @param deadlines The profile's bounds.
+    /// @return The bound.
+    [[nodiscard]] static constexpr std::chrono::milliseconds WorstCaseStopUnder(AdminDeadlines const& deadlines) noexcept
+    {
+        return AcceptPoll + deadlines.drain + deadlines.afterCancel;
+    }
 
     /// Maximum number of concurrently-in-flight admin requests. The accept
     /// loop spawns each request as a detached coroutine; once this cap is
@@ -487,7 +518,18 @@ class AdminHttpServer
                   "the default profile is the admin surface's, so its cap is this one");
 
   private:
+    /// Wait for the requests in flight up to `AdminDeadlines::drain`, then cancel every connection still open
+    /// and wait `afterCancel` for what they held to end. Run ONCE per stop, so `WorstCaseStopUnder` is literal.
+    void DrainOrCancel() noexcept;
+
+    /// Close the listener: after the accept thread is joined, since closing writes what it reads (#260).
+    void CloseListener() noexcept;
+
+    /// Say, as a `Warn`, how many connections the stop's cancel shut down, once no accept can add to the count.
+    void ReportCancelled() noexcept;
+
     core::net::IListener& _listener;
+    IConnectionCanceller& _openConnections;
     IMetricsSink const& _metrics;
     SnapshotProvider _snapshotProvider;
     ILogger& _logger;
