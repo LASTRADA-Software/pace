@@ -685,7 +685,7 @@ must exhibit a magnitude must not be measured through machinery whose own cost i
 comparable to that magnitude. Both halves of this file got that wrong once, in the
 same direction -- towards a confident wrong answer.
 
-## A case name is an ARGUMENT, so it may not begin with `-`
+## A case name is an ARGUMENT, so it may not begin with `-` or `/`
 
 <!-- agent-tripwire: A Catch2 case name is an ARGUMENT, and that one fact has three consequences -->
 
@@ -711,6 +711,11 @@ rather than listing the two known names, for the reason every other table here
 does: a list of what is wrong today is maintained by the same person who
 introduces the next one. Put the flag anywhere but first — "Naming `--cache-dir`
 gives the node an on-disk tier" reads no worse and runs.
+
+**A leading `/` is the same defect on Windows alone**, where Catch2 accepts `/`-led
+options: `TEST_CASE("/fleet.json refuses an unknown range ...")` failed there as
+`Unrecognised token: /fleet.json` and so never ran, while every POSIX leg passed it.
+The scan refuses `/` as well as `-`, which is the only place a POSIX run can see it.
 
 ### A COMMA splits the spec, so such a name cannot select itself — and the miss is a RED
 

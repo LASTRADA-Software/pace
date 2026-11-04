@@ -2198,7 +2198,7 @@ TEST_CASE("A compile the admission queue placed on a worker reads as dispatched 
     CHECK(json.body.contains(R"("dispatched":{"value":1,)"));
 }
 
-TEST_CASE("/fleet.json refuses an unknown range in JSON and still ignores a section", "[node][admin][fleettext]")
+TEST_CASE("fleet.json refuses an unknown range in JSON and still ignores a section", "[node][admin][fleettext]")
 {
     // The route answers through `AnswerFleetText`, whose refusal is a sentence: the route carries it as
     // a JSON string, so a scraper reading the 400 still reads JSON, and it names every range served.

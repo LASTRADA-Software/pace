@@ -84,6 +84,7 @@ set(file_wrapped_unique "TEST_CASE(\"alpha stays distinct\", \"[t]\")\n${body}\n
 set(file_unsuffixed "TEST_CASE(\"alpha stays distinct\", \"[bench]\")\n${body}")
 set(file_unsuffixed_unique "TEST_CASE(\"gamma stays distinct\", \"[bench]\")\n${body}")
 
+set(file_slash "TEST_CASE(\"/fleet.json refuses an unknown range\", \"[t]\")\n${body}\nTEST_CASE(\"beta stays distinct\", \"[t]\")\n${body}")
 set(file_template_method "TEMPLATE_TEST_CASE_METHOD(Fixture, \"-cache-dir gives the node an on-disk tier\", \"[t]\", int)\n${body}")
 set(file_scenario_method "SCENARIO_METHOD(Fixture, \"-cache-dir gives the node an on-disk tier\", \"[t]\")\n${body}")
 
@@ -206,6 +207,8 @@ set(cases
 
     # --- the refusing direction ----------------------------------------------
     "dash|src/Alpha_test.cpp=dash|-|refuse|begin with '-'|-"
+    # A leading slash is an option to Catch2 on Windows alone, so only this check can catch it off Windows.
+    "slash|src/Alpha_test.cpp=slash|-|refuse|begin with '-' or '/'|-"
     "duplicate|src/Alpha_test.cpp=duplicate|-|refuse|declared more than once|-"
     # WHERE, not only whether: the sites are asserted as line numbers.
     "duplicate-sites|src/Alpha_test.cpp=duplicate_sites|-|refuse|\\(3 cases\\) +src/Alpha_test\\.cpp:6 +src/Alpha_test\\.cpp:11 +src/Alpha_test\\.cpp:18[^0-9]|-"

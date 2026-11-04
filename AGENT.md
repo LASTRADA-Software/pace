@@ -1273,9 +1273,9 @@ and what they may assume.
   what gets tested.
 - `Unwrap(x)` after `REQUIRE(x.has_value())` for `std::optional`; a bare `*x` is a build failure.
 - A Catch2 case name is an ARGUMENT, and that one fact has three consequences. It may not begin with
-  `-`. A **COMMA** splits the spec, so such a name selects NOTHING and `No tests ran` exits
-  **non-zero** — a deterministic red, not an empty result. Select by TAG, and **anything selecting a
-  subset asserts how many cases RAN**; write it as *the name is an argument*.
+  `-` or `/` (an option on Windows). A **COMMA** splits the spec, so such a name selects NOTHING and
+  `No tests ran` exits **non-zero** — a deterministic red, not an empty result. Select by TAG, and
+  **anything selecting a subset asserts how many cases RAN**; write it as *the name is an argument*.
 - A DUPLICATED case name registers two ctest entries that each run BOTH cases — nothing is skipped,
   ATTRIBUTION breaks, so it reads as harmless. `test-name-hygiene` refuses duplicates; an exemption
   row carries a REASON and is refused STALE once it stops describing one.
