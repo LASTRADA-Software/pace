@@ -155,6 +155,7 @@ struct Reply
 {
     auto pages = std::vector<Wire::FingerprintInputsPage> {};
     auto cursor = std::uint64_t { 0 };
+    auto finished = false;
     // Bounded by the record: a responder that stalled at one cursor would otherwise loop forever.
     for ([[maybe_unused]] auto const turn: std::views::iota(0, 10000))
     {
@@ -166,10 +167,15 @@ struct Reply
         auto const next = Unwrap(page).nextCursor;
         pages.push_back(Unwrap(page));
         if (!next.has_value())
-            return pages;
+        {
+            finished = true;
+            break;
+        }
         cursor = Unwrap(next);
     }
-    FAIL("the responder never answered a last page");
+    // Required, not `FAIL`ed: nothing may follow a `FAIL`, which MSVC reads as unreachable code (C4702).
+    INFO("the responder never answered a last page");
+    REQUIRE(finished);
     return pages;
 }
 

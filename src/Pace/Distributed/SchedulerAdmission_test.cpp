@@ -183,14 +183,14 @@ struct Fleet
     auto const* const compiles = document.Find("compiles");
     REQUIRE(compiles != nullptr);
     REQUIRE(compiles->AsArray() != nullptr);
-    for (auto const& row: Unwrap(compiles->AsArray()))
-    {
+    // Found, then required: nothing may follow a `FAIL`, which MSVC reads as unreachable code (C4702).
+    auto const* const found = core::findIfOrNull(Unwrap(compiles->AsArray()), [ticket](Json::Value const& row) {
         auto const* const id = row.Find("ticket");
-        if (id != nullptr && id->AsInt() == static_cast<std::int64_t>(ticket))
-            return row;
-    }
-    FAIL("no compile row for ticket " << ticket);
-    return {};
+        return id != nullptr && id->AsInt() == static_cast<std::int64_t>(ticket);
+    });
+    INFO("ticket " << ticket);
+    REQUIRE(found != nullptr);
+    return *found;
 }
 
 /// The member @p key of a JSON object; the case fails when it is missing -- which is not `null`.

@@ -30,6 +30,7 @@
 #include <utility>
 #include <vector>
 
+#include <core/Ranges.hpp>
 #include <core/async/SyncRun.hpp>
 #include <core/platform/Clock.hpp>
 #include <tests/BoundedWait.hpp>
@@ -176,11 +177,12 @@ struct Rig
     /// @return The memory tier's row.
     [[nodiscard]] TierBudgetStatus Memory() const
     {
-        for (auto const& row: applier.BudgetStatus())
-            if (row.tier == StorageTier::Memory)
-                return row;
-        FAIL("no memory row");
-        return {};
+        // Found, then required: nothing may follow a `FAIL`, which MSVC reads as unreachable code (C4702).
+        auto const rows = applier.BudgetStatus();
+        auto const* const memory =
+            core::findIfOrNull(rows, [](TierBudgetStatus const& row) { return row.tier == StorageTier::Memory; });
+        REQUIRE(memory != nullptr);
+        return *memory;
     }
 
     SwappableConfig config;

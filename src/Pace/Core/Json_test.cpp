@@ -70,7 +70,10 @@ struct Refusal
 
 TEST_CASE("json parses every value kind", "[json]")
 {
-    auto const text = R"({"a":[1,-2,3.5,true,false,null,"x\u00e9"]})"sv;
+    // JSON text naming a `\u` escape never spells one inside a raw literal -- split across two, or an ordinary
+    // literal with the backslash doubled -- because MSVC translates a universal-character-name even in a raw string.
+    auto const text = R"({"a":[1,-2,3.5,true,false,null,"x\)"
+                      R"(u00e9"]})"sv;
     auto const parsed = J::Parse(text);
     REQUIRE(parsed.has_value());
     CHECK(J::Serialize(*parsed) == "{\"a\":[1,-2,3.5,true,false,null,\"x\xC3\xA9\"]}"sv);
@@ -181,10 +184,10 @@ TEST_CASE("json escapes strings per RFC 8259", "[json]")
 
 TEST_CASE("json decodes escapes and surrogate pairs", "[json]")
 {
-    CHECK(Unwrap(Unwrap(J::Parse(R"("\"\\\/\b\f\n\r\t")"sv)).AsString()) == "\"\\/\b\f\n\r\t"sv);
-    CHECK(Unwrap(Unwrap(J::Parse(R"("\u0041\u00E9\u20ac")"sv)).AsString()) == "A\xC3\xA9\xE2\x82\xAC"sv);
-    CHECK(Unwrap(Unwrap(J::Parse(R"("\ud83d\ude00")"sv)).AsString()) == "\xF0\x9F\x98\x80"sv);
-    CHECK(Unwrap(Unwrap(J::Parse(R"("\u0000")"sv)).AsString()) == "\0"sv);
+    CHECK(Unwrap(Unwrap(J::Parse("\"\\\"\\\\\\/\\b\\f\\n\\r\\t\""sv)).AsString()) == "\"\\/\b\f\n\r\t"sv);
+    CHECK(Unwrap(Unwrap(J::Parse("\"\\u0041\\u00E9\\u20ac\""sv)).AsString()) == "A\xC3\xA9\xE2\x82\xAC"sv);
+    CHECK(Unwrap(Unwrap(J::Parse("\"\\ud83d\\ude00\""sv)).AsString()) == "\xF0\x9F\x98\x80"sv);
+    CHECK(Unwrap(Unwrap(J::Parse("\"\\u0000\""sv)).AsString()) == "\0"sv);
     // Whitespace around and inside is skipped.
     CHECK(Unwrap(Unwrap(J::Parse(" \t\r\n[ 1 , 2 ]\n"sv)).AsArray()).size() == 2);
 }
@@ -208,9 +211,22 @@ TEST_CASE("json refuses", "[json]")
         { .input = "{1:2}", .limits = defaults, .code = J::ErrorCode::UnexpectedCharacter, .offset = 1 },
         { .input = "\"a\nb\"", .limits = defaults, .code = J::ErrorCode::UnexpectedCharacter, .offset = 2 },
         { .input = "// c\n1", .limits = defaults, .code = J::ErrorCode::UnexpectedCharacter, .offset = 0 },
-        { .input = R"("\ud800")", .limits = defaults, .code = J::ErrorCode::InvalidEscape, .offset = 1 },
-        { .input = R"("\ud800\u0041")", .limits = defaults, .code = J::ErrorCode::InvalidEscape, .offset = 1 },
-        { .input = R"("\udc00")", .limits = defaults, .code = J::ErrorCode::InvalidEscape, .offset = 1 },
+        { .input = R"("\)"
+                   R"(ud800")",
+          .limits = defaults,
+          .code = J::ErrorCode::InvalidEscape,
+          .offset = 1 },
+        { .input = R"("\)"
+                   R"(ud800\)"
+                   R"(u0041")",
+          .limits = defaults,
+          .code = J::ErrorCode::InvalidEscape,
+          .offset = 1 },
+        { .input = R"("\)"
+                   R"(udc00")",
+          .limits = defaults,
+          .code = J::ErrorCode::InvalidEscape,
+          .offset = 1 },
         { .input = R"("\q")", .limits = defaults, .code = J::ErrorCode::InvalidEscape, .offset = 1 },
         { .input = R"("ab\u12G4")", .limits = defaults, .code = J::ErrorCode::InvalidEscape, .offset = 3 },
         { .input = "01", .limits = defaults, .code = J::ErrorCode::InvalidNumber, .offset = 0 },
@@ -269,8 +285,8 @@ TEST_CASE("json limits are each enforced", "[json]")
         CHECK(J::Parse(over, limits).error().code == J::ErrorCode::StringTooLong);
         // Counted on the DECODED bytes: an escape expands, a pair of them counts as four.
         auto const small = J::ParseLimits { .maxStringBytes = 4 };
-        CHECK(J::Parse(R"("\ud83d\ude00")"sv, small).has_value());
-        CHECK(J::Parse(R"("\ud83d\ude00a")"sv, small).error().code == J::ErrorCode::StringTooLong);
+        CHECK(J::Parse("\"\\ud83d\\ude00\""sv, small).has_value());
+        CHECK(J::Parse("\"\\ud83d\\ude00a\""sv, small).error().code == J::ErrorCode::StringTooLong);
         // A key is a string.
         CHECK(J::Parse(R"({"abcde":1})"sv, small).error().code == J::ErrorCode::StringTooLong);
     }
@@ -296,15 +312,15 @@ TEST_CASE("json survives mutated input", "[json]")
     auto seeds = std::vector<std::string> {};
     for (auto const index: std::views::iota(std::size_t { 0 }, Documents))
     {
-        auto const doc = std::format(
-            R"({{"id":{},"name":"n\u00e9{}\n","ok":{},"nil":null,"r":{}.5e-{},"list":[{},"{}",[true,{{"k":[]}}],{{}}],"u":"\ud83d\ude00"}})",
-            index,
-            index,
-            index % 2 == 0 ? "true" : "false",
-            index,
-            index % 7,
-            index * 31,
-            Repeat("z", index % 17));
+        auto const doc = std::format("{{\"id\":{},\"name\":\"n\\u00e9{}\\n\",\"ok\":{},\"nil\":null,\"r\":{}.5e-{},\"list\":"
+                                     "[{},\"{}\",[true,{{\"k\":[]}}],{{}}],\"u\":\"\\ud83d\\ude00\"}}",
+                                     index,
+                                     index,
+                                     index % 2 == 0 ? "true" : "false",
+                                     index,
+                                     index % 7,
+                                     index * 31,
+                                     Repeat("z", index % 17));
         REQUIRE(J::Parse(doc).has_value());
         seeds.push_back(doc);
     }
