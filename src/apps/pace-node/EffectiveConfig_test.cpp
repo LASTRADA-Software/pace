@@ -156,12 +156,22 @@ TEST_CASE("A path that is not UTF-8 travels as its bytes, for the reader to mark
 {
     // The wire carries the bytes the node holds; `NodeStatusView::ReadableText` is where they are marked, never
     // replaced -- and replacing them here would name a different file.
+    //
+    // Built from the platform's own form: on Windows `std::filesystem::path`'s narrow constructor THROWS for bytes
+    // that are not UTF-8 (`PathFromNarrowText` is the tree's one catch), so a path that is not text is one holding a
+    // lone surrogate, and it travels as the WTF-8 bytes of that surrogate -- never a throw out of `path.string()`.
     auto cfg = NodeConfig {};
+#if defined(_WIN32)
+    cfg.cacheDir = std::filesystem::path { std::wstring { L"C:\\cache\\pace-\xD800" } };
+    auto const expected = std::string { "C:\\cache\\pace-\xED\xA0\x80" };
+#else
     cfg.cacheDir = std::filesystem::path { std::string { "/var/cache/pace-\xff" } };
+    auto const expected = std::string { "/var/cache/pace-\xff" };
+#endif
     auto const rows = RowsNamed(EffectiveConfigOf(cfg), "--cache-dir");
     REQUIRE(rows.size() == 1);
     CHECK(rows.front().kind == Wire::WireSettingValue::Value);
-    CHECK(rows.front().text == std::string { "/var/cache/pace-\xff" });
+    CHECK(rows.front().text == expected);
 }
 
 TEST_CASE("A value too long to carry, and values past the ceiling, are omitted by name and never cut", "[effective-config]")
