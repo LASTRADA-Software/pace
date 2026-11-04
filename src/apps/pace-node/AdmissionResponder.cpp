@@ -248,8 +248,15 @@ namespace
         /// Abandons the ticket unless a settle took it: the connection ended, or another frame came.
         /// A departure the endpoint already counted -- the grant was ready and nobody took it -- is
         /// given back without being counted again.
+        ///
+        /// The machine-own charge goes FIRST, in the body rather than with the member: `Abandon` counts
+        /// `AdmissionAbandoned` and pumps, and the count is what an observer on another thread acts on.
+        /// Left to the member, the charge was released after the count announced it, so a reader that saw
+        /// the abandonment still found the slot held. (The pump is not that reader: the queue learns of
+        /// this record only through the machine's next budget report.)
         ~AdmissionHold() override
         {
+            ReleaseCharge();
             if (!_settled)
                 _core->Abandon(_ticket, _scope->DepartureCounted());
         }
@@ -289,6 +296,13 @@ namespace
         void Settled() noexcept
         {
             _settled = true;
+        }
+
+        /// The grant is over -- settled, or abandoned -- so the machine-own charge goes now, before
+        /// anything is counted on its behalf.
+        void ReleaseCharge() noexcept
+        {
+            _charge = HeldChargeRegistry::Handle {};
         }
 
       private:
@@ -488,6 +502,9 @@ namespace
                                                     Wire::SettleRequest const& request)
     {
         auto const ticket = hold.Ticket();
+        // Whatever the settle says, the grant this machine recorded is over: released before the
+        // counters below, as the abandoning path does (`~AdmissionHold`).
+        hold.ReleaseCharge();
         if (request.outcome == Wire::SettleOutcome::WorkerRefused)
         {
             auto waiter = std::make_shared<AdmissionWaiter>();

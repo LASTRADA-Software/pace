@@ -130,10 +130,13 @@ namespace
         ForwardHold(ForwardHold&&) = delete;
         ForwardHold& operator=(ForwardHold&&) = delete;
 
-        /// Closes the connection to the leader, which is what releases whatever it holds there; the
-        /// local charge goes with the member.
+        /// Closes the connection to the leader, which is what releases whatever it holds there.
+        ///
+        /// The local charge goes FIRST: the close is what the leader files under `AdmissionAbandoned`, on
+        /// its own thread, and a charge left to the member is still recorded here after that count.
         ~ForwardHold() override
         {
+            ReleaseCharge();
             if (_socket != nullptr)
                 _socket->close();
         }
