@@ -2509,8 +2509,9 @@ gives it none, so each rule below is what keeps a session's fleet controls on th
   for every acting tool; a learner is refused BY NAME with the remedy), never the MCP client. A
   verb with no undo that revokes a key permanently (`cluster_forget`) is not a tool.
 - **An MCP answer SHARES ITS DERIVATION with the dashboard or `pacectl`, by construction.** A
-  fleet tool reads `FLEET-TEXT` with `FleetTextFormat::Json`, answered by `AnswerFleetText` -- the
-  ONE function the `/fleet.json` route answers from -- and re-shapes that document; `node_status`
+  fleet tool reads `FLEET-TEXT` with `FleetTextFormat::Json` -- or, for `history`'s one series,
+  `FleetTextFormat::Text` with the `series` section -- answered by `AnswerFleetText`, the ONE
+  function the `/fleet.json` and `/fleet.txt` routes answer from, and re-shapes that document; `node_status`
   reads `NODE-STATUS` through `NodeStatusView`, as `pacectl node` does. A tool that recomputed a
   quantity would be a second derivation, and the two drift without either being wrong in a test.
   Absent stays `null`, never `0`; `compiles: null` (leads no queue) is not `[]`.

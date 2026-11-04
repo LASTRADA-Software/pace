@@ -340,9 +340,9 @@ std::vector<Mcp::ToolRow> NodeReadTools(IMcpUpstream& upstream, IAppliedClusterV
                            "slots with every ceiling on them and the binding one named, cordon, each cache tier with "
                            "entries, bytes, budget and hit ratio, the surfaces it opened, and the configuration in "
                            "force after reloads with every credential redacted. This node by default; `node` names "
-                           "another member by its id, matched exactly. The same reply `pacectl node` reads. Durations "
-                           "are in SECONDS (fields ending _s); a null field is absent, never zero. `term` is the term "
-                           "THIS node holds.",
+                           "another member by its id or display name, matched exactly. The same reply `pacectl node` "
+                           "reads. Durations are in SECONDS (fields ending _s); a null field is absent, never zero. "
+                           "`term` is the term THIS node holds.",
             .inputSchema = NodeStatusInput,
             .outputSchema = NodeStatusOutput,
             .effect = Mcp::ToolEffect::ReadOnly,

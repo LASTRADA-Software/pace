@@ -1090,19 +1090,19 @@ std::vector<Mcp::ToolRow> ToolchainTools(IMcpUpstream& upstream,
             .title = "Toolchain diff",
             .description =
                 "Why two toolchain fingerprints differ, even when the name and version are the same. Each side is a "
-                "node (a member's id, matched exactly; this node when omitted) and a fingerprint, or a toolchain label "
-                "or compiler path that names exactly one toolchain that node serves -- an ambiguous one is an error "
-                "listing the candidates. Each node sends the inputs its survey digested -- the schema, the compiler's "
-                "banner, the driver grammar and every include-tree file with its content digest -- and THIS node "
-                "recomputes each fingerprint from them before comparing (recompute: passed), refusing a record that "
-                "no longer reproduces. The result names what differs: schema, both banners, both grammars, files only "
-                "on a, only on b, and on both with different content, each with a count. The verdict states only what "
-                "the comparison shows; anything more is marked 'inferred:' and inferred is true. A side whose "
-                "record does not reproduce its fingerprint is refused as stale; identical inputs reproducing neither "
-                "fingerprint, or a side digested under another schema, are reported as a skew naming both versions and "
-                "schemas. A side past 200000 files, its byte bound or its page bound is compared on schema, banner and "
-                "grammar only (complete: false), and the verdict says the files were not compared. `term` is the term "
-                "THIS node holds.",
+                "node (a member's id or display name, matched exactly; this node when omitted) and a fingerprint, or "
+                "a toolchain label or compiler path that names exactly one toolchain that node serves -- an "
+                "ambiguous one is an error listing the candidates. Each node sends the inputs its survey digested -- "
+                "the schema, the compiler's banner, the driver grammar and every include-tree file with its content "
+                "digest -- and THIS node recomputes each fingerprint from them before comparing (recompute: passed), "
+                "refusing a record that no longer reproduces. The result names what differs: schema, both banners, "
+                "both grammars, files only on a, only on b, and on both with different content, each with a count. "
+                "The verdict states only what the comparison shows; anything more is marked 'inferred:' and inferred "
+                "is true. A side whose record does not reproduce its fingerprint is refused as stale; identical "
+                "inputs reproducing neither fingerprint, or a side digested under another schema, are reported as a "
+                "skew naming both versions and schemas. A side past 200000 files, its byte bound or its page bound "
+                "is compared on schema, banner and grammar only (complete: false), and the verdict says the files "
+                "were not compared. `term` is the term THIS node holds.",
             .inputSchema = ToolchainDiffInput,
             .outputSchema = ToolchainDiffOutput,
             .effect = Mcp::ToolEffect::ReadOnly,

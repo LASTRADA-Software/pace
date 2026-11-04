@@ -4204,7 +4204,7 @@ member, because only the member knows what it configured (`Cluster::BudgetOverri
   through the node's own router, which dies first.
 - **Never a share of RAM and never zero.** A `25%` would be resolved by whichever machine read it,
   the leader included, so it is refused at the one grammar every door shares
-  (`Cluster::ParseBudgetSpec`); zero is *unbounded* or *no tier* at startup, and a live tier stack
+  (`Cluster::ParseOverrideBudget`, which `ParseBudgetSpec` wraps for the CLI's `<node>:memory=...`); zero is *unbounded* or *no tier* at startup, and a live tier stack
   cannot remove a tier (`TierOverrideCannotRemoveTier`).
 - **What a member reports about ITSELF is `MemberReport`, never a weaker `MemberEdit` door** --
   the node-proof section above has that rule.
