@@ -2520,6 +2520,10 @@ gives it none, so each rule below is what keeps a session's fleet controls on th
   stopped waiting for; and the drain runs BEFORE the accept thread's join, because the dashboard
   (`OnAcceptThread`) serves its request ON that thread. The dashboard and MCP share it as one
   mechanism, the bound being `AdminHttpServer::WorstCaseStopUnder` of the surface's own row.
+  **Only a write the kernel REFUSED is blocked**: Winsock took a 4 MiB send whole past a 64 KiB
+  `SO_SNDBUF`, so a large answer is not evidence of a parked write, and a test that inferred one went
+  green on Linux and red on Windows. A stop case SEES the write parked first
+  (`tests/WriteWatchingListener.hpp`: a write under way that moves no byte for a stretch).
 - **No credential is added, and the node acts AS ITSELF.** A forwarded call rides the node's own
   proven, sealed `0xFC` connection; a call this node answers goes to its own router in process
   (`FrameRouterAnswerer`), stating the proof it holds. That self-call is answered as PROVEN and

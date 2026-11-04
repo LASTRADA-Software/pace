@@ -42,6 +42,7 @@
 #include <tests/ScopedSignalHandler.hpp>
 #include <tests/SmallSendBufferListener.hpp>
 #include <tests/SocketDoubles.hpp>
+#include <tests/WriteWatchingListener.hpp>
 
 namespace
 {
@@ -1521,8 +1522,10 @@ constexpr std::size_t SlowClientReceiveBytes = 4096;
 
 /// Large enough that a client reading it slowly is still being written to when the drain runs out: many times what
 /// the server's send buffer (`Testing::BindWithSmallSendBuffer`, refused past its grant ceiling) and the client's
-/// receive buffer can hold between them, so the case does not depend on `net.ipv4.tcp_wmem`.
-constexpr std::size_t SlowReaderBodyBytes = std::size_t { 4 } * 1024 * 1024;
+/// receive buffer can hold between them, so the case does not depend on `net.ipv4.tcp_wmem`. That is necessary and
+/// NOT sufficient -- Winsock took a 4 MiB send whole past a 64 KiB `SO_SNDBUF` -- so the case also waits to SEE the
+/// server parked in a write (`Testing::WaitUntilParkedInWrite`) before it stops anything.
+constexpr std::size_t SlowReaderBodyBytes = std::size_t { 16 } * 1024 * 1024;
 static_assert(SlowReaderBodyBytes > 4 * (Pace::Testing::SmallSendBufferGrantCeiling + SlowClientReceiveBytes),
               "the answer must outlast every buffer under it");
 
@@ -1542,7 +1545,18 @@ static_assert(SlowReaderBodyBytes > 4 * (Pace::Testing::SmallSendBufferGrantCeil
                              } };
 }
 
-/// A server over a real loopback listener, run on an accept thread, under the serving and bounds a case names.
+/// A loopback listener with a small send buffer, armed as `AdminEndpoint::Start` arms its own.
+/// @return The listener.
+[[nodiscard]] std::unique_ptr<Pace::BlockingListener> ArmedStopCaseListener()
+{
+    auto listener = Pace::Testing::BindWithSmallSendBuffer();
+    listener->SetTimeouts(Pace::AdminHttpServer::AcceptPoll, Pace::AdminHttpServer::RequestTimeout);
+    return listener;
+}
+
+/// A server over a real loopback listener, run on an accept thread, under the serving and bounds a case names. Its
+/// connections write in watched chunks (`Testing::WriteWatchingListener`), so a case can SEE the answer parked in a
+/// write before it stops anything.
 struct StopCaseServer
 {
     /// @param serving Where a connection is served.
@@ -1553,9 +1567,25 @@ struct StopCaseServer
                    Pace::AdminDeadlines deadlines,
                    std::size_t bodyBytes,
                    std::chrono::milliseconds hold):
-        listener { Pace::Testing::BindWithSmallSendBuffer() },
+        StopCaseServer(ArmedStopCaseListener(), serving, deadlines, bodyBytes, hold)
+    {
+    }
+
+    /// @param armed The bound, armed listener; its registry is taken before it is wrapped.
+    /// @param serving Where a connection is served.
+    /// @param deadlines The bounds, the drain among them.
+    /// @param bodyBytes How long `GET /big`'s body is.
+    /// @param hold How long its handler runs first.
+    StopCaseServer(std::unique_ptr<Pace::BlockingListener> armed,
+                   Pace::AdminConnectionServing serving,
+                   Pace::AdminDeadlines deadlines,
+                   std::size_t bodyBytes,
+                   std::chrono::milliseconds hold):
+        connections { &armed->Connections() },
+        port { armed->boundPort() },
+        listener { std::make_unique<Pace::Testing::WriteWatchingListener>(std::move(armed)) },
         server { *listener,
-                 listener->Connections(),
+                 *connections,
                  metrics,
                  [] { return Pace::MetricsSnapshot {}; },
                  logger,
@@ -1571,7 +1601,6 @@ struct StopCaseServer
                    .builtIns = Pace::AdminBuiltInRoutes::None,
                    .serving = serving } }
     {
-        listener->SetTimeouts(Pace::AdminHttpServer::AcceptPoll, Pace::AdminHttpServer::RequestTimeout);
         acceptThread = std::jthread { [this] { core::async::syncRun(server.Run()); } };
     }
 
@@ -1583,7 +1612,7 @@ struct StopCaseServer
         core::net::BlockingConnector connector;
         auto client = core::async::syncRun(connector.connect(
             "127.0.0.1",
-            listener->boundPort(),
+            port,
             core::net::DialOptions { .connectTimeout = 5s, .buffers = { .send = {}, .receive = SlowClientReceiveBytes } }));
         REQUIRE(client.has_value());
         (*client)->setReceiveDeadline(5s);
@@ -1596,7 +1625,10 @@ struct StopCaseServer
     Pace::AtomicMetricsSink metrics;
     core::platform::SteadyClock clock;
     core::net::AcceptLoopHealth acceptLoops;
-    std::unique_ptr<Pace::BlockingListener> listener;
+    /// The registry of the listener `listener` wraps, and owned by it.
+    Pace::OpenConnections* connections;
+    std::uint16_t port;
+    std::unique_ptr<Pace::Testing::WriteWatchingListener> listener;
     Pace::AdminHttpServer server;
     std::jthread acceptThread;
 
@@ -1680,9 +1712,24 @@ TEST_CASE("AdminHttp: a stop cancels a client that reads its answer too slowly, 
     std::atomic<bool> endedByServer { false };
     std::atomic<bool> abandon { false };
     std::atomic<bool> hurry { false };
+    // Started once the server is SEEN parked in a write, so there is something to cancel whatever the platform's
+    // kernel absorbs; declared here, before the guard below, so that guard releases it before it joins.
+    std::jthread reader;
+    StopRun stop;
+    // Destroyed FIRST: a failed assertion below must not leave the stop waiting on a client nobody releases, nor the
+    // accept thread's join waiting on a loop nobody stopped.
+    auto const release = [&abandon](Pace::AdminHttpServer* server) {
+        abandon.store(true);
+        server->RequestStop();
+    };
+    std::unique_ptr<Pace::AdminHttpServer, decltype(release)> const releaseFirst { &fixture.server, release };
+
+    // Nothing read yet: the server fills what is under the connection and parks in a write.
+    REQUIRE(Pace::Testing::WaitUntilParkedInWrite(*fixture.listener->Watch(), 250ms, 10s));
+
     // One KiB every 20 ms until `hurry`: far from the end of the body for the whole stop, and every write call the
     // server makes progresses well inside `RequestTimeout`. Bounded by its count, and by `abandon` on the failure path.
-    std::jthread reader { [&] {
+    reader = std::jthread { [&] {
         std::vector<std::byte> chunk(std::size_t { 64 } * 1024);
         for ([[maybe_unused]] auto const step: std::views::iota(0, 20000))
         {
@@ -1701,14 +1748,6 @@ TEST_CASE("AdminHttp: a stop cancels a client that reads its answer too slowly, 
         }
         client->close();
     } };
-    StopRun stop;
-    // Destroyed FIRST: a failed assertion below must not leave the stop waiting on a client nobody releases, nor the
-    // accept thread's join waiting on a loop nobody stopped.
-    auto const release = [&abandon](Pace::AdminHttpServer* server) {
-        abandon.store(true);
-        server->RequestStop();
-    };
-    std::unique_ptr<Pace::AdminHttpServer, decltype(release)> const releaseFirst { &fixture.server, release };
 
     REQUIRE(Pace::Testing::WaitUntil(
         "the response to be on its way to the slow client",

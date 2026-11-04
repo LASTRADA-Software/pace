@@ -47,6 +47,7 @@
 #include <tests/RelabelledPeerListener.hpp>
 #include <tests/SmallSendBufferListener.hpp>
 #include <tests/Unwrap.hpp>
+#include <tests/WriteWatchingListener.hpp>
 
 using namespace Pace;
 using namespace Pace::Node;
@@ -631,9 +632,11 @@ TEST_CASE("an MCP stop cancels a client reading its answer too slowly, within Wo
     // wait for it, so past the drain the connection is cancelled and the stop ends inside `WorstCaseStop` regardless.
     // Many times what the server's send buffer (`Testing::BindWithSmallSendBuffer`, refused past its grant ceiling)
     // and the client's receive buffer hold between them, so the case does not depend on `net.ipv4.tcp_wmem` -- and no
-    // larger, since a sanitized debug build serializes the answer a code point at a time.
+    // larger, since a sanitized debug build serializes the answer a code point at a time. Necessary and NOT
+    // sufficient: Winsock took a 4 MiB send whole past a 64 KiB `SO_SNDBUF`, so the case also waits to SEE the
+    // server parked in a write (`Testing::WaitUntilParkedInWrite`) before it stops anything.
     constexpr auto ClientReceiveBytes = std::size_t { 4096 };
-    constexpr auto AnswerBytes = std::size_t { 4 } * 1024 * 1024;
+    constexpr auto AnswerBytes = std::size_t { 8 } * 1024 * 1024;
     static_assert(AnswerBytes > 4 * (Testing::SmallSendBufferGrantCeiling + ClientReceiveBytes),
                   "the answer must outlast every buffer under it");
     auto tools = std::vector<Mcp::ToolRow> { Mcp::ToolRow {
@@ -657,7 +660,9 @@ TEST_CASE("an MCP stop cancels a client reading its answer too slowly, within Wo
     bound->SetTimeouts(AdminHttpServer::AcceptPoll, AdminHttpServer::RequestTimeout);
     auto const port = bound->boundPort();
     auto& connections = bound->Connections();
-    auto endpoint = McpEndpoint::StartWithListener(std::move(bound),
+    auto watched = std::make_unique<Testing::WriteWatchingListener>(std::move(bound));
+    auto const watch = watched->Watch();
+    auto endpoint = McpEndpoint::StartWithListener(std::move(watched),
                                                    connections,
                                                    std::format("127.0.0.1:{}", port),
                                                    std::move(tools),
@@ -691,9 +696,21 @@ TEST_CASE("an MCP stop cancels a client reading its answer too slowly, within Wo
     std::atomic<bool> endedByServer { false };
     std::atomic<bool> abandon { false };
     std::atomic<bool> hurry { false };
+    // Started once the server is SEEN parked in a write; declared before the guard below so that guard releases it
+    // before it joins.
+    std::jthread reader;
+    // Destroyed before the reader joins: a failed assertion must not leave it reading for the whole of its count.
+    auto const release = [](std::atomic<bool>* flag) {
+        flag->store(true);
+    };
+    std::unique_ptr<std::atomic<bool>, decltype(release)> const releaseFirst { &abandon, release };
+
+    // Nothing read yet: the server serializes the answer, fills what is under the connection and parks in a write.
+    REQUIRE(Testing::WaitUntilParkedInWrite(*watch, 250ms, 60s));
+
     // One KiB every 20 ms until `hurry`, so every write call makes progress inside its send timeout and the body is
     // nowhere near done for the whole stop. Bounded by its count, and by `abandon` on the failure path.
-    std::jthread reader { [&, socket = client->get()] {
+    reader = std::jthread { [&, socket = client->get()] {
         std::vector<std::byte> chunk(std::size_t { 64 } * 1024);
         for ([[maybe_unused]] auto const step: std::views::iota(0, 20000))
         {
@@ -712,11 +729,6 @@ TEST_CASE("an MCP stop cancels a client reading its answer too slowly, within Wo
         }
         socket->close();
     } };
-    // Destroyed before the reader joins: a failed assertion must not leave it reading for the whole of its count.
-    auto const release = [](std::atomic<bool>* flag) {
-        flag->store(true);
-    };
-    std::unique_ptr<std::atomic<bool>, decltype(release)> const releaseFirst { &abandon, release };
 
     REQUIRE(Testing::WaitUntil(
         "the answer to be on its way to the slow client",
