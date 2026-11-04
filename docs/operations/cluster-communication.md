@@ -840,7 +840,8 @@ binds loopback, and an address other machines could reach is refused at startup:
 no authentication scheme here, so a Claude Code session reaches the fleet *through* its
 own machine's node and never by dialling another node's MCP port. Every request is checked
 again for a caller on this machine, and one that is not is answered `403` and counted in
-`pace_mcp_requests_refused_not_loopback_total`.
+`pace_mcp_requests_refused_not_loopback_total`. The tools and who may act are in
+[Asking the fleet through MCP](mcp.md).
 
 !!! warning "Keep the node port off any network you would not run a compiler for"
 

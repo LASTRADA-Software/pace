@@ -167,7 +167,9 @@ Several things on that table are easy to get wrong and expensive to get wrong:
 **MCP is never reachable from the network.** `--mcp-listen` serves `POST /mcp` for a
 Claude Code session on this machine, on a thread of its own. There is no MCP
 authentication scheme, so an address other machines could reach is refused at startup,
-and every request is checked again for a caller on this machine before it is read:
+and every request is checked again for a caller on this machine before its body is parsed.
+The tools, who may act and who answers are in [Asking the fleet through
+MCP](../operations/mcp.md). A refused request is counted:
 
 | Series | What a rise means |
 |---|---|
@@ -1019,12 +1021,14 @@ is rendered by every node.
 
 A `fleet-text` request reads the fleet document once, one section or all of them, over `0xFC` rather than `/fleet.txt` over HTTP ([#1391](https://github.com/LASTRADA-Software/pace/issues/1391)) -- so a fleet table is readable from a leader that serves no admin surface at all. `pacectl fleet <section>` is its client, and follows a follower's `not-leader` to the leader. The text is the route's to the byte: both answer from one function, which parses the section and the range and renders the document, so neither door has a renderer of its own.
 
-It is admitted as the fleet subject of a subscription is, by the same decision: a fleet member, then the dashboard credential (or, with no `--dashboard-token-file`, this machine only), then leadership. A follower refuses `not-leader` naming the leader, and the client follows it; a node running no scheduler says the fleet is served elsewhere; a section or a range this build does not serve is `unknown-fleet-selector`, listing the ones it does. None of those three is counted -- the first two are what a healthy fleet answers a client pointed at the wrong node, and the third is a typo its typist already sees.
+A request names its format: the text document `/fleet.txt` serves, or the JSON document `/fleet.json` serves -- one document, so a JSON request naming a section is refused `unknown-fleet-selector`. The MCP tools read the fleet this way, from the same function the route answers from.
+
+It is admitted by the decision the fleet subject of a subscription is, with one difference. A fleet member comes first. A caller that **proved a live roster key** on the connection -- a learner included -- then reads without the dashboard credential, because a node asking the leader holds none, and the MCP tools on a node that does not lead must read the leader's fleet. Any other member needs the dashboard credential (or, with no `--dashboard-token-file`, must be on this machine): a machine ticket, `--fleet-open` and loopback without a proof earn nothing more here. Leadership is asked last. The live-stats fleet subscription does not take the proof in place of the credential. A follower refuses `not-leader` naming the leader, and the client follows it; a node running no scheduler says the fleet is served elsewhere; a section or a range this build does not serve is `unknown-fleet-selector`, listing the ones it does. None of those three is counted -- the first two are what a healthy fleet answers a client pointed at the wrong node, and the third is a typo its typist already sees.
 
 | Counter | What a rise means |
 |---|---|
 | `pace_fleet_text_requests_refused_not_a_member_total` | A fleet read was refused because its peer is not a fleet member. The fleet is read by the same peers a subscription to it streams to; a burst from one host is a stranger probing the port. |
-| `pace_fleet_text_requests_refused_unauthenticated_total` | A fleet read was refused: a wrong or missing dashboard credential, or a remote peer while no `--dashboard-token-file` is configured. The fleet map is behind the same credential here as on `/fleet`; a burst from one host is somebody guessing. |
+| `pace_fleet_text_requests_refused_unauthenticated_total` | A fleet read that proved no live roster key was refused: a wrong or missing dashboard credential, or a remote peer while no `--dashboard-token-file` is configured. The fleet map is behind the same credential here as on `/fleet`; a burst from one host is somebody guessing. |
 | `pace_fleet_text_requests_refused_malformed_total` | A `fleet-text` request did not decode. No client of this tree sends one; a rise is a client of another build, or not a client at all. |
 | `pace_fleet_text_requests_refused_payload_too_large_total` | A `fleet-text` header declared more than the control payload the verb is bounded to, and was refused before a byte of it was read. No client of this tree at any version sends one. |
 | `pace_fleet_text_requests_refused_endpoint_busy_total` | A fleet read was refused because the `0xFC` listener's in-flight byte budget was full of other requests. A rise says an operator asked for the fleet exactly when the leader was busiest. |

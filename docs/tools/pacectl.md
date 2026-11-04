@@ -390,6 +390,9 @@ admin-tls                      false
 for it (`name-source` reads `replicated`), else the hostname it reports for itself (`self-reported`); both are
 absent when neither says.
 
+Each surface the node opened is one `<surface>-port` field — `admin-port`, `raft-port`,
+`discovery-port` and `mcp-port` (the [MCP surface](../operations/mcp.md), `--mcp-listen`) —
+and `admin-tls` says the admin surface's scheme.
 A surface the node does not run gets **no field at all** rather than a zero port —
 a `0` renders as a dialable-looking number in every format, and an operator who
 tries it reaches nothing and reports the surface as down. The `0xFC` port is

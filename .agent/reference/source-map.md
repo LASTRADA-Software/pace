@@ -28,7 +28,10 @@ src/Pace/
                 what that production excludes includes perfectly good UTF-8 -- and it
                 is here rather than beside its first consumer because three targets
                 spell the convention, two of which have no business reaching into
-                Distributed/), Profiling (Tracy wrappers), and the crypto seam
+                Distributed/), Json (the one JSON parser and writer: strict RFC 8259,
+                every size, depth and count a `ParseLimits` field because its text comes
+                off a socket, an OWNING value type, nothing thrown -- the MCP envelope's
+                reader and the fleet document's escaper), Profiling (Tracy wrappers), and the crypto seam
                 -- Ed25519 (RFC 8032 signatures), X25519 (RFC 7748 key agreement,
                 refusing the all-zero secret) and Hkdf (RFC 5869, over Sha256's
                 HMAC) -- which is the ONLY first-party code that reaches the
@@ -189,6 +192,13 @@ src/Pace/
                 and the progress pulse all hold the connection's socket and a swap
                 could not reach them at once. ProvenIdentity is what the proof
                 established -- the id claimed and the key it verified under.
+                Mcp/: McpServer (the MCP envelope, pure: one parsed HTTP request in,
+                one response out; both revisions it answers, `2026-07-28` and the
+                `initialize`-based `2025-11-25`, over one tool table) and McpTool
+                (a tool is a ROW -- name, schemas, effect, handler -- so adding one
+                is adding a row). The tools themselves, the loopback-only endpoint
+                and the forwarding to the leader live in `apps/pace-node/Mcp*`,
+                since they read node state this library does not own.
   Server/       Connection (per-client coroutine), Server,
                 ReactorServerLoop (the server driver), AdminHttpServer (the
                 read-only HTTP surface; its routes are a table a caller

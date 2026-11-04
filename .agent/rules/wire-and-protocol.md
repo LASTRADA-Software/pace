@@ -2480,3 +2480,43 @@ consequence rather than a precaution.
 - **Reporting without erasing would have been worse than neither.** The record
   stays, so the next `APPEND`/`INCR`/CAS on the same lapsed key fires `expired`
   again. The erase is what makes the event true exactly once.
+
+## The MCP surface
+
+<!-- agent-tripwire: MCP is LOOPBACK ONLY, asked twice -->
+
+`pace-node --mcp-listen` serves `POST /mcp` to a Claude Code session on the node's own machine
+(operator page: `docs/operations/mcp.md`). MCP has no authentication scheme here, and the design
+gives it none, so each rule below is what keeps a session's fleet controls on that machine.
+
+- **Loopback only, asked TWICE.** An `--mcp-listen` address other machines can reach is a STARTUP
+  refusal (`McpListenNotLoopbackRefusal`, a `StartupPolicyRejection` row, so an install meets it
+  too), and a NAME is not loopback, `localhost` included: a resolver decides what it reaches. Then
+  every request is asked again, before its envelope is parsed, whether the connection's
+  kernel-reported peer is on this machine (`McpAdmits` over `IsLoopbackHost`; an EMPTY peer is not
+  local), answered `403` and counted (`McpRequestsRefusedNotLoopback`). The second check is not
+  redundant: it is what stops a future change to the bind from widening who is answered without
+  also changing this. `--mcp-listen` is `Reloadable::No`, so a reload cannot widen it either.
+- **Its own thread, never a reactor's and never the dashboard's.** Hostile or slow MCP input may
+  stall only MCP. A forwarded call is posted onto `NodeIoLoop`, which dials through the connector,
+  and the MCP thread waits on a condition variable bounded by `McpUpstream::CallDeadline`. A wait
+  that runs out CANCELS what it waited for, so no frame stays parked for a reply nobody reads.
+- **No credential is added, and the node acts AS ITSELF.** A forwarded call rides the node's own
+  proven, sealed `0xFC` connection; a call this node answers goes to its own router in process
+  (`FrameRouterAnswerer`), stating the proof it holds. That self-call is answered as PROVEN and
+  skips the endpoint's size and budget ceilings, so a tool sends only a frame the TOOL built from
+  fixed fields, never a client's bytes. The leader judges the forwarding NODE (`OperatorStanding`
+  for every acting tool; a learner is refused BY NAME with the remedy), never the MCP client. A
+  verb with no undo that revokes a key permanently (`cluster_forget`) is not a tool.
+- **An MCP answer SHARES ITS DERIVATION with the dashboard or `pacectl`, by construction.** A
+  fleet tool reads `FLEET-TEXT` with `FleetTextFormat::Json`, answered by `AnswerFleetText` -- the
+  ONE function the `/fleet.json` route answers from -- and re-shapes that document; `node_status`
+  reads `NODE-STATUS` through `NodeStatusView`, as `pacectl node` does. A tool that recomputed a
+  quantity would be a second derivation, and the two drift without either being wrong in a test.
+  Absent stays `null`, never `0`; `compiles: null` (leads no queue) is not `[]`.
+- **A proof reads the fleet in place of the dashboard credential on `FLEET-TEXT` alone**
+  (`FleetReader::ProvenMember`), because a node asking the leader holds no dashboard credential;
+  the full rule, and why the live-stats subscription does NOT take it, is in
+  `distributed-compilation.md`'s node-proof section.
+- **`term` is THIS node's term**, labelled `term_scope: this-node`: no `0xFC` reply carries one,
+  and a field named `term` beside the leader's answer would read as the leader's.
