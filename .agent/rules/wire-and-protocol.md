@@ -2507,6 +2507,19 @@ gives it none, so each rule below is what keeps a session's fleet controls on th
   614 s measured before this. A forwarded call is posted onto `NodeIoLoop`, which dials through the connector,
   and the MCP thread waits on a condition variable bounded by `McpUpstream::CallDeadline`. A wait
   that runs out CANCELS what it waited for, so no frame stays parked for a reply nobody reads.
+- **A stop is bounded whatever a CLIENT does, because past its drain it CANCELS.** A blocking write
+  is bounded per CALL (`SO_SNDTIMEO`), never per answer, so a local client reading just fast enough
+  to keep each call moving held a response write -- and the thread it blocks, which the stop then
+  joins -- for as long as it liked, past `TimeoutStopSec` into a `SIGKILL`. So every socket a
+  `BlockingListener` accepts is tracked (`OpenConnections`, behind `IConnectionCanceller`), and once
+  `AdminDeadlines::drain` runs out `AdminHttpServer::Stop` shuts every one still open down under
+  whatever it is blocked in, logs a `Warn` naming the count, and waits `afterCancel`. Three parts
+  are load-bearing: it is a `shutdown`, never a `close` (the descriptor stays its owner's, and a
+  socket leaves the registry UNDER ITS LOCK before it closes, so a cancel never reaches a reused
+  number); it LATCHES, so an accept already in flight cannot hand out a connection the stop has
+  stopped waiting for; and the drain runs BEFORE the accept thread's join, because the dashboard
+  (`OnAcceptThread`) serves its request ON that thread. The dashboard and MCP share it as one
+  mechanism, the bound being `AdminHttpServer::WorstCaseStopUnder` of the surface's own row.
 - **No credential is added, and the node acts AS ITSELF.** A forwarded call rides the node's own
   proven, sealed `0xFC` connection; a call this node answers goes to its own router in process
   (`FrameRouterAnswerer`), stating the proof it holds. That self-call is answered as PROVEN and

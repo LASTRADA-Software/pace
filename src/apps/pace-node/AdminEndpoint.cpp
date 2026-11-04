@@ -1397,6 +1397,7 @@ AdminEndpoint::AdminEndpoint(std::unique_ptr<BlockingListener> listener,
         // it (#1484) -- and since #1501 the same holds for every other surface it does not
         // run, so `--slots=0` reads `-` on the worker rows rather than a quiet zero.
         *_listener,
+        _listener->Connections(),
         metrics,
         std::move(snapshot),
         logger,
@@ -1428,10 +1429,12 @@ AdminEndpoint::~AdminEndpoint()
     // one poll interval of the flag being set, and waiting for it costs at most
     // that -- so ask it to stop, JOIN, and only then close, at which point nobody
     // is inside `Accept()` and there is nothing left to race.
-    _server->RequestStop();
-    if (_thread.joinable())
-        _thread.join();
-    _server->Shutdown();
+    //
+    // The drain runs BEFORE the join (`AdminHttpServer::Stop`): this surface serves
+    // a request on the accept thread itself, so a dashboard client reading its
+    // answer slowly would hold the join for as long as it read. Past the drain its
+    // connection is cancelled instead.
+    _server->Stop(_thread);
 }
 
 std::expected<std::unique_ptr<AdminEndpoint>, std::string> AdminEndpoint::Start(NodeSurface surface,

@@ -1257,8 +1257,14 @@ int DaemonBody(Pace::Config const& effective,
             // pair, which is two places for one decision to drift.
             adminListener->SetTimeouts(Pace::AdminHttpServer::AcceptPoll, Pace::AdminHttpServer::RequestTimeout);
 
-            adminServer = std::make_unique<Pace::AdminHttpServer>(
-                *adminListener, metrics, snapshotProvider, logger, steadyClock, acceptLoops, Pace::DefaultDrainWait());
+            adminServer = std::make_unique<Pace::AdminHttpServer>(*adminListener,
+                                                                  adminListener->Connections(),
+                                                                  metrics,
+                                                                  snapshotProvider,
+                                                                  logger,
+                                                                  steadyClock,
+                                                                  acceptLoops,
+                                                                  Pace::DefaultDrainWait());
             adminThread = std::jthread { [&adminServer] {
                 CORE_THREAD_NAME("pace-admin");
                 core::async::syncRun(adminServer->Run());
@@ -1274,14 +1280,10 @@ int DaemonBody(Pace::Config const& effective,
 
     if (adminServer)
     {
-        // Ask, join, then close -- the same ordering `AdminEndpoint::~AdminEndpoint`
-        // documents (#260). Shutdown() alone closes the listener while this thread's
-        // accept loop may be reading it, which is a data race whatever the suite says.
-        // The loop leaves within one `AcceptPoll` of the flag, so the join is bounded.
-        adminServer->RequestStop();
-        if (adminThread.joinable())
-            adminThread.join();
-        adminServer->Shutdown();
+        // Ask, drain, join, then close -- `AdminHttpServer::Stop`'s one ordering (#260): closing the
+        // listener while this thread's accept loop may be reading it is a data race whatever the suite
+        // says, and the drain cancels a scrape a slow client still holds, so the join is bounded.
+        adminServer->Stop(adminThread);
     }
     reloaderQuit.store(true, std::memory_order_release);
     return exitCode;

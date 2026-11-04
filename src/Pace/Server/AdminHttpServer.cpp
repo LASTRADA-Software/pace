@@ -23,6 +23,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <utility>
 
 #include <core/async/IExecutor.hpp>
@@ -973,6 +974,7 @@ core::async::Task<void> ServeAdminHttp(core::net::ISocket* socket,
 }
 
 AdminHttpServer::AdminHttpServer(core::net::IListener& listener,
+                                 IConnectionCanceller& connections,
                                  IMetricsSink const& metrics,
                                  SnapshotProvider snapshotProvider,
                                  ILogger& logger,
@@ -984,6 +986,7 @@ AdminHttpServer::AdminHttpServer(core::net::IListener& listener,
                                  std::span<MetricsSurface const> surfaces,
                                  AdminServerProfile profile):
     _listener { listener },
+    _openConnections { connections },
     _metrics { metrics },
     _snapshotProvider { std::move(snapshotProvider) },
     _logger { logger },
@@ -1112,13 +1115,41 @@ void AdminHttpServer::Shutdown() noexcept
     // metrics sink, snapshot provider and routes held on this object, so we must
     // wait for them to drain before letting Shutdown return — otherwise an admin
     // handler that suspends on a slow write could touch freed members after
-    // the server object is destroyed. Bounded by the per-request socket I/O
-    // timeout, plus a generous spin-cap so a stuck handler cannot block
-    // forever -- through the one shared `DrainWithin`, which measures that ceiling
-    // rather than counting polls towards it (#452).
-    if (DrainWithin([this] { return _inFlight.load(std::memory_order_acquire) > 0; },
-                    DrainBound { .ceiling = _profile.deadlines.drain })
-        == DrainResult::Ceiling)
+    // the server object is destroyed.
+    DrainOrCancel();
+}
+
+void AdminHttpServer::Stop(std::jthread& acceptThread) noexcept
+{
+    RequestStop();
+    // Before the join: on the accept thread's own profile the request in flight is served ON the thread being
+    // joined, so the drain -- and the cancel that bounds it -- must not wait behind it.
+    DrainOrCancel();
+    if (acceptThread.joinable())
+        acceptThread.join();
+    // Closes the listener once nothing reads it (#260); its own drain finds nothing left.
+    Shutdown();
+}
+
+void AdminHttpServer::DrainOrCancel() noexcept
+{
+    auto const busy = [this] {
+        return _inFlight.load(std::memory_order_acquire) > 0;
+    };
+    // Through the one shared `DrainWithin`, which measures its ceiling rather than counting polls towards it (#452).
+    std::ignore = DrainWithin(busy, DrainBound { .ceiling = _profile.deadlines.drain });
+    // A blocking write is bounded per CALL, so a client that reads just fast enough holds one -- and the thread it
+    // blocks -- for as long as it likes. Past the drain the stop stops waiting for clients: every connection still
+    // open is shut down under whatever it is blocked in, and so is one an in-flight accept hands out from here on.
+    // Asked whether or not the drain ran out, since an accept already past its poll can still produce a connection.
+    auto const cancelled = _openConnections.CancelOpenConnections();
+    if (cancelled > 0)
+        _logger.Logf(LogLevel::Warn,
+                     "{}: stopping, cancelled {} connection(s) still open after the {} ms drain",
+                     _profile.surface,
+                     cancelled,
+                     _profile.deadlines.drain.count());
+    if (DrainWithin(busy, DrainBound { .ceiling = _profile.deadlines.afterCancel }) == DrainResult::Ceiling)
         _logger.Logf(LogLevel::Error,
                      "{}: {} request(s) did not finish within the stop ceiling",
                      _profile.surface,
