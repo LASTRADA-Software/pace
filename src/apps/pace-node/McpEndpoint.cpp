@@ -154,10 +154,10 @@ std::expected<std::unique_ptr<McpEndpoint>, std::string> McpEndpoint::Start(Node
 }
 
 std::expected<std::unique_ptr<McpEndpoint>, NodeRefusal> StartMcpSurfaceOrExplain(NodeConfig const& cfg,
-                                                                                 std::vector<Mcp::ToolRow> tools,
-                                                                                 IMetricsSink& metrics,
-                                                                                 ILogger& logger,
-                                                                                 core::net::AcceptLoopHealth& acceptLoops)
+                                                                                  std::vector<Mcp::ToolRow> tools,
+                                                                                  IMetricsSink& metrics,
+                                                                                  ILogger& logger,
+                                                                                  core::net::AcceptLoopHealth& acceptLoops)
 {
     // Off unless asked for, like every other surface this program serves.
     if (cfg.mcpListen.empty())

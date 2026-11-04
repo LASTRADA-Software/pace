@@ -1286,7 +1286,8 @@ TEST_CASE("A forced refresh ignores a cached value", "[toolchain-probe]")
     CHECK(forced != before);
 }
 
-TEST_CASE("A walk hands back the inputs it digested, and a cache hit hands back none", "[toolchain-probe][fingerprint-inputs]")
+TEST_CASE("A walk hands back the inputs it digested, and a cache hit hands back none",
+          "[toolchain-probe][fingerprint-inputs]")
 {
     // The record a node explains a fingerprint with (`toolchain_diff`) is the digest's own argument list, so it
     // recomputes to exactly the fingerprint returned beside it. A cache hit walked nothing and digested nothing,
