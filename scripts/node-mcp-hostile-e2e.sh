@@ -95,10 +95,11 @@ e2e_launcher_state_enter launcher
 # that tells "answered" from "answered once something else let go". Measured at about a
 # millisecond; one second is that with three orders of magnitude for a loaded machine.
 readonly HealthzBound=1.0
-# `AdminHttpServer::BodyTimeout` (2 s): a body that stops is refused when it passes. The lower
-# bound is that less half a second (the client starts its clock after the server armed the read,
-# so it can only read LONGER); the upper adds the linger (`Linger.total`, 2 s) and six seconds of
-# scheduling -- far below the 30 s a never-armed deadline would show as.
+# MCP's body bound (`McpEndpoint::Deadlines.body`, 2 s): a body that stops is refused when it passes.
+# The lower bound is that less half a second (the client starts its clock after the server armed the
+# read, so it can only read LONGER); the upper adds MCP's linger (`McpEndpoint::Deadlines.linger.total`,
+# 400 ms -- not the admin surface's 2 s) and over seven seconds of scheduling -- far below the 30 s a
+# never-armed deadline would show as.
 readonly TruncatedAtLeast=1.5
 readonly TruncatedAtMost=10.0
 # Twenty idle sockets against `McpEndpoint::MaxConcurrentRequests` (4) slots. Four take a slot each

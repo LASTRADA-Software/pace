@@ -165,7 +165,7 @@ Several things on that table are easy to get wrong and expensive to get wrong:
   credential rule turns on, so widening that address is what makes a token required.
 
 **MCP is never reachable from the network.** `--mcp-listen` serves `POST /mcp` for a
-Claude Code session on this machine, on a thread of its own. There is no MCP
+Claude Code session on this machine, on threads of its own (four requests at once). There is no MCP
 authentication scheme, so an address other machines could reach is refused at startup,
 and every request is checked again for a caller on this machine before its body is parsed.
 The tools, who may act and who answers are in [Asking the fleet through
