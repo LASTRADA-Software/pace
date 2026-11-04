@@ -507,16 +507,16 @@ namespace
 
         // The totals count EVERY ticket, the unlisted ones included, keyed as the document keys them.
         auto totalsOut = Json::Object {};
-        for (auto const& [state, count]: *totals)
-            totalsOut.emplace_back(SnakeCase(state), count);
+        for (auto const& [ticketState, count]: *totals)
+            totalsOut.emplace_back(SnakeCase(ticketState), count);
         totalsOut.emplace_back("oldest_wait_s", counts.oldestWait);
         totalsOut.emplace_back("per_requester", Arr(std::move(counts.perRequester)));
         totalsOut.emplace_back("per_worker", Arr(std::move(counts.perWorker)));
         totalsOut.emplace_back("per_counts_cover_every_ticket", Bool(*truncated == 0));
 
         // `-` for a state the leader's totals do not carry, or carry as null: absent, never a zero.
-        auto const countOf = [totalsMember](std::string_view state) {
-            auto const* const member = totalsMember->Find(state);
+        auto const countOf = [totalsMember](std::string_view ticketState) {
+            auto const* const member = totalsMember->Find(ticketState);
             auto const count = member != nullptr ? member->AsInt() : std::nullopt;
             return count.has_value() ? std::format("{}", *count) : std::string { "-" };
         };

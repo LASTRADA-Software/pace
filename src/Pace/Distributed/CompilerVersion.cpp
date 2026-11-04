@@ -343,7 +343,10 @@ namespace
         auto const& candidates = target->second.first;
         auto drivers = std::set<std::string> {};
         for (auto const& fingerprint: candidates)
-            drivers.insert_range(members.at(fingerprint).drivers);
+        {
+            auto const& named = members.at(fingerprint).drivers;
+            drivers.insert(named.begin(), named.end());
+        }
         for (auto const& driver: drivers)
         {
             auto underDriver = std::vector<std::string> {};

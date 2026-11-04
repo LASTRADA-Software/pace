@@ -148,9 +148,9 @@ FingerprintDiff DiffFingerprintInputs(Cc::FingerprintInputs const& a, Cc::Finger
     {
         auto paths = std::vector<std::string> {};
         paths.reserve(differing);
-        paths.insert_range(paths.end(), diff.onlyA);
-        paths.insert_range(paths.end(), diff.onlyB);
-        paths.insert_range(paths.end(), diff.contentDiffers);
+        // Iterator-pair `insert`, not C++23's `insert_range`, which CI's libstdc++ and libc++ do not all ship.
+        for (auto const* const group: { &diff.onlyA, &diff.onlyB, &diff.contentDiffers })
+            paths.insert(paths.end(), group->begin(), group->end());
         directory = CommonDirectory(paths);
         auto const where =
             directory.empty() ? std::string { "across the include tree" } : std::format("under `{}`", directory);

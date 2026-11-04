@@ -192,8 +192,9 @@ void AdmissionQueue::Settle(Ticket ticket, Settlement const& settlement)
     if (settlement.outcome == SettleOutcome::Stored)
         for (auto& waiter: waiters)
         {
-            auto const ticket = waiter.ticket;
-            _stored.push_back(StoredWaiter { .decision = Decision { .ticket = ticket,
+            // Read before the move below; named apart from the parameter, the ticket that was SETTLED.
+            auto const waiterTicket = waiter.ticket;
+            _stored.push_back(StoredWaiter { .decision = Decision { .ticket = waiterTicket,
                                                                     .kind = GrantKind::Stored,
                                                                     .placement = std::nullopt,
                                                                     .chargedBytes = 0,

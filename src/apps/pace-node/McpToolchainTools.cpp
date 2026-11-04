@@ -401,7 +401,10 @@ namespace
     {
         auto families = std::set<std::string> {};
         for (auto const& fingerprint: served)
-            families.insert_range(toolchains.at(fingerprint).families);
+        {
+            auto const& named = toolchains.at(fingerprint).families;
+            families.insert(named.begin(), named.end());
+        }
         if (families.empty())
             return std::nullopt;
         auto unserved = std::vector<std::string> {};
