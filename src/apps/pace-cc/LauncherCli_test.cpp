@@ -373,6 +373,8 @@ TEST_CASE("the help text documents every environment variable the launcher reads
                              "PACE_DISPATCH_IDLE",
                              "PACE_MAX_STORE_BYTES",
                              "PACE_SCHEDULER",
+                             // The off switch (#1745): an empty PACE_SCHEDULER cannot be one on Windows.
+                             "PACE_DISTRIBUTE",
                              "PACE_TOKEN",
                              "PACE_USER",
                              // Was missing from this oracle while its row existed in
@@ -492,4 +494,25 @@ TEST_CASE("LauncherRetiredEnvironmentNotice: the retired address variable is tol
 
     Pace::Testing::ScopedEnv const current { "PACE_ADDR", "127.0.0.1:6674" };
     CHECK_FALSE(LauncherRetiredEnvironmentNotice().has_value());
+}
+
+TEST_CASE("PACE_DISTRIBUTE: an off spelling switches distribution off, anything else leaves it on")
+{
+    // #1745: the explicit off switch. Unset is on -- an empty PACE_SCHEDULER cannot be the off spelling on
+    // Windows, where setting a variable to empty deletes it.
+    CHECK(ParseDistribute("") == DistributeSetting::On);
+    for (auto const* const off: { "off", "OFF", "0", "false", "False", "no" })
+    {
+        INFO(off);
+        CHECK(ParseDistribute(off) == DistributeSetting::Off);
+    }
+    for (auto const* const on: { "on", "1", "true", "YES" })
+    {
+        INFO(on);
+        CHECK(ParseDistribute(on) == DistributeSetting::On);
+    }
+    // Never a failed build: read as on, and the launcher says so under PACE_VERBOSE.
+    CHECK(ParseDistribute("disabled") == DistributeSetting::Unrecognised);
+    CHECK(ParseDistribute("offf") == DistributeSetting::Unrecognised);
+    CHECK(HelpText().contains("PACE_DISTRIBUTE"));
 }

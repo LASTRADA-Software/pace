@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "TicketCredentials.hpp"
 
+#include <Pace/Core/Ed25519.hpp>
 #include <Pace/Core/EnumTable.hpp>
+#include <Pace/Core/IdentityKeyLabel.hpp>
 #include <Pace/Core/SecureBytes.hpp>
+#include <Pace/Distributed/MachineTicket.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -69,15 +72,25 @@ TicketCredentials::TicketCredentials(IEndpointExchange& exchange,
                                      std::string passwordFor,
                                      ExchangeBudget budget,
                                      std::function<void(std::string_view)> sink,
-                                     std::string refusalCost) noexcept:
+                                     std::string refusalCost,
+                                     core::platform::IClock* clock) noexcept:
     _exchange { exchange },
     _mintFrom { std::move(mintFrom) },
     _password { std::move(password) },
     _passwordFor { std::move(passwordFor) },
     _budget { MintBudget(budget) },
     _sink { std::move(sink) },
-    _refusalCost { std::move(refusalCost) }
+    _refusalCost { std::move(refusalCost) },
+    _clock { clock != nullptr ? clock : &_ownClock }
 {
+}
+
+PresentedCredential TicketCredentials::Reserve(std::string_view audience)
+{
+    auto presented = Present(audience);
+    if (presented.credential.kind == Wire::AuthKind::MachineTicket)
+        _reserved = ReservedTicket { .audience = std::string { audience }, .presented = presented, .minted = _clock->now() };
+    return presented;
 }
 
 PresentedCredential TicketCredentials::Present(std::string_view audience)
@@ -85,6 +98,11 @@ PresentedCredential TicketCredentials::Present(std::string_view audience)
     // Asked here, where the table's private rows are in scope and the class is complete.
     static_assert(RowsInEnumeratorOrder(Choices, &ChoiceRow::choice),
                   "TicketCredentials::Choices must hold one row per CredentialChoice, in enumerator order");
+    static_assert(ReservedTicketReuse == Distributed::MachineTicketLifetime / 2);
+    // Handed over once, whatever happens next: a ticket is spent by one exchange.
+    if (auto reserved = std::exchange(_reserved, std::nullopt);
+        reserved.has_value() && reserved->audience == audience && _clock->now() - reserved->minted <= ReservedTicketReuse)
+        return std::move(reserved->presented);
     auto const passwordFor = _password.Configured() ? std::string_view { _passwordFor } : std::string_view {};
     auto const choice = ChooseCredential(audience, passwordFor);
     return (this->*Choices[static_cast<std::size_t>(choice)].present)(audience);
@@ -215,6 +233,21 @@ DispatchRecording RecordedReason(DispatchResult const& result, RefusalRecord con
     if (auto const why = MissingTicketExplains(refusals.MissingAt(*result.declinedAt), result.decline); why.has_value())
         recording.reason = *why;
     return recording;
+}
+
+bool GrantNamesOwnMachine(ICredentialFor& credentials, std::string_view firstDialed, std::span<std::byte const> workerKey)
+{
+    if (workerKey.size() != Ed25519PublicKeyBytes)
+        return false;
+    auto const presented = credentials.Reserve(firstDialed);
+    if (presented.credential.kind != Wire::AuthKind::MachineTicket || presented.credential.secret.empty())
+        return false;
+    auto const ticket = Distributed::DecodeMachineTicket(Wire::AsBytes(presented.credential.secret.View()));
+    if (!ticket.has_value())
+        return false;
+    auto key = Ed25519PublicKey {};
+    std::ranges::copy(workerKey, key.begin());
+    return VerifyLabelled(key, Distributed::MachineTicketMessage(ticket->claims), ticket->signature);
 }
 
 } // namespace Pace::Cc

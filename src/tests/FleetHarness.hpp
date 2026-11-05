@@ -191,6 +191,9 @@ class FleetHarness final: public Cc::IEndpointExchange, public Pace::Node::IEndp
     /// worker's reply signs it as that machine -- or, on purpose, as another.
     static constexpr std::string_view ProvenMachine = "harness-machine";
 
+    /// The machine `GrantAt` asks from: not `ProvenMachine`, whose workers a scheduler never grants it.
+    static constexpr std::string_view ProvenClient = "harness-client";
+
     /// The fleet every node in this harness belongs to.
     ///
     /// One id across all of them, because a grant minted by any of these schedulers
@@ -899,8 +902,13 @@ class FleetHarness final: public Cc::IEndpointExchange, public Pace::Node::IEndp
     /// @return The token a client would present.
     [[nodiscard]] std::string GrantAt(std::string_view scheduler, std::string_view fingerprint, std::string_view key)
     {
+        // A client on ANOTHER machine than the workers `SetupCaller` registers: a scheduler never grants a
+        // machine its own worker (#1745).
+        auto client = SetupCaller();
+        client.provenNodeId = std::string { ProvenClient };
+        client.provenKey = TestKeyPair(std::string { ProvenClient }).PublicKey();
         auto const reply = NodeAt(scheduler).service.Lease(
-            SetupCaller(), CompileCacheWire::LeaseRequest { .fingerprint = fingerprint, .key = key, .acceptedCodecs = {} });
+            client, CompileCacheWire::LeaseRequest { .fingerprint = fingerprint, .key = key, .acceptedCodecs = {} });
         if (reply.status != CompileCacheWire::Status::Ok)
             throw std::runtime_error { "FleetHarness: the scheduler refused a lease" };
         auto const grant = CompileCacheWire::DecodeLeaseGrant(reply.payload);

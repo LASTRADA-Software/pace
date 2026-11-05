@@ -238,11 +238,18 @@ using WireVersion = std::uint8_t;
 /// `format` field, and the reply for `Json` is `/fleet.json`'s body byte for byte. `WireSurface`
 /// also gained `Mcp`. A version-16 request has three fields where this build reads four, so it is
 /// refused `UnsupportedVersion`, naming the range, by `FleetTextResponder` before any field is read.
-inline constexpr WireVersion CurrentVersion = 17;
+///
+/// **18 lets an ADMIT grant say `LocalGrantReason::OwnMachineOnly`** (#1745): the leader never places
+/// a compile on the machine that asked, and says so. A version-17 `DecodeAdmitGrant` refuses a reason
+/// past its `Last`, and a launcher that cannot read its grant compiles UNADMITTED and closes the
+/// connection that held it -- the memory bound bypassed and the leader's estimate raised to a kill.
+/// No other shape moved, so this is the first step that KEEPS its predecessor: a version-17 asker is
+/// answered `NoWorker` (`AdmitGrantAt`), which compiles it here under its grant exactly as
+/// `OwnMachineOnly` does, and `MinSupportedVersion` stays at 17.
+inline constexpr WireVersion CurrentVersion = 18;
 
-/// The oldest version this build still accepts. Equal to `CurrentVersion` while
-/// only one version exists; widen the range when a second one ships and this
-/// build can still decode the older shape.
+/// The oldest version this build still accepts. Equal to `CurrentVersion` until version 18, the
+/// first step this build can still answer the older shape across.
 ///
 /// **The consequence is a flag day, and it is now written down for operators**
 /// rather than left to be discovered during a rollout:
@@ -408,6 +415,11 @@ inline constexpr WireVersion CurrentVersion = 17;
 /// a version-16 request would otherwise be answered as a malformed frame, a confident wrong
 /// diagnosis for a version mismatch. `FleetTextResponder` judges the version itself, because
 /// nothing earlier on the Fleet family's path does.
+///
+/// Version 18 does NOT move it: every request and reply a version-17 peer exchanges reads the same at
+/// 18, and the one byte that does not -- a grant's `OwnMachineOnly` -- is answered in the version-17
+/// spelling to a version-17 asker (`AdmitGrantAt`). So an 18 node serves a 17 launcher; an 18 client
+/// is still refused by a 17 node, which knows no 18.
 inline constexpr WireVersion MinSupportedVersion = 17;
 
 /// Size of the fixed request header: magic, version, op, payload length.
@@ -10209,7 +10221,11 @@ enum class LocalGrantReason : std::uint8_t
     /// Workers serve it and none had room for it when the queue reached it -- full, unreported, or
     /// refused it as often as the queue allows.
     NoRoom = 3,
-    Last = 4
+    /// The only workers serving it are on the machine that asked: a compile placed there would only add a
+    /// second preprocess and a loopback transfer to the compile it already is (#1745). Since version 18;
+    /// an older asker reads `NoWorker` (`AdmitGrantAt`).
+    OwnMachineOnly = 4,
+    Last = 5
 };
 
 /// How a granted compile ended, as the admission queue is told. Explicit values: transmitted.
@@ -10498,6 +10514,20 @@ inline constexpr std::size_t AdmitGrantFieldCount = 10;
                                 AsBytes(grant.dialHint) });
 }
 
+/// The first version whose ADMIT grant may carry `LocalGrantReason::OwnMachineOnly`.
+inline constexpr WireVersion OwnMachineOnlyVersion = 18;
+
+/// The reason a client speaking @p version can read: `OwnMachineOnly` is `NoWorker` before
+/// `OwnMachineOnlyVersion` -- no OTHER machine serves the toolchain, and both compile here under the grant.
+/// @param reason What the leader decided.
+/// @param version The asking request's header version.
+/// @return @p reason, or its older spelling.
+[[nodiscard]] constexpr LocalGrantReason LocalGrantReasonAt(LocalGrantReason reason, WireVersion version) noexcept
+{
+    return reason == LocalGrantReason::OwnMachineOnly && version < OwnMachineOnlyVersion ? LocalGrantReason::NoWorker
+                                                                                         : reason;
+}
+
 /// Split an ADMIT reply payload.
 ///
 /// Exactly `AdmitGrantFieldCount` fields: a reply is not stepped over the way a request is. The
@@ -10531,6 +10561,27 @@ inline constexpr std::size_t AdmitGrantFieldCount = 10;
                               .workerKey = { workerKey.begin(), workerKey.end() },
                               .reason = *reason,
                               .dialHint = std::string { AsStringView((*fields)[9]) } };
+}
+
+/// An encoded ADMIT grant as a client speaking @p version reads it (`LocalGrantReasonAt`).
+/// @param grant The payload `EncodeAdmitGrant` produced.
+/// @param version The asking request's header version.
+/// @return @p grant unchanged when that client reads it as it is, else re-encoded in its spelling.
+[[nodiscard]] inline std::vector<std::byte> AdmitGrantAt(std::vector<std::byte> grant, WireVersion version)
+{
+    auto const fields = DecodeAdmitGrant(grant);
+    if (!fields.has_value() || LocalGrantReasonAt(fields->reason, version) == fields->reason)
+        return grant;
+    return EncodeAdmitGrant(AdmitGrant { .kind = fields->kind,
+                                         .endpoint = fields->endpoint,
+                                         .leaseToken = fields->leaseToken,
+                                         .workerCodecs = fields->workerCodecs,
+                                         .chargedBytes = fields->chargedBytes,
+                                         .queuedMs = fields->queuedMs,
+                                         .lifetime = fields->lifetime,
+                                         .workerKey = fields->workerKey,
+                                         .reason = LocalGrantReasonAt(fields->reason, version),
+                                         .dialHint = fields->dialHint });
 }
 
 /// Frame a SETTLE request.

@@ -121,6 +121,12 @@ Every rule below has already been a bug.
       frame but the last is a pulse" passes VACUOUSLY on a build that pulses none, because
       with one frame the run before the last is empty. So the ordering case reads to EOF,
       requires at least two frames, and keeps a control on a surface that pulses nothing.
+- **A new value in a reply byte an older client pins (`DecodeEnumByte` refuses past `Last`) is a
+  version step -- and the floor may stay where it is when the responder can answer the older version in
+  its own spelling** (#1745, version 18). The asker's version is in its request header: `AdmitGrantAt`
+  tells a version-17 asker `NoWorker` where it would say `OwnMachineOnly`, which makes that launcher do
+  exactly what the new reason does (compile here under the grant), so `MinSupportedVersion` stayed 17.
+  Only where the old spelling leads to the same action; otherwise the floor moves with the ceiling.
 - **`Status::Push` is the second exception: a `SUBSCRIBE` is answered by a stream of pushes
   and then exactly one terminal**
   ([#1399](https://github.com/LASTRADA-Software/pace/issues/1399)). `Ok` is an orderly

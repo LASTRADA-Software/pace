@@ -9,12 +9,15 @@
 #include <Pace/Protocol/CompileCacheWire.hpp>
 #include <Pace/Protocol/TicketChoice.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include <core/platform/Clock.hpp>
 
 namespace Pace::Cc
 {
@@ -54,6 +57,16 @@ class ICredentialFor
     /// @return What to present there, and why no ticket is among it when one was due.
     [[nodiscard]] virtual PresentedCredential Present(std::string_view audience) = 0;
 
+    /// What the NEXT exchange with @p audience will present, shown ahead of it: an implementation that
+    /// mints keeps it for that exchange's `Present`, so looking costs no second mint (#1745). The default
+    /// keeps nothing and is `Present`.
+    /// @param audience The endpoint the exchange will dial, as `host:port`.
+    /// @return What it will present there.
+    [[nodiscard]] virtual PresentedCredential Reserve(std::string_view audience)
+    {
+        return Present(audience);
+    }
+
     /// @param audience The endpoint this exchange dials, as `host:port`.
     /// @return What to present there; default-constructed presents nothing.
     [[nodiscard]] Credential For(std::string_view audience)
@@ -86,7 +99,8 @@ inline constexpr std::string_view RefusedCompileRunsLocally = "a refused exchang
 /// **One ticket per exchange, never one per process.** A node spends a ticket once, so a second
 /// exchange presenting the first's ticket is refused `replayed`; and each ticket names ONE
 /// audience, so the lease's would be refused at the worker. Minting is a loopback round trip, far
-/// below the exchange it admits.
+/// below the exchange it admits. `Reserve` mints one AHEAD of its exchange, and the next `Present`
+/// of that audience hands it over -- still one spend -- unless it has aged past `ReservedTicketReuse`.
 ///
 /// **A mint that fails leaves that exchange unauthenticated, and says why on two channels.** One is
 /// `sink`, which prints at most two lines per process: one on the first failure, and one more if a
@@ -124,16 +138,21 @@ class TicketCredentials final: public ICredentialFor
     ///        may be empty.
     /// @param refusalCost What a refused exchange costs THIS caller, ending each line @p sink says:
     ///        `RefusedCompileRunsLocally` for the launcher, the node's operator verbs their own.
+    /// @param clock What a reserved ticket's age is read on; nullptr reads the steady clock. Borrowed.
     TicketCredentials(IEndpointExchange& exchange,
                       std::optional<std::string> mintFrom,
                       Credential password,
                       std::string passwordFor,
                       ExchangeBudget budget,
                       std::function<void(std::string_view)> sink,
-                      std::string refusalCost) noexcept;
+                      std::string refusalCost,
+                      core::platform::IClock* clock = nullptr) noexcept;
 
     /// @copydoc ICredentialFor::Present
     [[nodiscard]] PresentedCredential Present(std::string_view audience) override;
+
+    /// @copydoc ICredentialFor::Reserve
+    [[nodiscard]] PresentedCredential Reserve(std::string_view audience) override;
 
   private:
     [[nodiscard]] PresentedCredential NoCredential(std::string_view audience);
@@ -171,7 +190,23 @@ class TicketCredentials final: public ICredentialFor
     bool _said { false };
     /// A failure this process does not ask the node about again (`MintRetry::NotAgain`).
     std::optional<MintFailure> _remembered;
+
+    /// A ticket `Reserve` minted, waiting for the exchange it was minted for.
+    struct ReservedTicket
+    {
+        std::string audience;                   ///< Where it may be presented.
+        PresentedCredential presented;          ///< The ticket itself.
+        core::platform::SteadyTimePoint minted; ///< When, on `_clock`.
+    };
+
+    core::platform::IClock* _clock;
+    core::platform::SteadyClock _ownClock;
+    std::optional<ReservedTicket> _reserved;
 };
+
+/// How long a reserved ticket is handed over rather than minted again: half its lifetime, so the
+/// exchange it was minted for is never refused `expired` for having waited on a preprocess.
+inline constexpr std::chrono::seconds ReservedTicketReuse { 30 };
 
 /// What each exchange that was REFUSED presented, filed under where it went and what it asked.
 ///
@@ -261,5 +296,22 @@ class CredentialedExchange final: public IEndpointExchange
 /// @param refusals `CredentialedExchange::Refusals` of the exchange the dispatch ran over.
 /// @return The state to record and its fixed reason.
 [[nodiscard]] DispatchRecording RecordedReason(DispatchResult const& result, RefusalRecord const& refusals) noexcept;
+
+/// Whether a grant's worker is this client's OWN machine (#1745), proven by the machine identity the
+/// launcher already holds: a ticket this machine's node mints for the worker verifies under the key the
+/// grant names for it only when that node signs with the worker's key.
+///
+/// The one place the launcher reads into a ticket, and only to verify a signature over it: no claim is
+/// trusted, so a forged grant can at worst keep a compile here. The ticket is RESERVED for the dial it
+/// was minted for (`ICredentialFor::Reserve`), so a grant on another machine costs no extra round trip.
+/// Answers false whenever it cannot tell -- no node, no ticket for that audience, a key of the wrong
+/// width -- so an unknown machine is dispatched to as before.
+/// @param credentials Mints the ticket (`TicketCredentials`).
+/// @param firstDialed The address the compile dials first (`FirstDialedOf`), which the ticket is minted for.
+/// @param workerKey The identity key the grant names for that worker.
+/// @return True when this machine's node signs under @p workerKey.
+[[nodiscard]] bool GrantNamesOwnMachine(ICredentialFor& credentials,
+                                        std::string_view firstDialed,
+                                        std::span<std::byte const> workerKey);
 
 } // namespace Pace::Cc

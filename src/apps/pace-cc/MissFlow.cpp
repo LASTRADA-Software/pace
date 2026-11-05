@@ -290,6 +290,20 @@ namespace
     }
 } // namespace
 
+AdmittedDispatch DispatchUnlessOwnMachine(
+    AdmitTicket const& ticket,
+    std::function<bool(std::string_view firstDialed, std::span<std::byte const> workerKey)> const& ownMachine,
+    std::function<void()> const& declined,
+    std::function<AdmittedDispatch()> const& dispatch)
+{
+    if (ownMachine && ownMachine(FirstDialedOf(ticket.endpoint, ticket.dialHint), ticket.workerKey))
+    {
+        declined();
+        return {};
+    }
+    return dispatch();
+}
+
 std::optional<std::string_view> PlanUnreachableAt(LauncherEndpoints const& endpoints,
                                                   std::function<bool(std::string_view)> const& remembered)
 {

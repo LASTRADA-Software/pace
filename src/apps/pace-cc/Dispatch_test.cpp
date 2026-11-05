@@ -1032,6 +1032,49 @@ TEST_CASE("The lease is handed back however the job ended", "[dispatch]")
     CHECK(Wire::AsStringView(Unwrap(resolved).key) == "objkey");
 }
 
+TEST_CASE("A lease granted on this client's own machine is handed back and nothing is sent", "[dispatch][own-machine]")
+{
+    // #1745: an older leader may grant a fleet of one its own worker. The launcher releases the lease and
+    // compiles here, rather than preprocess and ship the unit over loopback to itself.
+    ScriptedFleet fleet;
+    fleet.Serve(std::string { Scheduler }, GrantReply());
+    fleet.Serve(std::string { Worker }, Wire::EncodeErrorReply(Wire::ErrorCode::UnknownLease, {}));
+    std::vector<std::string> const args { "-O2" };
+    auto request = Request(args);
+    std::vector<std::string> asked;
+    request.ownMachine = [&asked](std::string_view endpoint, std::span<std::byte const> workerKey) {
+        asked.emplace_back(endpoint);
+        return std::ranges::equal(workerKey, Testing::TestWorkerPublicKey());
+    };
+
+    auto const result = Dispatch(fleet, request);
+    CHECK(result.status == DispatchStatus::Declined);
+    CHECK(result.decline == DeclineCause::OwnMachine);
+    CHECK(result.leaseEndpoint == Scheduler);
+    CHECK(asked == std::vector<std::string> { std::string { Worker } });
+    CHECK(RecordingFor(result.status, result.decline).reason == "the only worker serving this toolchain is this machine");
+
+    // Leased, released, and the worker never dialled.
+    CHECK(FramesTo(fleet, Worker).empty());
+    auto const frames = FramesTo(fleet, Scheduler);
+    REQUIRE(frames.size() == 2);
+    CHECK(OpOf(frames[0]) == Wire::Op::Lease);
+    CHECK(OpOf(frames[1]) == Wire::Op::Release);
+}
+
+TEST_CASE("A lease granted on another machine is dispatched as before", "[dispatch][own-machine]")
+{
+    ScriptedFleet fleet;
+    fleet.Serve(std::string { Scheduler }, GrantReply());
+    std::vector<std::string> const args { "-O2" };
+    auto request = Request(args);
+    fleet.Serve(std::string { Worker }, CompileReply(request, "OBJ"));
+    request.ownMachine = [](std::string_view, std::span<std::byte const>) {
+        return false;
+    };
+    CHECK(Dispatch(fleet, request).Ran());
+}
+
 TEST_CASE("A scheduler that has gone away by then changes nothing", "[dispatch]")
 {
     // The release is best effort and must stay that way: the scheduler restarting

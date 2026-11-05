@@ -669,7 +669,7 @@ TEST_CASE("A version-14 AUTH in its own two-field grammar is refused by number, 
     REQUIRE(error.present);
     CHECK(error.code == Wire::ErrorCode::UnsupportedVersion);
     CHECK(error.code != Wire::ErrorCode::MalformedFrame);
-    CHECK(error.message == "unsupported wire version 14; this server speaks 17..17");
+    CHECK(error.message == "unsupported wire version 14; this server speaks 17..18");
 }
 
 TEST_CASE("A wire version change mid-connection is rejected", "[compile-cache][handler][version]")

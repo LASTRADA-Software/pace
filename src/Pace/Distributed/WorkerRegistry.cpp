@@ -238,7 +238,8 @@ namespace
 } // namespace
 
 std::expected<WorkerInfo, PickError> WorkerRegistry::Pick(std::string_view fingerprint,
-                                                          std::span<std::string_view const> excluded)
+                                                          std::span<std::string_view const> excluded,
+                                                          std::string_view requester)
 {
     std::scoped_lock const guard { _mutex };
     auto const now = _clock.now();
@@ -250,6 +251,7 @@ std::expected<WorkerInfo, PickError> WorkerRegistry::Pick(std::string_view finge
     bool sawMatch = false;
     bool sawWithdrawn = false;
     bool sawExcluded = false;
+    bool sawOwnMachine = false;
     for (auto& [id, entry]: _workers)
     {
         // Byte-identical, never "compatible". See the header: an over-strict match
@@ -264,6 +266,12 @@ std::expected<WorkerInfo, PickError> WorkerRegistry::Pick(std::string_view finge
         if (std::ranges::contains(excluded, std::string_view { entry.info.endpoint }))
         {
             sawExcluded = true;
+            continue;
+        }
+        // The client's own machine is the local compile again, plus a loopback transfer (#1745).
+        if (!requester.empty() && entry.info.identityKey == requester)
+        {
+            sawOwnMachine = true;
             continue;
         }
         sawMatch = true;
@@ -315,7 +323,11 @@ std::expected<WorkerInfo, PickError> WorkerRegistry::Pick(std::string_view finge
     // toolchain nobody serves is still `NoWorker`, whatever the client listed --
     // the misconfiguration must not hide behind an exclusion that never applied.
     if (!sawMatch)
-        return std::unexpected(sawExcluded ? PickError::Excluded : PickError::NoWorker);
+    {
+        if (sawExcluded)
+            return std::unexpected(PickError::Excluded);
+        return std::unexpected(sawOwnMachine ? PickError::OwnMachineOnly : PickError::NoWorker);
+    }
     return std::unexpected(sawWithdrawn ? PickError::Withdrawn : PickError::NoCapacity);
 }
 

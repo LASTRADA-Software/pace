@@ -1408,3 +1408,28 @@ TEST_CASE("An announcement's conditions reach a worker's row only from the machi
         CHECK_FALSE(conditionsAt().has_value());
     }
 }
+
+TEST_CASE("A pick never lands on the requesting machine's own worker", "[distributed][registry][own-machine]")
+{
+    // #1745: the client's own machine is the local compile again, plus a loopback transfer.
+    Fixture fix;
+    std::array<std::byte, 32> ownKey {};
+    ownKey.fill(std::byte { 0x0A });
+    std::array<std::byte, 32> otherKey {};
+    otherKey.fill(std::byte { 0x0B });
+    (void) fix.registry.Register(ProvenAnnounce(Gcc13, "own.corp:6676", ownKey));
+
+    auto const alone = fix.registry.Pick(Gcc13, {}, KeyText(ownKey));
+    REQUIRE_FALSE(alone.has_value());
+    CHECK(alone.error() == PickError::OwnMachineOnly);
+    // Nothing named, or another machine asking: the same worker is picked as before.
+    CHECK(fix.registry.Pick(Gcc13).has_value());
+    CHECK(fix.registry.Pick(Gcc13, {}, KeyText(otherKey)).has_value());
+    // A toolchain nobody serves is still `NoWorker`, whoever asks.
+    CHECK(fix.registry.Pick(Gcc14, {}, KeyText(ownKey)).error() == PickError::NoWorker);
+
+    auto const other = fix.registry.Register(ProvenAnnounce(Gcc13, "other.corp:6676", otherKey));
+    auto const picked = fix.registry.Pick(Gcc13, {}, KeyText(ownKey));
+    REQUIRE(picked.has_value());
+    CHECK(picked->id == other);
+}

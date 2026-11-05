@@ -8176,7 +8176,7 @@ if(TARGET PaceTest)
         # the assertion that could not have failed while this ticket was open: 69
         # cases ran, and 69 is non-zero.
         #
-        # 309 = 213 (CompileCacheWire) + 26 (RaftWire) + 27 (ClusterState)
+        # 310 = 214 (CompileCacheWire) + 26 (RaftWire) + 27 (ClusterState)
         #     + 23 (DiscoveryWire) + 9 (FingerprintInputsWire) + 6 (NodeStatusDetailWire)
         #     + 1 (RaftTypes) + 1 (SchedulerService) + 1 (MachineTicket)
         #     + 1 (MachineStanding) + 1 (IdentityKeyLabel), read off `PaceTest "[wire]"
@@ -8205,7 +8205,8 @@ if(TARGET PaceTest)
         # records (+3). From 305 to 306: the MEMBER-REPORT opcode, report bytes and frame in
         # CompileCacheWire (+1). From 306 to 307: a budget row whose note is over its ceiling, or whose
         # figure is the wrong width, refused, in NodeStatusDetailWire (+1). From 307 to 309, in
-        # ClusterState: the last release's state and its command are read and converted (+2).
+        # ClusterState: the last release's state and its command are read and converted (+2). From 309
+        # to 310, in CompileCacheWire: an ADMIT grant's reason in a version-17 asker's spelling (+1).
         #
         # `[(]` rather than `\(`: CMake reads `\(` in a quoted argument as an escape
         # and stores a bare `(`, which its regex engine then takes as a capture group
@@ -8217,7 +8218,7 @@ if(TARGET PaceTest)
         # anything matches nothing. No `SKIP_RETURN_CODE` here: every selected case
         # must PASS for the count to be the count, so a run that skipped is a failure
         # of this check, never a state to report.
-        PASS_REGULAR_EXPRESSION "All tests passed [(][0-9]+ assertions in 309 test cases[)]"
+        PASS_REGULAR_EXPRESSION "All tests passed [(][0-9]+ assertions in 310 test cases[)]"
         LABELS "hygiene"
         TIMEOUT 300
     )

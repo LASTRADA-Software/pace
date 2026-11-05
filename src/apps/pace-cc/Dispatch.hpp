@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <expected>
 #include <format>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -475,6 +476,12 @@ enum class DeclineCause : std::uint8_t
     /// locally is the design. Tallied beside "no machine serves your compiler" it
     /// reads as a fleet in trouble.
     AlreadyBuilding,
+    /// The only worker the fleet could name is this client's own machine (#1745): a fleet of one, or one
+    /// whose other machines lack the toolchain. Dispatching there is the local compile plus a second
+    /// preprocess and a loopback transfer, so it compiles here. Not a fault -- add a machine that serves the
+    /// toolchain if distribution was expected. No wire code of its own: the leader answers it as a `Local`
+    /// grant's `OwnMachineOnly`, and the launcher meets it on a grant naming its own key.
+    OwnMachine,
     /// A credential, membership or lease refusal: this client was not allowed to ask.
     ///
     /// Fixed where the client is configured, or on the scheduler's member list --
@@ -877,7 +884,25 @@ struct DispatchRequest
     /// Whether the leader already granted this compile in this invocation, so the LEASE says it asks again for one
     /// compile (`CompileCacheWire::AskOrigin`) and the leader's demand history counts it once.
     CompileCacheWire::AskOrigin askOrigin { CompileCacheWire::AskOrigin::First };
+
+    /// Whether a granted worker is this client's own machine (`GrantNamesOwnMachine`), asked of a LEASE
+    /// grant before anything is sent: a leader that does not keep a machine off its own workers (#1745)
+    /// is answered by releasing the lease and compiling here. Asked with the address the compile dials
+    /// first (`FirstDialedOf`), so a ticket minted to ask is the one that dial presents. Empty asks nothing.
+    std::function<bool(std::string_view firstDialed, std::span<std::byte const> workerKey)> ownMachine {};
 };
+
+/// The address a grant's compile dials first: its dial hint when that is one to dial, else its name.
+/// @param endpoint The worker the grant names.
+/// @param dialHint What the grant relayed beside the name; may be empty.
+/// @return The `host:port` dialled first.
+[[nodiscard]] std::string FirstDialedOf(std::string_view endpoint, std::string_view dialHint);
+
+/// The result for a grant that named this client's own machine: declined `DeclineCause::OwnMachine`,
+/// and nothing was sent.
+/// @param endpoint The worker the grant named.
+/// @return The result.
+[[nodiscard]] DispatchResult OwnMachineGrant(std::string_view endpoint);
 
 /// Ask the scheduler for a worker and have it compile this translation unit.
 ///

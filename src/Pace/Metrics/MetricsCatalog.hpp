@@ -117,6 +117,12 @@ inline constexpr EnumTable<IMetricsSink::Counter, CounterDescriptor> CounterTabl
               "exclusion list: the machines exist and the clients cannot reach them. "
               "Answered no-worker; never sum this with no_worker.",
       .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::DispatchLeasesOwnMachineOnly,
+      .prometheusName = "pace_dispatch_leases_own_machine_only_total",
+      .help = "Compiles kept on the machine that asked because the only workers serving "
+              "the toolchain run on that machine: a fleet of one, or one whose other "
+              "machines lack the toolchain. Never sum this with no_worker.",
+      .type = MetricType::Counter },
     { .counter = IMetricsSink::Counter::DispatchLeasesDuplicate,
       .prometheusName = "pace_dispatch_leases_duplicate_total",
       .help = "Lease requests refused because another client already held a lease "

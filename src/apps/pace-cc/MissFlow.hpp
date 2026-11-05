@@ -5,6 +5,7 @@
 #include "CacheProtocol.hpp"
 #include "Dispatch.hpp"
 #include "IProcessRunner.hpp"
+#include "LauncherCli.hpp"
 #include "ReachabilityMemo.hpp"
 #include "Stats.hpp"
 
@@ -17,6 +18,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -170,6 +172,51 @@ struct LauncherEndpoints
 [[nodiscard]] std::optional<std::string_view> PlanUnreachableAt(LauncherEndpoints const& endpoints,
                                                                 std::function<bool(std::string_view)> const& remembered);
 
+/// What `PACE_DISTRIBUTE` and the configured endpoints let one miss do (#1745).
+struct DistributionGate
+{
+    /// A dispatch is planned -- the plan, and the dependency list a dispatch preprocess sends -- and the
+    /// ADMIT may ask `Dispatchable`. Off whenever distribution is switched off, or no queue is named.
+    bool planDispatch {};
+    /// A `LEASE` may be sent when no queue answers: a scheduler is named and distribution is not off.
+    bool leaseFallback {};
+
+    /// @param planned Whether a dispatch plan was made.
+    /// @return The kind the ADMIT asks: `Dispatchable` only for a plan this gate let be made.
+    [[nodiscard]] constexpr CompileCacheWire::AdmitKind AdmitKindFor(bool planned) const noexcept
+    {
+        return planDispatch && planned ? CompileCacheWire::AdmitKind::Dispatchable : CompileCacheWire::AdmitKind::LocalOnly;
+    }
+};
+
+/// Gate distribution for one miss. Switched off, nothing is planned and no LEASE is sent, but the queue is
+/// still asked -- `LocalOnly`, so this machine's memory bound still holds the compile.
+/// @param setting What `PACE_DISTRIBUTE` asks for.
+/// @param endpoints What the launcher is configured with.
+/// @return What the miss may do.
+[[nodiscard]] constexpr DistributionGate GateDistribution(DistributeSetting setting,
+                                                          LauncherEndpoints const& endpoints) noexcept
+{
+    auto const on = setting != DistributeSetting::Off;
+    return DistributionGate { .planDispatch = on && !AdmissionEndpointOf(endpoints).empty(),
+                              .leaseFallback = on && !endpoints.scheduler.empty() };
+}
+
+/// An admitted dispatch, unless the grant names this client's OWN machine (#1745) -- an older leader's
+/// self-grant. Asked BEFORE @p dispatch, whose preprocess is the cost being saved; declined, it returns no
+/// run, so `RunMiss` settles the grant and asks again `LocalOnly` with that worker excluded.
+/// @param ticket The grant.
+/// @param ownMachine Whether a worker is this machine (`GrantNamesOwnMachine`), asked with the address
+///        dialled first (`FirstDialedOf`).
+/// @param declined Told when the grant names this machine; records the decline.
+/// @param dispatch The dispatch, run otherwise.
+/// @return What @p dispatch returned, or no run.
+[[nodiscard]] AdmittedDispatch DispatchUnlessOwnMachine(
+    AdmitTicket const& ticket,
+    std::function<bool(std::string_view firstDialed, std::span<std::byte const> workerKey)> const& ownMachine,
+    std::function<void()> const& declined,
+    std::function<AdmittedDispatch()> const& dispatch);
+
 /// Decide whether to dial the queue, from what this invocation ALREADY knows.
 ///
 /// **A node that is stopped must cost exactly what it did before a queue existed**, and a refused
@@ -267,6 +314,12 @@ inline constexpr EnumTable<CompileCacheWire::LocalGrantReason, LocalGrantRow> Lo
       .cause = DeclineCause::NoCapacity,
       .code = CompileCacheWire::ErrorCode::NoCapacity,
       .sentence = "no worker serving {} had room for it, so the queue ran it here" },
+    // A fleet of one: dispatching to this machine would only add a preprocess and a loopback transfer (#1745).
+    { .reason = CompileCacheWire::LocalGrantReason::OwnMachineOnly,
+      .records = true,
+      .cause = DeclineCause::OwnMachine,
+      .code = CompileCacheWire::ErrorCode::NoWorker,
+      .sentence = "the only worker serving {} is this machine, so it compiles here" },
 } };
 
 static_assert(RowsInEnumeratorOrder(LocalGrantTable, &LocalGrantRow::reason),

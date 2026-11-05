@@ -713,6 +713,16 @@ DispatchResult Dispatch(IEndpointExchange& exchange,
         return refused;
     }
     auto const hint = UsableDialHint(Wire::AsStringView(grant->dialHint), endpoint);
+    // A leader that does not keep a machine off its own workers (#1745) granted this client its own machine:
+    // the compile there would be this one plus a second preprocess and a loopback transfer. Released like
+    // every other way out of a granted lease.
+    if (request.ownMachine && request.ownMachine(hint.empty() ? endpoint : hint, grant->workerKey))
+    {
+        auto own = OwnMachineGrant(endpoint);
+        own.leaseEndpoint = lease.scheduler;
+        ReleaseLease(exchange, lease.scheduler, request, token, credential, budgets.control);
+        return own;
+    }
 
     // The lease conversation is over and its connection is already gone: an exchange
     // owns its socket for exactly one request/reply. Holding one for the length of a
@@ -785,6 +795,20 @@ DispatchResult Dispatch(IEndpointExchange& exchange,
                                           .admissionCacheKey = request.objectKey,
                                           .admissionSourcePath = request.admissionSourcePath },
                              now);
+}
+
+std::string FirstDialedOf(std::string_view endpoint, std::string_view dialHint)
+{
+    auto hint = UsableDialHint(dialHint, endpoint);
+    return hint.empty() ? std::string { endpoint } : hint;
+}
+
+DispatchResult OwnMachineGrant(std::string_view endpoint)
+{
+    auto own = Refused(DispatchStatus::Declined,
+                       std::format("the grant named {}, which is this machine; compiling here", endpoint));
+    own.decline = DeclineCause::OwnMachine;
+    return own;
 }
 
 bool IsWorkerCapacityRefusal(DispatchResult const& result) noexcept

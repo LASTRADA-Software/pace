@@ -703,7 +703,7 @@ struct DiskStoreSpec
 ///
 /// Passed to `NodeCapacityOf` as its own argument rather than added to
 /// `NodeCacheCapacity`, which is ON THE WIRE: a new field there would be a frame-shape
-/// change, and `MinSupportedVersion == CurrentVersion` makes that a flag day for the
+/// change, and no version this build accepts reads one more field, which makes that a flag day for the
 /// fleet (#998). `reservedMemoryBytes` already travels, so the figure reaches the
 /// leader through a field that exists.
 /// @param tier This node's cache tier, or nullptr when it runs none.

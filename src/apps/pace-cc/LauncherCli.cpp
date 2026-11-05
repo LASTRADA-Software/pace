@@ -19,6 +19,8 @@
 #include <string_view>
 #include <vector>
 
+#include <core/Ranges.hpp>
+
 namespace Pace::Cc
 {
 
@@ -300,16 +302,27 @@ namespace
                                 "result larger than this; raising only one leaves the other\n"
                                 "refusing." },
         EnvVarSpec { .name = EnvName::Scheduler,
-                     .summary = "host:port of a pace-kv scheduling endpoint (its\n"
-                                "--listen-node port). Unset means every miss compiles\n"
-                                "locally, which is the behaviour without this feature.\n"
-                                "On a miss the launcher asks the scheduler for a worker and\n"
-                                "sends it the preprocessed translation unit. EVERY refusal\n"
-                                "-- no matching toolchain, no free slot, another client\n"
-                                "already compiling this key, an unreachable node -- falls\n"
-                                "back to a local compile, so distribution cannot fail a\n"
-                                "build. A worker that reports a FAILED compile is retried\n"
-                                "locally before its diagnostics are believed." },
+                     .summary = "host:port of a scheduler to ask for a LEASE when the fleet\n"
+                                "queue does not answer. Distribution does NOT need it: a\n"
+                                "miss is queued at the pace-node behind PACE_ADDR, whose\n"
+                                "leader places it on a worker -- never on this machine's\n"
+                                "own, which is the local compile plus a transfer. Unset\n"
+                                "means no LEASE fallback; PACE_DISTRIBUTE=off turns\n"
+                                "distribution off. EVERY refusal -- no matching toolchain,\n"
+                                "no free slot, another client already compiling this key,\n"
+                                "an unreachable node -- falls back to a local compile, so\n"
+                                "distribution cannot fail a build. A worker that reports a\n"
+                                "FAILED compile is retried locally before its diagnostics\n"
+                                "are believed." },
+        EnvVarSpec { .name = EnvName::Distribute,
+                     .summary = "off, 0, false or no: never dispatch -- every miss compiles\n"
+                                "here, with no LEASE and no worker. The queue at PACE_ADDR\n"
+                                "is still asked to admit it as a LOCAL compile, which keeps\n"
+                                "this machine's memory bound; --show-stats says \"switched\n"
+                                "off\". on, 1, true, yes or unset: dispatch\n"
+                                "as above. Any other value reads as on, and PACE_VERBOSE\n"
+                                "says so. A switch rather than an empty PACE_SCHEDULER,\n"
+                                "because Windows cannot hold an empty variable." },
         EnvVarSpec { .name = EnvName::Token,
                      .summary = "The password for a cache at PACE_ADDR started with\n"
                                 "--requirepass, presented to that cache alone. A compile\n"
@@ -500,6 +513,19 @@ Command ParseTopLevel(std::span<std::string const> args)
         return Rejected(std::format("unknown option '{}'", head));
 
     return Selected(Action::Compile);
+}
+
+DistributeSetting ParseDistribute(std::string_view text) noexcept
+{
+    if (text.empty())
+        return DistributeSetting::On;
+    auto const lower = [](char letter) {
+        return letter >= 'A' && letter <= 'Z' ? static_cast<char>(letter - 'A' + 'a') : letter;
+    };
+    auto const* const spelled = core::findIfOrNull(DistributeSpellings, [&](DistributeSpelling const& spelling) {
+        return std::ranges::equal(spelling.text, text, {}, {}, lower);
+    });
+    return spelled != nullptr ? spelled->setting : DistributeSetting::Unrecognised;
 }
 
 std::chrono::milliseconds EnvironmentDuration(std::string_view text, std::chrono::milliseconds fallback) noexcept

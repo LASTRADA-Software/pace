@@ -2065,9 +2065,9 @@ namespace
             // REFUSED rather than rendered with blank cells, which is the missing string
             // this change exists to prevent arriving through the renderer: an operator
             // comparing two empty columns finds them equal. Deliberately not reported as
-            // *an older node* either -- `MinSupportedVersion` equals `CurrentVersion`, so
-            // one speaking another version is refused by name at the header and never
-            // reaches here.
+            // *an older node* either -- every version this build accepts reads this receipt
+            // alike, so one speaking another version is refused by name at the header and
+            // never reaches here.
             return Concluded(
                 Outcome::Protocol,
                 std::format("{} answered the admission with a receipt this client cannot read", context.node->Address()));

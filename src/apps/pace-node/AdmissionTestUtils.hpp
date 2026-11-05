@@ -193,8 +193,11 @@ class Client
     std::unique_ptr<core::net::ISocket> _socket;
 };
 
-/// A wire frame asking to be admitted.
-[[nodiscard]] inline std::vector<std::byte> AdmitFrame(Wire::AdmitKind kind, std::string_view key, bool storable = false)
+/// A wire frame asking to be admitted, at @p version.
+[[nodiscard]] inline std::vector<std::byte> AdmitFrame(Wire::AdmitKind kind,
+                                                       std::string_view key,
+                                                       bool storable = false,
+                                                       Wire::WireVersion version = Wire::CurrentVersion)
 {
     auto const excluded = std::array<std::string_view, 0> {};
     return Wire::EncodeAdmit(Wire::AdmitRequest { .kind = kind,
@@ -205,7 +208,8 @@ class Client
                                                   .storable = storable,
                                                   .acceptedCodecs = {},
                                                   .excluded = excluded,
-                                                  .toolchainLabel = {} });
+                                                  .toolchainLabel = {} },
+                             version);
 }
 
 [[nodiscard]] inline std::vector<std::byte> SettleFrame(Wire::SettleOutcome outcome,

@@ -195,19 +195,21 @@ TEST_CASE("A fleet read's node selector reaches the sources as typed, and none r
 TEST_CASE("A version 16 FLEET-TEXT is refused UnsupportedVersion, not as a malformed frame", "[node][fleettext]")
 {
     Rig rig;
-    // The version-16 grammar: three fields, no format. Hand-built, because the encoder only speaks 17.
+    // The version-16 grammar: three fields, no format. Hand-built, because the encoder only speaks four fields.
     auto const old = Wire::Detail::EncodeRequest(
         16, Wire::Op::FleetText, { Wire::AsBytes("series"), Wire::AsBytes("7d"), Wire::AsBytes("") });
     auto const reply = rig.AskLocally(old);
     CHECK(Testing::ErrorOf(reply) == Wire::ErrorCode::UnsupportedVersion);
-    CHECK(DetailOf(reply).contains("17..17"));
+    CHECK(DetailOf(reply).contains("17..18"));
     CHECK(rig.sources.reads == 0);
     // Not mistaken for a malformed frame, which would have moved this counter.
     CHECK(NothingCounted(rig.metrics));
 
     // And a version nobody speaks yet is the same answer.
-    auto const future = Wire::Detail::EncodeRequest(
-        18, Wire::Op::FleetText, { Wire::AsBytes(""), Wire::AsBytes(""), Wire::AsBytes(""), Wire::AsBytes("") });
+    auto const future =
+        Wire::Detail::EncodeRequest(static_cast<Wire::WireVersion>(Wire::CurrentVersion + 1),
+                                    Wire::Op::FleetText,
+                                    { Wire::AsBytes(""), Wire::AsBytes(""), Wire::AsBytes(""), Wire::AsBytes("") });
     CHECK(Testing::ErrorOf(rig.AskLocally(future)) == Wire::ErrorCode::UnsupportedVersion);
 }
 

@@ -723,7 +723,7 @@ TEST_CASE("counter-attribution: the mechanism figures quoted beside the table st
     // a sentence with nothing watching it -- did not get. Unaffected by the exemption above: none
     // of these five sets can contain a counter with no writer, exempt or not.
     CHECK(incremented.size() == 69);
-    CHECK(refusalRow.size() == 150);
+    CHECK(refusalRow.size() == 151);
     CHECK(outcomeRow.size() == 10);
     CHECK(returned.size() == 6);
     // Ten members of the private tier's profile and six of the shared tier's, which leaves its
@@ -736,9 +736,9 @@ TEST_CASE("counter-attribution: the mechanism figures quoted beside the table st
     // catalogue minus the exemptions, not a count: a row nobody writes and nobody has excused is a
     // row whose surface was guessed.
     CHECK(anyWriter.size() == nonExempt.size());
-    CHECK(nonExempt.size() - incremented.size() == 177);
+    CHECK(nonExempt.size() - incremented.size() == 178);
 
-    // 150 rows have a refusal row; 149 of them have no increment site. Two figures one apart
+    // 151 rows have a refusal row; 150 of them have no increment site. Two figures one apart
     // measuring different things is how a census gets quoted wrong -- the first draft of the
     // comment beside `CounterSoleWriterTable` said 101 for both -- so the REACH of a
     // SurfaceRefusal-only reading is asserted separately from the row count.
@@ -746,7 +746,7 @@ TEST_CASE("counter-attribution: the mechanism figures quoted beside the table st
     for (auto const& name: refusalRow)
         if (!incremented.contains(name))
             reachedByRefusalRowsAlone.insert(name);
-    CHECK(reachedByRefusalRowsAlone.size() == 149);
+    CHECK(reachedByRefusalRowsAlone.size() == 150);
 
     // And four rows are written two ways, which is why the column sums to four more than the rows.
     // Said in words rather than as two totals: the totals were a second claim nothing checked, and
