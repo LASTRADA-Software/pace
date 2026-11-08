@@ -871,6 +871,7 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
 /// @param hostEvents Where the host's suspend, resume and network events arrive.
 /// @param budgetDrops Whether this process dropped a cluster budget override; outlives every body.
 /// @param routeAt Where this machine's route is asked, and where the last one is kept for the process.
+/// @param memoryMeter The process's compile-memory meter, which every body's worker shares (it prepares once).
 /// @return The process's exit status.
 [[nodiscard]] int WorkerBody(NodeConfig const& cfg,
                              std::optional<Ed25519KeyPair> const& identityKey,
@@ -881,7 +882,8 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
                              std::optional<int> activated,
                              Node::LeaseCheckInForce& leaseCheck,
                              Node::BudgetDropLatch& budgetDrops,
-                             RouteParts const& routeAt)
+                             RouteParts const& routeAt,
+                             Node::CompileMemoryMeter& memoryMeter)
 {
     // ONE origin for every uptime this process reports. `/healthz` and the `0xFC`
     // `NodeStatus` verb both answer *how long has this been serving*, and two
@@ -1300,29 +1302,30 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     std::optional<Node::AdmissionResponder> admissionResponder;
     StartAdmissionQueue(
         admissionResponder, schedulerTier.get(), membership.Oracle(), nodeIo.Reactor(), metrics, leaseCharges);
-    auto workerOrRefusal = Node::WorkerTier::Start(Node::WorkerTierParts { .cfg = cfg,
-                                                                           .reloader = reloader,
-                                                                           .capacity = capacity,
-                                                                           .announced = announced,
-                                                                           .endpoints = endpointResolver,
-                                                                           .activatedNodeEndpoint = activatedNodeEndpoint,
-                                                                           .schedulers = appliedSchedulers,
-                                                                           .membership = membership.Oracle(),
-                                                                           .locality = locality,
-                                                                           .io = nodeIo,
-                                                                           .host = *host,
-                                                                           .cacheTier = cacheTier.get(),
-                                                                           .prover = AddressOrNull(prover),
-                                                                           .leaseRoster = nodeRoster->Lease(),
-                                                                           .leaseCheck = leaseCheck,
-                                                                           .metrics = metrics,
-                                                                           .logger = logger,
-                                                                           .conditions = conditions,
-                                                                           .hostEvents = hostEvents,
-                                                                           .suspendWait = DefaultDrainWait(),
-                                                                           .schedulerDialer = workerDialer,
-                                                                           .measurements = measuredPeaks },
-                                                   &Node::MakeSystemWorkerMachine);
+    auto workerOrRefusal = Node::WorkerTier::Start(
+        Node::WorkerTierParts { .cfg = cfg,
+                                .reloader = reloader,
+                                .capacity = capacity,
+                                .announced = announced,
+                                .endpoints = endpointResolver,
+                                .activatedNodeEndpoint = activatedNodeEndpoint,
+                                .schedulers = appliedSchedulers,
+                                .membership = membership.Oracle(),
+                                .locality = locality,
+                                .io = nodeIo,
+                                .host = *host,
+                                .cacheTier = cacheTier.get(),
+                                .prover = AddressOrNull(prover),
+                                .leaseRoster = nodeRoster->Lease(),
+                                .leaseCheck = leaseCheck,
+                                .metrics = metrics,
+                                .logger = logger,
+                                .conditions = conditions,
+                                .hostEvents = hostEvents,
+                                .suspendWait = DefaultDrainWait(),
+                                .schedulerDialer = workerDialer,
+                                .measurements = measuredPeaks },
+        [&memoryMeter, &metrics, &logger] { return Node::MakeSystemWorkerMachine(memoryMeter, metrics, logger); });
     if (!workerOrRefusal.has_value())
     {
         logger.Logf(LogLevel::Error, "{}; refusing to start", workerOrRefusal.error().reason);
@@ -2199,6 +2202,7 @@ struct ServingParts
     Node::LeaseCheckInForce& leaseCheck;    ///< Where every body's worker records the lease check it built.
     Node::BudgetDropLatch& budgetDrops;     ///< Whether this process dropped a cluster budget override, across bodies.
     RouteParts route;                       ///< Where every body's endpoint resolver asks and keeps the route.
+    Node::CompileMemoryMeter& memoryMeter;  ///< The process's one compile-memory meter, prepared once across bodies.
 };
 
 /// Wait @p wait, returning early once a stop is asked: the pause between two reforms.
@@ -2274,7 +2278,8 @@ void PauseUnlessStopped(std::chrono::milliseconds wait)
                               served,
                               parts.leaseCheck,
                               parts.budgetDrops,
-                              parts.route);
+                              parts.route,
+                              parts.memoryMeter);
         },
         logger);
 }
@@ -3348,6 +3353,9 @@ int main(int argc, char** argv)
     SystemStopAwareWait const formationWait;
     Node::BlockingEndpointDialer formationDialer { Node::FormationRuntime::IoTimeout };
     auto const formationSrv = MakeSystemSrvResolver();
+    // Built here, once: preparing the meter moves this process into a cgroup of its own, which must
+    // not happen again when a reform rebuilds the worker (`Node::CompileMemoryMeter`).
+    Node::CompileMemoryMeter memoryMeter { std::make_shared<Platform::SystemCgroupHost>() };
     auto const parts = ServingParts { .store = *formationStore,
                                       .endpoints = *endpointsFile,
                                       .archiver = archiver,
@@ -3362,7 +3370,8 @@ int main(int argc, char** argv)
                                           },
                                       .leaseCheck = leaseCheck,
                                       .budgetDrops = budgetDrops,
-                                      .route = RouteParts { .probe = *routeProbe, .cell = routeHost } };
+                                      .route = RouteParts { .probe = *routeProbe, .cell = routeHost },
+                                      .memoryMeter = memoryMeter };
     return host->Run([&cfg,
                       &identityKey,
                       &logger,

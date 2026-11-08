@@ -1554,6 +1554,14 @@ inline constexpr EnumTable<IMetricsSink::Counter, CounterDescriptor> CounterTabl
       .help = "fingerprint-inputs requests that were not exactly a fingerprint and an eight-byte page cursor. No "
               "shipped client builds one, so a rise is a client of another build or a hand-made probe.",
       .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::WorkerCompilesUnmeasured,
+      .prometheusName = "pace_worker_compiles_unmeasured_total",
+      .help = "Compiles whose peak memory went unmeasured although this worker measures in a cgroup "
+              "per compile: the cgroup could not be made, the compiler could not be started inside "
+              "it, or the kernel gave no memory.peak. The compile itself is correct; the fleet's "
+              "memory estimates simply never learn from it. Not counted on a node that measures "
+              "nothing at all: that is the compile-memory-unmeasured condition.",
+      .type = MetricType::Counter },
 } };
 
 // Checked at compile time rather than by a test, because the failure this prevents

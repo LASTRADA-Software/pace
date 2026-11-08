@@ -644,7 +644,11 @@ TEST_CASE("This build's live-stats layout is the pinned one", "[metrics][livesta
     //
     // Moved again when FINGERPRINT-INPUTS added `node_fingerprint_inputs_refused_malformed_total` at the end of the
     // catalogue. Clients and nodes upgrade together. Read off the built test, never computed by hand.
-    CHECK(StatsReadingLayout == 0x3ac69106c0ce143aULL);
+    //
+    // Moved again when `worker_compiles_unmeasured_total` joined at the end of the catalogue (a node that
+    // measures compile peaks in a cgroup counts the compiles it could not). Clients and nodes upgrade together.
+    // Read off the built test, never computed by hand.
+    CHECK(StatsReadingLayout == 0x3289178b62af302aULL);
 }
 
 TEST_CASE("A truncated or padded reading is refused and never half-read", "[metrics][livestats]")

@@ -566,7 +566,7 @@ struct CounterSoleWriter
 /// a row silently absent from the attribution and indistinguishable from one nobody had
 /// considered, cannot recur by omission ([#1501](https://github.com/LASTRADA-Software/pace/issues/1501)).
 ///
-/// **How the 245 rows are attributed**, since a scan for `Increment(Counter::X)` finds only 69
+/// **How the 246 rows are attributed**, since a scan for `Increment(Counter::X)` finds only 70
 /// of them and would have rendered the other 176 absent -- the same defect as the bug, three
 /// times larger. The rows are written by five mechanisms, and reading only `SurfaceRefusal`
 /// tables (the obvious reading of *written through `Refuse(row)`*) reaches 148 of the 176 and
@@ -578,7 +578,7 @@ struct CounterSoleWriter
 /// | a `LeaseToken.hpp` outcome row's `workerCounter` | 10 |
 /// | returned by a classifier for its caller to spend | 6 |
 /// | a `CacheTierProfile` member, spent by the tier built with it | 16 |
-/// | `Increment(Counter::X)` directly | 69 |
+/// | `Increment(Counter::X)` directly | 70 |
 ///
 /// The column sums past 245 because five rows are written two ways -- and the 148 above is not
 /// the 149 here: 149 rows HAVE a refusal row, and 148 of those have no increment site, which is
@@ -707,6 +707,8 @@ inline constexpr std::array CounterSoleWriterTable {
     CounterSoleWriter { .counter = IMetricsSink::Counter::WorkerSchedulerTermRegressions,
                         .surface = MetricsSurface::CompileWorker },
     CounterSoleWriter { .counter = IMetricsSink::Counter::WorkerScratchRootsReclaimed,
+                        .surface = MetricsSurface::CompileWorker },
+    CounterSoleWriter { .counter = IMetricsSink::Counter::WorkerCompilesUnmeasured,
                         .surface = MetricsSurface::CompileWorker },
     CounterSoleWriter { .counter = IMetricsSink::Counter::WorkerBytesReceived, .surface = MetricsSurface::CompileWorker },
     CounterSoleWriter { .counter = IMetricsSink::Counter::WorkerBytesReturned, .surface = MetricsSurface::CompileWorker },
@@ -1064,6 +1066,8 @@ inline constexpr std::array CounterSoleWriterTable {
                         .surface = MetricsSurface::NodeMcp },
     CounterSoleWriter { .counter = IMetricsSink::Counter::NodeFingerprintInputsRefusedMalformed,
                         .surface = MetricsSurface::NodeFrameEndpoint },
+    CounterSoleWriter { .counter = IMetricsSink::Counter::WorkerCompilesUnmeasured,
+                        .surface = MetricsSurface::CompileWorker },
 };
 
 /// Whether every catalogue row has at least one surface attributed to it.

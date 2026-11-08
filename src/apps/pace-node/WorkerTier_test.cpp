@@ -510,6 +510,43 @@ TEST_CASE("A worker answers whether its scratch root can be written into a mappi
     }
 }
 
+TEST_CASE("A worker whose machine cannot measure a compile's peak raises compile-memory-unmeasured, naming why",
+          "[node][worker-tier][memory-meter]")
+{
+    namespace Wire = CompileCacheWire;
+    WorkerTierFixture fixture;
+
+    SECTION("a machine that measures leaves the row clear")
+    {
+        auto const tier = fixture.Start();
+        REQUIRE(tier.has_value());
+        CHECK(fixture.conditions.StateOf(NodeCondition::CompileMemoryUnmeasured) == Wire::ConditionState::Clear);
+    }
+
+    SECTION("a machine that cannot raises it with the machine's own reason")
+    {
+        fixture.memoryMeter =
+            MeterReport { .state = MeterState::Unmeasured, .reason = "the cgroup this node runs in is not delegated to it" };
+        auto const tier = fixture.Start();
+        REQUIRE(tier.has_value());
+        CHECK(fixture.conditions.StateOf(NodeCondition::CompileMemoryUnmeasured) == Wire::ConditionState::Raised);
+        auto const rows = fixture.conditions.Snapshot();
+        auto const row =
+            std::ranges::find(rows, RowFor(NodeCondition::CompileMemoryUnmeasured).id, &Wire::NodeConditionFields::id);
+        REQUIRE(row != rows.end());
+        CHECK(row->detail.contains("not delegated"));
+        CHECK(row->persistence == "latched");
+    }
+
+    SECTION("a platform that cannot measure asks for nothing: the row is not evaluated, with the reason")
+    {
+        fixture.memoryMeter = MeterReport { .state = MeterState::NotApplicable, .reason = "no meter here" };
+        auto const tier = fixture.Start();
+        REQUIRE(tier.has_value());
+        CHECK(fixture.conditions.StateOf(NodeCondition::CompileMemoryUnmeasured) == Wire::ConditionState::NotEvaluated);
+    }
+}
+
 TEST_CASE("A worker hears the host's events from the moment it exists, and stops hearing them when it goes",
           "[node][worker-tier][host-events]")
 {
