@@ -4209,6 +4209,45 @@ member, because only the member knows what it configured (`Cluster::BudgetOverri
 - **What a member reports about ITSELF is `MemberReport`, never a weaker `MemberEdit` door** --
   the node-proof section above has that rule.
 
+## A node never reports `ru_maxrss` as a compile's peak
+
+<!-- agent-tripwire: A node never reports a child's ru_maxrss as a compile's peak -->
+
+On Linux the `ru_maxrss` that `wait4` returns for a spawned child INCLUDES the resident set of its
+spawner: `exec` folds the old address space's high-water mark into the child, and with
+`posix_spawn` the old address space is the parent's. A launcher is small and reads it correctly. A
+node holding a 13 GB cache tier read 13 GB for every compile it ran, that figure became the
+estimate for the compile's shape (`PeakEstimates` keeps the maximum), and `AdmissionQueue` charged
+13 GB per job against a 67 GB budget: four of thirty slots ran, with a 40 s admission wait per
+translation unit and every test green.
+
+- **The meter is chosen at construction** (`Cc::PeakSource`, or an `IJobCgroupSource`), never by a
+  flag at the call. `pace-cc` keeps `ResourceUsage`; the node uses `CompileMemoryMeter`, prepared ONCE per process (a formation reform rebuilds the
+  worker, and a second preparation from inside `node/` would nest `node/node`).
+- **A node measures in a cgroup per compile** (`Platform/CgroupV2`): the child is spawned INTO a
+  fresh `job-<n>` (`posix_spawnattr_setcgroup_np`, no fork of the big daemon), `memory.peak` is read
+  after `wait4`, then `cgroup.kill` and `rmdir`. The node moves itself into a leaf first; cgroup v2
+  refuses a controller on a cgroup that also holds processes. It needs glibc 2.39 for
+  `posix_spawnattr_setcgroup_np`; without it a job handed to a plain spawn is dropped, never read.
+  Delegation is judged by effect (writable, unshared, `+memory` read back, `clone3` probed FIRST so a
+  refusal touches nothing): systemd's delegation xattr is unreadable to a service account and absent on
+  a user manager's delegated unit, so requiring it would refuse every working setup.
+- **Where it cannot, the peak is UNKNOWN (`std::nullopt`), never `ru_maxrss`**, and the node says
+  so: a Warn at startup and the latched `compile-memory-unmeasured` condition naming the first
+  thing missing. macOS and Windows keep their own meters (a child's `ru_maxrss` / job object is the
+  child's alone); any other platform is `NotApplicable`, the row not evaluated, because no remedy
+  applies. A compile that goes unmeasured after startup is counted
+  (`pace_worker_compiles_unmeasured_total`) and Warned once. A runner handed a cgroup source answers from a cgroup or not at all, including for
+  the spawn the cgroup failed on.
+- **The shipped unit measures nothing**, on purpose: `ProtectControlGroups=yes` stays, and the opt-in
+  is a drop-in (`Delegate=memory`, `ProtectControlGroups=private`, `RestrictNamespaces=no`).
+  `RestrictNamespaces=` of ANY value but `no` makes systemd refuse `clone3` (seccomp cannot read its
+  flags), which is the call that spawns into a cgroup: measured as ENOTSUP, so the startup probe
+  (`ICgroupHost::ProbeSpawnInto`) tests it rather than assuming it.
+- **The integration case is opt-in** (`PACE_TEST_CGROUP_DELEGATED`): preparing moves the test process
+  into a cgroup, so it runs under `systemd-run --user --scope -p Delegate=yes`, and skips with the
+  reason anywhere else.
+
 ## Open work
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues; AGENT.md tripwires rules, not residuals -->
