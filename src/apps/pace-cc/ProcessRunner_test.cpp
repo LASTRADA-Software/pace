@@ -6,13 +6,20 @@
 #include "IProcessRunner.hpp"
 
 #include <Pace/Platform/Environment.hpp>
+#include <Pace/Platform/JobCgroups.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <cstdint>
+#include <expected>
+#include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 #include <tests/Unwrap.hpp>
@@ -314,3 +321,192 @@ TEST_CASE("ProcessRunner.unspawnable-has-no-peak", "[pace-cc][process]")
     CHECK(run.exitCode == NotSpawned);
     CHECK_FALSE(run.peakMemoryBytes.has_value());
 }
+
+TEST_CASE("ProcessRunner.unmeasured-reports-no-peak", "[pace-cc][process]")
+{
+    // The node's runner on a machine that gave it no cgroup: the compile runs, and no figure is made up.
+    // On Linux the figure `ru_maxrss` would give is the SPAWNER's resident set, which is the bug.
+    auto const runner = MakeProcessRunner(PeakSource::Unmeasured);
+#if defined(_WIN32)
+    auto const run = runner->RunCaptureSplit(ShellCommand("echo hi"));
+    REQUIRE(run.exitCode == 0);
+    CHECK(run.peakMemoryBytes.has_value()); // Windows measures through its job object, not through this choice.
+#else
+    auto const run = runner->RunCaptureSplit(ShellCommand("echo hi"));
+    REQUIRE(run.exitCode == 0);
+    CHECK(run.out == "hi\n");
+    CHECK_FALSE(run.peakMemoryBytes.has_value());
+#endif
+}
+
+TEST_CASE("ProcessRunner.resource-usage-source-still-measures", "[pace-cc][process]")
+{
+    auto const runner = MakeProcessRunner(PeakSource::ResourceUsage);
+    auto const run = runner->RunCaptureSplit(ShellCommand("echo hi"));
+
+    REQUIRE(run.exitCode == 0);
+    REQUIRE(run.peakMemoryBytes.has_value());
+    CHECK(Unwrap(run.peakMemoryBytes) > 0);
+}
+
+#if !defined(_WIN32)
+
+namespace
+{
+
+/// A job cgroup that is not one: a descriptor no spawn can place a child in, so the runner's refusal
+/// path runs without a cgroup tree. It counts its own destruction.
+class UnusableJob final: public Pace::Platform::IJobCgroup
+{
+  public:
+    explicit UnusableJob(std::atomic<int>& alive):
+        _alive { alive }
+    {
+        ++_alive;
+    }
+    UnusableJob(UnusableJob const&) = delete;
+    UnusableJob(UnusableJob&&) = delete;
+    UnusableJob& operator=(UnusableJob const&) = delete;
+    UnusableJob& operator=(UnusableJob&&) = delete;
+    ~UnusableJob() override
+    {
+        --_alive;
+    }
+    [[nodiscard]] int DirectoryDescriptor() const noexcept override
+    {
+        return -1;
+    }
+    [[nodiscard]] std::optional<std::uint64_t> PeakBytes() const override
+    {
+        return 12345; // Never asked for: the spawn that would have run in it was refused.
+    }
+
+  private:
+    std::atomic<int>& _alive;
+};
+
+/// A source that makes `UnusableJob`s, or refuses to make any.
+class ScriptedJobSource final: public Pace::Platform::IJobCgroupSource
+{
+  public:
+    enum class Answer : std::uint8_t
+    {
+        RefuseToCreate,
+        CreateUnusableJob
+    };
+
+    explicit ScriptedJobSource(Answer answer):
+        _answer { answer }
+    {
+    }
+
+    [[nodiscard]] std::expected<std::unique_ptr<Pace::Platform::IJobCgroup>, std::error_code> Create() override
+    {
+        ++_created;
+        if (_answer == Answer::RefuseToCreate)
+            return std::unexpected { std::make_error_code(std::errc::permission_denied) };
+        return std::make_unique<UnusableJob>(_alive);
+    }
+
+    /// @return How many cgroups the runner asked for.
+    [[nodiscard]] int Created() const noexcept
+    {
+        return _created;
+    }
+
+    /// @copydoc Pace::Platform::IJobCgroupSource::NoteUnmeasured
+    void NoteUnmeasured(Unmeasured why) noexcept override
+    {
+        if (why == Unmeasured::SpawnRefused)
+            ++_refusals;
+    }
+
+    /// @return How many spawns the runner reported as refused a cgroup.
+    [[nodiscard]] int Refusals() const noexcept
+    {
+        return _refusals;
+    }
+
+    /// @return How many of them are still alive.
+    [[nodiscard]] int Alive() const noexcept
+    {
+        return _alive;
+    }
+
+  private:
+    Answer _answer;
+    std::atomic<int> _created { 0 };
+    std::atomic<int> _alive { 0 };
+    std::atomic<int> _refusals { 0 };
+};
+
+} // namespace
+
+TEST_CASE("ProcessRunner.cgroup-runner-runs-the-compile-when-no-cgroup-can-be-made", "[pace-cc][process]")
+{
+    if (!CanSpawnIntoCgroups())
+        SKIP("this build cannot spawn into a cgroup, so its runner never asks for one (see the case below)");
+    auto source = std::make_shared<ScriptedJobSource>(ScriptedJobSource::Answer::RefuseToCreate);
+    auto const runner = MakeProcessRunner(source);
+
+    auto const run = runner->RunCaptureSplit(ShellCommand("echo hi"));
+
+    CHECK(source->Created() == 1);
+    REQUIRE(run.exitCode == 0);
+    CHECK(run.out == "hi\n");
+    // Not `ru_maxrss`: a runner given a cgroup source answers from a cgroup or not at all.
+    CHECK_FALSE(run.peakMemoryBytes.has_value());
+}
+
+TEST_CASE("ProcessRunner.cgroup-runner-runs-the-compile-when-the-system-refuses-the-cgroup", "[pace-cc][process]")
+{
+    if (!CanSpawnIntoCgroups())
+        SKIP("this build cannot spawn into a cgroup, so its runner never asks for one (see the case below)");
+    auto source = std::make_shared<ScriptedJobSource>(ScriptedJobSource::Answer::CreateUnusableJob);
+    auto const runner = MakeProcessRunner(source);
+
+    auto const run = runner->RunCaptureSplit(ShellCommand("echo hi"));
+
+    REQUIRE(run.exitCode == 0);
+    CHECK(run.out == "hi\n");
+    CHECK_FALSE(run.peakMemoryBytes.has_value());
+    // The job is released whichever way the spawn went, and the source is told it went unmeasured.
+    CHECK(source->Alive() == 0);
+    CHECK(source->Refusals() == 1);
+}
+
+TEST_CASE("ProcessRunner.cgroup-runner-still-reports-an-unspawnable-program", "[pace-cc][process]")
+{
+    if (!CanSpawnIntoCgroups())
+        SKIP("this build cannot spawn into a cgroup, so its runner never asks for one (see the case below)");
+    auto source = std::make_shared<ScriptedJobSource>(ScriptedJobSource::Answer::CreateUnusableJob);
+    auto const runner = MakeProcessRunner(source);
+
+    auto const run = runner->RunCaptureSplit({ { "definitely-not-a-real-program-xyzzy" } });
+
+    CHECK(run.exitCode == NotSpawned);
+    CHECK_FALSE(run.peakMemoryBytes.has_value());
+    CHECK(source->Alive() == 0);
+    // A program that cannot run is not a cgroup refusal.
+    CHECK(source->Refusals() == 0);
+}
+
+#endif
+
+#if !defined(_WIN32)
+
+TEST_CASE("ProcessRunner.cgroup-runner-on-a-build-without-support-never-asks-for-a-cgroup", "[pace-cc][process]")
+{
+    if (CanSpawnIntoCgroups())
+        SKIP("this build can spawn into a cgroup; the case is about the one that cannot");
+    auto source = std::make_shared<ScriptedJobSource>(ScriptedJobSource::Answer::CreateUnusableJob);
+    auto const runner = MakeProcessRunner(source);
+
+    auto const run = runner->RunCaptureSplit(ShellCommand("echo hi"));
+
+    REQUIRE(run.exitCode == 0);
+    CHECK_FALSE(run.peakMemoryBytes.has_value());
+    CHECK(source->Created() == 0);
+}
+
+#endif

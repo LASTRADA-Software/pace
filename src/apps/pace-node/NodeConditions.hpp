@@ -64,6 +64,7 @@ enum class NodeCondition : std::uint8_t
     StateDirectoryUnsynced, ///< The state directory's filesystem cannot sync a directory, so its replaces may not survive
                             ///< a power loss.
     CacheBudgetOverrideDropped, ///< A cluster cache budget override was dropped: this machine's own later edit wins.
+    CompileMemoryUnmeasured,    ///< The worker cannot measure a compile's peak memory, so it reports none.
     Last,                       ///< Not a condition.
 };
 
@@ -379,6 +380,20 @@ inline constexpr EnumTable<NodeCondition, NodeConditionRow> NodeConditionTable {
       .scope = ConditionScope::Consensus,
       .remedy = "the machine's own configuration changed after the override was set; set it again with "
                 "set_cache_budget if still wanted" },
+    // Latched: the meter is chosen once, at startup, from what the machine's cgroup tree allowed this process;
+    // nothing the node does afterwards changes it. A notice and not a warning, because it is the SHIPPED default
+    // (the unit does not delegate a cgroup) and every compile is correct -- only the fleet's memory estimates
+    // lose their measurements. Worker scope: no worker runs no compiles to measure.
+    { .condition = NodeCondition::CompileMemoryUnmeasured,
+      .id = "compile-memory-unmeasured",
+      .persistence = CompileCacheWire::ConditionPersistence::Latched,
+      .severity = CompileCacheWire::ConditionSeverity::Notice,
+      .scope = ConditionScope::Worker,
+      .remedy = "Compiles are correct; this worker reports no peak memory for them, so the fleet's admission estimates "
+                "stay at their default instead of learning each compile's real need. Measuring takes a cgroup of this "
+                "node's own: under systemd, a drop-in with Delegate=memory, ProtectControlGroups=private (systemd 257 or "
+                "newer) and RestrictNamespaces=no, then a restart; see docs/tools/pace-node.md. The detail names what "
+                "this machine lacked." },
 } };
 static_assert(RowsInEnumeratorOrder(NodeConditionTable, &NodeConditionRow::condition),
               "NodeConditionTable must hold one row per NodeCondition, in enumerator order");

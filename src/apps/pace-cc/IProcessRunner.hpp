@@ -7,6 +7,11 @@
 #include <span>
 #include <string>
 
+namespace Pace::Platform
+{
+class IJobCgroupSource;
+}
+
 namespace Pace::Cc
 {
 
@@ -158,8 +163,44 @@ class IProcessRunner
     }
 };
 
-/// Create the process runner for the host platform.
+/// Where a runner takes `CompileRun::peakMemoryBytes` from, when it has no cgroup to ask.
+enum class PeakSource : std::uint8_t
+{
+    Unmeasured = 0, ///< Nowhere: the peak stays disengaged.
+    ResourceUsage,  ///< `wait4`'s `ru_maxrss`, which is right only for a SMALL parent (see below).
+};
+
+/// Whether this build can start a process directly inside a cgroup (`posix_spawnattr_setcgroup_np`:
+/// Linux with glibc 2.39 or newer).
+/// @return True when `MakeProcessRunner(std::shared_ptr<Platform::IJobCgroupSource>)` can measure.
+[[nodiscard]] bool CanSpawnIntoCgroups() noexcept;
+
+/// Create the process runner for the host platform, measuring a child's peak as `PeakSource::ResourceUsage`.
+///
+/// **Right for the launcher and wrong for a node ON LINUX.** There the `ru_maxrss` of a spawned child
+/// INCLUDES the resident set of the process that spawned it (`exec` folds the old address space's
+/// high-water mark into the child, and `posix_spawn` shares the parent's), so a parent holding gigabytes
+/// reports every child as holding them. The launcher is small; the node is not, and uses
+/// `MakeProcessRunner(PeakSource)` or the cgroup form. macOS makes a fresh task for the child, so its
+/// `ru_maxrss` is the child's own; Windows measures through the job object it already runs the child in.
 /// @return A runner spawning real child processes.
 [[nodiscard]] std::unique_ptr<IProcessRunner> MakeProcessRunner();
+
+/// Create the process runner for the host platform with an explicit peak source.
+/// @param peakSource Where the peak comes from on POSIX; Windows measures through its job object either way.
+/// @return A runner spawning real child processes.
+[[nodiscard]] std::unique_ptr<IProcessRunner> MakeProcessRunner(PeakSource peakSource);
+
+/// Create the process runner for the host platform, measuring each child's peak in a cgroup of its own.
+///
+/// Each spawn creates a cgroup from @p cgroups and starts the child INSIDE it, so the cgroup's peak
+/// counts the child and its descendants and nothing of the spawner. A spawn the source cannot make a
+/// cgroup for (or that the system refuses to place in one) still runs, with its peak unknown: the
+/// compile matters more than its measurement, and `ru_maxrss` is never the fallback.
+/// A build that `!CanSpawnIntoCgroups()` gets a runner reporting every peak unknown, which never calls
+/// @p cgroups.
+/// @param cgroups Makes the per-job cgroups; shared so it outlives every spawn.
+/// @return A runner spawning real child processes.
+[[nodiscard]] std::unique_ptr<IProcessRunner> MakeProcessRunner(std::shared_ptr<Platform::IJobCgroupSource> cgroups);
 
 } // namespace Pace::Cc

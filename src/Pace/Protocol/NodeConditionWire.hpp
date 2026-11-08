@@ -284,7 +284,10 @@ inline constexpr std::size_t MaxConditionIdBytes = ConditionFieldCeiling(&NodeCo
 /// DECODER bound, so it moves with lane 0's version bump.
 // 24 since `cache-budget-override-dropped` spent the spare row: the detail ceiling went 448 -> 400 to buy it, the
 // trade this comment names, rather than the history share.
-inline constexpr std::size_t MaxNodeConditions = 24;
+// 25 since `compile-memory-unmeasured` spent that one. Bought from the HISTORY share (`HistoryPayloadShare`, 2 KiB
+// of a half that a full batch uses barely half of), not from a field ceiling: lowering `detail` would make this
+// decoder refuse a row an older encoder legitimately sent.
+inline constexpr std::size_t MaxNodeConditions = 25;
 
 /// What one encoded row costs at most, framing included: every field at its ceiling behind its
 /// length prefix, plus the prefix on the row itself.

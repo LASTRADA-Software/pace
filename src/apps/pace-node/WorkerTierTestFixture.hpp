@@ -216,6 +216,8 @@ struct WorkerTierFixture
     /// Builds the machine's process runner when set, in place of the real one: a case that needs a
     /// compile to RUN and report something (a measured peak) supplies it. Empty for the real runner.
     std::function<std::unique_ptr<Cc::IProcessRunner>()> makeRunner;
+    /// What the machine says about its runner measuring a compile's peak; measured by default.
+    MeterReport memoryMeter;
     /// What the heartbeat's scheduler dials answer, one frame per dial, read by the first `Start`.
     /// EMPTY by default: a case that launches no heartbeat expects no dial at all, so any is a
     /// `FAIL` in the fake's own voice -- which is how a case asserts that a host event dialled nobody
@@ -267,7 +269,8 @@ struct WorkerTierFixture
                                    .host = Cc::MakeToolchainHost(),
                                    .discovery = std::make_unique<CountingDiscovery>(discoveryCalls),
                                    .claimant = MakeLockFileScratchClaimant(),
-                                   .scratchBase = scratchBase.empty() ? scratch.Path() : scratchBase };
+                                   .scratchBase = scratchBase.empty() ? scratch.Path() : scratchBase,
+                                   .memoryMeter = memoryMeter };
         };
         schedulers.push_back(std::make_unique<AppliedSchedulers>(cfg, activatedNodeEndpoint));
         capacities.push_back(std::make_unique<FixedNodeCapacity>(capacity));

@@ -108,6 +108,7 @@ add_executable(pace-node
     WorkerLease.cpp
     WorkerTier.cpp
     CompileCapacity.cpp
+    CompileMemoryMeter.cpp
     CompileResponder.cpp
     FingerprintInputsResponder.cpp
     NodeStatusResponder.cpp
@@ -302,6 +303,8 @@ if(PACE_BUILD_TESTS)
         WorkerTier_test.cpp
         CompileCapacity.cpp
         CompileCapacity_test.cpp
+        CompileMemoryMeter.cpp
+        CompileMemoryMeter_test.cpp
         CompileResponder.cpp
         FingerprintInputsResponder.cpp
         FingerprintInputsResponder_test.cpp

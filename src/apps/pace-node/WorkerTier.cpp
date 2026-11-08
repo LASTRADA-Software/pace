@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "AdminEndpoint.hpp"
 #include "CacheTier.hpp"
+#include "CompileMemoryMeter.hpp"
 #include "InputsCapture.hpp"
 #include "NodeAnnounce.hpp"
 #include "NodeFormation.hpp"
@@ -17,6 +18,7 @@
 #include <format>
 #include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <stop_token>
@@ -248,9 +250,10 @@ void AdoptAllowlist(Cc::CompileJobRunner& jobs,
     logger.Log(LogLevel::Warn, *said);
 }
 
-WorkerMachine MakeSystemWorkerMachine()
+WorkerMachine MakeSystemWorkerMachine(CompileMemoryMeter& meter, IMetricsSink& metrics, ILogger& logger)
 {
-    auto runner = Cc::MakeProcessRunner();
+    auto metered = meter.MakeRunner(metrics, logger);
+    auto runner = std::move(metered.runner);
     auto host = Cc::MakeToolchainHost();
     // Built UNCONDITIONALLY and consulted per call, since #403 made
     // `--no-toolchain-discovery` reloadable. It costs nothing to hold: it stores two
@@ -260,7 +263,8 @@ WorkerMachine MakeSystemWorkerMachine()
                            .host = std::move(host),
                            .discovery = std::move(discovery),
                            .claimant = MakeLockFileScratchClaimant(),
-                           .scratchBase = ScratchBaseDirectory() };
+                           .scratchBase = ScratchBaseDirectory(),
+                           .memoryMeter = std::move(metered.report) };
 }
 
 std::expected<std::unique_ptr<WorkerTier>, NodeRefusal> WorkerTier::Start(WorkerTierParts const& parts,
@@ -289,6 +293,7 @@ std::expected<std::unique_ptr<WorkerTier>, NodeRefusal> WorkerTier::Start(Worker
 
     // Only now, with a worker decided: see `MakeSystemWorkerMachine`.
     auto machine = makeMachine();
+    ReportCompileMemoryMeter(machine.memoryMeter, parts.conditions, parts.logger);
 
     // Only the CHEAP half of the survey runs here, and that split is the whole of #365.
     // Deciding WHICH compilers to serve is a spawn per candidate; IDENTIFYING them walks

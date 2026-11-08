@@ -109,6 +109,7 @@ constexpr std::array WriterFiles {
     SurfaceWriterFile { .surface = MetricsSurface::CompileWorker, .path = "src/apps/pace-node/CompileCapacity.hpp" },
     SurfaceWriterFile { .surface = MetricsSurface::CompileWorker, .path = "src/apps/pace-node/CompileResponder.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::CompileWorker, .path = "src/apps/pace-node/CompileResponder.hpp" },
+    SurfaceWriterFile { .surface = MetricsSurface::CompileWorker, .path = "src/apps/pace-node/CompileMemoryMeter.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::CompileWorker, .path = "src/apps/pace-node/WorkerTier.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::ConsensusPeerWire, .path = "src/Pace/Consensus/RaftPeerRefusals.hpp" },
     SurfaceWriterFile { .surface = MetricsSurface::ConsensusPeerWire, .path = "src/Pace/Consensus/RaftPeerServer.cpp" },
@@ -722,7 +723,7 @@ TEST_CASE("counter-attribution: the mechanism figures quoted beside the table st
     // was never taken under. Drift is a red build, which is what the previous "106 of 144" --
     // a sentence with nothing watching it -- did not get. Unaffected by the exemption above: none
     // of these five sets can contain a counter with no writer, exempt or not.
-    CHECK(incremented.size() == 69);
+    CHECK(incremented.size() == 70);
     CHECK(refusalRow.size() == 150);
     CHECK(outcomeRow.size() == 10);
     CHECK(returned.size() == 6);

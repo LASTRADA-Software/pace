@@ -272,9 +272,8 @@ launcher's cache key is made of. Before `apps/pace-cc/`, `CompileCache/`.
   constant: `expiresAt` is attacker-chosen, so it is a comparison BEFORE a subtraction.
 - The learned scheduler term is a DIAGNOSTIC, never a gate: a lower term is ADOPTED, and
   `WorkerJobsRefusedLeaseStaleEpoch` is RETIRED rather than left reading zero.
-- **A lower term is a REGRESSION, and calling it a reset is a claim the worker cannot make**:
-  report what is OBSERVED, name both causes, and say that the RATE separates them. **A confident
-  wrong signal is worse than a vague right one.**
+- **A lower term is a REGRESSION; calling it a reset is a claim a worker cannot make**: report what is
+  OBSERVED, name both causes, say the RATE separates them. **A confident wrong signal is worse than a vague right one.**
 - A scheduler IS a consensus voter, alone or not, so every grant is signed by the ISSUING voter's
   own identity key; which modes schedule is `NodeModeTable`'s `scheduler` column, never a flag.
 - A worker checks that signature against the ROSTER its own consensus APPLIED (`StateLeaseRoster`):
@@ -306,11 +305,12 @@ launcher's cache key is made of. Before `apps/pace-cc/`, `CompileCache/`.
   column, a present zero is *unbounded*, and a disk tier's key index is **a working set rather than a store** (`storage.md`).
 - A cache budget override is applied OFF the consensus apply path and off every reactor, and the
   later edit wins by its recorded BASELINE, never by comparing clocks (`BudgetOverrideApplier`).
-- A node SERVES while it identifies its toolchains: the cheap half at startup, the walk on the
-  heartbeat thread's first round, registering NOTHING until the fingerprint is real;
-  `ToolchainSurvey` travels beside the map with a deleted default constructor.
+- A node SERVES while it identifies its toolchains: the cheap half at startup, the walk on the heartbeat thread's
+  first round, registering NOTHING until the fingerprint is real (`ToolchainSurvey` travels beside the map, no default).
 - Fingerprint inputs are CAPTURED, never re-gathered: `FINGERPRINT-INPUTS` reads what the survey
   published; ONE capture walk per process runs on a thread of its own, and no request starts one.
+- A node never reports a child's `ru_maxrss` as a compile's peak (Linux folds the spawner's RSS into it): a
+  cgroup per compile where delegated, else UNKNOWN plus `compile-memory-unmeasured`; prepared once per process.
 - A probe that did not RUN is not one that answered nothing, and an identity built on one is
   neither served nor cached: the guard is `exitCode == NotSpawned`, never the count.
 - A reply's codec is chosen from what the OTHER end said it accepts, never from this end's list

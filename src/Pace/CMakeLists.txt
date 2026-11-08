@@ -97,6 +97,7 @@ target_sources(Pace
         Metrics/PrometheusFormatter.cpp
         Metrics/StatsReading.cpp
         Metrics/StatsReadingCodec.cpp
+        Platform/CgroupV2.cpp
         Platform/CpuAffinity.cpp
         Platform/DaemonControls.cpp
         Platform/Environment.cpp

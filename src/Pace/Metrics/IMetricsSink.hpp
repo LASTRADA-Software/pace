@@ -1602,6 +1602,15 @@ class IMetricsSink
         /// rather than that one's: the two verbs carry different fields, so one counter would name two mistakes.
         NodeFingerprintInputsRefusedMalformed,
 
+        /// Compiles that ran with their peak memory unmeasured although this worker measures in a
+        /// cgroup per compile: the cgroup could not be made, the system would not start the compiler
+        /// inside it, or the kernel would not report its `memory.peak`. Each is a compile whose peak
+        /// the fleet's estimates never learn, so a rise is an estimate going stale with nothing else
+        /// showing it. NOT counted on a node that does not measure at all (the shipped Linux unit):
+        /// that is the `compile-memory-unmeasured` condition, and a counter per compile would only
+        /// repeat it.
+        WorkerCompilesUnmeasured,
+
         Last,
     };
 

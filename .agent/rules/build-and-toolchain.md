@@ -515,7 +515,7 @@ determinism rests on.
     index range says what `enumerate` says and is ten years older.
   - **A facility can be PRESENT and still not have the overload you want -- which makes
     the remedy above give a FALSE PASS.** `std::from_chars` has no floating-point
-    overload in libc++ before macOS 26.0, which is what the `macos-14` runners have, so
+    overload in libc++ before macOS 26.0, which is what the `macos-15` runners have, so
     `std::from_chars(first, last, someDouble)` compiles on libstdc++ and on MSVC and
     fails to BUILD on that one leg. Every *integral* `from_chars` in this tree is fine
     and there are many of them, so the bullet above's remedy -- grep for the facility in

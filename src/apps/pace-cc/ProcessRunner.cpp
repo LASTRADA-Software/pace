@@ -7,6 +7,8 @@
 
 #include "IProcessRunner.hpp"
 
+#include <Pace/Platform/JobCgroups.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -17,6 +19,7 @@
 #include <optional>
 #include <ranges>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -561,9 +564,22 @@ namespace
     }
 
     /// POSIX process runner: posix_spawnp with two pipes, drained with poll().
+    ///
+    /// Where the peak comes from is fixed at construction: a cgroup per job when a source was handed
+    /// over, else `wait4`'s `ru_maxrss` when asked for, else nowhere. The three are exclusive on
+    /// purpose -- a runner given a cgroup source never falls back to `ru_maxrss`, which is the figure
+    /// the cgroup exists to replace.
     class PosixProcessRunner final: public IProcessRunner
     {
       public:
+        /// @param peakSource Where the peak comes from when @p cgroups is null.
+        /// @param cgroups Makes a cgroup per job; null for none.
+        PosixProcessRunner(PeakSource peakSource, std::shared_ptr<Platform::IJobCgroupSource> cgroups):
+            _peakSource { peakSource },
+            _cgroups { std::move(cgroups) }
+        {
+        }
+
         [[nodiscard]] CompileRun RunCaptureCombined(std::span<std::string const> argv) override
         {
             return Spawn(argv, Merge::Yes, {});
@@ -695,13 +711,18 @@ namespace
         /// @param merge Whether stderr shares stdout's pipe.
         /// @param environment Variables added to the inherited environment.
         /// @return Exit code plus captured streams.
-        [[nodiscard]] static CompileRun Spawn(std::span<std::string const> argv,
-                                              Merge merge,
-                                              std::span<EnvironmentAssignment const> environment)
+        [[nodiscard]] CompileRun Spawn(std::span<std::string const> argv,
+                                       Merge merge,
+                                       std::span<EnvironmentAssignment const> environment) const
         {
             CompileRun result;
             if (argv.empty())
                 return result;
+
+            // Made before the spawn lock is taken -- it is a mkdir and an open, and the lock is held
+            // across the spawn alone. Destroyed on every way out of this function (it kills what the job
+            // left in it and removes it), which is also why it is declared before the pipes.
+            auto job = MakeJobCgroup();
 
             Fd outRead;
             Fd outWrite;
@@ -809,7 +830,19 @@ namespace
                     childEnvironment = mergedPointers.data();
                 }
 
-                int const spawned = ::posix_spawnp(&pid, cargv[0], &actions, nullptr, cargv.data(), childEnvironment);
+                int spawned = SpawnProcess(pid, cargv, actions, childEnvironment, job.get());
+                if (spawned != 0 && job != nullptr)
+                {
+                    // The system would not place the child in the cgroup (a service's seccomp filter
+                    // refuses `clone3`, or the cgroup is gone). The compile matters more than its
+                    // measurement: dropping the job makes the retry a plain spawn, and the peak below
+                    // is then unknown rather than anybody's `ru_maxrss`. A program that cannot be
+                    // spawned at all fails the same way twice, for the price of one more `clone`.
+                    job.reset();
+                    spawned = SpawnProcess(pid, cargv, actions, childEnvironment, nullptr);
+                    if (spawned == 0)
+                        _cgroups->NoteUnmeasured(Platform::IJobCgroupSource::Unmeasured::SpawnRefused);
+                }
                 ::posix_spawn_file_actions_destroy(&actions);
                 if (spawned != 0)
                     return result;
@@ -828,8 +861,7 @@ namespace
             ::rusage usage {};
             while (::wait4(pid, &status, 0, &usage) < 0 && errno == EINTR)
                 continue;
-            if (auto const maxRss = MaxRssOf(usage); maxRss > 0)
-                result.peakMemoryBytes = static_cast<std::uint64_t>(maxRss) * MaxRssUnitBytes;
+            result.peakMemoryBytes = PeakOf(job.get(), usage);
             if (WIFEXITED(status))
                 result.exitCode = WEXITSTATUS(status);
             else if (WIFSIGNALED(status))
@@ -837,6 +869,76 @@ namespace
             else
                 result.exitCode = 1;
             return result;
+        }
+
+        /// Make the cgroup this spawn runs in, when the runner measures through cgroups.
+        /// @return The cgroup; null when there is no source or it could not make one.
+        [[nodiscard]] std::unique_ptr<Platform::IJobCgroup> MakeJobCgroup() const
+        {
+            if (_cgroups == nullptr)
+                return nullptr;
+            auto made = _cgroups->Create();
+            return made.has_value() ? std::move(*made) : nullptr;
+        }
+
+        /// `posix_spawnp`, into @p job's cgroup when there is one.
+        /// @param pid Receives the child's pid.
+        /// @param argv The null-terminated argument vector.
+        /// @param actions The child's file actions.
+        /// @param environment The child's environment.
+        /// @param job The cgroup to start the child in; null for none.
+        /// @return `posix_spawnp`'s result.
+        [[nodiscard]] static int SpawnProcess(::pid_t& pid,
+                                              std::vector<char*>& argv,
+                                              posix_spawn_file_actions_t const& actions,
+                                              char** environment,
+                                              [[maybe_unused]] Platform::IJobCgroup const* job)
+        {
+    #if defined(POSIX_SPAWN_SETCGROUP)
+            if (job != nullptr)
+            {
+                ::posix_spawnattr_t attributes {};
+                if (int const failure = ::posix_spawnattr_init(&attributes); failure != 0)
+                    return failure;
+                ::posix_spawnattr_setcgroup_np(&attributes, job->DirectoryDescriptor());
+                ::posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETCGROUP);
+                int const spawned = ::posix_spawnp(&pid, argv[0], &actions, &attributes, argv.data(), environment);
+                ::posix_spawnattr_destroy(&attributes);
+                return spawned;
+            }
+    #else
+            // Unrepresentable: `MakeProcessRunner(cgroups)` hands a build that cannot spawn into a cgroup a
+            // runner with no source, so no job is ever made here. A job reaching a plain spawn would be read
+            // for the peak of a cgroup the child never ran in -- the bug this exists to end -- so it is a
+            // contract violation, not a refusal to retry.
+            if (job != nullptr)
+                throw std::logic_error("a job cgroup was handed to a build that cannot spawn into one");
+    #endif
+            return ::posix_spawnp(&pid, argv[0], &actions, nullptr, argv.data(), environment);
+        }
+
+        /// The peak memory of a reaped child tree, from wherever this runner measures.
+        /// @param job The job's cgroup; null when the spawn had none.
+        /// @param usage What `wait4` filled in.
+        /// @return The peak in bytes; disengaged when this runner does not measure, or the cgroup would not say.
+        [[nodiscard]] std::optional<std::uint64_t> PeakOf(Platform::IJobCgroup const* job, ::rusage const& usage) const
+        {
+            // A runner handed a cgroup source answers from the cgroup or not at all. Falling back to
+            // `ru_maxrss` here would resurrect, for exactly the spawns the cgroup failed on, the figure
+            // that charges every compile with the spawner's resident set.
+            if (_cgroups != nullptr)
+            {
+                if (job == nullptr)
+                    return std::nullopt;
+                auto const peak = job->PeakBytes();
+                if (!peak.has_value())
+                    _cgroups->NoteUnmeasured(Platform::IJobCgroupSource::Unmeasured::PeakUnreadable);
+                return peak;
+            }
+            if (_peakSource == PeakSource::ResourceUsage)
+                if (auto const maxRss = MaxRssOf(usage); maxRss > 0)
+                    return static_cast<std::uint64_t>(maxRss) * MaxRssUnitBytes;
+            return std::nullopt;
         }
 
         /// Read both pipes until each reports EOF, never blocking on one while the
@@ -900,18 +1002,48 @@ namespace
                 }
             }
         }
+
+        PeakSource _peakSource;
+        std::shared_ptr<Platform::IJobCgroupSource> _cgroups;
     };
 
 #endif
 
 } // namespace
 
+bool CanSpawnIntoCgroups() noexcept
+{
+#if defined(POSIX_SPAWN_SETCGROUP)
+    return true;
+#else
+    return false;
+#endif
+}
+
 std::unique_ptr<IProcessRunner> MakeProcessRunner()
+{
+    return MakeProcessRunner(PeakSource::ResourceUsage);
+}
+
+std::unique_ptr<IProcessRunner> MakeProcessRunner([[maybe_unused]] PeakSource peakSource)
 {
 #if defined(_WIN32)
     return std::make_unique<WindowsProcessRunner>();
 #else
-    return std::make_unique<PosixProcessRunner>();
+    return std::make_unique<PosixProcessRunner>(peakSource, nullptr);
+#endif
+}
+
+std::unique_ptr<IProcessRunner> MakeProcessRunner([[maybe_unused]] std::shared_ptr<Platform::IJobCgroupSource> cgroups)
+{
+#if defined(_WIN32)
+    return std::make_unique<WindowsProcessRunner>();
+#else
+    // Decided here, once, rather than at every spawn: a build that cannot place a child in a cgroup gets a
+    // runner that holds no source, so it never makes a cgroup it cannot use and never reads one's peak.
+    if (!CanSpawnIntoCgroups())
+        return std::make_unique<PosixProcessRunner>(PeakSource::Unmeasured, nullptr);
+    return std::make_unique<PosixProcessRunner>(PeakSource::Unmeasured, std::move(cgroups));
 #endif
 }
 

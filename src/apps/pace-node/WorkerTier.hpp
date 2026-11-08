@@ -3,6 +3,7 @@
 
 #include "CacheTier.hpp"
 #include "CompileCapacity.hpp"
+#include "CompileMemoryMeter.hpp"
 #include "CompileResponder.hpp"
 #include "EndpointDialer.hpp"
 #include "EndpointResolver.hpp"
@@ -76,6 +77,10 @@ struct WorkerMachine
     std::unique_ptr<Cc::IToolchainDiscovery> discovery; ///< This machine's compilers; borrows the two above.
     std::unique_ptr<IScratchClaimant> claimant;         ///< Claims the scratch root exclusively.
     std::filesystem::path scratchBase;                  ///< Where scratch roots are claimed.
+    /// Whether `runner` reports a peak memory for a compile, and if not why; raised as
+    /// `compile-memory-unmeasured` (or not evaluated, where no remedy applies) once the worker starts.
+    /// The default is a test double's: nothing to measure, nothing to say.
+    MeterReport memoryMeter {};
 };
 
 /// The label a REGISTER for @p toolchain carries: its own, or none when a scheduler would
@@ -102,15 +107,16 @@ struct WorkerMachine
     return std::nullopt;
 }
 
-/// This machine's own worker seams: the real process runner, toolchain host, discovery
-/// and scratch claimant, claiming under `ScratchBaseDirectory()`.
+/// This machine's own worker seams: the real process runner (measuring each compile in a cgroup of
+/// its own where the machine delegates one, through the process's one @p meter), toolchain host,
+/// discovery and scratch claimant, claiming under `ScratchBaseDirectory()`.
 ///
 /// Handed to `WorkerTier::Start` as a factory and never called by `main` itself, because
 /// `ScratchBaseDirectory()` asks `temp_directory_path()`, which THROWS for a `TMP` naming
 /// a directory that is not there -- a question a node running no worker has no business
 /// asking.
 /// @return The machine, for `WorkerTier::Start`.
-[[nodiscard]] WorkerMachine MakeSystemWorkerMachine();
+[[nodiscard]] WorkerMachine MakeSystemWorkerMachine(CompileMemoryMeter& meter, IMetricsSink& metrics, ILogger& logger);
 
 /// Builds the machine a worker runs on, asked only once a worker is decided.
 using WorkerMachineFactory = std::function<WorkerMachine()>;

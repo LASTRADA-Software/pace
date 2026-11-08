@@ -65,6 +65,17 @@ WorkingDirectory=%t/pace-node
 NoNewPrivileges=yes
 PrivateTmp=yes
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+# To have the node measure each compile's peak memory in a cgroup of its own (otherwise it
+# reports none and raises the `compile-memory-unmeasured` condition), opt in with a drop-in
+# (`systemctl --user edit pace-node-user`):
+#
+#     [Service]
+#     Delegate=memory
+#     RestrictNamespaces=no
+#
+# RestrictNamespaces=no because starting a process inside a cgroup is `clone3`, which systemd
+# refuses whenever any namespace is restricted. See docs/tools/pace-node.md,
+# "Measuring what a compile used".
 RestrictNamespaces=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes

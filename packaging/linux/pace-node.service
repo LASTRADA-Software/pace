@@ -178,6 +178,23 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectHome=yes
+# yes, and that is why compile peaks are not measured by default: the cgroup filesystem is
+# read-only to this service, so it cannot create the per-compile cgroup whose `memory.peak`
+# is the only trustworthy peak (`ru_maxrss` of a child includes its spawner's resident set,
+# which is the whole cache tier). The node runs correctly, says so at startup and raises the
+# `compile-memory-unmeasured` condition. To measure, opt in with a drop-in
+# (`systemctl edit pace-node`):
+#
+#     [Service]
+#     Delegate=memory
+#     ProtectControlGroups=private
+#     RestrictNamespaces=no
+#
+# `private` needs systemd 257 or newer (older: `no`). RestrictNamespaces=no is needed
+# because starting a process inside a cgroup is `clone3`, which a seccomp filter cannot
+# inspect and systemd therefore refuses whenever any namespace is restricted (measured on
+# systemd 259: ENOTSUP). @system-service below allows clone3 itself. The node checks it all
+# at startup. See docs/tools/pace-node.md, "Measuring what a compile used".
 ProtectControlGroups=yes
 ProtectKernelLogs=yes
 ProtectKernelModules=yes
@@ -185,6 +202,8 @@ ProtectKernelTunables=yes
 ProtectHostname=yes
 ProtectClock=yes
 ProtectProc=invisible
+# Also what keeps clone3 away from the node (see ProtectControlGroups above): the opt-in to
+# measuring compile peaks relaxes it.
 RestrictNamespaces=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes

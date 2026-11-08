@@ -124,7 +124,7 @@ env:
   # reason it is an environment variable rather than a `--parallel` on each of
   # the four `run:` lines that exist today.
   #
-  # Four because that is what a GitHub-hosted runner has (macos-14 has three, and
+  # Four because that is what a GitHub-hosted runner has (macos-15 has three, and
   # oversubscribing a suite of short single-threaded processes by one costs
   # nothing). Safe because every TEST_CASE is already its own process and the
   # tests that genuinely cannot share -- a daemon, a fixed port -- carry
@@ -684,6 +684,21 @@ jobs:
         env:
           PACE_EXPECT_SHA256_ENGINE: ${{ matrix.sha256Engine }}
         run: ctest --preset ${{ matrix.preset }}
+
+      # The real-kernel half of the compile-memory meter (`Node::CompileMemoryMeter`), which no
+      # other leg exercises: the ctest run above SKIPS that case, because preparing a cgroup moves the
+      # calling process into one and so is opt-in. Here it is opted into, under a systemd scope that
+      # delegates a cgroup subtree (`Delegate=yes`, run as root by `sudo`; the runner is ubuntu-24.04
+      # with systemd 255, glibc 2.39 and a 6.x kernel, and no unit hardening is involved, so
+      # `ProtectControlGroups=` does not come into it). With the variable set the case FAILS on a
+      # machine that cannot measure instead of skipping: if this step goes green by skipping, the
+      # cgroup path has stopped being tested and nothing else would say so.
+      - name: "Test the compile-memory meter in a delegated cgroup"
+        if: ${{ needs.changes.outputs.code != 'false' && matrix.preset == 'clang-release' }}
+        run: |
+          sudo systemd-run --scope --quiet -p Delegate=yes \
+            --setenv=PACE_TEST_CGROUP_DELEGATED=1 \
+            "$PWD/out/build/${{ matrix.preset }}/target/pace-node-tests" "[cgroup]"
 
       # The binaries the smoke jobs drive: the daemon every job starts, the launcher
       # the compile-cache smoke job points at it, and `mid-compile-edit-stub`, the
@@ -1631,7 +1646,7 @@ jobs:
 
   macos:
     name: "macOS-clang-release"
-    runs-on: macos-14
+    runs-on: macos-15
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     steps:
@@ -1692,7 +1707,7 @@ jobs:
       # `lib/unwind/`, not `lib/c++/`. Without that second rpath, dyld
       # resolves libunwind from /usr/lib/system instead — the resulting
       # two-libunwind / two-libc++abi load corrupts exception unwinding
-      # on macos-14 and Catch2 sees SIGABRT instead of the C++ throw.
+      # on the macOS runners and Catch2 sees SIGABRT instead of the C++ throw.
       # OpenSSL is keg-only on Homebrew, so point CMake at it via OPENSSL_ROOT_DIR.
       - name: "Configure"
         run: |
@@ -1706,7 +1721,7 @@ jobs:
       - name: "Build"
         run: cmake --build --preset clang-release
 
-      # `macos-14` is Apple Silicon, whose every core has the ARMv8 SHA-256 instructions,
+      # `macos-15` is Apple Silicon, whose every core has the ARMv8 SHA-256 instructions,
       # so this leg holds itself to the hardware engine rather than letting a detection
       # that answered nothing SKIP every case that would have noticed (#1432).
       - name: "Test"
