@@ -218,9 +218,11 @@ function Tally(p) {
 DRIVER
 
 # Drive the library @p 2 over the fixture @p 1, the file passed TWICE as every
-# consumer passes it.
+# consumer passes it. In the C locale, because an awk that compares strings by
+# collation (macOS 15's does) sorts `if` before `NOTE`, and the transcript is
+# byte-ordered.
 Drive() {
-    awk -f "${PaceLexAwk}" -f "$2" -f "${PaceWork}/drive.awk" "$1" "$1" 2>&1
+    LC_ALL=C awk -f "${PaceLexAwk}" -f "$2" -f "${PaceWork}/drive.awk" "$1" "$1" 2>&1
 }
 
 # ---- assertions -------------------------------------------------------------
