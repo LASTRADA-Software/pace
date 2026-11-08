@@ -685,6 +685,21 @@ jobs:
           PACE_EXPECT_SHA256_ENGINE: ${{ matrix.sha256Engine }}
         run: ctest --preset ${{ matrix.preset }}
 
+      # The real-kernel half of the compile-memory meter (`Node::CompileMemoryMeter`), which no
+      # other leg exercises: the ctest run above SKIPS that case, because preparing a cgroup moves the
+      # calling process into one and so is opt-in. Here it is opted into, under a systemd scope that
+      # delegates a cgroup subtree (`Delegate=yes`, run as root by `sudo`; the runner is ubuntu-24.04
+      # with systemd 255, glibc 2.39 and a 6.x kernel, and no unit hardening is involved, so
+      # `ProtectControlGroups=` does not come into it). With the variable set the case FAILS on a
+      # machine that cannot measure instead of skipping: if this step goes green by skipping, the
+      # cgroup path has stopped being tested and nothing else would say so.
+      - name: "Test the compile-memory meter in a delegated cgroup"
+        if: ${{ needs.changes.outputs.code != 'false' && matrix.preset == 'clang-release' }}
+        run: |
+          sudo systemd-run --scope --quiet -p Delegate=yes \
+            --setenv=PACE_TEST_CGROUP_DELEGATED=1 \
+            "$PWD/out/build/${{ matrix.preset }}/target/pace-node-tests" "[cgroup]"
+
       # The binaries the smoke jobs drive: the daemon every job starts, the launcher
       # the compile-cache smoke job points at it, and `mid-compile-edit-stub`, the
       # compiler that saves a file during one launcher invocation for that job's
