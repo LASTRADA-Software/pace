@@ -85,7 +85,12 @@
 namespace
 {
 
-constexpr std::string_view ProgramVersion = Pace::VersionString;
+/// Read through a function rather than copied into a namespace-scope constant: the
+/// version is defined in another unit, so a copy here would be a dynamic initializer.
+[[nodiscard]] std::string_view ProgramVersion() noexcept
+{
+    return Pace::VersionString;
+}
 
 /// Read the metrics port from the PACE_METRICS_PORT environment variable.
 /// This lets a container's daemon CMD and its separate `--healthcheck` probe
@@ -1048,7 +1053,7 @@ int DaemonBody(Pace::Config const& effective,
                 "pace-kv {} starting; bind={} max-memory={} config={} storage={} "
                 "durability={} compression={} memory-compression={} max-value={} reactors={} shards={}{} auth={} "
                 "tls={}",
-                ProgramVersion,
+                ProgramVersion(),
                 bindSummary,
                 Pace::FormatByteSize(effective.maxMemoryBytes),
                 effective.configPath.empty() ? std::string_view { "<none>" } : std::string_view { effective.configPath },
@@ -1313,7 +1318,7 @@ int main(int argc, char const* const* argv)
     switch (parsed->outcome)
     {
         case Pace::CliOutcome::ShowVersion:
-            std::println("pace-kv {}", ProgramVersion);
+            std::println("pace-kv {}", ProgramVersion());
             return Pace::CommandExitCode(Pace::CommandEnding::Completed);
         case Pace::CliOutcome::ShowHelp:
             std::print("{}",
