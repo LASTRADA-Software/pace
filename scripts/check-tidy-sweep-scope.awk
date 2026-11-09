@@ -33,6 +33,8 @@
 #   want=sweep   SWEEP  \t <job> \t <step id> \t <joined run> \t <joined step env>
 #   want=reader  READER \t <joined if>    (only for @p sweepJob, naming @p sweepId and master)
 #   want=perms   PERMS  \t <one permissions row as `scope: level`>
+#   want=diff    DIFF   \t <job> \t <step id> \t <joined run> \t <joined step env>
+#                (a step that runs `$TIDY_DIFF`, the clang-tidy-diff.py driver, found by what it runs)
 
 function WorkflowOn(kind) {
     if (kind == "raw") return               # no fact of this check lives in an unplaced line
@@ -93,6 +95,9 @@ function FlushStep(   i, line, run) {
     if (want == "sweep") {
         if (run ~ /tidy-sweep\.sh/ && run !~ /--self-test/)
             printf "SWEEP\t%s\t%s\t%s\t%s\n", WfJob, stepId, run, stepEnv
+    } else if (want == "diff") {
+        if (run ~ /[$][{]?TIDY_DIFF/)
+            printf "DIFF\t%s\t%s\t%s\t%s\n", WfJob, stepId, run, stepEnv
     } else if (want == "reader" && WfJob == sweepJob) {
         # Scoped to the job, and that is not tidiness: `steps.<id>.conclusion` only ever resolves
         # within its own job, so a reader in job A says nothing about a sweep in job B. Two sweep

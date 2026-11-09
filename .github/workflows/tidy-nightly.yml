@@ -1,0 +1,120 @@
+# SPDX-License-Identifier: Apache-2.0
+name: clang-tidy nightly
+
+# The whole-tree clang-tidy sweep, once a night, off every change's path.
+#
+# The `clang-tidy` job in `build.yml` analyses only the lines a change touched
+# (`clang-tidy-diff.py`). What that cannot see is a finding outside those lines:
+# an analyser upgrade, a `.clang-tidy` change, or a header change that makes a
+# finding appear in a file the change did not touch. This sweep is where those
+# are seen, and the step after it is what makes them reach a person: nothing is
+# blocked by a scheduled run and nobody is obliged to look at one, so a failure
+# here files (or updates) an issue.
+#
+# It used to run on every push to master inside `build.yml`, where it set that
+# workflow's wall-clock (31-98 minutes over the runs sampled when it moved). A
+# schedule in its own file costs one job; a `schedule:` on `build.yml` would run
+# all of that workflow's jobs.
+#
+# The job is named `clang-tidy` because `scripts/tidy-blind-spots.txt` names the
+# leg that reaches a unit by its job, and this is the leg that reads every Linux
+# unit.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tidy-nightly
+  cancel-in-progress: false
+
+env:
+  CLANG_TOOLS_VERSION: "22"
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cache/CPM
+
+jobs:
+  clang-tidy:
+    name: "clang-tidy (full sweep)"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    # `issues: write` for the report step, `contents: read` for checkout. A
+    # job-level block is exhaustive, so the two together are the whole list.
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Restore only: `build.yml`'s `clang-tidy` job is this key's one writer.
+      - name: "Restore CPM packages"
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: cpm-${{ runner.os }}-clang-debug-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: cpm-${{ runner.os }}-clang-debug-
+
+      - name: "Install build tools"
+        run: |
+          bash scripts/ci-apt-update.sh
+          sudo apt-get install -y ninja-build libyaml-cpp-dev libssl-dev
+
+      - name: "Install Clang ${{ env.CLANG_TOOLS_VERSION }}"
+        run: bash scripts/ci-install-clang.sh --version ${{ env.CLANG_TOOLS_VERSION }}
+
+      - name: "Install the declared clang-tidy"
+        run: |
+          set -euo pipefail
+          site="$RUNNER_TEMP/clang-tidy"
+          python3 -m pip install --no-deps --target "$site" "$(bash scripts/check-clang-tidy-version.sh --requirement "$GITHUB_WORKSPACE")"
+          tidy="$(bash scripts/check-clang-tidy-version.sh --locate "$site" "$GITHUB_WORKSPACE")"
+          bash scripts/run-check.sh scripts/check-clang-tidy-version.sh --installed "$tidy" "$GITHUB_WORKSPACE"
+          bash scripts/run-check.sh scripts/check-clang-tidy-known-defects.sh --installed "$tidy" "$GITHUB_WORKSPACE"
+          echo "CLANG_TIDY_BIN=$tidy" >> "$GITHUB_ENV"
+
+      # The same configure line as `build.yml`'s `clang-tidy` job, for the same
+      # reasons, which are stated there.
+      - name: "Configure"
+        run: >-
+          cmake --preset clang-debug -DENABLE_TIDY=OFF
+          -DCMAKE_CXX_SCAN_FOR_MODULES=OFF -DPACE_ENABLE_TLS=ON
+          -DPACE_BUILD_BENCHMARKS=ON -DPACE_BUILD_TESTCLIENT=ON
+
+      - name: "Sweep"
+        id: sweep
+        env:
+          # The binary the install step identified. The sweep checks it again itself, so a
+          # TIDY that somehow names another analyser refuses rather than sweeps.
+          TIDY: ${{ env.CLANG_TIDY_BIN }}
+          DB: out/build/clang-debug
+        run: scripts/tidy-sweep.sh --all
+
+      # Keyed on the sweep STEP, never the job: a job-keyed alarm fires on every
+      # unrelated infrastructure failure and is the alarm people mute. Scoped to
+      # master, so a manual dispatch from a branch reports nothing.
+      - name: "Report a full sweep that is failing on master"
+        if: ${{ failure() && steps.sweep.conclusion == 'failure' && github.ref == 'refs/heads/master' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TITLE: "clang-tidy: the full sweep on master is failing"
+        run: |
+          set -euo pipefail
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          body="The nightly full \`clang-tidy\` sweep failed on master at \`${GITHUB_SHA}\`.
+
+          ${run_url}
+
+          Every change is analysed on its changed lines only (\`clang-tidy-diff\`),
+          so this sweep is the only place a finding outside those lines is seen --
+          an analyser upgrade, a \`.clang-tidy\` change, or a header change whose
+          finding lands in a file the change did not touch. Nothing is blocked by
+          this run."
+          printf '%s\n' "$body" > "${RUNNER_TEMP}/tidy-report.md"
+          bash scripts/ci-report-issue.sh "$TITLE" "${RUNNER_TEMP}/tidy-report.md" \
+            type/bug area/build status/needs-triage

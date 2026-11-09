@@ -155,8 +155,8 @@ fi
 # Which analyser legs EXIST, derived from the workflow rather than restated here.
 # A second copy of this list would be a second thing to be wrong, and the failure
 # would be silent: rows claiming coverage from a leg that was renamed away.
-legs="$("$python3_bin" "$here/tidy-blind-spots-legs.py" "$repo/.github/workflows/build.yml")" || refuse "a step runs tidy-sweep.sh in a mode this check does not recognise; see UNKNOWN-SWEEP-MODE above. A mode it cannot classify would make a real leg invisible and refuse every row naming it."
-[[ -n $legs ]] || refuse "no clang-tidy leg found in .github/workflows/build.yml; the reached-by column cannot be checked"
+legs="$("$python3_bin" "$here/tidy-blind-spots-legs.py" "$repo"/.github/workflows/*.yml)" || refuse "a step runs tidy-sweep.sh in a mode this check does not recognise; see UNKNOWN-SWEEP-MODE above. A mode it cannot classify would make a real leg invisible and refuse every row naming it."
+[[ -n $legs ]] || refuse "no clang-tidy leg found in .github/workflows/; the reached-by column cannot be checked"
 
 expected="$(grep -v '^[[:space:]]*#' "$table" | grep . | cut -f1 | sort)"
 actual="$(printf '%s\n' "$measured" | grep . | sort)"
@@ -286,7 +286,7 @@ fi
 # and the half it did not, and it says which check answers the other half.
 if [[ $tableOnly -eq 1 ]]; then
     if [[ $rc -eq 0 ]]; then
-        echo "tidy-blind-spots: [table only, no build] $rows row(s) well-formed against $(grep -c . <<< "$legs") analyser leg(s) derived from .github/workflows/build.yml"
+        echo "tidy-blind-spots: [table only, no build] $rows row(s) well-formed against $(grep -c . <<< "$legs") analyser leg(s) derived from .github/workflows/"
         echo "  The blind SET is not measured here -- that needs the objects, and 'tidy-blind-spots' is the test that measures it."
     else
         echo "tidy-blind-spots: [table only, no build] $rows row(s) read from scripts/tidy-blind-spots.txt; the table does not satisfy its own format"

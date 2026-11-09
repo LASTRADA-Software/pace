@@ -1,47 +1,33 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# The `clang-tidy` sweep still sweeps EVERYTHING somewhere, and that somewhere
-# still reaches a person.
+# The `clang-tidy` sweep still sweeps EVERYTHING somewhere, that somewhere is off
+# every change's path, and it still reaches a person.
 #
 # ## The property, and why nothing else holds it
 #
-# Since #554 a pull request and a merge-queue entry both diff-scope, and the
-# `push` on master is the only full sweep left. What makes that sound is an
-# argument with two halves, both of which live in
-# `.agent/rules/build-and-toolchain.md` and neither of which is visible in a run:
+# Every change -- pull request, merge-queue entry, push -- is analysed on the
+# lines it touched (`clang-tidy-diff.py`, in `build.yml`'s `clang-tidy` job). What
+# makes that sound is the whole-tree sweep in `tidy-nightly.yml`: a finding outside
+# a change's lines (an analyser upgrade, a `.clang-tidy` change, a header change
+# whose finding lands in an untouched file) is seen there and nowhere else.
 #
-#   * master@N was proved fully clean by the `push` that landed it, so a scope
-#     that over-approximates everything the next change can reach covers
-#     master@N+1; and
-#   * that `push` is the only place the full sweep still happens, so a finding
-#     outside a change's include closure is seen there and nowhere else.
+# Take that sweep away, or let it drift back onto a change's path, and every run in
+# this repository stays green while the analysis is permanently narrower -- or
+# permanently slower -- than the rulebook says. There is no failing check and no log
+# line. So this asserts:
 #
-# Take the `--all` off that push and every run in this repository stays green
-# while the analysis is permanently narrower than the rulebook says it is. There
-# is no failing check, no slower job and no log line -- the sweep prints a
-# confident count of a smaller number of translation units, which is the exact
-# failure `scripts/tidy-sweep.sh` exists to make impossible one level down.
+#   * a step runs `scripts/tidy-sweep.sh --all`, in a workflow triggered by
+#     `schedule:` and by no change event (`push`, `pull_request`, `merge_group`);
+#   * no step runs the old per-change `--ci` sweep, which put the include-closure
+#     sweep back on the change path;
+#   * the sweep has a reader keyed on its STEP and scoped to master, in a job that
+#     can write issues: a scheduled run blocks nothing and nobody is obliged to look
+#     at it, so a failure that files nothing reaches no one;
+#   * the line-scoped step receives the queue entry's own base commit, under the
+#     name it reads, so a queue entry does not diff against master instead.
 #
-# Since #570 the mapping that decides all of this is ONE table -- `CiScopeTable`
-# in `scripts/tidy-sweep.sh`, driven by that script's own `--self-test`. It used
-# to be two GitHub expressions on the sweep step composed with the shell inside
-# the script, so the mapping could only be reconstructed across two languages.
-# The reader's `if:` below is a separate per-event expression -- who is TOLD,
-# not how wide the analysis is -- and rule C still checks it here. #570's
-# acceptance counts it as a third expression of the same mapping; it is not, and
-# moving it would have made one table describe two things, so the deviation was
-# decided rather than overlooked.
-# This file therefore no longer checks a SPELLING; it checks the WIRING: that the
-# workflow reaches the table (`--ci`), that it has not started deciding again
-# alongside it, and that the one fact only the workflow holds gets there.
-#
-# The second half is the same shape one step further out. A master push blocks
-# nothing and notifies nobody -- 18 of 18 failed master-push runs were never once
-# re-run, measured and recorded in the rulebook -- so the report step is what
-# turns that run into a signal. Delete it and the full sweep still runs, still
-# fails, and still reaches no one. A check nobody reads is a check that does not
-# exist.
+# The `--only=` leg (`clang-tidy-windows`) keeps the rules it always had.
 #
 # ## What is asserted rather than demonstrated
 #
@@ -75,7 +61,8 @@ set -uo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
-Workflow=".github/workflows/build.yml"
+WorkflowDir=".github/workflows"
+DiffWorkflow=".github/workflows/build.yml"
 SweepScript="scripts/tidy-sweep.sh"
 
 # The env NAME `scripts/tidy-sweep.sh --ci` actually READS for the queue's base
@@ -185,6 +172,27 @@ FindReader() {
 # The `permissions:` block of one job, comments dropped.
 # @param 1 The workflow file.
 # @param 2 The job key.
+FindDiff() {
+    WorkflowRead "$1" diff
+}
+
+# The events a workflow's top-level `on:` names, one per line. Both the block form
+# (`on:` then indented keys) and a one-line list or scalar are read.
+#
+# @param 1 The workflow file.
+WorkflowEvents() {
+    awk '
+        /^on:[ \t]*$/ { inOn = 1; next }
+        /^on:[ \t]*[^ \t]/ {
+            v = $0; sub(/^on:[ \t]*/, "", v); gsub(/[\[\]," ]/, " ", v)
+            n = split(v, ev, " "); for (i = 1; i <= n; i++) if (ev[i] != "") print ev[i]
+            next
+        }
+        inOn && /^[^ \t#]/ { inOn = 0 }
+        inOn && /^  [A-Za-z_]+:/ { k = $1; sub(/:.*/, "", k); print k }
+    ' "$1"
+}
+
 FindJobPermissions() {
     WorkflowRead "$1" perms "" "$2"
 }
@@ -253,39 +261,35 @@ CheckWorkflow() {
     # reaches). It satisfies the same property `--ci` does -- the workflow does not
     # DECIDE the scope, it passes a fact -- so it is accepted, and the branch-on-
     # event rules below still apply to it.
+    local fullSweep=""
     if [[ "$sweepRun" == *"--only="* ]]; then
         if [[ "$sweepRun" != *"scripts/"* ]]; then
             Fail "the sweep passes \`--only=\` but the set does not come from a file under \`scripts/\`, so what this leg covers is decided in the workflow rather than somewhere reviewable -- run: $sweepRun"
         else
             echo "  ok: the sweep is explicitly scoped from a file under \`scripts/\`"
         fi
-    elif [[ "$sweepRun" != *"--ci"* ]]; then
-        Fail "the sweep does not pass \`--ci\`, so it does not consult \`CiScopeTable\` in scripts/tidy-sweep.sh and the event -> (scope, base) mapping is being decided somewhere else -- run: $sweepRun"
+    elif [[ "$sweepRun" == *"--ci"* ]]; then
+        Fail "the sweep passes \`--ci\`, which sweeps every unit a change's headers reach and, on a push, the whole tree. Changes are analysed on their changed lines by \`clang-tidy-diff.py\`; the whole tree belongs to the scheduled \`--all\` sweep -- run: $sweepRun"
     elif [[ "$sweepRun" == *"--all"* ]]; then
-        Fail "the sweep passes \`--all\` alongside \`--ci\`; every pull request and every queue entry would sweep the whole tree again, which is the cost #554 removed -- run: $sweepRun"
-    elif [[ "$sweepRun" == *"github.event_name"* ]]; then
-        Fail "the sweep's command line branches on \`github.event_name\`, so the workflow is deciding the scope as well as the table. Pass the FACTS and let \`CiScopeTable\` decide (#570): two mappings that can disagree are worse than one -- run: $sweepRun"
-    elif [[ "$sweepEnv" == *"github.event_name"* ]]; then
-        Fail "the sweep's \`env:\` branches on \`github.event_name\`, so the base is being decided in the workflow rather than by \`CiScopeTable\` (#570) -- env: $sweepEnv"
+        fullSweep=yes
+        local events
+        events="$(WorkflowEvents "$workflow")"
+        if ! grep -qx schedule <<< "$events"; then
+            Fail "the \`--all\` sweep is in a workflow with no \`schedule:\`, so nothing guarantees it runs at all -- on: $(echo $events)"
+        elif grep -qxE 'push|pull_request|pull_request_target|merge_group' <<< "$events"; then
+            Fail "the \`--all\` sweep runs on a change event, so the whole-tree sweep is back on a change's path, which is the cost moving it to a schedule removed -- on: $(echo $events)"
+        else
+            echo "  ok: the whole-tree sweep runs on a schedule and on no change event"
+        fi
     else
-        echo "  ok: the sweep consults CiScopeTable via \`--ci\` and restates none of the mapping"
+        Fail "the sweep passes neither \`--all\` nor \`--only=\`, so what it covers is whatever the script defaults to -- run: $sweepRun"
     fi
 
-    # -----------------------------------------------------------------------
-    # Rule B: the queue's own base actually REACHES the table.
-    #
-    # `CiScopeTable` decides that a `merge_group` diff-scopes against the entry it
-    # is stacked on, but the base commit itself is a value only the workflow
-    # context holds -- `GITHUB_EVENT_NAME` and `GITHUB_BASE_REF` are in every
-    # step's environment and this one is not. Drop it here and the table's
-    # `origin/master` fallback takes over, silently.
-    #
-    # Losing it is not a hole: `origin/master` resolves and over-approximates. It
-    # is a COST rule, asserted because the way it gets lost is somebody removing
-    # an env var that looks unused from the workflow -- which it is, from here.
     local queueBaseEnv
     queueBaseEnv="$(FindQueueBaseEnvName "$SweepScript")"
-    if [[ -z "$queueBaseEnv" ]]; then
+    if [[ -n "$fullSweep" ]]; then
+        echo "  ok: a whole-tree sweep diffs against nothing, so it needs no queue base"
+    elif [[ -z "$queueBaseEnv" ]]; then
         # Every way of not knowing escalates, as everywhere else here: a name this
         # check could not read is a rule it cannot apply, not a rule that passed.
         Fail "cannot read from $SweepScript which environment variable its \`--ci\` path takes the queue's base commit from, so this rule cannot be applied at all"
@@ -306,9 +310,9 @@ CheckWorkflow() {
     local reader
     reader="$(FindReader "$workflow" "$sweepId" "$sweepJob")"
     if [[ -z "$reader" ]]; then
-        Fail "no step reads \`steps.${sweepId}.conclusion\` for a push to \`refs/heads/master\`. That push is the only full sweep left, it blocks nothing and notifies nobody -- 18 of 18 failed master-push runs were never once re-run -- so with no reader the check runs, fails, and reaches no one."
+        Fail "no step reads \`steps.${sweepId}.conclusion\` on \`refs/heads/master\`. A run off a change's path blocks nothing and notifies nobody -- 18 of 18 failed master-push runs were never once re-run when the full sweep lived there -- so with no reader the check runs, fails, and reaches no one."
     else
-        echo "  ok: the master push's full sweep has a reader keyed on the sweep step"
+        echo "  ok: the sweep has a reader keyed on the sweep step, scoped to master"
     fi
 
     # -----------------------------------------------------------------------
@@ -338,6 +342,48 @@ CheckWorkflow() {
 }
 
 # ---------------------------------------------------------------------------
+# The line-scoped step: it exists, and the queue entry's own base reaches it.
+#
+# The same silent failure rule B guards for a sweep: a queue entry whose base
+# does not arrive falls back to another base and analyses lines this entry did not
+# write -- or misses ones it did -- while every run stays green. The name is the
+# one `tidy-sweep.sh` reads, so both consumers of the fact spell it the same way,
+# and the step must both be HANDED it and READ it.
+#
+# @param 1 The workflow file.
+CheckDiff() {
+    local workflow="$1"
+    local problems=0
+    Fail() { echo "  FAIL: $*" >&2; problems=$((problems + 1)); }
+
+    local diff queueBaseEnv diffJob diffId diffRun diffEnv
+    diff="$(FindDiff "$workflow")"
+    if [[ -z "$diff" ]]; then
+        Fail "no step in $workflow drives \`clang-tidy-diff.py\`, so no change is analysed by clang-tidy on Linux at all and every run stays green"
+        return 1
+    fi
+    queueBaseEnv="$(FindQueueBaseEnvName "$SweepScript")"
+    [[ -n "$queueBaseEnv" ]] \
+        || { Fail "cannot read from $SweepScript which name carries the queue's base commit"; return 1; }
+
+    while IFS=$'\t' read -r diffJob diffId diffRun diffEnv; do
+        [[ -z "${diffJob:-}" ]] && continue
+        echo "  -- line-scoped step in job \`${diffJob}\`"
+        if [[ "$diffEnv" != *"${queueBaseEnv}:"* ]]; then
+            Fail "the step's \`env:\` sets no \`${queueBaseEnv}\`, so a queue entry analyses against some other base -- env: ${diffEnv:-<none>}"
+        elif [[ "$diffEnv" != *"merge_group.base_sha"* ]]; then
+            Fail "the step's \`env:\` does not pass \`github.event.merge_group.base_sha\` as \`${queueBaseEnv}\` -- env: ${diffEnv:-<none>}"
+        elif [[ "$diffRun" != *"\$${queueBaseEnv}"* && "$diffRun" != *"\${${queueBaseEnv}"* ]]; then
+            Fail "the step is handed \`${queueBaseEnv}\` and never reads it -- run: $diffRun"
+        else
+            echo "  ok: the queue's own base_sha reaches the line-scoped step as \`${queueBaseEnv}\`"
+        fi
+    done < <(printf '%s\n' "$diff")
+
+    return "$problems"
+}
+
+# ---------------------------------------------------------------------------
 # Self-test
 #
 # Each rule is driven in BOTH directions over a GENERATED workflow: a check that
@@ -350,19 +396,33 @@ CheckWorkflow() {
 
 # Knobs. `Reset` restores the shipped shape; a case changes one thing.
 gPerms=""; gSweepId=""; gArgs=""; gEnvBase=""; gReaderIf=""; gReader=""; gSweepStep=""
+gSchedule=""; gChangeEvent=""; gDiffStep=""; gDiffEnvBase=""; gDiffRead=""
 Reset() {
     gPerms="yes"
     gSweepId="sweep"
-    gArgs="--ci"
-    gEnvBase="MERGE_GROUP_BASE_SHA: \${{ github.event.merge_group.base_sha }}"
-    gReaderIf="\${{ failure() && steps.sweep.conclusion == 'failure' && github.event_name == 'push' && github.ref == 'refs/heads/master' }}"
+    gArgs="--all"
+    gEnvBase=""
+    gReaderIf="\${{ failure() && steps.sweep.conclusion == 'failure' && github.ref == 'refs/heads/master' }}"
     gReader="yes"
     gSweepStep="yes"
+    gSchedule="yes"
+    gChangeEvent=""
+    gDiffStep="yes"
+    gDiffEnvBase="MERGE_GROUP_BASE_SHA: \${{ github.event.merge_group.base_sha }}"
+    gDiffRead='"$MERGE_GROUP_BASE_SHA"'
 }
 
 # The synthetic workflow. Indentation matches build.yml's, because that is what
 # the extractors key on.
 Fragment() {
+    echo "on:"
+    if [[ -n "$gSchedule" ]]; then
+        echo "  schedule:"
+        echo "    - cron: \"17 3 * * *\""
+    fi
+    [[ -n "$gChangeEvent" ]] && echo "  ${gChangeEvent}:"
+    echo "  workflow_dispatch:"
+    echo ""
     echo "jobs:"
     echo "  clang-tidy:"
     echo "    name: \"clang-tidy\""
@@ -386,9 +446,29 @@ Fragment() {
         echo "          ${gArgs}"
     fi
     if [[ -n "$gReader" ]]; then
-        echo "      - name: \"Report a full sweep that only master saw\""
+        echo "      - name: \"Report a full sweep that is failing on master\""
         echo "        if: ${gReaderIf}"
         echo "        run: gh issue create"
+    fi
+    echo "  other:"
+    echo "    steps:"
+    echo "      - run: true"
+}
+
+# The line-scoped step, as build.yml carries it.
+DiffFragment() {
+    echo "jobs:"
+    echo "  clang-tidy:"
+    echo "    steps:"
+    if [[ -n "$gDiffStep" ]]; then
+        echo "      - name: \"Analyse the changed lines\""
+        echo "        id: tidy-diff"
+        echo "        env:"
+        echo "          TIDY_DIFF: clang-tidy-diff.py"
+        [[ -n "$gDiffEnvBase" ]] && echo "          ${gDiffEnvBase}"
+        echo "        run: |"
+        echo "          base=${gDiffRead}"
+        echo "          git diff -U0 \"\${base}...HEAD\" | python3 \"\$TIDY_DIFF\" -p1"
     fi
     echo "  other:"
     echo "    steps:"
@@ -436,36 +516,30 @@ SelfTest() {
     Case "the shipped shape passes" want-pass
 
     gArgs=""
-    Case "the table not consulted at all (no --ci)" want-fail
+    Case "a sweep with no mode at all" want-fail
 
-    gArgs="--all"
-    Case "--all unconditionally, bypassing the table" want-fail
+    gArgs="--ci"
+    Case "the per-change --ci sweep back on a change's path" want-fail
 
-    gArgs="--ci --all"
-    Case "--all alongside --ci" want-fail
+    gArgs="--only=x"
+    Case "an --only= set not read from a file under scripts/" want-fail
 
-    # Deliberately spelled WITHOUT `--all`: with it, the case is caught by the
-    # rule above and the `github.event_name` arm is never once seen to bite,
-    # which is a guard that has told you nothing.
-    gArgs="--ci --base \${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || 'origin/master' }}"
-    Case "the workflow deciding the scope again beside the table" want-fail
+    gSchedule=""
+    Case "the whole-tree sweep with no schedule" want-fail
 
-    gEnvBase="BASE: \${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || 'origin/master' }}"
-    Case "the workflow deciding the base again beside the table" want-fail
+    gChangeEvent="push"
+    Case "the whole-tree sweep on a push again" want-fail
 
-    # The rename, which is the one break that leaves the EXPRESSION in place: the
-    # script reads `MERGE_GROUP_BASE_SHA` and gets nothing, so the queue silently
-    # diffs against master. A rule matching only the expression reports `ok` here.
-    gEnvBase="QUEUE_BASE_SHA: \${{ github.event.merge_group.base_sha }}"
-    Case "the queue's base carried under a name the script does not read" want-fail
+    gChangeEvent="pull_request"
+    Case "the whole-tree sweep on every pull request" want-fail
 
-    gEnvBase=""
-    Case "the queue's own base_sha never reaching the table" want-fail
+    gChangeEvent="merge_group"
+    Case "the whole-tree sweep in the merge queue" want-fail
 
     gReader=""
     Case "the reader deleted" want-fail
 
-    gReaderIf="\${{ failure() && steps.sweep.conclusion == 'failure' && github.event_name == 'push' }}"
+    gReaderIf="\${{ failure() && steps.sweep.conclusion == 'failure' }}"
     Case "the reader no longer scoped to master" want-fail
 
     gReaderIf="\${{ failure() && github.ref == 'refs/heads/master' }}"
@@ -479,6 +553,43 @@ SelfTest() {
 
     gSweepStep=""
     Case "the sweep step gone entirely" want-fail
+
+    # The line-scoped step, over its own generated workflow.
+    local diffCorrect="${scratch}/diff-correct.yml"
+    Reset
+    DiffFragment > "$diffCorrect"
+    DiffCase() {
+        local what="$1" want="$2" file="${scratch}/diff.yml" got
+        DiffFragment > "$file"
+        if [[ "$want" == "want-fail" ]] && cmp -s "$file" "$diffCorrect"; then
+            echo "  FAIL ${what}: the case generated the CORRECT workflow, so it staged no break at all"
+            status=1; Reset; return
+        fi
+        if CheckDiff "$file" >/dev/null 2>&1; then got=want-pass; else got=want-fail; fi
+        if [[ "$got" == "$want" ]]; then
+            echo "  ok   ${what}"
+        else
+            echo "  FAIL ${what}: wanted ${want#want-}, got ${got#want-}"
+            status=1
+        fi
+        Reset
+    }
+    DiffCase "the shipped line-scoped step passes" want-pass
+
+    gDiffStep=""
+    DiffCase "the line-scoped step deleted" want-fail
+
+    gDiffEnvBase=""
+    DiffCase "the queue's own base_sha never reaching the line-scoped step" want-fail
+
+    gDiffEnvBase="QUEUE_BASE_SHA: \${{ github.event.merge_group.base_sha }}"
+    DiffCase "the queue's base carried under a name the step does not read" want-fail
+
+    gDiffEnvBase="MERGE_GROUP_BASE_SHA: \${{ github.sha }}"
+    DiffCase "the queue base name carrying some other commit" want-fail
+
+    gDiffRead='"origin/master"'
+    DiffCase "the queue base handed over and never read" want-fail
 
     # And the two shapes that must NOT be mistaken for a break. Both are pure
     # reflows of the shipped expressions, and both used to fail: the run: block
@@ -514,7 +625,6 @@ SelfTest() {
         Fragment | awk '
         /^        if: $/ { print "        if: >-"
                            print "          ${{ failure() && steps.sweep.conclusion == '\''failure'\''"
-                           print "          && github.event_name == '\''push'\''"
                            print "          && github.ref == '\''refs/heads/master'\'' }}"
                            next }
         { print }
@@ -589,9 +699,26 @@ elif [[ $# -gt 0 ]]; then
     exit 2
 fi
 
-echo "check-tidy-sweep-scope: ${Workflow}"
-if ! CheckWorkflow "$Workflow"; then
+problems=0
+fullSweeps=0
+for workflow in "$WorkflowDir"/*.yml; do
+    sweeps="$(FindSweep "$workflow")"
+    [[ -n "$sweeps" ]] || continue
+    echo "check-tidy-sweep-scope: ${workflow}"
+    CheckWorkflow "$workflow" || problems=1
+    if [[ "$(cut -f3 <<< "$sweeps")" == *"--all"* ]]; then
+        fullSweeps=$((fullSweeps + 1))
+    fi
+done
+if [[ "$fullSweeps" -eq 0 ]]; then
+    echo "  FAIL: no workflow under ${WorkflowDir} runs \`scripts/tidy-sweep.sh --all\`, so nothing reads the whole tree and a finding outside a change's lines is never seen" >&2
+    problems=1
+fi
+echo "check-tidy-sweep-scope: ${DiffWorkflow} (line-scoped)"
+CheckDiff "$DiffWorkflow" || problems=1
+
+if [[ "$problems" -ne 0 ]]; then
     echo "check-tidy-sweep-scope: the tidy sweep's coverage would narrow silently" >&2
     exit 1
 fi
-echo "check-tidy-sweep-scope: a full sweep still happens on the master push, and it has a reader"
+echo "check-tidy-sweep-scope: the whole tree is swept on a schedule with a reader, and every change on its lines"
