@@ -673,6 +673,7 @@ NonBindingContexts=(
     "Draft GitHub release|NotBinding|tag-only (if: startsWith(github.ref, 'refs/tags/v')). A pull request can never produce this context, so requiring it would leave every branch waiting on a check that never reports"
     "Maintain status/needs-triage|NotBinding|triggered by an issues event, so it produces no check run on a pull request at all. Renamed from 'Mark as needing triage' when the job grew a remover (#1563) -- a workflow job's name IS the context string, so renaming one without moving its row here leaves the new context with no verdict AND a stale row excusing nothing"
     "Apply derivable labels|NotBinding|a pull_request_target job, and it MUTATES rather than checks. Its outcome is enforced by the required Require a type label"
+    "clang-tidy (full sweep)|NotBinding|tidy-nightly.yml runs on a schedule, never on a pull request or a queue entry, so a required context would wait forever. Its failure reaches a person through the issue its report step files, not through a gate"
     "Deploy to Pages|NotBinding|a deployment, not a check, and it runs only after a push to master has already merged"
     "Build site (strict)|NotBinding|docs.yml is not reachable from a code change; a docs break is caught on the push that lands it and blocks no unrelated work"
     "Check the release gate covers every job|NotBinding|it guards a TAG run, and a tag is not a merge. A release that lost a gating job is caught by this job on the tag, which is the event that can act on it"

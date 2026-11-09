@@ -2675,6 +2675,35 @@ makes it anyway and says so there.
   the second half is still unpriced; what settles the trade today is the bullet
   above it rather than this number.
 
+- **Every change is analysed on its changed LINES; the whole tree is swept
+  nightly.** This supersedes the bullet below, which is kept as the record of what
+  it replaced. `build.yml`'s `clang-tidy` job runs `clang-tidy-diff.py` -- from the
+  same pinned wheel as the analyser -- on every event: a pull request against its
+  base branch, a queue entry against its own `merge_group.base_sha`, a push against
+  the commit it moved the branch from. Each changed first-party file is analysed
+  once with `-line-filter` naming the lines the change wrote; a translation unit
+  the Linux compile database does not hold is left to the leg that compiles it.
+  The whole-tree `tidy-sweep.sh --all` moved to `tidy-nightly.yml`, on a schedule
+  and on no change event, with the master-scoped reader that files the issue.
+
+  Why: the per-change sweep was the include closure of the change, and on a push
+  the whole tree, so `clang-tidy` set the Build workflow's wall clock -- 31-98
+  minutes over the runs sampled when it moved, longer than every compiling job.
+
+  **What it stops checking per change, and where that is still caught.** A finding
+  on a line the change did not write: an analyser upgrade, a `.clang-tidy` change,
+  or a header change whose finding lands in a file the change did not touch. The
+  nightly sweep sees all of them, and its reader turns a failure into an issue. So
+  the union is complete a day late rather than at the merge, and a `.clang-tidy` or
+  `.clang-tidy-version` change should be swept locally (`scripts/local-gate.sh`)
+  before it lands, because nothing on its pull request will.
+
+  **The wiring is asserted** (`ctest -R tidy-sweep-scope`): a `--all` sweep exists,
+  in a scheduled workflow no change event triggers; no step runs the per-change
+  `--ci` sweep; the sweep has a reader keyed on its STEP and scoped to master, in a
+  job with `issues: write`; and the line-scoped step is handed the queue entry's
+  `base_sha` under the name `tidy-sweep.sh` reads it by, and reads it.
+
 - **A pull request and a merge-queue entry diff-scope the `clang-tidy` sweep;
   every other event sweeps everything, which today means the master `push`.** The
   step was `--all` for every event but a pull request, so the workflow's critical

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 #
-# Which clang-tidy legs EXIST, derived from `.github/workflows/build.yml` rather
-# than restated anywhere. A second copy of that list would be a second thing to be
+# Which clang-tidy legs EXIST, derived from the workflows named on the command line
+# (every file under `.github/workflows/`) rather than restated anywhere. Every file,
+# not `build.yml` alone: the whole-tree Linux sweep runs in `tidy-nightly.yml`. A second copy of that list would be a second thing to be
 # wrong, and the failure would be silent: rows claiming coverage from a leg that
 # was renamed away.
 #
@@ -55,8 +56,19 @@ def code(line):
     stripped = line.lstrip()
     return "" if stripped.startswith("#") else line
 
+def lines(paths):
+    # A job key is per file: reset it at each file's start, so one file's last job
+    # cannot claim the next file's opening lines.
+    for path in paths:
+        yield None
+        for raw in open(path):
+            yield raw
+
 job, found, unknown = None, [], []
-for raw in open(sys.argv[1]):
+for raw in lines(sys.argv[1:]):
+    if raw is None:
+        job = None
+        continue
     line = code(raw)
     m = re.match(r"  ([A-Za-z0-9_-]+):\s*$", line)
     if m:
