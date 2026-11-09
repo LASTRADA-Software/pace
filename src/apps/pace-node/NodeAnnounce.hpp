@@ -134,11 +134,12 @@ class AnnouncedEndpoint final: public Cc::IAdvertisedEndpointSource
 /// `Distributed::CapacityToWire`, which knows nothing of the version because it is derived
 /// from `NodeCapacity`, a record with no version field of its own to read. See
 /// `AnnouncedCapacity`, which is `NodePresenceTier`'s answer to that.
+///
+/// That a scheduler can record twice what this returns is a `static_assert` in the generated
+/// `Version.cpp`, where the string is a literal.
 /// @return This build's version, compiled in and never configurable.
-[[nodiscard]] constexpr std::string_view AdvertisedVersion() noexcept
+[[nodiscard]] inline std::string_view AdvertisedVersion() noexcept
 {
-    static_assert(VersionString.size() * 2 <= CompileCacheWire::MaxNodeVersionBytes,
-                  "a scheduler must record twice the version this node sends");
     return VersionString;
 }
 

@@ -90,7 +90,14 @@ endif()
 # The version is compiled in from the git tag rather than read at runtime, so
 # `pacectl version` cannot report a value that has drifted from the build. The
 # source refuses to compile without it.
-target_compile_definitions(pacectl PRIVATE PACE_CLI_VERSION="${PACE_VERSION_STRING}")
+#
+# On the units that read it, never on the targets: the string changes on every
+# commit, and as a target definition it changed the command line of every unit in
+# pacectl and pacectl-tests, so none could hit a compiler cache from one commit to
+# the next. A source property reaches every target in this directory that compiles
+# the file, so CliVerbs.cpp gets it in pacectl-tests too.
+set_property(SOURCE main.cpp CliVerbs.cpp CliVerbs_test.cpp APPEND PROPERTY COMPILE_DEFINITIONS
+    PACE_CLI_VERSION="${PACE_VERSION_STRING}")
 
 install(TARGETS pacectl
     RUNTIME DESTINATION "${PACE_INSTALL_BINDIR}"
@@ -138,7 +145,6 @@ if(PACE_BUILD_TESTS)
     if(TARGET core::tui)
         target_link_libraries(pacectl-tests PRIVATE core::tui)
     endif()
-    target_compile_definitions(pacectl-tests PRIVATE PACE_CLI_VERSION="${PACE_VERSION_STRING}")
     include(Catch)
     # `SKIP_RETURN_CODE 4` tells ctest a Catch2 skip is a skip and not a failure
     # (#499), and under the Catch2 the top-level CMakeLists pins EXACTLY it is exact: a

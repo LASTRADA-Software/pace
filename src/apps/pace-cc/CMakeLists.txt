@@ -201,7 +201,10 @@ add_executable(pace-cc
     ${_pace_cc_core}
 )
 target_include_directories(pace-cc PRIVATE "${CMAKE_SOURCE_DIR}/src")
-target_compile_definitions(pace-cc PRIVATE
+# On the one unit that reads it, never on the target: the string changes on every
+# commit, and as a target definition it changed the command line of every unit in
+# pace-cc, so none of them could hit a compiler cache from one commit to the next.
+set_property(SOURCE main.cpp APPEND PROPERTY COMPILE_DEFINITIONS
     PACE_CC_VERSION="${PACE_VERSION_STRING}")
 if(PACE_ENABLE_COMPRESSION AND _pace_cc_zstd AND _pace_cc_lz4)
     target_link_libraries(pace-cc PRIVATE ${_pace_cc_zstd} ${_pace_cc_lz4})

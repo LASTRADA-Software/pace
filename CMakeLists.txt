@@ -718,14 +718,25 @@ if(TRACY_ENABLE)
     target_link_libraries(Pace PUBLIC Tracy::TracyClient)
 endif()
 
-# Substitute the version triple/string into Core/Version.hpp at configure
-# time. The generated header lives under the build dir so it never gets
-# checked in.
+# Substitute the version into Core/Version.hpp and Core/Version.cpp at configure
+# time. Both live under the build dir so they never get checked in.
+#
+# The header carries only the release triple. The full string carries the
+# git-describe distance and commit, so it changes on every commit, and it is
+# spelled in Version.cpp alone: in the header, every unit that includes it would
+# compile differently on every commit, and none could be answered from a compiler
+# cache across commits.
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Pace/Core/Version.hpp.in"
     "${CMAKE_CURRENT_BINARY_DIR}/generated/Pace/Core/Version.hpp"
     @ONLY
 )
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Pace/Core/Version.cpp.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/Pace/Core/Version.cpp"
+    @ONLY
+)
+target_sources(Pace PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated/Pace/Core/Version.cpp")
 
 # The checkout's paths, for the test cases that read a file out of it -- generated
 # here, before src/apps, because pace-node-tests needs it as much as

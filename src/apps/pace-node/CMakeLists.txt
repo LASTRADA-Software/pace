@@ -130,7 +130,10 @@ target_include_directories(pace-node PRIVATE
     "${CMAKE_SOURCE_DIR}/src"
     "${CMAKE_SOURCE_DIR}/src/apps/pace-cc")
 target_link_libraries(pace-node PRIVATE Pace)
-target_compile_definitions(pace-node PRIVATE
+# On the one unit that reads it, never on the target: the string changes on every
+# commit, and as a target definition it changed the command line of every unit in
+# pace-node, so none of them could hit a compiler cache from one commit to the next.
+set_property(SOURCE main.cpp APPEND PROPERTY COMPILE_DEFINITIONS
     PACE_NODE_VERSION="${PACE_VERSION_STRING}")
 if(WIN32)
     target_link_libraries(pace-node PRIVATE ws2_32)
