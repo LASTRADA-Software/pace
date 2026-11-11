@@ -94,9 +94,10 @@ on:
 #   * `docker` builds an image and runs it; it pushes to no registry, so no
 #     `packages: write`.
 #
-# The two jobs that need more say so themselves, and that is what keeps the
-# exception visible: `clang-tidy-windows` adds `issues: write` for its report step and
-# `release` takes `contents: write` to draft the release. A job-level block
+# The jobs that need more say so themselves, and that is what keeps the
+# exception visible: `clang-tidy-windows` adds `issues: write` for its report step,
+# `linux` adds `packages: read` to pull the shared CI image, and `release` takes
+# `contents: write` to draft the release. A job-level block
 # REPLACES this one rather than adding to it -- every scope a job names is the
 # whole of what that job gets -- which is also the verification argument for a
 # change that cannot be exercised on a pull request. `release` runs only on a tag
@@ -527,6 +528,15 @@ jobs:
     # contexts out of existence entirely. The step conditions below still decide
     # whether any work happens.
     if: ${{ !cancelled() }}
+    # `packages: read` so an image leg can pull the shared CI image, which is a
+    # PRIVATE package of LASTRADA-Software/cpp-ci-image: the package grants this
+    # repository read access, and the job's own token is the credential. A
+    # job-level block replaces the file's floor, so `contents: read` is restated
+    # for checkout. A pull request from a fork gets a token that cannot read
+    # another repository's private package, so its image legs fail at the pull.
+    permissions:
+      contents: read
+      packages: read
     strategy:
       fail-fast: false
       matrix:
@@ -537,6 +547,19 @@ jobs:
             runner: ubuntu-24.04-arm
             suffix: "-arm64"
             sha256Engine: arm-sha2
+          # The x86 legs build inside the shared CI image
+          # (LASTRADA-Software/cpp-ci-image), whose compile-cache seed holds this
+          # preset's objects, warmed from master with the same configure flags as
+          # the `Configure` step below. `seed` names the store in the image. The
+          # image is amd64 only, so the arm64 leg stays native.
+          - preset: clang-release
+            runner: ubuntu-24.04
+            image: ghcr.io/lastrada-software/cpp-ci:latest
+            seed: clang
+          - preset: gcc-release
+            runner: ubuntu-24.04
+            image: ghcr.io/lastrada-software/cpp-ci:latest
+            seed: gcc
     steps:
       - uses: actions/checkout@v4
         if: ${{ needs.changes.outputs.code != 'false' }}
@@ -606,8 +629,9 @@ jobs:
       # a full set of entries per release, for nothing. Same clause #559 needed
       # one level up, for the opposite reason: there a tag must not be skipped,
       # here it must not save.
+      # Native legs only: an image leg caches through pace-cc and the image's seed.
       - name: "ccache"
-        if: ${{ needs.changes.outputs.code != 'false' }}
+        if: ${{ needs.changes.outputs.code != 'false' && !matrix.image }}
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: ${{ runner.os }}-${{ matrix.preset }}${{ matrix.suffix }}
@@ -627,15 +651,80 @@ jobs:
       # reader to the sanitizer and the source tree for a network fault. Not a retry:
       # a blind one would make the instrument's own failures vanish unrecorded.
       - name: "Install Clang ${{ env.CLANG_TOOLS_VERSION }}"
-        if: ${{ needs.changes.outputs.code != 'false' && (startsWith(matrix.preset, 'clang')) }}
+        if: ${{ needs.changes.outputs.code != 'false' && !matrix.image && (startsWith(matrix.preset, 'clang')) }}
         run: bash scripts/ci-install-clang.sh --version ${{ env.CLANG_TOOLS_VERSION }}
 
       - name: "Install GCC ${{ env.GCC_VERSION }}"
-        if: ${{ needs.changes.outputs.code != 'false' && (startsWith(matrix.preset, 'gcc')) }}
+        if: ${{ needs.changes.outputs.code != 'false' && !matrix.image && (startsWith(matrix.preset, 'gcc')) }}
         run: |
           sudo apt-get install -y gcc-${{ env.GCC_VERSION }} g++-${{ env.GCC_VERSION }}
           sudo ln -sf /usr/bin/gcc-${{ env.GCC_VERSION }} /usr/local/bin/gcc
           sudo ln -sf /usr/bin/g++-${{ env.GCC_VERSION }} /usr/local/bin/g++
+
+      # An image leg runs Configure, Build and Test inside the shared CI image, which
+      # carries the same Clang ${{ env.CLANG_TOOLS_VERSION }} and GCC ${{ env.GCC_VERSION }} the install steps above
+      # provide natively. It is a `docker run`, not a job `container:`, so every
+      # other step -- the caches, the artifact, the cgroup test under the host's
+      # systemd -- runs on the host as before, and the workspace is mounted at its
+      # host path, so `github.workspace` and CPM_SOURCE_CACHE mean the same thing
+      # on both sides. It runs as the runner's own user: the checkout is the
+      # runner's, and as root a file made unreadable can still be read, which
+      # fails the toolchain-probe case that relies on a denied read.
+      #
+      # `--init` puts an init process at PID 1 to reap orphans, as the runner's
+      # own init does: without one, a child the gate reaper's self-test orphans
+      # stays a zombie and reads as alive.
+      #
+      # A local pace-kv serves the image's seed store for this preset. It is a
+      # copy, so the image's store is not modified. The container keeps its own
+      # network namespace, so its 127.0.0.1:6674 is private: on a machine that
+      # already runs a pace-kv there, a host-network daemon would share the port
+      # and the kernel would split connections between the two. Configure finds pace-cc on
+      # PATH and pace-kv at its default address, and passes over ccache, which
+      # the image does not carry. The probe waits until a compile is served,
+      # because the configure-time check gives the daemon 2 s, and a seed of
+      # this size can take longer than that to open.
+      - name: "Start the shared CI image and its seeded compile cache"
+        if: ${{ needs.changes.outputs.code != 'false' && matrix.image }}
+        env:
+          IMAGE: ${{ matrix.image }}
+          SEED: ${{ matrix.seed }}
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          if ! docker pull --quiet "$IMAGE"; then
+            echo "::error title=shared CI image::cannot pull ${IMAGE}. It is a private package: its 'Manage Actions access' must list this repository, and a pull request from a fork cannot read it."
+            exit 1
+          fi
+          docker run -d --init --name ci-image \
+            --user "$(id -u):$(id -g)" -e HOME=/tmp/home \
+            -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE" \
+            "$IMAGE" sleep infinity
+          docker exec ci-image bash -euo pipefail -c '
+            mkdir -p "$HOME"
+            cp "$PACE_CACHE_SEED_DIR/pace/'"$SEED"'.cow" /tmp/seed.cow
+            ls -l /tmp/seed.cow
+            gcc --version | head -n1
+            clang++ --version | head -n1'
+          docker exec -d ci-image bash -c \
+            'pace-kv --bind=127.0.0.1 --port=6674 --storage=/tmp/seed.cow --storage-shards=1 --log-level=warn > /tmp/pace-kv.log 2>&1'
+          docker exec ci-image bash -euo pipefail -c '
+            mkdir -p /tmp/probe && cd /tmp/probe
+            printf "int paceCiReady() { return 0; }\n" > ready.cpp
+            for attempt in $(seq 24); do
+              if PACE_SOURCE_DIR=/tmp/probe PACE_BINARY_DIR=/tmp/probe PACE_VERBOSE=1 \
+                  PACE_NO_STATS=1 PACE_TIMEOUT=30s timeout 60 \
+                  pace-cc clang++ -c ready.cpp -o ready.o 2> err \
+                && grep -qE "pace-cc: (HIT|MISS) key=" err; then
+                echo "pace-kv is serving (attempt $attempt)"; exit 0
+              fi
+              sleep 5
+            done
+            cat err /tmp/pace-kv.log; exit 1'
+          # The prefix the steps below run their commands through. The variables
+          # named here are passed from the step environment into the image.
+          echo "IN_IMAGE=docker exec -e CPM_SOURCE_CACHE -e CTEST_OUTPUT_ON_FAILURE -e CTEST_PARALLEL_LEVEL -e PACE_REQUIRE_EXACT_VERSION -e PACE_EXPECT_SHA256_ENGINE ci-image" >> "$GITHUB_ENV"
 
       # Benchmarks on so pace-bench is compiled rather than only ever built
       # by hand from bench/inproc_bench.py. It is not installed and runs no test
@@ -648,11 +737,34 @@ jobs:
       # recv undeclared, a shell-string popen, and a `store` hardcoded to MSVC
       # flags (issue #84). A target nothing compiles is a target that rots, and
       # that is what it looks like when nobody notices.
+      #
+      # In the image, configure is retried when it comes out with caching off. Its
+      # probe allows pace-kv 2s, and a seed store just opened can miss that once,
+      # after the start step's own probe was served: CMake then only warns and the
+      # leg builds uncached (measured: a 59-minute clang-release Build). A fresh
+      # tree each attempt, so the retry probes again rather than reading the
+      # tree's held answer.
       - name: "Configure"
         if: ${{ needs.changes.outputs.code != 'false' }}
-        run: >-
-          cmake --preset ${{ matrix.preset }} -DPACE_ENABLE_TLS=ON
-          -DPACE_BUILD_BENCHMARKS=ON -DPACE_BUILD_TESTCLIENT=ON
+        env:
+          IN_IMAGE: ${{ env.IN_IMAGE }}
+          PRESET: ${{ matrix.preset }}
+          RETRY_UNCACHED: ${{ matrix.image && 'true' || 'false' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/configure.log"
+          for attempt in 1 2 3; do
+            ${IN_IMAGE} cmake --preset "$PRESET" -DPACE_ENABLE_TLS=ON \
+              -DPACE_BUILD_BENCHMARKS=ON -DPACE_BUILD_TESTCLIENT=ON 2>&1 | tee "$log"
+            if [ "$RETRY_UNCACHED" != true ] || ! grep -q "caching disabled" "$log"; then
+              exit 0
+            fi
+            echo "::warning::configure attempt $attempt came out with caching disabled; retrying"
+            rm -rf "out/build/$PRESET"
+            sleep 5
+          done
+          echo "::warning::the compile cache stayed disabled; this leg builds uncached"
 
       # The x86 leg of each preset saves; the arm64 leg, the one row naming a
       # `suffix`, only restores. Everything the combined step's post-job save
@@ -676,14 +788,23 @@ jobs:
 
       - name: "Build"
         if: ${{ needs.changes.outputs.code != 'false' }}
-        run: cmake --build --preset ${{ matrix.preset }}
+        env:
+          IN_IMAGE: ${{ env.IN_IMAGE }}
+        run: ${IN_IMAGE} cmake --build --preset ${{ matrix.preset }}
+
+      - name: "Report pace-cc effectiveness"
+        if: ${{ needs.changes.outputs.code != 'false' && matrix.image }}
+        env:
+          IN_IMAGE: ${{ env.IN_IMAGE }}
+        run: ${IN_IMAGE} pace-cc --show-stats
 
       # Empty on a row that states no engine, which the test reads as "not stated".
       - name: "Test"
         if: ${{ needs.changes.outputs.code != 'false' }}
         env:
           PACE_EXPECT_SHA256_ENGINE: ${{ matrix.sha256Engine }}
-        run: ctest --preset ${{ matrix.preset }}
+          IN_IMAGE: ${{ env.IN_IMAGE }}
+        run: ${IN_IMAGE} ctest --preset ${{ matrix.preset }}
 
       # The real-kernel half of the compile-memory meter (`Node::CompileMemoryMeter`), which no
       # other leg exercises: the ctest run above SKIPS that case, because preparing a cgroup moves the
