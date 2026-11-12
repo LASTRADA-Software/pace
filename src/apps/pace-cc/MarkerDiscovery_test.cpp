@@ -2,6 +2,7 @@
 #include "MarkerDiscovery.hpp"
 
 #include <Pace/CompileCache/PathCanon.hpp>
+#include <Pace/Platform/NarrowText.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -288,3 +289,20 @@ TEST_CASE("Under a UTF-8 console the UTF-8 spelling still matches", "[1580]")
     REQUIRE(learned.has_value());
     CHECK(Pace::Testing::Unwrap(learned) == Pace::PathCanon::IncludeNoteMarker);
 }
+
+#if defined(_WIN32)
+TEST_CASE("The probe's second spelling is the one the platform transcodes to", "[1580]")
+{
+    // The spellings the probe builds, end to end on this host: `NarrowTextFromUtf8` turns the
+    // UTF-8 path into CP-850 bytes, and a note written in those bytes is matched.
+    std::string const utf8Path = "C:\\Users\\J\xC3\xBCrgen\\pace-marker-probe.h";
+    auto const encoded = Pace::NarrowTextFromUtf8(utf8Path, 850U);
+    REQUIRE(encoded.has_value());
+    CHECK(Pace::Testing::Unwrap(encoded) == "C:\\Users\\J\x81rgen\\pace-marker-probe.h");
+    std::vector<std::string> const spellings { utf8Path, Pace::Testing::Unwrap(encoded) };
+    auto const learned =
+        MarkerFromProbeOutput("Note: including file: " + Pace::Testing::Unwrap(encoded) + "\r\n", spellings);
+    REQUIRE(learned.has_value());
+    CHECK(Pace::Testing::Unwrap(learned) == Pace::PathCanon::IncludeNoteMarker);
+}
+#endif
