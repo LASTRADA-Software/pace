@@ -172,19 +172,33 @@ TEST_CASE("Each directory is listed once however many tails it is asked about", 
 // ---------------------------------------------------------------------------
 // HeaderSearchDirectories
 
+namespace
+{
+/// @p paths with every separator spelled `/`. A Windows layout resolves into backslashes on a
+/// Windows host and keeps the forward slashes on a POSIX one (`ResolveAgainst` joins with the
+/// host's arithmetic), and which DIRECTORIES were found is the property under test, never the
+/// separator the host chose for them.
+[[nodiscard]] Paths Slashed(Paths paths)
+{
+    for (auto& path: paths)
+        std::ranges::replace(path, '\\', '/');
+    return paths;
+}
+} // namespace
+
 TEST_CASE("Include directories are read in every spelling, separated or fused", "[shadow-census]")
 {
     Paths const args { "/nologo", "/Ic:/work/src/inc0", "/I", "c:/work/src/inc", "/external:Ic:/work/ext", "/c", "a.cpp" };
-    // Resolved into the layout's own spelling, which on a Windows layout is backslashes.
-    CHECK(HeaderSearchDirectories(args, DriverFamily::Msvc, "c:/work/build", Windows, {})
-          == Paths { R"(c:\work\src\inc0)", R"(c:\work\src\inc)", R"(c:\work\ext)" });
+    CHECK(Slashed(HeaderSearchDirectories(args, DriverFamily::Msvc, "c:/work/build", Windows, {}))
+          == Paths { "c:/work/src/inc0", "c:/work/src/inc", "c:/work/ext" });
 }
 
 TEST_CASE("The include-search environment adds its directories", "[shadow-census][1756]")
 {
     Paths const environment { "INCLUDE=c:/sdk/one;c:/sdk/two" };
-    CHECK(HeaderSearchDirectories(Paths { "/c", "a.cpp" }, DriverFamily::Msvc, "c:/work/build", Windows, environment)
-          == Paths { R"(c:\sdk\one)", R"(c:\sdk\two)" });
+    CHECK(
+        Slashed(HeaderSearchDirectories(Paths { "/c", "a.cpp" }, DriverFamily::Msvc, "c:/work/build", Windows, environment))
+        == Paths { "c:/sdk/one", "c:/sdk/two" });
 }
 
 TEST_CASE("A GNU path list splits on colons", "[shadow-census]")
