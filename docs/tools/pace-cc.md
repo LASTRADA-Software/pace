@@ -987,6 +987,7 @@ retrying, the other never will be:
 |---|---|
 | *(silence)* | The cached object is the object this compiler produces. |
 | `WRONG OBJECT served for key …` | It is not. The message names what differed — a section such as `.text$mn` is stale code; `.debug$S` or `.chks64` is a foreign build path. The fresh object was used, so this build is unaffected. Find the machine that stored it. The compile is recorded as `VERIFY-MISMATCH` rather than `HIT` — in `invocations.log`, on the `PACE_VERBOSE` trace line, and as `wrong object` in `--show-stats`, which rates the hit rate against it — because the build did not use what the cache served. |
+| `NONDETERMINISTIC compiler for key …` | Not a cache fault. The served object differed from a fresh compile, so the launcher compiled a second time — and the two fresh objects differ from each other too: this compiler does not reproduce its own output for this translation unit (seen with `cl` on some units). Nothing is known about the cached object either way, and the entry is kept. Recorded as `HIT`. |
 | `could not verify the hit for key …` | The check did not complete: the fresh compile failed, or a file could not be read. Nothing is known about the cached object either way, and the next hit may well answer. |
 | `cannot verify hits for this toolchain …` | This build cannot lay out the object format its own compiler produced, so it can say nothing about any hit — not this one and not the next. A property of the toolchain, not a statement about your cache. |
 
