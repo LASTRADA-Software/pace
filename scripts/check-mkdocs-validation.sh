@@ -28,7 +28,14 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 [ "${1:-}" != "--root" ] || root="${2:?--root needs a tree}"
 
-python3 - "$root" <<'PY'
+# A Python that RUNS, never a name on PATH: on Windows `python3` is the Store's stub (#1734).
+. "$(cd "$(dirname "$0")" && pwd)/lib/python.sh"
+if ! pace_python_resolve; then
+    echo "SKIP: $PACE_PYTHON_REFUSAL"
+    exit 0
+fi
+
+pace_python - "$root" <<'PY'
 import sys, os
 try:
     import yaml
