@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "HitVerification.hpp"
+#include "Stats.hpp"
 #include "StubCoffTestSupport.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -262,6 +263,59 @@ TEST_CASE("What differed is carried into the line, not left to be asked about", 
         "k");
     CHECK(line.contains(".text$mn"));
     CHECK(line.contains("WRONG OBJECT"));
+}
+
+TEST_CASE("A compiler that disagrees with itself is not reported as a wrong object", "[launcher][verify][1758]")
+{
+    // #1758: cl 19.51 produced 3115232 and 3115231 bytes from one unit on consecutive
+    // compiles, and 30 of ~380 verified hits were reported WRONG OBJECT for it.
+    HitComparison const served { .verdict = HitVerdict::Mismatched,
+                                 .comparison = ObjectComparison::Different,
+                                 .detail = "1 differing byte(s), in .text$mn" };
+    HitComparison const freshDiffer { .verdict = HitVerdict::Mismatched,
+                                      .comparison = ObjectComparison::Different,
+                                      .detail = "2 differing byte(s), in .text$mn" };
+    auto const confirmed = ConfirmMismatch(served, freshDiffer);
+    CHECK(confirmed.verdict == HitVerdict::Nondeterministic);
+    CHECK(confirmed.detail.contains("two fresh compiles differ"));
+
+    auto const line = DescribeVerdict(confirmed, "k");
+    CHECK(line.contains("NONDETERMINISTIC"));
+    CHECK_FALSE(line.contains("WRONG OBJECT"));
+    CHECK(OutcomeOfServedHit(confirmed.verdict) == Outcome::Hit);
+}
+
+TEST_CASE("Two fresh compiles that agree confirm a wrong object", "[launcher][verify][1758]")
+{
+    // The distinguishing half: a second compile must not launder a real mismatch. When the
+    // compiler reproduces itself the served object's difference is real -- and when the second
+    // comparison could not be made, the first verdict stands rather than being withheld.
+    HitComparison const served { .verdict = HitVerdict::Mismatched,
+                                 .comparison = ObjectComparison::Different,
+                                 .detail = "in .text$mn" };
+    for (auto const& freshAgain:
+         { HitComparison { .verdict = HitVerdict::Matched, .comparison = ObjectComparison::Identical, .detail = {} },
+           HitComparison { .verdict = HitVerdict::Matched,
+                           .comparison = ObjectComparison::EquivalentApartFromVolatile,
+                           .detail = "the compiler's timestamp" },
+           HitComparison { .verdict = HitVerdict::Inconclusive, .comparison = std::nullopt, .detail = {} } })
+    {
+        auto const confirmed = ConfirmMismatch(served, freshAgain);
+        CHECK(confirmed.verdict == HitVerdict::Mismatched);
+        CHECK(confirmed.detail == "in .text$mn");
+        CHECK(DescribeVerdict(confirmed, "k").contains("WRONG OBJECT"));
+    }
+}
+
+TEST_CASE("Only a mismatch is re-examined", "[launcher][verify][1758]")
+{
+    HitComparison const freshDiffer { .verdict = HitVerdict::Mismatched,
+                                      .comparison = ObjectComparison::Different,
+                                      .detail = "x" };
+    for (auto const verdict:
+         { HitVerdict::NotChecked, HitVerdict::Matched, HitVerdict::Inconclusive, HitVerdict::Unsupported })
+        CHECK(ConfirmMismatch({ .verdict = verdict, .comparison = std::nullopt, .detail = {} }, freshDiffer).verdict
+              == verdict);
 }
 
 TEST_CASE("A toolchain that cannot be compared is not reported as a wrong object", "[launcher][verify]")

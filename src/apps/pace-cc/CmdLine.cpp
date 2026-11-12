@@ -81,6 +81,15 @@ namespace
     constexpr std::string_view EndOfOptions = "--";
 
     constexpr std::array<std::string_view, 1> MsvcDispatchPreprocess { "/E" };
+    /// clang-cl's: INLINE the includes and expand nothing (#1719). Plain `/E` drops clang's
+    /// "expanded from a macro defined in a system header" context, so a warning clang
+    /// suppresses there -- `-Winconsistent-missing-override` on MFC's `DECLARE_DYNAMIC` --
+    /// fired on the worker, and under `/WX` 722 of 944 units of a large MFC build failed
+    /// there and compiled twice. Measured with clang-cl 22.1.3: the issue's reproduction fails
+    /// over plain `/E` text and compiles over this one, which still evaluates `__has_include`
+    /// and inlines `/FI` on the client. The macros it leaves unexpanded need the build's
+    /// definitions: `DispatchMacros::PrependedDirectives`.
+    constexpr std::array<std::string_view, 2> ClangClDispatchPreprocess { "/E", "/clang:-frewrite-includes" };
     constexpr std::array<std::string_view, 1> GnuDispatchPreprocess { "-E" };
 
     /// Tell a driver its input is already preprocessed, per language. See
@@ -310,6 +319,7 @@ namespace
           .includeDiscovery = IncludeDiscovery::None,
           .targetDiscovery = TargetDiscovery::None,
           .fingerprintTree = FingerprintTree::DiscoveredRoots,
+          .dispatchMacros = DispatchMacros::Expanded,
           .includeProbeFlags = {},
           .targetProbeFlags = {},
           // `--version` even here. An unrecognised driver is not cached, so this
@@ -340,6 +350,7 @@ namespace
           // compile, and an installed VS language pack's IntelliSense XML in the
           // toolset's `include` split two otherwise identical machines.
           .fingerprintTree = FingerprintTree::None,
+          .dispatchMacros = DispatchMacros::Expanded,
           .includeProbeFlags = {},
           .targetProbeFlags = {},
           // EMPTY, and that is the probe: `cl` prints its banner on every
@@ -351,7 +362,7 @@ namespace
         { .flavor = Flavor::ClangCl,
           .family = DriverFamily::Msvc,
           .preprocessFlags = MsvcPreprocess,
-          .dispatchPreprocessFlags = MsvcDispatchPreprocess,
+          .dispatchPreprocessFlags = ClangClDispatchPreprocess,
           .preprocessedInput = MsvcPreprocessedInput,
           .preprocessDropFlags = MsvcDrop,
           .probeDropFlags = MsvcProbeDrop,
@@ -370,6 +381,7 @@ namespace
           .targetDiscovery = TargetDiscovery::ClangDriverLine,
           // Its discovery already names only its own resource directory.
           .fingerprintTree = FingerprintTree::DiscoveredRoots,
+          .dispatchMacros = DispatchMacros::PrependedDirectives,
           .includeProbeFlags = {},
           .targetProbeFlags = MsvcTargetProbe,
           .versionFlags = VersionProbe,
@@ -396,6 +408,7 @@ namespace
           // Clang row's answer because a `cc`/`c++` that IS an MSVC-targeting clang
           // reaches this row by its stem, and must fingerprint as the Clang row does.
           .fingerprintTree = FingerprintTree::OwnTreeWhenTargetingMsvc,
+          .dispatchMacros = DispatchMacros::Expanded,
           .includeProbeFlags = GnuIncludeProbe,
           .targetProbeFlags = GnuTargetProbe,
           .versionFlags = VersionProbe,
@@ -416,6 +429,7 @@ namespace
           // `clang-cl` is; anywhere else the list is libstdc++ or an SDK it reads,
           // and stays folded (#1656).
           .fingerprintTree = FingerprintTree::OwnTreeWhenTargetingMsvc,
+          .dispatchMacros = DispatchMacros::Expanded,
           .includeProbeFlags = GnuIncludeProbe,
           .targetProbeFlags = GnuTargetProbe,
           .versionFlags = VersionProbe,
@@ -591,6 +605,14 @@ namespace
     // and reported all three as collisions, which is how they came to be named here.
 
     /// A macro switch, and which families spell it that way.
+    /// What a macro switch does, as the directive a source file would spell it with.
+    /// Private to the launcher, never transmitted or persisted.
+    enum class MacroDirective : std::uint8_t
+    {
+        Define,
+        Undefine,
+    };
+
     struct MacroFlag
     {
         /// The flag, bare. Its value may be fused on or given as the next argument.
@@ -598,15 +620,18 @@ namespace
 
         /// Which driver families accept this spelling.
         DriverFamily families;
+
+        /// The directive it stands for, when a dispatched text has to say it (#1719).
+        MacroDirective directive;
     };
 
     /// The macro switches. A `/`-led row is Msvc-only for the reason `PathValues` gives:
     /// under a POSIX layout `/D` is the head of an absolute path rather than an option.
     constexpr std::array<MacroFlag, 4> MacroFlags { {
-        { .spelling = "-D", .families = DriverFamily::Any },
-        { .spelling = "-U", .families = DriverFamily::Any },
-        { .spelling = "/D", .families = DriverFamily::Msvc },
-        { .spelling = "/U", .families = DriverFamily::Msvc },
+        { .spelling = "-D", .families = DriverFamily::Any, .directive = MacroDirective::Define },
+        { .spelling = "-U", .families = DriverFamily::Any, .directive = MacroDirective::Undefine },
+        { .spelling = "/D", .families = DriverFamily::Msvc, .directive = MacroDirective::Define },
+        { .spelling = "/U", .families = DriverFamily::Msvc, .directive = MacroDirective::Undefine },
     } };
 
     /// One flag that makes a compile write a second artefact (or, for `cl /Yu`, tie its
@@ -844,6 +869,17 @@ namespace
     /// reached the launcher another way.
     constexpr std::array<std::string_view, 4> MsvcSharedPdb { "/Zi", "-Zi", "/ZI", "-ZI" };
 
+    /// The spellings clang-cl reads as `/Z7` (#1602): `clang-cl /?` documents `/Zi` as "Like
+    /// /Z7", which writes the debug info into the object -- the one artefact a worker brings
+    /// back. A clang-cl `/Zi` build was cached (the `SideArtefacts` rows are `cl`-only) and never
+    /// dispatched, because the refusal above covered the whole MSVC family. Sent to the worker
+    /// AS `/Z7`, so the worker's allowlist, which refuses `/Zi` from every MSVC-family line,
+    /// does not widen. `/ZI` is deliberately absent: clang-cl does not document it.
+    constexpr std::array<std::string_view, 2> ClangClObjectDebugInfo { "/Zi", "-Zi" };
+
+    /// What a dispatched clang-cl line says instead of `ClangClObjectDebugInfo`.
+    constexpr std::string_view ObjectDebugInfo = "/Z7";
+
     /// What a GNU `-x` value names. Only the four plain languages: anything else
     /// (`assembler`, `c-header`, a `-cpp-output` form) has no exact `SourceLanguage`
     /// and keeps being refused, because guessing at it is how a worker comes to
@@ -1044,6 +1080,25 @@ namespace
     /// @param families    Which family spellings may match.
     /// @return Nullopt when it is not a macro switch; true when its value is the NEXT
     ///         argument, false when the value is fused on (or rides a pass-through).
+    /// The `MacroFlags` row a bare (not pass-through) argument matches, if any.
+    /// @param arg         The argument as it appeared on the command line.
+    /// @param introducers Which characters start an option here.
+    /// @param families    Which family spellings may match.
+    /// @return The row, or null.
+    [[nodiscard]] MacroFlag const* MatchMacroRow(std::string_view arg, std::string_view introducers, DriverFamily families)
+    {
+        if (arg.empty() || !introducers.contains(arg.front()))
+            return nullptr;
+        for (MacroFlag const& row: MacroFlags)
+        {
+            if (!introducers.contains(row.spelling.front()) || !Overlaps(row.families, families))
+                continue;
+            if (MatchesFlag(arg, row.spelling))
+                return &row;
+        }
+        return nullptr;
+    }
+
     [[nodiscard]] std::optional<bool> MatchMacroFlag(std::string_view arg,
                                                      std::string_view introducers,
                                                      DriverFamily families)
@@ -1056,16 +1111,8 @@ namespace
             return false;
         }
 
-        if (arg.empty() || !introducers.contains(arg.front()))
-            return std::nullopt;
-        for (MacroFlag const& row: MacroFlags)
-        {
-            if (!introducers.contains(row.spelling.front()) || !Overlaps(row.families, families))
-                continue;
-            if (!MatchesFlag(arg, row.spelling))
-                continue;
-            return arg.size() == row.spelling.size();
-        }
+        if (auto const* row = MatchMacroRow(arg, introducers, families))
+            return arg.size() == row->spelling.size();
         return std::nullopt;
     }
 
@@ -1706,9 +1753,12 @@ std::expected<std::vector<std::string>, std::string> RemoteCompileArgs(ParsedCom
 
     // A shared PDB is a second artefact, and only the object comes back. Refused
     // before anything is sent, on the same reasoning as a module interface unit.
+    auto const readsAsObjectDebugInfo = [&cmd](std::string_view arg) {
+        return cmd.flavor == Flavor::ClangCl && std::ranges::contains(ClangClObjectDebugInfo, arg);
+    };
     if (driver.family == DriverFamily::Msvc)
         for (auto const i: std::views::iota(std::size_t { 1 }, argv.size()))
-            if (std::ranges::contains(MsvcSharedPdb, argv[i]))
+            if (std::ranges::contains(MsvcSharedPdb, argv[i]) && !readsAsObjectDebugInfo(argv[i]))
                 return std::unexpected(
                     std::format("{} writes debug info to a shared PDB, which a dispatched compile cannot bring back; "
                                 "build with /Z7 to distribute this",
@@ -1751,6 +1801,13 @@ std::expected<std::vector<std::string>, std::string> RemoteCompileArgs(ParsedCom
         // read the language flags appended below as input files.
         if (a == EndOfOptions)
             continue;
+
+        // clang-cl's `/Zi` IS `/Z7`, and the worker is told so in the spelling it admits.
+        if (readsAsObjectDebugInfo(a))
+        {
+            out.emplace_back(ObjectDebugInfo);
+            continue;
+        }
 
         // The compile-only marker and the dependency switches, off the driver's own
         // list. Same rule PreprocessCommand applies, and the same reason for reading
@@ -2007,6 +2064,71 @@ std::vector<std::string> DispatchPreprocessCommand(ParsedCommand const& cmd, std
         out.emplace_back(a);
     }
     return out;
+}
+
+std::expected<std::string, std::string> DispatchedMacroPrologue(ParsedCommand const& cmd, std::span<std::string const> argv)
+{
+    auto const& driver = DriverOf(cmd.flavor);
+    std::string prologue;
+    if (driver.dispatchMacros == DispatchMacros::Expanded)
+        return prologue;
+
+    // One directive for one switch, the way the driver itself reads them: `NAME` alone is
+    // defined as 1, `NAME=` as nothing, and `#` stands for `=` in an MSVC spelling.
+    auto const directiveFor =
+        [](MacroFlag const& row, std::string_view value, DriverFamily family) -> std::expected<std::string, std::string> {
+        if (value.find_first_of("\r\n") != std::string_view::npos)
+            return std::unexpected(std::format("macro switch {}{} spans lines", row.spelling, value));
+        if (row.directive == MacroDirective::Undefine)
+            return std::format("#undef {}\n", value);
+        auto separator = value.find('=');
+        if (separator == std::string_view::npos && family == DriverFamily::Msvc)
+            separator = value.find('#');
+        if (separator == std::string_view::npos)
+            return std::format("#define {} 1\n", value);
+        return std::format("#define {} {}\n", value.substr(0, separator), value.substr(separator + 1));
+    };
+
+    auto const introducers = IntroducersOf(driver.family);
+    std::size_t at = 1;
+    while (at < argv.size())
+    {
+        std::string_view const arg = argv[at];
+        MacroFlag const* row = nullptr;
+        std::string_view value;
+        if (auto const passed = MatchPassThrough(arg, driver.family); passed.has_value())
+        {
+            auto const into = DriverOf(passed->into).family;
+            row = MatchMacroRow(passed->inner, IntroducersOf(into), into);
+            if (row != nullptr && passed->inner.size() == row->spelling.size())
+                return std::unexpected(
+                    std::format("pass-through macro switch {} takes its value from another argument", arg));
+            if (row != nullptr)
+                value = passed->inner.substr(row->spelling.size());
+        }
+        else
+        {
+            row = MatchMacroRow(arg, introducers, driver.family);
+            if (row != nullptr)
+            {
+                value = arg.substr(row->spelling.size());
+                if (value.empty() && at + 1 < argv.size())
+                {
+                    ++at; // the separated spelling: the definition is the next argument
+                    value = argv[at];
+                }
+            }
+        }
+        if (row != nullptr && !value.empty())
+        {
+            auto directive = directiveFor(*row, value, driver.family);
+            if (!directive.has_value())
+                return std::unexpected(directive.error());
+            prologue += *directive;
+        }
+        ++at;
+    }
+    return prologue;
 }
 
 std::vector<std::string> PreprocessCommand(ParsedCommand const& cmd,

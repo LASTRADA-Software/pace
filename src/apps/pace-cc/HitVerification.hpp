@@ -61,6 +61,17 @@ enum class HitVerdict : std::uint8_t
     /// records -- a precise wrong answer, which is worse than none, and exactly how
     /// a verifier gets switched off for good.
     Unsupported,
+    /// Compiled again TWICE: the served object differed from the first fresh one, and
+    /// the two fresh ones differ from each other too. This compiler does not reproduce
+    /// its own output for this translation unit, so the served object's difference is
+    /// no evidence against it (#1758).
+    ///
+    /// Measured with cl 19.51: two consecutive compiles of one unit came out 3115232 and
+    /// 3115231 bytes, differing by an equivalent instruction encoding and the padding
+    /// after it, and 30 of ~380 verified hits were reported as wrong objects for exactly
+    /// that. A false `WRONG OBJECT` is the answer that gets a verifier switched off,
+    /// which is why this is its own state rather than `Mismatched`.
+    Nondeterministic,
 };
 
 /// Verification is off; no hit is checked.
@@ -139,6 +150,21 @@ struct HitComparison
 ///        comparison without anything having to overlook them.
 /// @return The verdict, plus a sentence naming what it turned on.
 [[nodiscard]] HitComparison CompareObjectFiles(std::filesystem::path const& served, std::filesystem::path const& fresh);
+
+/// Whether a served object that differed from a fresh compile is wrong, or the compiler
+/// simply does not reproduce itself (#1758).
+///
+/// Asked only of a `Mismatched` first verdict, with a SECOND fresh compile compared against
+/// the first. Two fresh objects that agree make the served one's difference real; two that
+/// differ make it no evidence at all; and a second comparison that could not be made leaves
+/// the first verdict standing, because a `WRONG OBJECT` withheld on a full disk is the silent
+/// failure verification exists to end.
+/// @param served      The served object against the first fresh compile.
+/// @param freshAgain  The first fresh compile against the second.
+/// @return `served` unchanged unless it is `Mismatched` and `freshAgain` found the compiler
+///         disagreeing with itself, in which case `Nondeterministic`, carrying where the two
+///         fresh objects differed.
+[[nodiscard]] HitComparison ConfirmMismatch(HitComparison served, HitComparison const& freshAgain);
 
 /// What to tell an operator about @p verdict, or empty when there is nothing to say.
 ///

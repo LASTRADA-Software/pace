@@ -2,6 +2,7 @@
 #include "ArgumentDenials.hpp"
 #include "CacheKey.hpp"
 #include "CmdLine.hpp"
+#include "CompileJob.hpp"
 #include "IProcessRunner.hpp"
 
 #include <Pace/Platform/EnvironmentTestUtils.hpp>
@@ -1288,6 +1289,62 @@ TEST_CASE("The dispatch preprocess keeps warnings-as-errors, where the key probe
     CHECK(std::ranges::contains(probe, "/WX-"));
 }
 
+TEST_CASE("clang-cl dispatches include-rewritten text and cl does not", "[dispatch][msvc][1719]")
+{
+    // #1719: plain `/E` drops clang's system-header macro context, so a warning clang
+    // suppresses there fired on the worker under `/WX`. clang-cl inlines the includes and
+    // leaves the macros; `cl` has no such mode and keeps `/E`.
+    std::vector<std::string> const clangCl { "clang-cl", "/W3", "/WX", "/c", "a.cpp", "/Foa.obj" };
+    auto const clangClLine = DispatchPreprocessCommand(ParseCommand(clangCl), clangCl);
+    CHECK(std::ranges::contains(clangClLine, "/E"));
+    CHECK(std::ranges::contains(clangClLine, "/clang:-frewrite-includes"));
+
+    std::vector<std::string> const cl { "cl", "/W3", "/WX", "/c", "a.cpp", "/Foa.obj" };
+    auto const clLine = DispatchPreprocessCommand(ParseCommand(cl), cl);
+    CHECK(std::ranges::contains(clLine, "/E"));
+    CHECK_FALSE(std::ranges::contains(clLine, "/clang:-frewrite-includes"));
+
+    // The worker is still told its language and nothing else changes on ITS line: `/TP`, no
+    // macro switch (#1481), which is why the prologue below exists.
+    std::vector<std::string> const withMacros { "clang-cl", "/DA=1", "/c", "a.cpp", "/Foa.obj" };
+    auto const remote = RemoteCompileArgs(ParseCommand(withMacros), withMacros, /*targetTriple=*/ {});
+    REQUIRE(remote.has_value());
+    CHECK(std::ranges::contains(*remote, "/TP"));
+    CHECK_FALSE(std::ranges::contains(*remote, "/DA=1"));
+}
+
+TEST_CASE("clang-cl's dispatched text carries every macro switch as a directive, in order", "[dispatch][msvc][1719]")
+{
+    // The definitions a worker compiling unexpanded text needs, and the spellings a driver
+    // accepts: bare (= 1), `=`, MSVC's `#` for `=`, an empty value, separated, `/U`, and a
+    // pass-through. Order is the command line's, which is how the driver applies them.
+    std::vector<std::string> const argv { "clang-cl", "/DA", "-DB=2",        "/DC#3", "/DD=",  "/D",
+                                          "E=5",      "/UF", "-clang:-DG=7", "/c",    "a.cpp", "/Foa.obj" };
+    auto const prologue = DispatchedMacroPrologue(ParseCommand(argv), argv);
+    REQUIRE(prologue.has_value());
+    CHECK(*prologue == "#define A 1\n#define B 2\n#define C 3\n#define D \n#define E 5\n#undef F\n#define G 7\n");
+}
+
+TEST_CASE("A driver whose dispatched text is expanded needs no prologue", "[dispatch][1719]")
+{
+    // The control: `cl` and the GNU drivers expand every macro on the client, and a definition
+    // reaching their worker would be applied twice (#1481).
+    for (std::vector<std::string> const& argv: { std::vector<std::string> { "cl", "/DA=1", "/c", "a.cpp", "/Foa.obj" },
+                                                 std::vector<std::string> { "g++", "-DA=1", "-c", "a.cpp", "-o", "a.o" } })
+    {
+        auto const prologue = DispatchedMacroPrologue(ParseCommand(argv), argv);
+        REQUIRE(prologue.has_value());
+        CHECK(prologue->empty());
+    }
+}
+
+TEST_CASE("A separated pass-through macro switch cannot be written as a directive", "[dispatch][msvc][1719]")
+{
+    // Its value is the next PASS-THROUGH anywhere on the line, not the next argument.
+    std::vector<std::string> const argv { "clang-cl", "-clang:-D", "/O2", "-clang:FOO=3", "/c", "a.cpp", "/Foa.obj" };
+    CHECK_FALSE(DispatchedMacroPrologue(ParseCommand(argv), argv).has_value());
+}
+
 TEST_CASE("A failed preprocess is described by its exit and its first error line", "[dispatch]")
 {
     // `cl` echoes the source name first, which says nothing; the error line is the one
@@ -1838,6 +1895,33 @@ TEST_CASE("A compile writing a shared PDB is not dispatched")
     }
 }
 
+TEST_CASE("clang-cl's /Zi is dispatched as /Z7, and cl's never is", "[dispatch][msvc][1602]")
+{
+    // #1602: clang-cl documents `/Zi` as "Like /Z7" -- debug info in the object, the one
+    // artefact a worker returns -- so a clang-cl `/Zi` build was cached and never distributed.
+    // It travels as `/Z7`, the spelling the worker already admits.
+    for (auto const& flag: { "/Zi", "-Zi" })
+    {
+        INFO("flag: " << flag);
+        std::vector<std::string> const argv { "clang-cl", "/nologo", flag, "/FdX.pdb", "/c", "a.cpp" };
+        auto const remote = RemoteCompileArgs(ParseCommand(argv), argv, /*targetTriple=*/ {});
+        INFO("refused: " << remote.error_or(""));
+        REQUIRE(remote.has_value());
+        CHECK(std::ranges::contains(*remote, "/Z7"));
+        CHECK_FALSE(std::ranges::contains(*remote, std::string { flag }));
+        // The worker's own check, so the rewritten line is one it accepts.
+        for (auto const& arg: *remote)
+            CHECK(IsAcceptableJobArgument(arg, DriverOf(Flavor::ClangCl)));
+    }
+
+    // The controls: `/ZI` stays refused under clang-cl, which does not document it, and every
+    // spelling stays refused under `cl`, where it writes a shared PDB.
+    std::vector<std::string> const editAndContinue { "clang-cl", "/ZI", "/c", "a.cpp" };
+    CHECK_FALSE(RemoteCompileArgs(ParseCommand(editAndContinue), editAndContinue, {}).has_value());
+    std::vector<std::string> const cl { "cl", "/Zi", "/c", "a.cpp" };
+    CHECK_FALSE(RemoteCompileArgs(ParseCommand(cl), cl, {}).has_value());
+}
+
 TEST_CASE("A module interface unit is never dispatched, whatever the driver")
 {
     // It writes a BMI beside the object and a dispatched compile carries back only
@@ -2374,9 +2458,91 @@ TEST_CASE("A real clang-cl worker re-expands no definition the client's source h
     CHECK(worker.out.contains("return x"));
     CHECK_FALSE(worker.out.contains("return y"));
 
-    // The positive control: the same probe DOES see a re-expansion when the definition rides the
-    // worker's line, so the green above is this line's and not a probe that cannot fail.
-    auto const control = workerPreprocess({ "-clang:-Dx=y" });
+    // The positive control: the same probe DOES see a definition that rides the worker's line, so
+    // the green above is this line's and not a probe that cannot fail. Since #1719 the dispatched
+    // text keeps the source's own `#undef x` (clang-cl's text is include-rewritten, not expanded),
+    // so the control defines an identifier the source never undefines.
+    auto const control = workerPreprocess({ "-clang:-Dy=z" });
     REQUIRE(control.exitCode == 0);
-    CHECK(control.out.contains("return y"));
+    CHECK(control.out.contains("int z = 5"));
+}
+
+TEST_CASE("A real clang-cl worker compiles under /WX what the client compiles, macros and all (#1719)",
+          "[launcher][cmdline][msvc][1719]")
+{
+    // #1719 end to end on the driver it lives in: a macro defined in a SYSTEM header declares an
+    // override without `override`, which clang suppresses only while it still knows where the
+    // macro came from. The worker compiles the dispatched text -- the prologue the client writes,
+    // then the include-rewritten text -- under the dispatched line, and must succeed under `/WX`
+    // where the client's own compile does. The control is plain `/E` text, which fails.
+    Pace::Testing::ScratchDirectory const scratch { "pace-cc-rewrite-includes" };
+    auto const runner = MakeProcessRunner();
+    scratch.Write("sys/framework.h", "#pragma once\n#define DECLARE_GETTER virtual int Get() const;\n");
+    scratch.Write("tu.cpp",
+                  "#include <framework.h>\n"
+                  "struct Base { virtual ~Base() = default; virtual int Get() const; virtual void Other(); };\n"
+                  "struct Derived : Base { DECLARE_GETTER void Other() override; };\n"
+                  "int value = VALUE;\n");
+    // The probe asks only whether a clang-cl RUNS: the unit above needs its system include
+    // directory, which the probe does not pass.
+    scratch.Write("probe.cpp", "int probe;\n");
+
+    std::optional<std::string> driver;
+    for (auto const* candidate: { "clang-cl.exe", "clang-cl" })
+        if (runner
+                ->RunCaptureSplit(
+                    std::vector<std::string> { candidate, "/nologo", "/E", (scratch.Path() / "probe.cpp").string() })
+                .exitCode
+            == 0)
+        {
+            driver = candidate;
+            break;
+        }
+    if (!driver.has_value())
+        SKIP("no clang-cl on this host can preprocess");
+    auto const& clangCl = Unwrap(driver);
+
+    auto const rel = [](std::filesystem::path const& path) {
+        return std::filesystem::proximate(path).string();
+    };
+    std::vector<std::string> const argv { clangCl,
+                                          "/c",
+                                          "/W3",
+                                          "/WX",
+                                          "-imsvc" + rel(scratch.Path() / "sys"),
+                                          "/DVALUE=7",
+                                          "/Fo" + rel(scratch.Path() / "client.obj"),
+                                          rel(scratch.Path() / "tu.cpp") };
+    auto const cmd = ParseCommand(argv);
+    REQUIRE(cmd.parsedOk);
+    REQUIRE(runner->RunCaptureSplit(argv).exitCode == 0); // the client's own compile
+
+    auto const remote = RemoteCompileArgs(cmd, argv, /*targetTriple=*/ {});
+    REQUIRE(remote.has_value());
+    auto const prologue = DispatchedMacroPrologue(cmd, argv);
+    REQUIRE(prologue.has_value());
+    auto const workerCompile = [&](std::string const& text, std::string_view name) {
+        auto const job = scratch.Path() / std::format("{}.cpp", name);
+        std::ofstream { job, std::ios::binary } << text;
+        std::vector<std::string> line { clangCl, "/nologo", "/c" };
+        line.insert(line.end(), Unwrap(remote).begin(), Unwrap(remote).end());
+        line.push_back("/Fo" + rel(scratch.Path() / std::format("{}.obj", name)));
+        line.push_back(rel(job));
+        return runner->RunCaptureSplit(line);
+    };
+
+    auto const dispatched = runner->RunCaptureSplit(DispatchPreprocessCommand(cmd, argv));
+    REQUIRE(dispatched.exitCode == 0);
+    auto const worker = workerCompile(*prologue + dispatched.out, "worker");
+    INFO(worker.out << worker.err);
+    CHECK(worker.exitCode == 0);
+
+    // The control: the same unit, sent as plain `/E` text, fails on the worker under `/WX`.
+    std::vector<std::string> plain { clangCl,     "/nologo",
+                                     "/E",        "/W3",
+                                     "/WX",       "-imsvc" + rel(scratch.Path() / "sys"),
+                                     "/DVALUE=7", rel(scratch.Path() / "tu.cpp") };
+    auto const expanded = runner->RunCaptureSplit(plain);
+    REQUIRE(expanded.exitCode == 0);
+    CHECK(workerCompile(expanded.out, "plain").exitCode != 0);
 }
