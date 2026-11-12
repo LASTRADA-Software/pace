@@ -367,7 +367,7 @@ TEST_CASE("Two checkouts with equal content record byte-identical manifests and 
 
         auto witness = InputWitness::Begin(resolvedSource, files, ContentHashing::Yes);
         files.now = 2'000;
-        witness.Snapshot(ProjectDependencyPaths(std::vector<std::string> { header }, root.string(), layout), files);
+        witness.Snapshot(ManifestDependencyPaths(std::vector<std::string> { header }, root.string(), layout), files);
         REQUIRE(witness.AtKey().stability == InputStability::Stable);
         WitnessedManifestContent const content { witness, files };
         auto const manifest = BuildManifest({ .sourcePath = source,
@@ -381,7 +381,7 @@ TEST_CASE("Two checkouts with equal content record byte-identical manifests and 
         encoded[index] = EncodeManifest(*manifest);
         auto const token = CanonicalSourceToken(source, layout, root.string());
         REQUIRE(token.has_value());
-        manifestKeys[index] = ComputeManifestKey(*token, { "-c", *token }, "stamp");
+        manifestKeys[index] = ComputeManifestKey(*token, { "-c", *token }, "stamp", {});
     }
     CHECK(encoded[0] == encoded[1]);
     CHECK(manifestKeys[0] == manifestKeys[1]);

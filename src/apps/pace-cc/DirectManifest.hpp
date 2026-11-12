@@ -67,6 +67,12 @@ struct DirectManifest
     /// and two machines produce byte-identical manifests for the same state.
     std::vector<Entry> entries;
 
+    /// Every place a compiler might have found one of `entries` INSTEAD that held a file when this
+    /// manifest was recorded (`ShadowCensus`), sorted. A later census naming a candidate this one
+    /// does not is a header that appeared in front of a recorded one, and refuses the manifest
+    /// (#1754). Root tokens where the candidate has one, else absolute paths.
+    std::vector<std::string> shadowCensus;
+
     [[nodiscard]] friend bool operator==(DirectManifest const&, DirectManifest const&) = default;
 };
 
@@ -300,6 +306,14 @@ enum class PathClass : std::uint8_t
 /// @param layout       This build's roots.
 /// @return What the path is to this build.
 [[nodiscard]] PathClass ClassifyAgainstRoots(std::string_view absolutePath, PathCanon::Layout const& layout);
+
+/// Whether a path lies inside a compiler's OWN install -- the MSVC toolset, a Windows SDK, a
+/// clang or gcc resource directory, Apple's toolchain -- whose contents the toolchain stamp keys,
+/// and never inside a library tree (vcpkg) that happens to sit there. Everything else a manifest
+/// records itself (#1694, #1718).
+/// @param path An absolute path, in any separator convention.
+/// @return True only for a compiler's own install.
+[[nodiscard]] bool CoveredByToolchainStamp(std::string_view path);
 
 /// Hash a file's contents for manifest entry comparison. A missing or unreadable
 /// file yields an empty string, which never equals a recorded hash and so forces
@@ -636,7 +650,8 @@ struct ManifestInputs
                                          PathCanon::Layout const& layout);
 
 /// The reported dependencies a manifest would hash, resolved exactly as `BuildManifest` resolves
-/// them and kept only where `BuildManifest` keeps them (project paths).
+/// them and kept only where `BuildManifest` keeps them: project paths, and library paths the
+/// toolchain stamp does not cover (#1694, #1718).
 ///
 /// One function for both sides, so an input witness taken over this list answers every lookup
 /// `BuildManifest` makes. Paths `BuildManifest` would REFUSE (unanchored, a near-miss root) are
@@ -644,10 +659,10 @@ struct ManifestInputs
 /// @param reportedPaths    Dependencies as the compiler spelled them.
 /// @param workingDirectory The compile's working directory.
 /// @param layout           This build's roots.
-/// @return The resolved project paths, in reported order, duplicates removed.
-[[nodiscard]] std::vector<std::string> ProjectDependencyPaths(std::span<std::string const> reportedPaths,
-                                                              std::string_view workingDirectory,
-                                                              PathCanon::Layout const& layout);
+/// @return The resolved paths, in reported order, duplicates removed.
+[[nodiscard]] std::vector<std::string> ManifestDependencyPaths(std::span<std::string const> reportedPaths,
+                                                               std::string_view workingDirectory,
+                                                               PathCanon::Layout const& layout);
 
 /// Re-spell a directory in the vocabulary the layout's roots use.
 ///
@@ -809,10 +824,16 @@ struct ManifestInputs
 /// @param canonicalSource Canonical token for the translation unit's path.
 /// @param relativizedArgs The compile arguments, already relativized.
 /// @param toolchainStamp  The toolchain identity.
+/// @param includeSearchEnvironment `NAME=value` for every include-search variable the driver
+///                        reads (`CompilerEnvironment::includeSearch`). Folded in because this
+///                        key is taken before any header is opened, so a changed `INCLUDE` would
+///                        otherwise find the manifest recorded under the old search path and
+///                        validate the headers THAT path found (#1756). Empty folds nothing.
 /// @return A stable 32-hex-char digest.
 [[nodiscard]] std::string ComputeManifestKey(std::string_view canonicalSource,
                                              std::vector<std::string> const& relativizedArgs,
-                                             std::string_view toolchainStamp);
+                                             std::string_view toolchainStamp,
+                                             std::span<std::string const> includeSearchEnvironment);
 
 /// Derive a digest over a manifest's header state.
 ///

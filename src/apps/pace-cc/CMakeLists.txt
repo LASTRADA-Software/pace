@@ -156,6 +156,7 @@ set(_pace_cc_sources
     CmdLine.cpp
     AtomicFile.cpp
     CodecEnvelope.cpp
+    CompilerEnvironment.cpp
     CompileJob.cpp
     LauncherCli.cpp
     CacheKey.cpp
@@ -178,10 +179,12 @@ set(_pace_cc_sources
     ParallelFor.cpp
     PathResolve.cpp
     RefusalNotice.cpp
+    ResponseFiles.cpp
     ReplayGuard.cpp
     ReachabilityMemo.cpp
     RootBinding.cpp
     RootReconciler.cpp
+    ShadowCensus.cpp
     Stats.cpp
     TicketCredentials.cpp
     ToolchainHost.cpp
@@ -298,6 +301,7 @@ if(PACE_BUILD_TESTS)
         AtomicFile_test.cpp
         CacheDecision_test.cpp
         CmdLine_test.cpp
+        CompilerEnvironment_test.cpp
         CompileJob_test.cpp
         LauncherCli_test.cpp
         MarkerDiscovery_test.cpp
@@ -321,11 +325,13 @@ if(PACE_BUILD_TESTS)
         DirectManifest_test.cpp
         PathResolve_test.cpp
         RefusalNotice_test.cpp
+        ResponseFiles_test.cpp
         ReplayGuard_test.cpp
         ReachabilityMemo_test.cpp
         RootBinding_test.cpp
         StreamGrammar_test.cpp
         RootReconciler_test.cpp
+        ShadowCensus_test.cpp
         ProcessRunner_test.cpp
         Stats_test.cpp
         TicketCredentials_test.cpp

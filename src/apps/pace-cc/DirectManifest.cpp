@@ -20,6 +20,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 namespace Pace::Cc
@@ -29,7 +30,12 @@ namespace
 
     /// Manifest wire version. Bumped whenever the encoding changes shape, so an
     /// older launcher rejects a newer manifest instead of misreading it.
-    constexpr std::uint8_t ManifestVersion = 1;
+    ///
+    /// 2 appends the shadow census (#1754): a count, then one field per candidate.
+    constexpr std::uint8_t ManifestVersion = 2;
+
+    /// The fewest wire bytes one census entry can occupy: its length prefix, empty.
+    constexpr std::size_t MinCensusBytes = WireFields::FieldPrefixSize;
 
     /// The fewest wire bytes one encoded entry can occupy: the two length prefixes of
     /// its canonical path and content hash, both empty. Read off `EncodeManifest`'s
@@ -49,6 +55,38 @@ namespace
         R"(\microsoft visual studio\)",
         R"(\vcpkg_installed\)",
         R"(\vcpkg\installed\)",
+    };
+
+    /// The markers of a library tree, which the manifest RECORDS even though
+    /// `ToolchainMarkers` classifies it as toolchain content for the key (#1694, #1718).
+    ///
+    /// Asked before `CompilerInstallMarkers`, so a vcpkg tree inside a Visual Studio install
+    /// (classic mode under `...\VC\vcpkg\installed\`) is still a library.
+    constexpr std::array<std::string_view, 2> LibraryMarkers {
+        R"(\vcpkg_installed\)",
+        R"(\vcpkg\installed\)",
+    };
+
+    /// The markers of a COMPILER's own install: the headers the toolchain stamp -- the
+    /// driver's banner and target -- really does cover, because they ship with the binary it
+    /// names. Everything else outside the roots is a library a package manager can change
+    /// beneath an unchanged compiler, and a manifest that dropped it validated across the
+    /// upgrade (#1718: a vcpkg port gained a virtual, and five objects were served without it).
+    ///
+    /// Erring NARROW is the safe direction: a header missing from this list is hashed on every
+    /// direct hit, which costs time; a library wrongly on it is a stale object.
+    /// - `\microsoft visual studio\`: the MSVC toolset and its STL, versioned by `cl`'s banner.
+    /// - `\windows kits\`: the Windows SDK. WHICH SDK is `INCLUDE`, which the manifest key
+    ///   folds (`CompilerEnvironment`), and its version is part of every path below it.
+    /// - `\lib\clang\`, `\lib\gcc\`: a clang or gcc driver's resource directory
+    ///   (`<prefix>/lib/clang/<ver>/include`, `<prefix>/lib/gcc/<triple>/<ver>/include`).
+    /// - `\xcode.app\`, `\commandlinetools\`: Apple's toolchain and the SDKs it ships.
+    ///
+    /// Deliberately NOT here: `/usr/include` (glibc and every `-dev` package) and
+    /// `/usr/include/c++/v1` (libc++, which installs apart from the clang that uses it).
+    constexpr std::array<std::string_view, 6> CompilerInstallMarkers {
+        R"(\microsoft visual studio\)", R"(\windows kits\)", R"(\lib\clang\)", R"(\lib\gcc\)", R"(\xcode.app\)",
+        R"(\commandlinetools\)",
     };
 
     /// Fold a path to a comparable form: lowercased, with every separator unified.
@@ -149,7 +187,50 @@ namespace
         return PathRole::Toolchain;
     }
 
+    /// Whether `marker` occurs in the comparable form of a path.
+    /// @param comparable A path folded by `ToComparable`.
+    /// @param markers    Markers in the same fold.
+    /// @return True when any marker occurs.
+    [[nodiscard]] bool CarriesAnyMarker(std::string_view comparable, std::span<std::string_view const> markers)
+    {
+        return std::ranges::any_of(markers, [comparable](std::string_view marker) { return comparable.contains(marker); });
+    }
+
+    /// Whether the toolchain stamp covers a path `ClassifyResolved` called toolchain content, or
+    /// the manifest has to record it itself (#1694, #1718). See `CompilerInstallMarkers`.
+    /// @param resolved A path `ClassifyResolved` answered `PathRole::Toolchain` for.
+    /// @return True only for a compiler's own install, and never for a library tree inside one.
+    [[nodiscard]] bool CoveredByStamp(std::string_view resolved)
+    {
+        auto const comparable = ToComparable(resolved);
+        return !CarriesAnyMarker(comparable, LibraryMarkers) && CarriesAnyMarker(comparable, CompilerInstallMarkers);
+    }
+
+    /// The spelling a manifest records a LIBRARY header under: its root token where it has one
+    /// (a vcpkg tree inside the build tree stays portable), else its absolute path.
+    ///
+    /// An absolute entry ties the manifest to machines with the same file at the same place, and
+    /// that is the right answer rather than a cost: on any other machine it fails validation,
+    /// which is a manifest miss and the ordinary preprocessed key -- never a wrong object.
+    /// @param resolved A path `ClassifyResolved` answered `PathRole::Toolchain` for.
+    /// @param layout   This build's roots.
+    /// @return The entry's path, or nothing for a path anchored to no place this machine can
+    ///         name again (drive-relative), which the caller refuses.
+    [[nodiscard]] std::optional<std::string> LibraryEntryPath(std::string const& resolved, PathCanon::Layout const& layout)
+    {
+        if (auto token = PathCanon::CanonicalToken(resolved, layout))
+            return token;
+        if (PathCanon::AnchorForLayout(resolved, layout) == PathCanon::Anchor::Absolute)
+            return resolved;
+        return std::nullopt;
+    }
+
 } // namespace
+
+bool CoveredByToolchainStamp(std::string_view path)
+{
+    return CoveredByStamp(path);
+}
 
 std::string EncodeManifest(DirectManifest const& manifest)
 {
@@ -164,6 +245,9 @@ std::string EncodeManifest(DirectManifest const& manifest)
         out.AppendField(entry.canonicalPath);
         out.AppendField(entry.contentHash);
     }
+    out.AppendCount(manifest.shadowCensus.size());
+    for (auto const& candidate: manifest.shadowCensus)
+        out.AppendField(candidate);
     return text;
 }
 
@@ -202,6 +286,18 @@ std::expected<DirectManifest, DirectError> DecodeManifest(std::string_view bytes
         if (!cursor.ReadField(entry.canonicalPath) || !cursor.ReadField(entry.contentHash))
             return std::unexpected(DirectError::Malformed);
         manifest.entries.push_back(std::move(entry));
+    }
+
+    std::uint32_t censusCount = 0;
+    if (!cursor.ReadCount(censusCount, MinCensusBytes))
+        return std::unexpected(DirectError::Malformed);
+    manifest.shadowCensus.reserve(std::min<std::size_t>(censusCount, cursor.CapacityFor(sizeof(std::string))));
+    for ([[maybe_unused]] auto const index: std::views::iota(std::uint32_t { 0 }, censusCount))
+    {
+        std::string candidate;
+        if (!cursor.ReadField(candidate))
+            return std::unexpected(DirectError::Malformed);
+        manifest.shadowCensus.push_back(std::move(candidate));
     }
 
     // Trailing bytes mean the encoding is not what this version wrote; refuse it
@@ -756,15 +852,21 @@ std::expected<std::string, ManifestFailure> CanonicalSourceToken(std::string_vie
     return *std::move(token);
 }
 
-std::vector<std::string> ProjectDependencyPaths(std::span<std::string const> reportedPaths,
-                                                std::string_view workingDirectory,
-                                                PathCanon::Layout const& layout)
+std::vector<std::string> ManifestDependencyPaths(std::span<std::string const> reportedPaths,
+                                                 std::string_view workingDirectory,
+                                                 PathCanon::Layout const& layout)
 {
     std::vector<std::string> kept;
     for (auto const& rawPath: reportedPaths)
     {
         auto resolved = ResolveAgainst(rawPath, workingDirectory, layout);
-        if (ClassifyResolved(resolved, layout) == PathRole::Project && !std::ranges::contains(kept, resolved))
+        auto const role = ClassifyResolved(resolved, layout);
+        // Exactly the paths `BuildManifest` hashes: project headers, and library headers the
+        // stamp does not cover and that have a place to be recorded under.
+        bool const hashed =
+            role == PathRole::Project
+            || (role == PathRole::Toolchain && !CoveredByStamp(resolved) && LibraryEntryPath(resolved, layout).has_value());
+        if (hashed && !std::ranges::contains(kept, resolved))
             kept.push_back(std::move(resolved));
     }
     return kept;
@@ -822,15 +924,35 @@ std::expected<DirectManifest, ManifestFailure> BuildManifest(ManifestInputs cons
     // refusal below.
     std::size_t recorded = 0;
 
+    // Library headers, recorded only AFTER the project-header refusal below has been asked.
+    // Hashing one first would answer `Unreadable` for #319's hollow shape -- every path another
+    // checkout's, absent here -- and hide the refusal that names what is actually wrong.
+    std::vector<std::pair<std::string, std::string>> libraries;
+
     for (auto const& rawPath: inputs.reportedDependencies.Paths())
     {
         auto const resolved = ResolveAgainst(rawPath, inputs.workingDirectory, layout);
         switch (ClassifyResolved(resolved, layout))
         {
-            case PathRole::Toolchain:
-                // Covered by the stamp; listing it would make the manifest
-                // machine-specific for no gain in what a hit revalidates.
-                continue;
+            case PathRole::Toolchain: {
+                // Only the compiler's OWN install is covered by the stamp. Everything else
+                // here -- a vcpkg tree, `/usr/include/<lib>`, any prefix outside the roots -- is
+                // a library a package manager changes beneath an unchanged compiler, and this
+                // arm used to drop it too: the manifest then validated across the upgrade and
+                // served objects compiled against the old headers (#1694, #1718).
+                if (CoveredByStamp(resolved))
+                    continue;
+                auto entryPath = LibraryEntryPath(resolved, layout);
+                if (!entryPath.has_value())
+                    return std::unexpected(ManifestFailure { .fault = ManifestFault::Unanchored, .path = resolved });
+                libraries.emplace_back(*std::move(entryPath), resolved);
+                // Deliberately NOT counted in `recorded`. The `NoProjectDeps` refusal below
+                // exists for a manifest whose every reported path belongs to ANOTHER checkout
+                // (#319), and those paths reach this arm: counting them would let such a
+                // manifest through, validating against the producer's headers rather than
+                // this checkout's.
+                break;
+            }
             case PathRole::NearMissRoot:
                 // REFUSED, not dropped, and it is the one path outside the roots that
                 // is. Everything else out here is covered collectively by the
@@ -897,6 +1019,10 @@ std::expected<DirectManifest, ManifestFailure> BuildManifest(ManifestInputs cons
     if (!inputs.reportedDependencies.Paths().empty() && recorded == 0)
         return std::unexpected(ManifestFailure { .fault = ManifestFault::NoProjectDeps, .path = inputs.sourcePath });
 
+    for (auto& [entryPath, resolved]: libraries)
+        if (auto const stored = record(std::move(entryPath), resolved); !stored.has_value())
+            return std::unexpected(stored.error());
+
     // Deduplicate then sort: `/showIncludes` repeats a header once per inclusion
     // site, a GNU depfile names the TU among its own dependencies, and two machines
     // must agree on the order for the derived key to match.
@@ -935,7 +1061,8 @@ bool ValidateManifest(DirectManifest const& manifest, PathCanon::Layout const& l
 
 std::string ComputeManifestKey(std::string_view canonicalSource,
                                std::vector<std::string> const& relativizedArgs,
-                               std::string_view toolchainStamp)
+                               std::string_view toolchainStamp,
+                               std::span<std::string const> includeSearchEnvironment)
 {
     // The tag tracks `objkey-v*` and MUST be bumped with it, even when nothing
     // about the manifest's own shape changed. A manifest stores the object key BY
@@ -1022,11 +1149,26 @@ std::string ComputeManifestKey(std::string_view canonicalSource,
     //
     // v10 is the lock-step half of `objkey-v9` (a clang worker's dropped macro map): a v9
     // manifest stores an object key of the generation before it.
-    KeyDigest digest { "manifest-v10" };
+    //
+    // v11 moved alone (#1693, #1694, #1718, #1754, #1756), and every reason it moved is a
+    // manifest that validated while its object no longer matched the sources:
+    // - it records LIBRARY headers -- a vcpkg tree, `/usr/include/<lib>`, any prefix outside
+    //   the roots that is not the compiler's own install -- where v10 dropped them as covered
+    //   by the stamp, which covers the compiler and nothing a package manager installs;
+    // - it folds the include-search environment (`INCLUDE`, `CPATH`, ...) into this key, so a
+    //   moved search path no longer finds the manifest recorded under the old one;
+    // - a response file's contents reach it through the expanded argument list.
+    // Re-keying is the only thing that retires a v10 manifest: each one keeps its key under the
+    // fixed rules and keeps validating, and a direct hit never re-records. `objkey` does not
+    // move: the objects are correct under their own keys.
+    KeyDigest digest { "manifest-v11" };
     digest.Field(toolchainStamp);
     digest.Field(canonicalSource);
     for (auto const& arg: relativizedArgs)
         digest.Item(arg);
+    // A Field, never an Item, so no argument can spell an environment entry's piece.
+    for (auto const& variable: includeSearchEnvironment)
+        digest.Field(variable);
     return digest.ToHex();
 }
 

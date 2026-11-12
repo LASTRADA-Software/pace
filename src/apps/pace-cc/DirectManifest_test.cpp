@@ -68,14 +68,17 @@ TEST_CASE("EncodeManifest writes the layout DecodeManifest reads, byte for byte"
     manifest.toolchainStamp = "stamp";
     manifest.objectKey = "objkey";
     manifest.entries.push_back({ .canonicalPath = "<SRCROOT>/a.h", .contentHash = "hash" });
+    manifest.shadowCensus.emplace_back("<SRCROOT>/inc0/a.h");
 
     auto const expected = Pace::Testing::DeclaredCountBlob {}
-                              .Byte(0x01) // ManifestVersion
+                              .Byte(0x02) // ManifestVersion: 2 appended the shadow census (#1754)
                               .Field("stamp")
                               .Field("objkey")
                               .U32(1) // entryCount
                               .Field("<SRCROOT>/a.h")
                               .Field("hash")
+                              .U32(1) // censusCount
+                              .Field("<SRCROOT>/inc0/a.h")
                               .String();
 
     CHECK(EncodeManifest(manifest) == expected);
@@ -132,7 +135,7 @@ TEST_CASE("DecodeManifest rejects a length field that overruns the buffer")
     // Claim a 0xFFFFFF00-byte toolchain stamp in a handful of bytes. A decoder that
     // trusts the length would read far past the input.
     std::string hostile;
-    hostile.push_back('\x01');
+    hostile.push_back('\x02');
     hostile.append("\xff\xff\xff\x00", 4);
     hostile.append("short");
     auto const decoded = DecodeManifest(hostile);
@@ -151,7 +154,7 @@ namespace
 [[nodiscard]] std::string BlobDeclaring(std::uint32_t count, std::size_t trailing)
 {
     return Pace::Testing::DeclaredCountBlob {}
-        .Byte(0x01)   // version
+        .Byte(0x02)   // version
         .EmptyField() // toolchainStamp
         .EmptyField() // objectKey
         .U32(count)
@@ -193,13 +196,14 @@ TEST_CASE("DecodeManifest bounds an entry count by the bytes actually left")
     // One entry does fit, and those eight zero bytes really are one entry: two empty
     // fields. So the guard admits exactly what the blob can carry rather than capping
     // it at something smaller.
-    auto const exact = DecodeManifest(BlobDeclaring(1, 8));
+    // Four more zero bytes are the census count that follows the entries: an empty census.
+    auto const exact = DecodeManifest(BlobDeclaring(1, 8 + 4));
     REQUIRE(exact.has_value());
     REQUIRE(exact->entries.size() == 1);
     CHECK(exact->entries[0].canonicalPath.empty());
 
-    // And a manifest with no entries and nothing trailing is ordinary.
-    CHECK(DecodeManifest(BlobDeclaring(0, 0)).has_value());
+    // And a manifest with no entries is ordinary: its trailing bytes are the empty census count.
+    CHECK(DecodeManifest(BlobDeclaring(0, 4)).has_value());
 }
 
 TEST_CASE("MinEntryBytes tracks the encoder rather than a comment")
@@ -618,15 +622,41 @@ TEST_CASE("An unreadable dependency note is a different state from no note at al
 TEST_CASE("ComputeManifestKey is stable and separates differing inputs")
 {
     std::vector<std::string> const args { "/O2", "<SRCROOT>/src/a.cpp" };
-    auto const base = ComputeManifestKey("<SRCROOT>/src/a.cpp", args, "cl-19.51");
+    auto const base = ComputeManifestKey("<SRCROOT>/src/a.cpp", args, "cl-19.51", {});
 
     CHECK(base.size() == KeyDigest::HexLength);
-    CHECK(base == ComputeManifestKey("<SRCROOT>/src/a.cpp", args, "cl-19.51"));
+    CHECK(base == ComputeManifestKey("<SRCROOT>/src/a.cpp", args, "cl-19.51", {}));
 
     // Each input must participate: changing any one changes the key.
-    CHECK(base != ComputeManifestKey("<SRCROOT>/src/b.cpp", args, "cl-19.51"));
-    CHECK(base != ComputeManifestKey("<SRCROOT>/src/a.cpp", args, "cl-20.00"));
-    CHECK(base != ComputeManifestKey("<SRCROOT>/src/a.cpp", { "/Od", "<SRCROOT>/src/a.cpp" }, "cl-19.51"));
+    CHECK(base != ComputeManifestKey("<SRCROOT>/src/b.cpp", args, "cl-19.51", {}));
+    CHECK(base != ComputeManifestKey("<SRCROOT>/src/a.cpp", args, "cl-20.00", {}));
+    CHECK(base != ComputeManifestKey("<SRCROOT>/src/a.cpp", { "/Od", "<SRCROOT>/src/a.cpp" }, "cl-19.51", {}));
+}
+
+TEST_CASE("The include-search environment moves the manifest key", "[direct-manifest][compiler-environment]")
+{
+    // #1756: the manifest key is taken before any header is opened, so a changed `INCLUDE` has
+    // to reach it here or the manifest recorded under the old search path is found and validated.
+    std::vector<std::string> const args { "/O2", "<SRCROOT>/src/a.cpp" };
+    std::vector<std::string> const one { R"(INCLUDE=C:\sdk\one)" };
+    std::vector<std::string> const two { R"(INCLUDE=C:\sdk\two)" };
+    auto const none = ComputeManifestKey("<SRCROOT>/src/a.cpp", args, "cl-19.51", {});
+    auto const first = ComputeManifestKey("<SRCROOT>/src/a.cpp", args, "cl-19.51", one);
+
+    CHECK(first != none);
+    CHECK(first != ComputeManifestKey("<SRCROOT>/src/a.cpp", args, "cl-19.51", two));
+    CHECK(first == ComputeManifestKey("<SRCROOT>/src/a.cpp", args, "cl-19.51", one));
+}
+
+TEST_CASE("An argument cannot spell an environment entry in the manifest key", "[direct-manifest][compiler-environment]")
+{
+    // The entries are Fields and the arguments Items, so moving one string from the argument list
+    // to the environment list changes the key rather than colliding with it.
+    std::vector<std::string> const variable { "INCLUDE=C:/x" };
+    std::vector<std::string> const argsWithIt { "/O2", "INCLUDE=C:/x" };
+    std::vector<std::string> const argsWithout { "/O2" };
+    CHECK(ComputeManifestKey("<SRCROOT>/a.cpp", argsWithIt, "cl", {})
+          != ComputeManifestKey("<SRCROOT>/a.cpp", argsWithout, "cl", variable));
 }
 
 TEST_CASE("ComputeHeaderStateDigest changes when any header hash changes")
@@ -659,8 +689,8 @@ TEST_CASE("Two machines with different checkout roots derive the same object key
     std::vector<std::string> const args { "/O2", "<SRCROOT>/src/a.cpp" };
     auto const* const stamp = "cl-19.51";
 
-    auto const keyHere = ComputeManifestKey("<SRCROOT>/src/a.cpp", args, stamp);
-    auto const keyThere = ComputeManifestKey("<SRCROOT>/src/a.cpp", args, stamp);
+    auto const keyHere = ComputeManifestKey("<SRCROOT>/src/a.cpp", args, stamp, {});
+    auto const keyThere = ComputeManifestKey("<SRCROOT>/src/a.cpp", args, stamp, {});
     CHECK(keyHere == keyThere);
 
     // Manifests exchanged over the wire carry canonical tokens only, so a peer
@@ -1647,7 +1677,7 @@ TEST_CASE("The quarters of a manifest key vary independently for equal-length in
     std::array<std::set<std::uint32_t>, 6> pairwiseXors;
     for ([[maybe_unused]] auto const sample: std::views::iota(std::size_t { 0 }, Samples))
     {
-        auto const quarters = DigestQuarters(ComputeManifestKey(source.NextFixedWidthText(), args, "cl-19.51"));
+        auto const quarters = DigestQuarters(ComputeManifestKey(source.NextFixedWidthText(), args, "cl-19.51", {}));
 
         std::size_t pair = 0;
         for (auto const i: std::views::iota(std::size_t { 0 }, quarters.size()))
@@ -1685,7 +1715,7 @@ TEST_CASE("The three launcher key spaces are separated by their schema tag")
     // stripped these two blobs would be byte-identical.
     auto const objectKey =
         ComputeKey(KeyInputs { .compilerId = "same", .preprocessed = "same", .relativizedArgs = {}, .dependencyPaths = {} });
-    auto const manifestKey = ComputeManifestKey("same", args, "same");
+    auto const manifestKey = ComputeManifestKey("same", args, "same", {});
     auto const headerState = ComputeHeaderStateDigest("same", manifest);
 
     CHECK(objectKey != manifestKey);
@@ -1712,8 +1742,8 @@ TEST_CASE("The manifest digests are pinned, so changing them is deliberate")
     // so spelling the call a second time is a place for the two assertions to come
     // to disagree about what was hashed.
     std::vector<std::string> const args { "/O2", "<SRCROOT>/src/a.cpp" };
-    auto const manifestKey = ComputeManifestKey("<SRCROOT>/src/a.cpp", args, "cl-19.51");
-    CHECK(manifestKey == "7063f9c97376cce355decb8f99859612");
+    auto const manifestKey = ComputeManifestKey("<SRCROOT>/src/a.cpp", args, "cl-19.51", {});
+    CHECK(manifestKey == "88fad3f9230114ec78ee0aa163916054");
 
     // And the generations it has retired stay retired. This is the half the vector
     // above cannot cover: a v5 manifest is only safe because no launcher carrying
@@ -1736,6 +1766,11 @@ TEST_CASE("The manifest digests are pinned, so changing them is deliberate")
         // Retired with `objkey-v9` (a clang worker's dropped macro map): a v9 manifest points at
         // an object of the generation before it. Only the tag moved.
         { .key = "manifest-v9", .digest = "853203605fd6a55875adacb34fb822c0" },
+        // Retired by #1694, #1718, #1754 and #1756: a v10 manifest dropped every library
+        // header, ignored the include-search environment and a response file's contents, and
+        // carried no shadow census, so each validated across a change to what it compiled.
+        // Only the tag moved for these inputs.
+        { .key = "manifest-v10", .digest = "7063f9c97376cce355decb8f99859612" },
     });
     RequireNoRetiredDigest<std::string_view>(manifestKey, Retired);
 
@@ -2018,9 +2053,9 @@ TEST_CASE("BuildManifest takes every hash from its content source, never from th
     std::ranges::sort(hashes);
     CHECK(hashes == std::vector<std::string> { "header-as-keyed", "tu-as-keyed" });
 
-    // And it asked about exactly the TU plus what ProjectDependencyPaths names, so a witness
+    // And it asked about exactly the TU plus what ManifestDependencyPaths names, so a witness
     // taken over that list answers every lookup.
-    auto expected = ProjectDependencyPaths(std::vector<std::string> { header }, root.string(), layout);
+    auto expected = ManifestDependencyPaths(std::vector<std::string> { header }, root.string(), layout);
     expected.insert(expected.begin(), resolvedSource);
     CHECK(content.Asked() == expected);
 }
@@ -2052,13 +2087,91 @@ TEST_CASE("A content source's refusal names its path and its fault", "[direct-ma
     CHECK(DescribeManifestFailure(built.error()) == "changed during this compile: " + resolvedHeader);
 }
 
-TEST_CASE("ProjectDependencyPaths keeps project headers, resolved, and drops toolchain ones", "[direct-manifest][1650]")
+TEST_CASE("ManifestDependencyPaths keeps project and library headers, and drops the compiler's own",
+          "[direct-manifest][1650][1718]")
 {
     Pace::Testing::ScratchDirectory const scratch { "pace-direct-project-paths" };
     auto const& root = scratch.Path();
     Pace::PathCanon::Layout const layout { .sourceRoot = (root / "src").string(), .buildTree = (root / "out").string() };
     auto const project = (root / "src" / "inc" / ".." / "h.hpp").string();
-    auto const toolchain = (root / "sdk" / "vector").string();
-    auto const kept = ProjectDependencyPaths(std::vector<std::string> { project, toolchain }, root.string(), layout);
-    CHECK(kept == std::vector<std::string> { ResolveAgainst(project, root.string(), layout) });
+    auto const library = (root / "sdk" / "boost" / "any.hpp").string();
+    auto const vcpkg = (root / "out" / "vcpkg_installed" / "x64-windows" / "include" / "dep" / "api.hpp").string();
+    auto const compiler = (root / "Windows Kits" / "10" / "include" / "um" / "windows.h").string();
+    auto const kept =
+        ManifestDependencyPaths(std::vector<std::string> { project, library, vcpkg, compiler }, root.string(), layout);
+    CHECK(kept
+          == std::vector<std::string> { ResolveAgainst(project, root.string(), layout),
+                                        ResolveAgainst(library, root.string(), layout),
+                                        ResolveAgainst(vcpkg, root.string(), layout) });
+}
+
+TEST_CASE("A manifest records a vcpkg header and a library outside the roots, and a change to either fails it",
+          "[direct-manifest][1718]")
+{
+    // #1718's reproduction in miniature: the TU includes one project header (which is what makes a
+    // manifest buildable at all) and a dependency header. v10 dropped the dependency as covered by
+    // the stamp, so upgrading it in place left the manifest validating and the old object served.
+    Pace::Testing::ScratchDirectory const scratch { "pace-direct-library-headers" };
+    scratch.Write("src/a.cpp", "#include \"pch.h\"\n");
+    scratch.Write("src/pch.h", "#include <dep/api.hpp>\n");
+    scratch.Write("out/vcpkg_installed/x64-windows/include/dep/api.hpp", "constexpr int ApiVersion = 1;\n");
+    scratch.Write("prefix/include/lib/old.hpp", "constexpr int LibVersion = 1;\n");
+    auto const& root = scratch.Path();
+    Pace::PathCanon::Layout const layout { .sourceRoot = (root / "src").string(), .buildTree = (root / "out").string() };
+    auto const source = (root / "src" / "a.cpp").string();
+    auto const pch = (root / "src" / "pch.h").string();
+    auto const vcpkg = (root / "out" / "vcpkg_installed" / "x64-windows" / "include" / "dep" / "api.hpp").string();
+    auto const outside = (root / "prefix" / "include" / "lib" / "old.hpp").string();
+
+    Test::HashedWhenAsked const content;
+    auto const built = BuildManifest({ .sourcePath = source,
+                                       .reportedDependencies = ReportedDependencies::Observed({ pch, vcpkg, outside }),
+                                       .workingDirectory = root.string(),
+                                       .toolchainStamp = "stamp",
+                                       .objectKey = "objkey",
+                                       .content = content },
+                                     layout);
+    REQUIRE(built.has_value());
+    CHECK(built->entries.size() == 4);
+    // The rooted dependency keeps its portable token; only the one outside both roots is absolute.
+    CHECK(std::ranges::contains(built->entries,
+                                std::string { "<BUILDTREE>/vcpkg_installed/x64-windows/include/dep/api.hpp" },
+                                &DirectManifest::Entry::canonicalPath));
+    CHECK(ValidateManifest(*built, layout, "stamp"));
+
+    SECTION("upgrading the vcpkg port in place fails validation")
+    {
+        scratch.Write("out/vcpkg_installed/x64-windows/include/dep/api.hpp", "constexpr int ApiVersion = 2;\n");
+        CHECK_FALSE(ValidateManifest(*built, layout, "stamp"));
+    }
+    SECTION("upgrading the library outside the roots fails validation")
+    {
+        scratch.Write("prefix/include/lib/old.hpp", "constexpr int LibVersion = 2;\n");
+        CHECK_FALSE(ValidateManifest(*built, layout, "stamp"));
+    }
+}
+
+TEST_CASE("Library headers alone do not make a manifest: NoProjectDeps still refuses", "[direct-manifest][1718][319]")
+{
+    // The distinguishing control for the arm above: library entries are RECORDED but not counted,
+    // so a compile whose every dependency lies outside the roots -- the shape #319's hollow
+    // manifest had, every path belonging to another checkout -- is refused as before.
+    Pace::Testing::ScratchDirectory const scratch { "pace-direct-library-only" };
+    scratch.Write("src/a.cpp", "#include <lib/old.hpp>\n");
+    scratch.Write("prefix/include/lib/old.hpp", "constexpr int LibVersion = 1;\n");
+    auto const& root = scratch.Path();
+    Pace::PathCanon::Layout const layout { .sourceRoot = (root / "src").string(), .buildTree = (root / "out").string() };
+    auto const source = (root / "src" / "a.cpp").string();
+    auto const outside = (root / "prefix" / "include" / "lib" / "old.hpp").string();
+
+    Test::HashedWhenAsked const content;
+    auto const built = BuildManifest({ .sourcePath = source,
+                                       .reportedDependencies = ReportedDependencies::Observed({ outside }),
+                                       .workingDirectory = root.string(),
+                                       .toolchainStamp = "stamp",
+                                       .objectKey = "objkey",
+                                       .content = content },
+                                     layout);
+    REQUIRE_FALSE(built.has_value());
+    CHECK(built.error().fault == ManifestFault::NoProjectDeps);
 }

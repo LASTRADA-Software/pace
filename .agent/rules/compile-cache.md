@@ -2570,6 +2570,48 @@ OPEN -- a wrong object can be stored -- and the last fails CLOSED:
   share's clock against this machine's, or whether the filesystem stamps whole seconds. No
   runtime hint names it yet.
 
+## A manifest's key is taken before any header is opened, so it covers only what it can NAME
+
+<!-- agent-tripwire: The direct-mode MANIFEST is not the key: only a compiler's OWN install rides the stamp -->
+
+The preprocessed key hashes every byte the compiler read, so it is right about inputs it never
+names. The direct-mode manifest is the opposite object: its key is computed from the command line
+and the stamp BEFORE anything is opened, and a hit re-checks only what the manifest LISTS. Every
+input it neither lists nor keys is one a change to which still direct-hits the old object, under a
+zero exit code, and stays that way, because a direct hit never re-records. Batch #1693, #1694,
+#1718, #1754 and #1756 was four instances of that one shape (`manifest-v11` retired them):
+
+- **Only a compiler's OWN install rides the stamp.** "Toolchain content is covered by the
+  compiler identity" is true for the key and was false for the manifest: the stamp is a banner
+  and a triple, and it covers nothing a package manager installs. `BuildManifest` used to drop
+  every path `ClassifyAgainstRoots` calls toolchain -- a vcpkg tree, `/usr/include/<lib>`, any
+  prefix outside the roots -- and #1718 served five objects compiled against a vcpkg port's old
+  headers, which crashed at run time through a vtable missing the new virtual.
+  `CompilerInstallMarkers` names the trees the stamp really covers (MSVC, a Windows SDK, a clang
+  or gcc resource directory, Apple's toolchain); everything else is RECORDED, by root token where
+  it has one and by absolute path otherwise. **Err NARROW**: a missing marker costs a hash per hit,
+  a wrong one is a stale object. A library entry is NOT counted against `NoProjectDeps`, and is
+  hashed only AFTER that refusal is asked, or #319's hollow manifest -- every path another
+  checkout's -- passes, or is refused under the wrong name.
+- **The environment is input.** An argument-adding variable (`CL`, `_CL_`,
+  `CCC_OVERRIDE_OPTIONS`, `COMPILER_PATH`, `GCC_EXEC_PREFIX`) REFUSES caching rather than being
+  keyed: it is invisible to every command-line check and a worker never inherits it, so keying it
+  closes one hazard of three. An include-search variable (`INCLUDE`, `CPATH`, ...) only moves
+  resolution, which the key already hashes, so it is folded into the MANIFEST key alone. One
+  table, `CompilerEnvironmentTable()`; unset and empty are one answer.
+- **A response file is command line**, and every check read its NAME. `ExpandResponseFiles` runs
+  before `ParseCommand`, with the driver family's grammar (the CRT's rules for `cl`, libiberty's
+  for gcc), and anything it cannot expand exactly -- unreadable, nested, a BOM-less non-ASCII file
+  `cl` would read in an ANSI code page, a line too long for `CreateProcess` -- runs uncached as
+  written rather than guessed at.
+- **A header the compiler did NOT find is input too.** A manifest re-hashing the headers found
+  says nothing about the places searched before them, so a new same-named header in front of one
+  (an earlier `/I`, or beside the includer) changed the compile and kept the hit (#1754). The
+  manifest records a `ShadowCensus` -- every `<search dir>/<tail of a recorded header>` that
+  exists -- and a hit whose census differs is refused. It over-approximates on purpose, which
+  costs a manifest miss and never a wrong hit; what it cannot see is a spelling that climbs out
+  of its search directory (`"../x.h"`), since the launcher never reads `#include` text.
+
 ## Accepted trade-offs
 
 <!-- agent-tripwire: none: trades argued in place above and deliberately not rules; AGENT.md tripwires the rules they trade against -->
