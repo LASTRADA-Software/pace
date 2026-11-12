@@ -3,6 +3,7 @@
 
 #include "FormationController.hpp"
 
+#include <Pace/Consensus/DurableFile.hpp>
 #include <Pace/Core/StateFiles.hpp>
 
 #include <expected>
@@ -66,7 +67,10 @@ class RaftStoreArchiver final: public IStoreArchiver
 {
   public:
     /// @param directory The state directory the store sits in.
-    explicit RaftStoreArchiver(std::filesystem::path directory);
+    /// @param files How a directory a rename wrote into is synced (#1608): a rename reported before
+    ///        its directory reached the disk is one a power loss can take back, and the archive is
+    ///        what a dissolve or a forget leaves behind. Borrowed; must outlive this.
+    RaftStoreArchiver(std::filesystem::path directory, Consensus::IDurableFiles& files);
 
     /// @copydoc IStoreArchiver::Archive
     ///
@@ -75,7 +79,17 @@ class RaftStoreArchiver final: public IStoreArchiver
     [[nodiscard]] std::expected<void, std::string> Archive(std::string_view clusterId) override;
 
   private:
+    /// Sync @p directory after a rename into or out of it. A volume that cannot sync a directory
+    /// at all is degraded rather than refused, as every state file's replace is
+    /// (`Consensus::MeansDirectorySyncUnsupported`).
+    /// @param directory The directory to sync.
+    /// @param clusterId For the refusal's sentence.
+    /// @return Nothing, or why the archive is not yet durable.
+    [[nodiscard]] std::expected<void, std::string> SyncDirectory(std::filesystem::path const& directory,
+                                                                 std::string_view clusterId) const;
+
     std::filesystem::path _directory;
+    Consensus::IDurableFiles& _files;
 };
 
 } // namespace Pace::Node

@@ -12,10 +12,12 @@
 #include <filesystem>
 #include <format>
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <core/platform/Clock.hpp>
@@ -29,6 +31,222 @@ using Pace::Testing::Unwrap;
 
 namespace
 {
+
+using namespace Pace;
+
+/// A store that forwards every call to the one it owns, except that the next `Peek` can be made to
+/// fail: the shape of an L2 whose write succeeded and whose read-back for the L1 mirror did not
+/// (#1705). One-shot, so the case controls exactly which read fails.
+class PeekFailingStorage final: public IStorage
+{
+  public:
+    /// @param inner The store; owned.
+    explicit PeekFailingStorage(std::unique_ptr<IStorage> inner) noexcept:
+        _inner { std::move(inner) }
+    {
+    }
+
+    /// Make the next `Peek` answer @p error instead of forwarding.
+    /// @param error What it answers.
+    void FailNextPeek(StorageError error)
+    {
+        _peekFault = std::move(error);
+    }
+
+    [[nodiscard]] std::expected<GetResult, StorageError> Get(std::string_view key,
+                                                             core::platform::SteadyTimePoint now) override
+    {
+        return _inner->Get(key, now);
+    }
+
+    [[nodiscard]] std::expected<CasToken, StorageError> Set(std::string_view key,
+                                                            std::vector<std::byte> value,
+                                                            std::uint32_t flags,
+                                                            core::platform::SteadyTimePoint expiry) override
+    {
+        return _inner->Set(key, std::move(value), flags, expiry);
+    }
+
+    [[nodiscard]] std::expected<CasToken, StorageError> Add(std::string_view key,
+                                                            std::vector<std::byte> value,
+                                                            std::uint32_t flags,
+                                                            core::platform::SteadyTimePoint expiry,
+                                                            core::platform::SteadyTimePoint now) override
+    {
+        return _inner->Add(key, std::move(value), flags, expiry, now);
+    }
+
+    [[nodiscard]] std::expected<CasToken, StorageError> Replace(std::string_view key,
+                                                                std::vector<std::byte> value,
+                                                                std::uint32_t flags,
+                                                                core::platform::SteadyTimePoint expiry,
+                                                                core::platform::SteadyTimePoint now) override
+    {
+        return _inner->Replace(key, std::move(value), flags, expiry, now);
+    }
+
+    [[nodiscard]] std::expected<CasToken, StorageError> Append(std::string_view key,
+                                                               std::span<std::byte const> suffix,
+                                                               CasToken expected,
+                                                               core::platform::SteadyTimePoint now) override
+    {
+        return _inner->Append(key, suffix, expected, now);
+    }
+
+    [[nodiscard]] std::expected<CasToken, StorageError> Prepend(std::string_view key,
+                                                                std::span<std::byte const> prefix,
+                                                                CasToken expected,
+                                                                core::platform::SteadyTimePoint now) override
+    {
+        return _inner->Prepend(key, prefix, expected, now);
+    }
+
+    [[nodiscard]] std::expected<CasToken, StorageError> CompareAndSwap(std::string_view key,
+                                                                       CasToken expected,
+                                                                       std::vector<std::byte> value,
+                                                                       std::uint32_t flags,
+                                                                       core::platform::SteadyTimePoint expiry,
+                                                                       core::platform::SteadyTimePoint now) override
+    {
+        return _inner->CompareAndSwap(key, expected, std::move(value), flags, expiry, now);
+    }
+
+    [[nodiscard]] std::expected<IncrResult, StorageError> IncrementOrInitialize(std::string_view key,
+                                                                                std::uint64_t magnitude,
+                                                                                bool decrement,
+                                                                                core::platform::SteadyTimePoint now) override
+    {
+        return _inner->IncrementOrInitialize(key, magnitude, decrement, now);
+    }
+
+    [[nodiscard]] std::expected<void, StorageError> Delete(std::string_view key,
+                                                           core::platform::SteadyTimePoint now) override
+    {
+        return _inner->Delete(key, now);
+    }
+
+    [[nodiscard]] std::expected<CasToken, StorageError> Touch(std::string_view key,
+                                                              core::platform::SteadyTimePoint newExpiry,
+                                                              core::platform::SteadyTimePoint now) override
+    {
+        return _inner->Touch(key, newExpiry, now);
+    }
+
+    [[nodiscard]] std::expected<GetResult, StorageError> Peek(std::string_view key,
+                                                              core::platform::SteadyTimePoint now) override
+    {
+        if (_peekFault.has_value())
+        {
+            StorageError error = *_peekFault;
+            _peekFault.reset();
+            return std::unexpected(std::move(error));
+        }
+        return _inner->Peek(key, now);
+    }
+
+    [[nodiscard]] std::expected<std::optional<core::platform::SteadyTimePoint>, StorageError> PeekExpiry(
+        std::string_view key, core::platform::SteadyTimePoint now) override
+    {
+        return _inner->PeekExpiry(key, now);
+    }
+
+    [[nodiscard]] std::expected<CasToken, StorageError> MarkStale(std::string_view key,
+                                                                  std::optional<core::platform::SteadyTimePoint> newExpiry,
+                                                                  core::platform::SteadyTimePoint now) override
+    {
+        return _inner->MarkStale(key, newExpiry, now);
+    }
+
+    [[nodiscard]] std::expected<CasToken, StorageError> Update(
+        std::string_view key,
+        std::function<std::expected<UpdateOutcome, StorageError>(GetResult const&)> const& fn,
+        core::platform::SteadyTimePoint now) override
+    {
+        return _inner->Update(key, fn, now);
+    }
+
+    [[nodiscard]] std::expected<GetResult, StorageError> GetAndTouch(std::string_view key,
+                                                                     core::platform::SteadyTimePoint newExpiry,
+                                                                     core::platform::SteadyTimePoint now) override
+    {
+        return _inner->GetAndTouch(key, newExpiry, now);
+    }
+
+    [[nodiscard]] std::expected<bool, StorageError> ClearExpiry(std::string_view key,
+                                                                core::platform::SteadyTimePoint now) override
+    {
+        return _inner->ClearExpiry(key, now);
+    }
+
+    [[nodiscard]] std::expected<void, StorageError> CompareAndDelete(std::string_view key,
+                                                                     CasToken expected,
+                                                                     core::platform::SteadyTimePoint now) override
+    {
+        return _inner->CompareAndDelete(key, expected, now);
+    }
+
+    void FlushWithGeneration(core::platform::SteadyTimePoint effectiveAt) override
+    {
+        _inner->FlushWithGeneration(effectiveAt);
+    }
+
+    PurgeOutcome PurgeExpired(core::platform::SteadyTimePoint now, PurgeBudget budget) override
+    {
+        return _inner->PurgeExpired(now, budget);
+    }
+
+    std::optional<std::size_t> ResizeTier(StorageTier tier, std::size_t newMaxBytes) override
+    {
+        return _inner->ResizeTier(tier, newMaxBytes);
+    }
+
+    /// Runs the hook too, so a case can make one eviction step fail -- an exception on the driver's thread.
+    /// @return The inner store's answer.
+    EvictStepOutcome EvictStep() override
+    {
+        return _inner->EvictStep();
+    }
+
+    void Resize(std::size_t newMaxBytes) override
+    {
+        _inner->Resize(newMaxBytes);
+    }
+
+    [[nodiscard]] StorageStats Snapshot() const noexcept override
+    {
+        return _inner->Snapshot();
+    }
+
+    [[nodiscard]] TieredStorageStats SnapshotTiers() const noexcept override
+    {
+        return _inner->SnapshotTiers();
+    }
+
+    [[nodiscard]] bool SupportsSharedRead() const noexcept override
+    {
+        return _inner->SupportsSharedRead();
+    }
+
+    [[nodiscard]] std::expected<bool, StorageError> Prefetch(std::string_view key,
+                                                             core::platform::SteadyTimePoint now) override
+    {
+        return _inner->Prefetch(key, now);
+    }
+
+    void PromoteOnRead(std::string_view key, core::platform::SteadyTimePoint now) override
+    {
+        _inner->PromoteOnRead(key, now);
+    }
+
+    void SetReclaimLog(IReclaimLog* log) override
+    {
+        _inner->SetReclaimLog(log);
+    }
+
+  private:
+    std::unique_ptr<IStorage> _inner;
+    std::optional<StorageError> _peekFault;
+};
 
 /// Build a `LayeredStorage(InMemoryLruStorage, InMemoryLruStorage)`. L1
 /// has a configurable budget so tests can force eviction; L2 is
@@ -698,4 +916,26 @@ TEST_CASE("A sharded store splits a tier's budget across its shards as Resize do
     // Absent in every shard is absent for the whole, never a zero.
     CHECK_FALSE(storage.ResizeTier(Pace::StorageTier::Disk, 2000).has_value());
     CHECK(storage.EvictStep() == Pace::IStorage::EvictStepOutcome {});
+}
+
+TEST_CASE("A write whose L1 mirror cannot be read back drops L1 and still succeeds", "[layered][1705]")
+{
+    // #1705: the L2 write succeeded and the read-back for the mirror failed. Returning the error
+    // told the client a write failed that L2 holds, and left L1 serving the OLD value until it was
+    // evicted. L2 is canonical, so L1 drops the key and the write reports what happened.
+    auto l2Owned = std::make_unique<PeekFailingStorage>(std::make_unique<InMemoryLruStorage>(0));
+    auto* l2 = l2Owned.get();
+    LayeredStorage storage { std::make_unique<InMemoryLruStorage>(0), std::move(l2Owned) };
+    core::platform::ManualClock clock;
+
+    REQUIRE(storage.Set("k", MakeBytes("old"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    StorageError readBackFailed;
+    readBackFailed.code = StorageErrorCode::IoError;
+    l2->FailNextPeek(readBackFailed);
+    CHECK(storage.Set("k", MakeBytes("new"), 0, core::platform::SteadyTimePoint::max()).has_value());
+
+    auto const got = storage.Get("k", clock.now());
+    REQUIRE(got.has_value());
+    REQUIRE(got->found);
+    CHECK(Decode(got->entry.ValueBytes()) == "new");
 }

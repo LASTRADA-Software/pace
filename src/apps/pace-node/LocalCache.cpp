@@ -151,7 +151,14 @@ core::async::Task<std::optional<std::vector<std::byte>>> LocalCache::Fetch(std::
     // A failure to populate is not a failure to serve: the value is in hand and the
     // caller is owed it. Losing the local copy costs one future round trip, which is
     // strictly better than failing a build that could have succeeded.
-    if (auto const stored = _local.Set(key, *fetched, NoFlags, NoExpiry); !stored.has_value())
+    //
+    // ADD, never SET (#1706): this coroutine was suspended on the upstream, and a STORE may
+    // have written the key locally meanwhile -- the launcher's corrective re-store after a
+    // STALE HIT, or a manifest, which is last-writer-wins. Writing the older upstream value
+    // over it restored exactly what that store replaced. A key that is already present is
+    // that newer value winning, not a failed fill.
+    if (auto const stored = _local.Add(key, *fetched, NoFlags, NoExpiry, _clock.now());
+        !stored.has_value() && stored.error().code != StorageErrorCode::KeyExists)
         CountIfProfiled(_metrics, _counters.fillFailures);
 
     co_return fetched;
