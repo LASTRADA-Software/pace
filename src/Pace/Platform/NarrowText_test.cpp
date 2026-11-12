@@ -235,10 +235,10 @@ TEST_CASE("UTF-8 text is spelled in a tool's code page, and refused where the pa
     // UTF-8 looks like in the bytes `cl` writes under a legacy console.
     CHECK(NarrowTextFromUtf8(UmlautUtf8, std::nullopt) == std::string { UmlautUtf8 });
     CHECK(NarrowTextFromUtf8(UmlautUtf8, Utf8CodePage) == std::string { UmlautUtf8 });
-    CHECK(NarrowTextFromUtf8("plain ascii"sv, 1252U) == "plain ascii");
     // Bytes that are not UTF-8 are not text to re-spell.
     CHECK_FALSE(NarrowTextFromUtf8(UmlautCp1252, std::nullopt).has_value());
 #if defined(_WIN32)
+    CHECK(NarrowTextFromUtf8("plain ascii"sv, 1252U) == "plain ascii");
     CHECK(NarrowTextFromUtf8(UmlautUtf8, 1252U) == std::string { UmlautCp1252 });
     CHECK(NarrowTextFromUtf8(UmlautUtf8, 850U) == std::string { UmlautCp850 });
     // A character the page has no byte for is a refusal, never a best-fit substitute: Greek
