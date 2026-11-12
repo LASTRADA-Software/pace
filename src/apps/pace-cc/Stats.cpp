@@ -511,6 +511,9 @@ namespace
             case Outcome::Miss:
             case Outcome::VerifyMismatch:
             case Outcome::InputsMoved:
+            case Outcome::StoreFailed:
+            case Outcome::Stale:
+            case Outcome::VerifyFailed:
                 return true;
             case Outcome::Uncacheable:
             case Outcome::Unavailable:
@@ -536,6 +539,12 @@ namespace
         std::uint64_t verifyMismatches {};
         /// Compiles an input changed during; see `Outcome::InputsMoved`.
         std::uint64_t inputsMoved {};
+        /// Compiles whose STORE was not taken; see `Outcome::StoreFailed`.
+        std::uint64_t storeFailures {};
+        /// Hits refused as stale and recompiled; see `Outcome::Stale`.
+        std::uint64_t staleHits {};
+        /// Verified hits whose fresh compile failed; see `Outcome::VerifyFailed`.
+        std::uint64_t verifyFailures {};
         /// Records `CountsAsServable` admits; read through `Servable()`.
         std::uint64_t servableCount {};
 
@@ -575,7 +584,8 @@ namespace
 
         [[nodiscard]] std::uint64_t Total() const noexcept
         {
-            return hits + misses + uncacheable + unavailable + verifyMismatches + inputsMoved;
+            return hits + misses + uncacheable + unavailable + verifyMismatches + inputsMoved + storeFailures + staleHits
+                   + verifyFailures;
         }
 
         /// The compiles the cache was ASKED for, which is what a hit rate is rated against;
@@ -670,6 +680,12 @@ namespace
             return Outcome::VerifyMismatch;
         if (token == "INPUTS-MOVED")
             return Outcome::InputsMoved;
+        if (token == "STORE-FAILED")
+            return Outcome::StoreFailed;
+        if (token == "STALE")
+            return Outcome::Stale;
+        if (token == "VERIFY-FAILED")
+            return Outcome::VerifyFailed;
         return Outcome::Unavailable;
     }
 
@@ -1136,6 +1152,16 @@ namespace
             out << "  wrong object : " << Colorize(std::to_string(tally.verifyMismatches), palette.bad, palette.reset)
                 << "  (hits PACE_VERIFY rejected -- " << Colorize("WRONG OBJECT SERVED", palette.bad, palette.reset)
                 << "; the fresh compile was used)\n";
+        if (tally.verifyFailures > 0)
+            out << "  verify failed: " << Colorize(std::to_string(tally.verifyFailures), palette.bad, palette.reset)
+                << "  (hits PACE_VERIFY could not recompile -- the source no longer compiles, so the served object is "
+                   "suspect)\n";
+        if (tally.staleHits > 0)
+            out << "  stale hits   : " << Colorize(std::to_string(tally.staleHits), palette.neutral, palette.reset)
+                << "  (entries whose dependency record no longer held; recompiled and re-stored)\n";
+        if (tally.storeFailures > 0)
+            out << "  store failed : " << Colorize(std::to_string(tally.storeFailures), palette.bad, palette.reset)
+                << "  (compiled, and the cache did not take the object -- the next build misses again)\n";
 
         if (!tally.reasons.empty())
         {
@@ -1193,6 +1219,12 @@ std::string_view ToStringView(Outcome outcome) noexcept
             return "VERIFY-MISMATCH";
         case Outcome::InputsMoved:
             return "INPUTS-MOVED";
+        case Outcome::StoreFailed:
+            return "STORE-FAILED";
+        case Outcome::Stale:
+            return "STALE";
+        case Outcome::VerifyFailed:
+            return "VERIFY-FAILED";
         case Outcome::Unavailable:
             break;
     }
@@ -1203,6 +1235,8 @@ Outcome OutcomeOfServedHit(HitVerdict verdict) noexcept
 {
     switch (verdict)
     {
+        case HitVerdict::FreshCompileFailed:
+            return Outcome::VerifyFailed;
         case HitVerdict::Mismatched:
             return Outcome::VerifyMismatch;
         case HitVerdict::NotChecked:
@@ -1441,6 +1475,17 @@ namespace
                     case Outcome::InputsMoved:
                         ++tally->inputsMoved;
                         break;
+                    case Outcome::StoreFailed:
+                        ++tally->storeFailures;
+                        tally->missMs.push_back(record.elapsedMs);
+                        break;
+                    case Outcome::Stale:
+                        ++tally->staleHits;
+                        tally->missMs.push_back(record.elapsedMs);
+                        break;
+                    case Outcome::VerifyFailed:
+                        ++tally->verifyFailures;
+                        break;
                 }
                 if (CountsAsServable(record.outcome))
                     ++tally->servableCount;
@@ -1469,7 +1514,7 @@ namespace
             // uncacheable file is visible rather than hidden in a percentage, and so
             // is a file an edit raced, which names the source an editor touched.
             if ((record.outcome == Outcome::Uncacheable || record.outcome == Outcome::Unavailable
-                 || record.outcome == Outcome::InputsMoved)
+                 || record.outcome == Outcome::InputsMoved || record.outcome == Outcome::StoreFailed)
                 && !record.source.empty())
                 ++folded.neverCached[record.source];
         }
@@ -1972,6 +2017,12 @@ std::string FormatHtmlReport(std::string_view groupFilter)
     // Conditional for the same reason: most dashboards have no editor racing a build.
     if (overall.inputsMoved > 0)
         AppendTallyCard(out, "inputs moved", overall.inputsMoved, "uncache");
+    if (overall.verifyFailures > 0)
+        AppendTallyCard(out, "verify failed", overall.verifyFailures, "bad");
+    if (overall.staleHits > 0)
+        AppendTallyCard(out, "stale hits", overall.staleHits, "miss");
+    if (overall.storeFailures > 0)
+        AppendTallyCard(out, "store failed", overall.storeFailures, "bad");
     out << "</div>";
 
     out << R"(<div class="panel"><div class="panel-title">hit rate over time</div>)" << RenderTrendSvg(records) << "</div>";
