@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -182,6 +183,17 @@ struct ResolvedMarker
 /// @return The prefix its notes carry, or nullopt when nothing was learned.
 [[nodiscard]] std::optional<std::string> MarkerFromProbeOutput(std::string_view probeOutput, std::string_view knownPath);
 
+/// The same, matching a note against EVERY spelling of the probe's path the compiler may have
+/// written (#1580). `cl` writes `/showIncludes` in the console output code page, so a path this
+/// process holds in UTF-8 matches no note on a non-ASCII `TEMP` unless it is also compared in
+/// the compiler's spelling. The learned marker stays in the COMPILER's bytes, which is what a
+/// later reader matches against raw output; disagreement between lines is still no answer.
+/// @param probeOutput Everything the probe compiler printed, both streams.
+/// @param knownPathSpellings The header's path, as UTF-8 and as the tool would spell it.
+/// @return The prefix its notes carry, or nullopt when nothing was learned.
+[[nodiscard]] std::optional<std::string> MarkerFromProbeOutput(std::string_view probeOutput,
+                                                               std::span<std::string const> knownPathSpellings);
+
 /// Asks a compiler what prefix its `/showIncludes` notes carry.
 ///
 /// A seam rather than a free function because the answer costs a compiler spawn and a
@@ -260,8 +272,11 @@ inline constexpr std::string_view MarkerDiscoveryRequest = "auto";
 ///        no driver flag of its own. `/EP` ALONE is a rule with a ticket behind it
 ///        (`AGENT.md`), and a second literal would sit outside its reach.
 /// @return Its note prefix, or nullopt.
+/// @param toolCodePage The page the compiler writes its notes in when they are not UTF-8
+///        (`NarrowTextPolicy::toolCodePage`); the probe's path is compared in it as well.
 [[nodiscard]] std::optional<std::string> ProbeIncludeNoteMarker(IProcessRunner& runner,
                                                                 std::string const& compiler,
-                                                                DriverSpec const& driver);
+                                                                DriverSpec const& driver,
+                                                                std::optional<std::uint32_t> toolCodePage);
 
 } // namespace Pace::Cc

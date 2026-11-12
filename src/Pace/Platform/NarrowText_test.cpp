@@ -10,6 +10,8 @@
 #include <string>
 #include <string_view>
 
+#include <tests/Unwrap.hpp>
+
 using namespace Pace;
 using namespace std::string_view_literals;
 
@@ -223,5 +225,31 @@ TEST_CASE("The host policy separates this process from a tool it runs", "[platfo
     // Nothing to read a code page from, and inventing one would make every legacy
     // filename on this host unusable.
     CHECK_FALSE(policy.toolCodePage.has_value());
+#endif
+}
+
+TEST_CASE("UTF-8 text is spelled in a tool's code page, and refused where the page cannot say it",
+          "[platform][narrowtext][1580]")
+{
+    // The inverse of the second candidate above (#1580): what a path this process holds in
+    // UTF-8 looks like in the bytes `cl` writes under a legacy console.
+    CHECK(NarrowTextFromUtf8(UmlautUtf8, std::nullopt) == std::string { UmlautUtf8 });
+    CHECK(NarrowTextFromUtf8(UmlautUtf8, Utf8CodePage) == std::string { UmlautUtf8 });
+    CHECK(NarrowTextFromUtf8("plain ascii"sv, 1252U) == "plain ascii");
+    // Bytes that are not UTF-8 are not text to re-spell.
+    CHECK_FALSE(NarrowTextFromUtf8(UmlautCp1252, std::nullopt).has_value());
+#if defined(_WIN32)
+    CHECK(NarrowTextFromUtf8(UmlautUtf8, 1252U) == std::string { UmlautCp1252 });
+    CHECK(NarrowTextFromUtf8(UmlautUtf8, 850U) == std::string { UmlautCp850 });
+    // A character the page has no byte for is a refusal, never a best-fit substitute: Greek
+    // alpha (U+03B1) under CP-1252 would otherwise come back as `a`, a different file.
+    CHECK_FALSE(NarrowTextFromUtf8("\xCE\xB1"sv, 1252U).has_value());
+    // And the round trip agrees with the forward direction.
+    auto const roundTrip = NarrowTextFromUtf8(UmlautUtf8, 850U);
+    REQUIRE(roundTrip.has_value());
+    CHECK(Utf8FromNarrowText(Pace::Testing::Unwrap(roundTrip), 850U) == std::string { UmlautUtf8 });
+#else
+    // No transcoder here: a named legacy page is a request this build cannot honour.
+    CHECK_FALSE(NarrowTextFromUtf8(UmlautUtf8, 1252U).has_value());
 #endif
 }

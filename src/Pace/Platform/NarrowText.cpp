@@ -221,6 +221,46 @@ std::optional<std::string> Utf8FromNarrowText(std::string_view text, std::option
 #endif
 }
 
+std::optional<std::string> NarrowTextFromUtf8(std::string_view text, std::optional<std::uint32_t> codePage)
+{
+    if (!IsValidUtf8(text))
+        return std::nullopt;
+    if (!codePage.has_value() || *codePage == Utf8CodePage || text.empty())
+        return std::string { text };
+
+#if defined(_WIN32)
+    auto const wide = WideTextFromUtf8(text);
+    if (!wide.has_value() || wide->size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+        return std::nullopt;
+    // `WC_NO_BEST_FIT_CHARS` plus the used-default flag is what makes "cannot express" a refusal:
+    // without them `ü` under a page lacking it becomes `u`, a different file. A page that takes
+    // neither (the stateful ones) fails the call, which is a refusal too.
+    BOOL usedDefault = FALSE;
+    auto const length = ::WideCharToMultiByte(
+        *codePage, WC_NO_BEST_FIT_CHARS, wide->data(), static_cast<int>(wide->size()), nullptr, 0, nullptr, &usedDefault);
+    if (length <= 0 || usedDefault != FALSE)
+        return std::nullopt;
+    std::string narrow;
+    narrow.resize(static_cast<std::size_t>(length));
+    if (::WideCharToMultiByte(*codePage,
+                              WC_NO_BEST_FIT_CHARS,
+                              wide->data(),
+                              static_cast<int>(wide->size()),
+                              narrow.data(),
+                              length,
+                              nullptr,
+                              &usedDefault)
+            <= 0
+        || usedDefault != FALSE)
+        return std::nullopt;
+    return narrow;
+#else
+    // No transcoder on this platform, and a page a caller names is a request this build cannot
+    // honour -- the mirror of `Utf8FromNarrowText`'s refusal.
+    return std::nullopt;
+#endif
+}
+
 #if defined(_WIN32)
 std::optional<std::string> Utf8FromWideText(std::wstring_view text)
 {
