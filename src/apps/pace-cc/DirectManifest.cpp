@@ -890,7 +890,9 @@ std::expected<DirectManifest, ManifestFailure> BuildManifest(ManifestInputs cons
     if (!inputs.reportedDependencies.WasObserved())
         return std::unexpected(ManifestFailure { .fault = ManifestFault::DepsNotObserved, .path = inputs.sourcePath });
 
-    DirectManifest manifest { .toolchainStamp = inputs.toolchainStamp, .objectKey = inputs.objectKey, .entries = {} };
+    DirectManifest manifest {
+        .toolchainStamp = inputs.toolchainStamp, .objectKey = inputs.objectKey, .entries = {}, .shadowCensus = {}
+    };
 
     // The TU first, and its absence is fatal rather than merely thin. A manifest
     // that does not name the file being compiled revalidates everything except it,

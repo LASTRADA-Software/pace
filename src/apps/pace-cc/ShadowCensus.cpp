@@ -202,7 +202,9 @@ std::vector<std::string> ShadowCensus(std::span<std::string const> headers,
     for (auto const& directory: directories)
         for (auto const& tail: tails)
         {
-            auto candidate = directory + '/' + tail;
+            std::string candidate = directory;
+            candidate += '/';
+            candidate += tail;
             if (folded.contains(candidate) || !cache.Exists(directory, tail))
                 continue;
             auto token = PathCanon::CanonicalToken(candidate, layout);

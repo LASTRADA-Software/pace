@@ -94,7 +94,7 @@ TEST_CASE("EncodeManifest and DecodeManifest round-trip a manifest")
 
 TEST_CASE("DecodeManifest round-trips an empty entry list")
 {
-    DirectManifest const empty { .toolchainStamp = "cl 19.51", .objectKey = "k", .entries = {} };
+    DirectManifest const empty { .toolchainStamp = "cl 19.51", .objectKey = "k", .entries = {}, .shadowCensus = {} };
     auto const decoded = DecodeManifest(EncodeManifest(empty));
     REQUIRE(decoded.has_value());
     CHECK(decoded->entries.empty());
@@ -212,7 +212,7 @@ TEST_CASE("MinEntryBytes tracks the encoder rather than a comment")
     // which is comment discipline. This pins it structurally: the cost of one EMPTY
     // entry is measured from the encoder itself, so a field added to that loop fails
     // here rather than quietly leaving the guard weaker than the format it guards.
-    DirectManifest empty { .toolchainStamp = {}, .objectKey = {}, .entries = {} };
+    DirectManifest empty { .toolchainStamp = {}, .objectKey = {}, .entries = {}, .shadowCensus = {} };
     DirectManifest one = empty;
     one.entries.push_back(DirectManifest::Entry { .canonicalPath = {}, .contentHash = {} });
 
@@ -848,7 +848,7 @@ TEST_CASE("ValidateManifest refuses an empty manifest rather than validating on 
     // presence is that function's own precondition (issue #49 / issue #51). So an
     // empty entry set is a decode artifact or an older format, and a matching stamp
     // says nothing at all about the sources.
-    DirectManifest const empty { .toolchainStamp = "cl-19.51", .objectKey = "k", .entries = {} };
+    DirectManifest const empty { .toolchainStamp = "cl-19.51", .objectKey = "k", .entries = {}, .shadowCensus = {} };
     CHECK_FALSE(ValidateManifest(empty, WindowsLayout(), "cl-19.51"));
     CHECK_FALSE(ValidateManifest(empty, WindowsLayout(), "cl-20.00"));
 }

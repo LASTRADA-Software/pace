@@ -39,15 +39,20 @@ TEST_CASE("Windows grammar: whitespace and newlines separate, quotes group", "[r
 
 TEST_CASE("Windows grammar: backslashes are literal unless a quote follows them", "[response-files]")
 {
+    // The inputs are named outside the assertion macros: MSVC's release build read a raw
+    // literal carrying `\"` inside a macro argument as an escape sequence (C4129).
     // A path is the ordinary case, and its backslashes must survive untouched.
-    CHECK(SplitResponseFile(R"(/IC:\src\inc C:\src\a.cpp)", DriverFamily::Msvc)
-          == Args { R"(/IC:\src\inc)", R"(C:\src\a.cpp)" });
+    std::string_view const paths = "/IC:\\src\\inc C:\\src\\a.cpp";
+    CHECK(SplitResponseFile(paths, DriverFamily::Msvc) == Args { "/IC:\\src\\inc", "C:\\src\\a.cpp" });
     // 2n backslashes before a quote: n backslashes, and the quote toggles.
-    CHECK(SplitResponseFile(R"("C:\dir\\" next)", DriverFamily::Msvc) == Args { R"(C:\dir\)", "next" });
+    std::string_view const evenRun = "\"C:\\dir\\\\\" next";
+    CHECK(SplitResponseFile(evenRun, DriverFamily::Msvc) == Args { "C:\\dir\\", "next" });
     // 2n+1 backslashes before a quote: n backslashes and a literal quote.
-    CHECK(SplitResponseFile(R"(/DMSG=\"hi\")", DriverFamily::Msvc) == Args { R"(/DMSG="hi")" });
+    std::string_view const oddRun = "/DMSG=\\\"hi\\\"";
+    CHECK(SplitResponseFile(oddRun, DriverFamily::Msvc) == Args { "/DMSG=\"hi\"" });
     // `""` inside quotes is one literal quote.
-    CHECK(SplitResponseFile(R"("a""b")", DriverFamily::Msvc) == Args { R"(a"b)" });
+    std::string_view const doubled = "\"a\"\"b\"";
+    CHECK(SplitResponseFile(doubled, DriverFamily::Msvc) == Args { "a\"b" });
 }
 
 TEST_CASE("Windows grammar: an empty quoted argument is an argument", "[response-files]")
@@ -60,8 +65,8 @@ TEST_CASE("Windows grammar: an empty quoted argument is an argument", "[response
 
 TEST_CASE("GNU grammar: single quotes are literal, a backslash escapes", "[response-files]")
 {
-    CHECK(SplitResponseFile(R"(-c 'a b.c' -DX=\"y\" a\ b)", DriverFamily::Gnu)
-          == Args { "-c", "a b.c", R"(-DX="y")", "a b" });
+    std::string_view const escapes = "-c 'a b.c' -DX=\\\"y\\\" a\\ b";
+    CHECK(SplitResponseFile(escapes, DriverFamily::Gnu) == Args { "-c", "a b.c", "-DX=\"y\"", "a b" });
     CHECK(SplitResponseFile("-I\"/opt/my inc\"\n-O2", DriverFamily::Gnu) == Args { "-I/opt/my inc", "-O2" });
 }
 
