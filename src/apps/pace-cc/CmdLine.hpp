@@ -822,10 +822,15 @@ struct PassThroughMatch
 struct ParsedCommand
 {
     Flavor flavor { Flavor::Unknown };
-    std::string compiler;            ///< argv[0] — the real compiler to exec.
-    std::string source;              ///< The translation-unit source path.
-    std::string objPath;             ///< The requested object output (/Fo or -o).
-    std::string depPath;             ///< The requested depfile (-MF), if any.
+    std::string compiler; ///< argv[0] — the real compiler to exec.
+    std::string source;   ///< The translation-unit source path.
+    std::string objPath;  ///< The requested object output (/Fo or -o).
+    std::string depPath;  ///< The requested depfile (-MF), if any.
+    /// Why a line that is otherwise a compile is not cacheable, when an argument says so
+    /// (`UncacheableFlags`): it reads a file or a machine property the key cannot see, or asks
+    /// for a depfile the launcher cannot name. Empty when nothing did. A reason rather than a
+    /// flag, so the launcher can say WHICH, as it does for `sideArtefact`.
+    std::string_view uncacheable;
     bool wantShowIncludes { false }; ///< True if /showIncludes was requested.
     /// True when the line also writes a BMI, a precompiled header or `cl`'s shared
     /// PDB, or uses a precompiled header under `cl` (`/Yu`), which makes it
@@ -1218,6 +1223,35 @@ struct MappedCompileDir
 /// @return The preprocess invocation, argv[0] being the compiler.
 [[nodiscard]] std::vector<std::string> DispatchPreprocessCommand(ParsedCommand const& cmd,
                                                                  std::span<std::string const> argv);
+
+/// The rule targets and phony-rule request a GNU compile's depfile is written with: every
+/// `-MT` target as written, every `-MQ` target quoted for make, the object when neither was
+/// given, and whether `-MP` asked for a phony rule per dependency (#1696). A depfile the
+/// launcher writes itself -- a dispatched compile's -- must say what the driver's would.
+struct DepFileRules
+{
+    std::vector<std::string> targets;  ///< The rule's targets, already make-quoted.
+    bool phonyPerDependency { false }; ///< `-MP`.
+};
+
+/// Read `DepFileRules` off a GNU command line.
+/// @param cmd  The parsed command; its object path is the default target.
+/// @param argv The full invocation.
+/// @return The targets and the phony request.
+[[nodiscard]] DepFileRules DepFileRulesOf(ParsedCommand const& cmd, std::span<std::string const> argv);
+
+/// The precompiled headers a GNU driver would read IMPLICITLY for this compile (#1700): gcc uses
+/// `<header>.gch` in place of a header it includes when one sits beside it, and the preprocessed
+/// text -- and so the key -- shows the header, never the `.gch`. Candidates only: every
+/// `-include` argument and every reported dependency, each with `.gch` appended. The caller asks
+/// the filesystem which exist.
+/// @param argv         The full invocation.
+/// @param family       The driver's family; anything but GNU has none.
+/// @param dependencies The dependency paths the key's preprocess reported.
+/// @return The candidate `.gch` paths.
+[[nodiscard]] std::vector<std::string> ImplicitPrecompiledHeaderCandidates(std::span<std::string const> argv,
+                                                                           DriverFamily family,
+                                                                           std::span<std::string const> dependencies);
 
 /// The `#define`/`#undef` lines a driver whose dispatched text leaves macros unexpanded writes
 /// at the top of that text, one per macro switch on the command line, in its order

@@ -3147,3 +3147,23 @@ TEST_CASE("An MSVC-targeting clang that folds no tree and cannot name itself is 
     // doing rather than a fixture that could never write one.
     CHECK_FALSE(StoredFingerprint(state).empty());
 }
+
+TEST_CASE("A driver that does not identify itself is marked as named only", "[toolchain-probe][identity][1698]")
+{
+    // The fallback keys every version of a compiler alike, so the launcher refuses to cache on
+    // it; the evidence field is what lets it tell the fallback from a banner that happens to be
+    // a bare word.
+    CompileRun failedRun;
+    failedRun.exitCode = 1;
+    ScriptedRunner failed { failedRun };
+    auto const fallback = ProbeDriverIdentity(failed, "g++");
+    CHECK(fallback.evidence == IdentityEvidence::NameOnly);
+
+    CompileRun answeredRun;
+    answeredRun.exitCode = 0;
+    answeredRun.out = "g++ (GCC) 14.2.0\n";
+    ScriptedRunner answered { answeredRun };
+    auto const banner = ProbeDriverIdentity(answered, "g++");
+    CHECK(banner.evidence == IdentityEvidence::Answered);
+    CHECK(banner.banner == "g++ (GCC) 14.2.0");
+}

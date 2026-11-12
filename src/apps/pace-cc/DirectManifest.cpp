@@ -1061,6 +1061,12 @@ bool ValidateManifest(DirectManifest const& manifest, PathCanon::Layout const& l
     });
 }
 
+bool TextReferencesVolatileMacro(std::string_view text) noexcept
+{
+    constexpr std::array<std::string_view, 3> VolatileMacros { "__TIME__", "__DATE__", "__TIMESTAMP__" };
+    return std::ranges::any_of(VolatileMacros, [text](std::string_view macro) { return text.contains(macro); });
+}
+
 std::string ComputeManifestKey(std::string_view canonicalSource,
                                std::vector<std::string> const& relativizedArgs,
                                std::string_view toolchainStamp,
