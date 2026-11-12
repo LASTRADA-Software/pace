@@ -1737,6 +1737,41 @@ namespace
         }
         return *language;
     }
+
+    /// Whether @p arg is a clang-cl debug-info flag that clang-cl reads as `/Z7` (#1602).
+    /// @param flavor The driver's flavour.
+    /// @param arg    One argument.
+    /// @return True for `/Zi` or `-Zi` on clang-cl, and for nothing else.
+    [[nodiscard]] bool ReadsAsObjectDebugInfo(Flavor flavor, std::string_view arg) noexcept
+    {
+        return flavor == Flavor::ClangCl && std::ranges::contains(ClangClObjectDebugInfo, arg);
+    }
+
+    /// Why a command line writing a SHARED PDB cannot be dispatched, if it does: a second artefact,
+    /// and only the object comes back. Refused on the same reasoning as a module interface unit.
+    /// Its own function so `RemoteCompileArgs` stays under the analyser's complexity budget.
+    /// @param cmd    The parsed command.
+    /// @param argv   The full invocation.
+    /// @param family The driver's family.
+    /// @return The refusal, or nothing.
+    [[nodiscard]] std::optional<std::string> SharedPdbRefusal(ParsedCommand const& cmd,
+                                                              std::span<std::string const> argv,
+                                                              DriverFamily family)
+    {
+        if (family != DriverFamily::Msvc)
+            return std::nullopt;
+        // ONE span for the search and its end: two `subspan` calls are two ranges, and comparing
+        // across them is undefined (the debug STL asserts on it).
+        auto const arguments = argv.subspan(1);
+        auto const shared = std::ranges::find_if(arguments, [&cmd](std::string const& arg) {
+            return std::ranges::contains(MsvcSharedPdb, arg) && !ReadsAsObjectDebugInfo(cmd.flavor, arg);
+        });
+        if (shared == arguments.end())
+            return std::nullopt;
+        return std::format("{} writes debug info to a shared PDB, which a dispatched compile cannot bring back; "
+                           "build with /Z7 to distribute this",
+                           *shared);
+    }
 } // namespace
 
 std::expected<std::vector<std::string>, std::string> RemoteCompileArgs(ParsedCommand const& cmd,
@@ -1751,18 +1786,8 @@ std::expected<std::vector<std::string>, std::string> RemoteCompileArgs(ParsedCom
     if (!language.has_value())
         return std::unexpected(language.error());
 
-    // A shared PDB is a second artefact, and only the object comes back. Refused
-    // before anything is sent, on the same reasoning as a module interface unit.
-    auto const readsAsObjectDebugInfo = [&cmd](std::string_view arg) {
-        return cmd.flavor == Flavor::ClangCl && std::ranges::contains(ClangClObjectDebugInfo, arg);
-    };
-    if (driver.family == DriverFamily::Msvc)
-        for (auto const i: std::views::iota(std::size_t { 1 }, argv.size()))
-            if (std::ranges::contains(MsvcSharedPdb, argv[i]) && !readsAsObjectDebugInfo(argv[i]))
-                return std::unexpected(
-                    std::format("{} writes debug info to a shared PDB, which a dispatched compile cannot bring back; "
-                                "build with /Z7 to distribute this",
-                                argv[i]));
+    if (auto refusal = SharedPdbRefusal(cmd, argv, driver.family))
+        return std::unexpected(*std::move(refusal));
 
     auto const preprocessedInput = PreprocessedInputFlagsFor(driver, *language);
     if (!preprocessedInput.has_value())
@@ -1803,7 +1828,7 @@ std::expected<std::vector<std::string>, std::string> RemoteCompileArgs(ParsedCom
             continue;
 
         // clang-cl's `/Zi` IS `/Z7`, and the worker is told so in the spelling it admits.
-        if (readsAsObjectDebugInfo(a))
+        if (ReadsAsObjectDebugInfo(cmd.flavor, a))
         {
             out.emplace_back(ObjectDebugInfo);
             continue;
