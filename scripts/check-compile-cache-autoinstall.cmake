@@ -60,12 +60,16 @@ cmake_minimum_required(VERSION 3.28)
 # publishes for, and the unpublished case is a row of its own that states a
 # platform nothing is published for. no-such-release names the asset it tried,
 # which is how it shows the pin reached the download and not only the lookup.
+# linux-aarch64-asset does the same for the arm64 Linux row, under the processor
+# spelling `uname -m` and so CMAKE_HOST_SYSTEM_PROCESSOR give on that host: it is
+# the one row that pins what an arm64 Linux consumer asks for from an x86 host.
 set(PaceAutoInstallRows
     "api-unreachable|Not auto-installing pace-cc: cannot reach the GitHub API||-DPACE_AUTO_INSTALL=ON -DPACE_AUTO_INSTALL_API=http://127.0.0.1:1"
     "off-by-default||Not auto-installing pace-cc|"
     "opted-out-empty-addr|Not auto-installing pace-cc: PACE_ADDR is empty||-DPACE_AUTO_INSTALL=ON -DPACE_ADDR="
     "not-a-version|is not a numeric X.Y.Z version||-DPACE_AUTO_INSTALL=ON -DPACE_AUTO_INSTALL_VERSION=not-a-version"
     "no-such-release|Not auto-installing pace-cc: downloading pace-9.9.9-Linux-x86_64.tar.gz failed||-DPACE_AUTO_INSTALL=ON -DPACE_AUTO_INSTALL_VERSION=9.9.9"
+    "linux-aarch64-asset|Not auto-installing pace-cc: downloading pace-9.9.9-Linux-aarch64.tar.gz failed||-DPACE_AUTO_INSTALL=ON -DPACE_AUTO_INSTALL_VERSION=9.9.9 -DPACE_AUTO_INSTALL_HOST_PROCESSOR=aarch64"
     "unpublished-platform|Not auto-installing pace-cc: no prebuilt binary is published for Linux-no-such-arch||-DPACE_AUTO_INSTALL=ON -DPACE_AUTO_INSTALL_HOST_SYSTEM=Linux -DPACE_AUTO_INSTALL_HOST_PROCESSOR=no-such-arch"
 )
 

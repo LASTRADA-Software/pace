@@ -156,6 +156,7 @@ hostSystem="$(uname -s)"
 hostMachine="$(uname -m)"
 case "${hostSystem}-${hostMachine}" in
     Linux-x86_64)  platform="Linux-x86_64" ;;
+    Linux-aarch64) platform="Linux-aarch64" ;;
     Darwin-arm64)  platform="Darwin-arm64" ;;
     Darwin-aarch64) platform="Darwin-arm64" ;;
     *) echo "no published-asset row for ${hostSystem}-${hostMachine}; skipping"; exit "$SKIP" ;;

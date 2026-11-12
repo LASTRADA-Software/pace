@@ -51,6 +51,7 @@ cmake_minimum_required(VERSION 3.28)
 #   <host system>|<host processor>|<asset infix>|<launcher path>|<daemon path>
 set(PaceInstallOracle
     "Linux|x86_64|Linux-x86_64|usr/bin/pace-cc|usr/bin/pace-kv"
+    "Linux|aarch64|Linux-aarch64|usr/bin/pace-cc|usr/bin/pace-kv"
     "Darwin|arm64|Darwin-arm64|opt/pace/bin/pace-cc|opt/pace/bin/pace-kv"
 )
 

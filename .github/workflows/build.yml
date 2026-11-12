@@ -2497,28 +2497,58 @@ jobs:
   # actually parses, and that installing the package really does leave a
   # running daemon serving traffic.
 
+  # One row per Linux architecture a release ships, and a new architecture is a new
+  # row: the `-arm64` row is what PACE_AUTO_INSTALL's `linux_aarch64` row in
+  # cmake/portable/CompileCache.cmake downloads, so CI on an arm64 runner fetches a
+  # launcher instead of falling back. A matrix ROW, not a job, for
+  # `check-release-gate`'s reason, and `suffix` is empty on the x86 row so its
+  # context name does not move.
+  #
+  # `generators` is what CPack builds, and every RPM-only step below asks it. The
+  # arm64 row ships no .rpm yet: whether it should is the owner's call, and adding
+  # `RPM` to that row is the whole change (the Fedora e2e step then runs there too).
+  # The artifact name carries the suffix, so both rows land in the release job's
+  # `pace-*-packages` download without overwriting each other.
   package-linux:
-    name: "Package (Linux .deb/.rpm)"
-    runs-on: ubuntu-24.04
+    name: "Package (Linux ${{ matrix.formats }})${{ matrix.suffix }}"
+    runs-on: ${{ matrix.runner }}
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            suffix: ""
+            formats: ".deb/.rpm"
+            generators: "DEB;RPM;TGZ"
+          - runner: ubuntu-24.04-arm
+            suffix: "-arm64"
+            formats: ".deb"
+            generators: "DEB;TGZ"
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: "Cache CPM packages"
-        uses: actions/cache@v4
+      # Restored by both rows and saved by the x86 one only, for the reason the
+      # `linux` job's `Restore CPM packages` gives: CPM's cache holds sources, which
+      # do not depend on the machine, and rule F of `scripts/check-gated-jobs.sh`
+      # allows each key one writer.
+      - name: "Restore CPM packages"
+        id: cpm-cache
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.CPM_SOURCE_CACHE }}
           key: cpm-${{ runner.os }}-package-${{ hashFiles('CMakeLists.txt') }}
           restore-keys: cpm-${{ runner.os }}-package-
 
       # `save` on a branch push only; the reason is on the `linux` job's step.
+      # The key names the row, because a ccache entry holds objects for one machine.
       - name: "ccache"
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          key: ${{ runner.os }}-package
+          key: ${{ runner.os }}-package${{ matrix.suffix }}
           max-size: 256M
           save: ${{ github.event_name == 'push' && github.ref_type == 'branch' }}
 
@@ -2556,6 +2586,13 @@ jobs:
         # unpacks onto a developer's machine, where the loader kills it with 127.
         run: cmake --preset gcc-release -DCPM_USE_LOCAL_PACKAGES=OFF -DPACE_BUILD_TESTS=OFF -DPACE_PACKAGE_ROOT_PREFIX=ON -DPACE_REQUIRE_EXACT_VERSION=${{ env.PACE_REQUIRE_EXACT_VERSION }}
 
+      - name: "Save CPM packages"
+        if: ${{ matrix.suffix == '' && steps.cpm-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: cpm-${{ runner.os }}-package-${{ hashFiles('CMakeLists.txt') }}
+
       # Why this step, why before Build, and why it gates the package but no merge: the header of
       # scripts/check-instruction-set-flags.sh (#1442).
       - name: "No global instruction-set flag in what ships"
@@ -2573,7 +2610,7 @@ jobs:
 
       - name: "Package"
         working-directory: out/build/gcc-release
-        run: cpack -G "DEB;RPM;TGZ"
+        run: cpack -G "${{ matrix.generators }}"
 
       # The units are validated from the source tree (not the installed
       # system) so a typo or a bad directive fails here rather than at first
@@ -2652,6 +2689,7 @@ jobs:
           done
 
       - name: "Inspect the .rpm payload"
+        if: ${{ contains(matrix.generators, 'RPM') }}
         working-directory: out/build/gcc-release
         run: |
           set -euo pipefail
@@ -2706,11 +2744,15 @@ jobs:
       # preserved sibling, or it is quietly the edited arm over again.
       - name: "Retired config files are removed on upgrade"
         working-directory: out/build/gcc-release
+        env:
+          GENERATORS: ${{ matrix.generators }}
         run: |
           set -euo pipefail
           check="$GITHUB_WORKSPACE/scripts/check-obsolete-conffiles.sh"
           bash "$check" --deb "$(ls pace_*.deb)"  "$GITHUB_WORKSPACE"
-          bash "$check" --rpm "$(ls pace-*.rpm)" "$GITHUB_WORKSPACE"
+          if [[ ";$GENERATORS;" == *";RPM;"* ]]; then
+            bash "$check" --rpm "$(ls pace-*.rpm)" "$GITHUB_WORKSPACE"
+          fi
 
       # The .rpm, installed where rpm is the package manager. The steps above only
       # INSPECT it; this one has dnf resolve its dependencies and run its
@@ -2720,6 +2762,7 @@ jobs:
       # every inspection above and fails it, refusing to start on a read-only
       # cache_dir. What each leg asserts is in the script's header.
       - name: "Install the .rpm on Fedora and exercise the services"
+        if: ${{ contains(matrix.generators, 'RPM') }}
         working-directory: out/build/gcc-release
         run: bash "$GITHUB_WORKSPACE/scripts/rpm-package-e2e.sh" "$PWD/$(ls pace-*.rpm)"
 
@@ -2942,7 +2985,7 @@ jobs:
       - name: "Upload packages"
         uses: actions/upload-artifact@v4
         with:
-          name: pace-linux-packages
+          name: pace-linux${{ matrix.suffix }}-packages
           path: |
             out/build/gcc-release/pace_*.deb
             out/build/gcc-release/pace-*.rpm
@@ -5006,10 +5049,14 @@ jobs:
           # Apple Silicon, so the day an x86_64 package appears this list gains a
           # row. The version is deliberately a wildcard — it is pinned to the tag
           # by the assertion step above, which can say so in its own words.
+          # Linux arm64 is the `package-linux` matrix's `-arm64` row, which ships
+          # no .rpm (see that job).
           files: |
             dist/pace_*_amd64.deb
             dist/pace-*.x86_64.rpm
             dist/pace-*-Linux-x86_64.tar.gz
+            dist/pace_*_arm64.deb
+            dist/pace-*-Linux-aarch64.tar.gz
             dist/pace-*-Darwin-arm64.pkg
             dist/pace-*-Darwin-arm64.dmg
             dist/pace-*-Darwin-arm64.tar.gz
