@@ -39,8 +39,8 @@ Full documentation: **<https://lastrada-software.github.io/pace/>**
 
 ## Install
 
-Released packages — `.deb`, `.rpm`, macOS `.pkg`/`.dmg`, Windows `.msi` —
-install both executables and register the daemon to start automatically.
+Released packages — `.deb` (x86_64 and arm64), `.rpm` (x86_64), macOS
+`.pkg`/`.dmg`, Windows `.msi` — install both executables and register the daemon to start automatically.
 On macOS the installer offers the launchd job as a per-user agent (default)
 or a system-wide daemon, and ships `pace-uninstall` to remove it.
 

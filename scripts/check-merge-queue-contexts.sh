@@ -668,6 +668,7 @@ NonBindingContexts=(
     "Package (Linux .deb/.rpm)|NotBinding|#684: the packaging jobs are slow and a packaging failure should not block ordinary work. That ticket calls the reasoning sound and proposes REPORTING the failure instead, which merge-group-report.yml now does"
     "Package (macOS .pkg)|NotBinding|#684, as above -- and this is the job whose silent failure #684 was filed about"
     "Package (Windows .msi)|NotBinding|#684, as above"
+    "Package (Linux .deb)-arm64|NotBinding|#684, as above -- and #1432's reason too: a required context on an arm64 runner makes every merge depend on a runner pool this repository cannot fix"
     "Report a failure the merge queue did not gate on|NotBinding|#684 is explicit that this must gate NOTHING: a notifier that turns unrequired jobs into gates by the back door defeats the reason they are unrequired"
     "Decide what this change can affect|NotBinding|check-gated-jobs.sh rule A exists BECAUSE this job can fail without gating -- the fix for a dead classifier is that every reader compares != 'false', not that the classifier becomes a gate"
     "Draft GitHub release|NotBinding|tag-only (if: startsWith(github.ref, 'refs/tags/v')). A pull request can never produce this context, so requiring it would leave every branch waiting on a check that never reports"

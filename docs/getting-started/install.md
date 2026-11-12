@@ -2,8 +2,9 @@
 
 ## Packages
 
-The release artifacts include a `.deb`, an `.rpm`, a macOS `.pkg` (also
-offered inside a `.dmg`), and a Windows `.msi`. All of them install both
+The release artifacts include a `.deb` (for `amd64` and `arm64`), an `.rpm`
+(`x86_64`), a macOS `.pkg` (also offered inside a `.dmg`), and a Windows
+`.msi`. All of them install both
 executables — `pace-kv` (the daemon) and `pace-cc` (the compiler
 launcher) — and register the daemon as a service that starts on boot.
 

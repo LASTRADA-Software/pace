@@ -140,6 +140,16 @@ installer pane, the version derivation, or the release job's asset list.
   `|` anywhere else in that file, comments included. A step in the release job
   re-reads the list with that same extractor and fails on any entry containing
   whitespace or a colon, so the rule is enforced rather than merely documented.
+- **A new release platform is three rows, and the release job checks only two of
+  them.** A Linux architecture is a row of `package-linux`'s matrix, its globs in
+  the asset list, and a row of the `PACE_AUTO_INSTALL` asset table in
+  `cmake/portable/CompileCache.cmake` (plus the oracles in the
+  `check-compile-cache-*` scripts). The release job fails on a built archive no
+  glob attaches and on a glob nothing matches; nothing fails on a published
+  archive the asset table does not map, so a consumer's CI on that platform keeps
+  falling back with a green configure. The asset infix is CPack's
+  `${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}` -- `Linux-aarch64`, not
+  `Linux-arm64` -- while the `.deb` takes dpkg's `arm64`.
 
 ## Releasing
 
