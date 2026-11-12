@@ -20,6 +20,7 @@
 #include <string_view>
 #include <vector>
 
+#include <tests/FollowableLink.hpp>
 #include <tests/ScratchPath.hpp>
 #include <tests/Unwrap.hpp>
 
@@ -2127,9 +2128,10 @@ TEST_CASE("CompilerWorkingDirectory reads PWD from the environment through its o
     auto const& base = scratch.Path();
     std::filesystem::create_directories(base / "real" / "build");
 
-    std::error_code ec;
-    std::filesystem::create_directory_symlink(base / "real", base / "link", ec);
-    if (ec)
+    auto const unfollowable = Pace::Testing::MakeFollowableLink(base / "real", base / "link");
+    // Created AND followable, or skipped with the reason (#1735).
+    INFO(unfollowable.value_or(std::string {}));
+    if (unfollowable)
     {
         std::filesystem::remove_all(base);
         SKIP("symlinks unavailable on this host, so PWD cannot be made to differ from the resolved path");
@@ -2177,9 +2179,10 @@ TEST_CASE("CompilerWorkingDirectory keeps the symlinked spelling a driver report
     auto const& base = scratch.Path();
     std::filesystem::create_directories(base / "real" / "build");
 
-    std::error_code ec;
-    std::filesystem::create_directory_symlink(base / "real", base / "link", ec);
-    if (ec)
+    auto const unfollowable = Pace::Testing::MakeFollowableLink(base / "real", base / "link");
+    // Created AND followable, or skipped with the reason (#1735).
+    INFO(unfollowable.value_or(std::string {}));
+    if (unfollowable)
     {
         // Symlinks need a privilege or developer mode on Windows. The rule is
         // unconditional; only this way of demonstrating it is not -- so this is SKIPPED

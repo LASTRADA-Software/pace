@@ -10,6 +10,7 @@
 #include <string_view>
 #include <system_error>
 
+#include <tests/FollowableLink.hpp>
 #include <tests/ScratchPath.hpp>
 
 using namespace Pace;
@@ -86,10 +87,11 @@ TEST_CASE("Two spellings of one directory resolve to the same answer")
     auto const real = scratch / "real";
     auto const file = MakeFile(scratch, "real/inc/h1.h");
 
-    std::error_code ec;
     auto const link = scratch / "link";
-    std::filesystem::create_directory_symlink(real, link, ec);
-    if (ec)
+    auto const unfollowable = Pace::Testing::MakeFollowableLink(real, link);
+    // Created AND followable, or skipped with the reason (#1735).
+    INFO(unfollowable.value_or(std::string {}));
+    if (unfollowable)
         SKIP("this host does not permit creating symlinks; nothing to compare");
 
     auto const resolver = MakePathResolver();
@@ -111,8 +113,10 @@ TEST_CASE("A root's own final component is resolved, unlike a file's")
     std::error_code ec;
     std::filesystem::create_directories(real, ec);
     auto const link = scratch / "link";
-    std::filesystem::create_directory_symlink(real, link, ec);
-    if (ec)
+    auto const unfollowable = Pace::Testing::MakeFollowableLink(real, link);
+    // Created AND followable, or skipped with the reason (#1735).
+    INFO(unfollowable.value_or(std::string {}));
+    if (unfollowable)
         SKIP("this host does not permit creating symlinks; nothing to compare");
 
     auto const resolver = MakePathResolver();

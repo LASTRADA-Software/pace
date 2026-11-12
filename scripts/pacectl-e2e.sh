@@ -266,12 +266,14 @@ refute_stdout '"value":"-"' "json must not render an absence as a dash"
 # Validated with a real parser where one is available. Absent is reported as its own
 # outcome rather than silently passing, because "no parser here" and "the document
 # parsed" are different things.
-if command -v python3 > /dev/null 2>&1; then
-    python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert isinstance(d,list) and d[1]["value"] is None, d' \
+# A Python that RUNS, never a name on PATH: on Windows `python3` is the Store's stub (#1734).
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/python.sh"
+if pace_python_resolve; then
+    pace_python -c 'import json,sys; d=json.load(open(sys.argv[1])); assert isinstance(d,list) and d[1]["value"] is None, d' \
         "$WORK/out" || fail "the json output is not a parseable document with a null"
-    e2e_note "json validated with python3"
+    e2e_note "json validated with ${PACE_PYTHON_CMD[*]}"
 else
-    e2e_note "python3 absent: the json document was matched textually and not parsed"
+    e2e_note "$PACE_PYTHON_REFUSAL: the json document was matched textually and not parsed"
 fi
 
 # ---------------------------------------------------------------------------------

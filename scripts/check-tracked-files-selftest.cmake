@@ -452,7 +452,12 @@ MakeRepository("${missingTree}" TRUE)
 file(REMOVE "${missingTree}/gone.txt")
 execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${missingTree}" ls-files -s -- ./link-to-kept
                 OUTPUT_VARIABLE missingStaged)
-if(linkResult STREQUAL "0" AND danglingResult STREQUAL "0" AND missingStaged MATCHES "120000 [^\t]*\tlink-to-kept")
+# EXISTS too, which FOLLOWS the link (#1735): on a host that lets a user create a link it then
+# refuses to open (error 448, "untrusted mount point"), a created and recorded link reads as
+# unreadable, and a run that assumed otherwise ended in FATAL_ERROR rather than in the branches
+# below that already say the link cases did not run.
+if(linkResult STREQUAL "0" AND danglingResult STREQUAL "0" AND missingStaged MATCHES "120000 [^\t]*\tlink-to-kept"
+   AND EXISTS "${missingTree}/link-to-kept")
     set(linksReachable TRUE)
 endif()
 

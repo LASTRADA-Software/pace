@@ -19,6 +19,7 @@
 #include <utility>
 #include <vector>
 
+#include <tests/FollowableLink.hpp>
 #include <tests/OverrunningDrainWait.hpp>
 #include <tests/ScratchPath.hpp>
 #include <tests/SteppedDrainWait.hpp>
@@ -370,11 +371,13 @@ TEST_CASE("Retargeting a symlink changes the identity read through it", "[input-
     scratch.Write("a.hpp", "same\n");
     scratch.Write("b.hpp", "same\n");
     auto const link = scratch / "h.hpp";
-    std::filesystem::create_symlink(scratch / "a.hpp", link);
+    if (auto const unfollowable = Pace::Testing::MakeFollowableLink(scratch / "a.hpp", link))
+        SKIP(*unfollowable);
     auto const files = MakeDiskInputFiles();
     auto const first = files->Identify(link.string());
     std::filesystem::remove(link);
-    std::filesystem::create_symlink(scratch / "b.hpp", link);
+    if (auto const unfollowable = Pace::Testing::MakeFollowableLink(scratch / "b.hpp", link))
+        SKIP(*unfollowable);
     auto const second = files->Identify(link.string());
     auto const target = files->Identify((scratch / "b.hpp").string());
     REQUIRE(first.has_value());
