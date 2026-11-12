@@ -1227,6 +1227,31 @@ void AddQueued(std::optional<std::uint64_t>& total, std::optional<std::uint64_t>
 
     auto comparison = Cc::CompareObjectFiles(aside, *served);
     std::filesystem::remove(aside, ec);
+
+    // A difference is only evidence against the cache if the compiler reproduces ITSELF
+    // (#1758): cl 19.51 does not always, and 30 of ~380 verified hits read WRONG OBJECT for
+    // that alone. So a mismatch compiles once more and compares the two fresh objects. Paid
+    // only on a mismatch, which is the rare and expensive answer anyway.
+    if (comparison.verdict == Cc::HitVerdict::Mismatched)
+    {
+        auto const firstFresh = std::filesystem::path { *served }.concat(".pace-verify-fresh");
+        std::filesystem::copy_file(*served, firstFresh, std::filesystem::copy_options::overwrite_existing, ec);
+        if (!ec)
+        {
+            if (RunCaptureSplit(argv).exitCode == 0)
+                comparison = Cc::ConfirmMismatch(std::move(comparison), Cc::CompareObjectFiles(firstFresh, *served));
+            else
+            {
+                // The second compile failed and may have left anything at the output path, so
+                // the first fresh object -- the one this build was going to use -- goes back.
+                // The mismatch stands: a second compile that did not complete settles nothing.
+                auto const files = Cc::MakeDiskFiles();
+                if (auto restored = Cc::RestoreServedObject(firstFresh, *served, *files); !restored.detail.empty())
+                    return restored;
+            }
+            std::filesystem::remove(firstFresh, ec);
+        }
+    }
     return comparison;
 }
 
@@ -2771,6 +2796,17 @@ void RecordPlanRefusal(InvocationRecord& record, PlanRefusal const& refusal)
                                std::format("dispatch preprocess failed ({}); compiling locally",
                                            Cc::DescribeFailedPreprocess(preprocessRun.exitCode, preprocessRun.err)));
 
+    // A driver whose dispatched text leaves macros unexpanded (clang-cl, #1719) needs the
+    // build's definitions IN the text, never on the worker's line: one `#define`/`#undef` per
+    // switch, ahead of everything else. Empty for every other driver, which pays no copy.
+    auto const macroPrologue = Cc::DispatchedMacroPrologue(cmd, argv);
+    if (!macroPrologue.has_value())
+        return DeclineDispatch(record,
+                               RefusedHere("the dispatched text cannot carry the build's macro switches"),
+                               std::format("{}; compiling locally", macroPrologue.error()));
+    std::string const prologuedText = macroPrologue->empty() ? std::string {} : *macroPrologue + preprocessRun.out;
+    std::string_view const dispatchedText = macroPrologue->empty() ? std::string_view { preprocessRun.out } : prologuedText;
+
     // What THIS compile records as its compilation directory, and the directory itself,
     // so a worker can make its object record the same thing. It is the launcher's own
     // working directory -- the local compile below runs with no directory of its own --
@@ -2873,7 +2909,7 @@ void RecordPlanRefusal(InvocationRecord& record, PlanRefusal const& refusal)
                                                .objectKey = key,
                                                .args = plan.args,
                                                .family = Cc::DriverOf(cmd.flavor).family,
-                                               .preprocessed = preprocessRun.out,
+                                               .preprocessed = dispatchedText,
                                                .sourceName = sourceName,
                                                .compileDir = compileDirPath,
                                                .compileDirReplacement = compileDirReplacement,

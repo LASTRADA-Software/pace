@@ -122,6 +122,16 @@ HitComparison CompareObjectFiles(std::filesystem::path const& served, std::files
              .detail = std::move(comparison.detail) };
 }
 
+HitComparison ConfirmMismatch(HitComparison served, HitComparison const& freshAgain)
+{
+    if (served.verdict != HitVerdict::Mismatched || freshAgain.verdict != HitVerdict::Mismatched)
+        return served;
+    return { .verdict = HitVerdict::Nondeterministic,
+             .comparison = freshAgain.comparison,
+             .detail = freshAgain.detail.empty() ? std::string {}
+                                                 : std::format("two fresh compiles differ: {}", freshAgain.detail) };
+}
+
 std::string DescribeVerdict(HitComparison const& comparison, std::string_view key)
 {
     // One place decides whether a detail is appended, so a new verdict cannot ship a
@@ -154,6 +164,15 @@ std::string DescribeVerdict(HitComparison const& comparison, std::string_view ke
             // off, and the class it guards goes invisible again.
             return withDetail(std::format("pace-cc: cannot verify hits for this toolchain, so the hit for key "
                                           "{} was neither confirmed nor faulted",
+                                          key));
+        case HitVerdict::Nondeterministic:
+            // Not a finding about the cache either (#1758): the compiler disagreed with
+            // ITSELF, so the served object's difference proves nothing. Said, so a reader
+            // does not mistake it for a clean verification, and phrased so a script can
+            // tell it from WRONG OBJECT.
+            return withDetail(std::format("pace-cc: NONDETERMINISTIC compiler for key {} -- two fresh compiles of "
+                                          "this source differ, so the hit was neither confirmed nor faulted and the "
+                                          "cached entry is kept",
                                           key));
     }
     return {};
