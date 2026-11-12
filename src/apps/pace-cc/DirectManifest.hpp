@@ -811,6 +811,14 @@ struct ManifestInputs
                                     PathCanon::Layout const& layout,
                                     std::string_view toolchainStamp);
 
+/// Whether source text names a macro that expands to the time of the compile (`__DATE__`,
+/// `__TIME__`, `__TIMESTAMP__`). A manifest recorded over a header that does is refused (#1695):
+/// the key re-keys such a unit every second, but a manifest validates on the header's BYTES,
+/// which do not change, and served yesterday's date the next day.
+/// @param text The file's contents.
+/// @return True when any of the three is named.
+[[nodiscard]] bool TextReferencesVolatileMacro(std::string_view text) noexcept;
+
 /// Derive the key under which a manifest is stored.
 ///
 /// Deliberately independent of header contents: this key must be computable

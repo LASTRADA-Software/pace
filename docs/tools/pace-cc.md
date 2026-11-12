@@ -1144,6 +1144,15 @@ Two things this is **not**:
   deliberately: a partial answer here is the stale-dependency serve it exists to
   prevent. The refusal is silent unless `PACE_VERBOSE` is set, and shows in
   `--show-stats` as *uncacheable*.
+- A compile is **not cached** when its command line depends on something the key
+  cannot see, and `PACE_VERBOSE` says which: `-march=native` / `-mcpu=native` /
+  `-mtune=native`; a profile (`-fprofile-use`, `-fprofile-sample-use`,
+  `-fauto-profile`, `-fprofile-instr-use`); a plugin (`-fplugin=`,
+  `-fpass-plugin=`); a specs file; `-B`; a depfile requested through `-Wp,-MD` or
+  by `-MD`/`-MMD` without `-MF` (CMake always passes `-MF`); a side file
+  (`-gsplit-dwarf`, `--coverage`, `-ftime-trace`, `-fstack-usage`,
+  `-save-temps`); a `<header>.gch` gcc would read in place of a header; or a
+  compiler whose version probe answered nothing.
 - A compile is **not cached** while an environment variable that adds compiler
   arguments or picks the programs a driver runs is set: `CL`, `_CL_`
   (`cl`, `clang-cl`), `CCC_OVERRIDE_OPTIONS` (clang), `COMPILER_PATH`,

@@ -2611,6 +2611,18 @@ zero exit code, and stays that way, because a direct hit never re-records. Batch
   exists -- and a hit whose census differs is refused. It over-approximates on purpose, which
   costs a manifest miss and never a wrong hit; what it cannot see is a spelling that climbs out
   of its search directory (`"../x.h"`), since the launcher never reads `#include` text.
+- **The KEY has the same blind spot for what a FLAG names**, and the answer there is a refusal
+  by table rather than a hash (#1688, #1689, #1691, #1692, #1700): `-march/-mcpu/-mtune=native`
+  (this machine's CPU), a profile, a plugin, a specs file, `-B`, and a depfile named through
+  `-Wp,` or not named at all (`-MD` without `-MF`) are `UncacheableFlags` rows, each with the
+  reason the launcher prints; `-gsplit-dwarf`, `--coverage`, `-ftime-trace`, `-fstack-usage` and
+  `-save-temps` are `SideArtefacts` rows; and a `<header>.gch` gcc would read in place of a
+  header is checked for after the key's preprocess. A trailing `-x` decides nothing for a GNU
+  driver, and dispatch reads only the selectors before the source (#1697). A driver whose
+  identity probe answered nothing keys on its file name, which every version shares, so that
+  is a refusal too (`IdentityEvidence::NameOnly`, #1698). A manifest over a header that
+  expands `__DATE__`/`__TIME__` is not recorded (#1695): the key re-keys such a unit, the
+  manifest validates on the header's unchanging bytes.
 
 ## Accepted trade-offs
 

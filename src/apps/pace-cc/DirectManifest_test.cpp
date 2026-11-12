@@ -2176,3 +2176,10 @@ TEST_CASE("Library headers alone do not make a manifest: NoProjectDeps still ref
     REQUIRE_FALSE(built.has_value());
     CHECK(built.error().fault == ManifestFault::NoProjectDeps);
 }
+
+TEST_CASE("A header expanding the clock is named as one", "[direct-manifest][1695]")
+{
+    CHECK(TextReferencesVolatileMacro("static char const built[] = __DATE__;"));
+    CHECK(TextReferencesVolatileMacro("x = __TIMESTAMP__;"));
+    CHECK_FALSE(TextReferencesVolatileMacro("#pragma once\nint f();\n"));
+}

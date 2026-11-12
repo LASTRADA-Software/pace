@@ -63,6 +63,19 @@ namespace Pace::Cc
 /// @return The depfile text, ending in a newline.
 [[nodiscard]] std::string RenderDepFile(std::string_view target, std::span<std::string const> dependencyPaths);
 
+/// Render a Makefile depfile with SEVERAL targets and, when asked, gcc's `-MP` phony rules
+/// (#1696): one empty rule per dependency other than the main source, so deleting a header does
+/// not leave make with a rule it cannot satisfy.
+/// @param targets          The rule's targets, already make-quoted (`DepFileRules::targets`).
+/// @param dependencyPaths  The headers, as the driver spelled them.
+/// @param phonyPerDependency `-MP`.
+/// @param mainSource       The translation unit, which gets no phony rule, as with gcc.
+/// @return The depfile text, ending in a newline.
+[[nodiscard]] std::string RenderDepFile(std::span<std::string const> targets,
+                                        std::span<std::string const> dependencyPaths,
+                                        bool phonyPerDependency,
+                                        std::string_view mainSource);
+
 /// Render MSVC `/showIncludes` notes.
 ///
 /// One `<marker> <path>` line per dependency, which is the form Ninja parses under
