@@ -136,7 +136,11 @@ class PeekFailingStorage final: public IStorage
                                                               core::platform::SteadyTimePoint now) override
     {
         if (_peekFault.has_value())
-            return std::unexpected(*std::exchange(_peekFault, std::nullopt));
+        {
+            StorageError error = *_peekFault;
+            _peekFault.reset();
+            return std::unexpected(std::move(error));
+        }
         return _inner->Peek(key, now);
     }
 
@@ -925,7 +929,9 @@ TEST_CASE("A write whose L1 mirror cannot be read back drops L1 and still succee
     core::platform::ManualClock clock;
 
     REQUIRE(storage.Set("k", MakeBytes("old"), 0, core::platform::SteadyTimePoint::max()).has_value());
-    l2->FailNextPeek(StorageError { .code = StorageErrorCode::IoError });
+    StorageError readBackFailed;
+    readBackFailed.code = StorageErrorCode::IoError;
+    l2->FailNextPeek(readBackFailed);
     CHECK(storage.Set("k", MakeBytes("new"), 0, core::platform::SteadyTimePoint::max()).has_value());
 
     auto const got = storage.Get("k", clock.now());

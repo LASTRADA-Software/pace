@@ -271,16 +271,21 @@ class RecordingDirectorySyncs final: public Consensus::IDurableFiles
     [[nodiscard]] std::expected<void, Consensus::DirectorySyncFailure> SyncDirectory(
         std::filesystem::path const& directory) override
     {
-        synced.push_back(directory.lexically_normal());
+        _synced.push_back(directory.lexically_normal());
         if (_answer)
             return std::unexpected { Consensus::DirectorySyncFailure { .step = Consensus::DirectorySyncStep::Flush,
                                                                        .code = _answer } };
         return {};
     }
 
-    std::vector<std::filesystem::path> synced; ///< Every directory asked, in order.
+    /// @return Every directory asked, in order.
+    [[nodiscard]] std::vector<std::filesystem::path> const& Synced() const noexcept
+    {
+        return _synced;
+    }
 
   private:
+    std::vector<std::filesystem::path> _synced;
     std::error_code _answer;
     Consensus::SystemDurableFiles _system;
 };
@@ -300,7 +305,7 @@ TEST_CASE("An archive syncs every directory its renames wrote, in order", "[node
     REQUIRE(archiver.Archive("c-laptop").has_value());
 
     auto const archive = (scratch / ArchiveDirectoryName).lexically_normal();
-    CHECK(files.synced
+    CHECK(files.Synced()
           == std::vector<std::filesystem::path> {
               scratch.Path().lexically_normal(), (archive / "c-laptop.partial").lexically_normal(), archive });
 }
