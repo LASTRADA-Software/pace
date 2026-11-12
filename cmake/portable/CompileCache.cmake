@@ -685,7 +685,7 @@ endif()
 #                                staged only when PACE_AUTO_START asks
 #                                for it — see _pace_auto_start_pace_kv below
 #   _pace_asset_<id>_daemon_exe  staged daemon's filename
-set(_pace_asset_rows linux_x86_64 darwin_arm64 windows_amd64)
+set(_pace_asset_rows linux_x86_64 linux_aarch64 darwin_arm64 windows_amd64)
 
 set(_pace_asset_linux_x86_64_system "Linux")
 set(_pace_asset_linux_x86_64_arch x86_64 amd64 AMD64)
@@ -695,6 +695,18 @@ set(_pace_asset_linux_x86_64_member "usr/bin/pace-cc")
 set(_pace_asset_linux_x86_64_exe "pace-cc")
 set(_pace_asset_linux_x86_64_daemon_member "usr/bin/pace-kv")
 set(_pace_asset_linux_x86_64_daemon_exe "pace-kv")
+
+# The infix is CPack's own: `pace-<version>-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}`
+# (cmake/Packaging.cmake), and an arm64 Linux host calls itself `aarch64` there,
+# as `uname -m` does. `arm64` is Debian's and macOS's word for the same machine.
+set(_pace_asset_linux_aarch64_system "Linux")
+set(_pace_asset_linux_aarch64_arch aarch64 arm64)
+set(_pace_asset_linux_aarch64_platform "Linux-aarch64")
+set(_pace_asset_linux_aarch64_ext "tar.gz")
+set(_pace_asset_linux_aarch64_member "usr/bin/pace-cc")
+set(_pace_asset_linux_aarch64_exe "pace-cc")
+set(_pace_asset_linux_aarch64_daemon_member "usr/bin/pace-kv")
+set(_pace_asset_linux_aarch64_daemon_exe "pace-kv")
 
 set(_pace_asset_darwin_arm64_system "Darwin")
 set(_pace_asset_darwin_arm64_arch arm64 aarch64)

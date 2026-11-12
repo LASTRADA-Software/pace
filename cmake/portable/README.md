@@ -221,5 +221,8 @@ install anything system-wide: the daemon binds `PACE_ADDR`'s own host
   active the module turns off precompiled headers and C++20 module scanning, and
   forces MSVC to embed debug info (`/Z7`) rather than share a PDB. A second
   artefact no hit can reproduce would otherwise go missing.
-- Prebuilt binaries exist only for the platforms the project publishes. Anything
-  else falls back, and says so.
+- Prebuilt binaries exist only for the platforms the project publishes: Linux
+  x86_64 and aarch64 (`pace-<version>-Linux-x86_64.tar.gz`,
+  `pace-<version>-Linux-aarch64.tar.gz`), macOS arm64
+  (`pace-<version>-Darwin-arm64.tar.gz`) and Windows x64
+  (`pace-<version>-Windows-AMD64.zip`). Anything else falls back, and says so.
