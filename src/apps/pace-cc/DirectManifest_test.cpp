@@ -49,6 +49,7 @@ DirectManifest SampleManifest()
             { .canonicalPath = "<SRCROOT>/src/AppCore/AppCore.hpp", .contentHash = "aabb1122" },
             { .canonicalPath = "<SRCROOT>/src/Toolbox/unicode.hpp", .contentHash = "ccdd3344" },
         },
+        .shadowCensus = { "<SRCROOT>/src/inc0/AppCore.hpp" },
     };
 }
 } // namespace

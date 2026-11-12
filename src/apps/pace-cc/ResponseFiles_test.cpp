@@ -39,20 +39,25 @@ TEST_CASE("Windows grammar: whitespace and newlines separate, quotes group", "[r
 
 TEST_CASE("Windows grammar: backslashes are literal unless a quote follows them", "[response-files]")
 {
-    // The inputs are named outside the assertion macros: MSVC's release build read a raw
-    // literal carrying `\"` inside a macro argument as an escape sequence (C4129).
+    // Raw literals, and NAMED outside the assertion macros: the MSVC on CI's Windows runners
+    // read a raw literal carrying `\"` inside a macro ARGUMENT as an escape sequence (C4129),
+    // and clang-tidy refuses the escaped spelling that avoids it (modernize-raw-string-literal).
     // A path is the ordinary case, and its backslashes must survive untouched.
-    std::string_view const paths = "/IC:\\src\\inc C:\\src\\a.cpp";
-    CHECK(SplitResponseFile(paths, DriverFamily::Msvc) == Args { "/IC:\\src\\inc", "C:\\src\\a.cpp" });
+    std::string_view const paths = R"(/IC:\src\inc C:\src\a.cpp)";
+    Args const pathArgs { R"(/IC:\src\inc)", R"(C:\src\a.cpp)" };
+    CHECK(SplitResponseFile(paths, DriverFamily::Msvc) == pathArgs);
     // 2n backslashes before a quote: n backslashes, and the quote toggles.
-    std::string_view const evenRun = "\"C:\\dir\\\\\" next";
-    CHECK(SplitResponseFile(evenRun, DriverFamily::Msvc) == Args { "C:\\dir\\", "next" });
+    std::string_view const evenRun = R"("C:\dir\\" next)";
+    Args const evenArgs { R"(C:\dir\)", "next" };
+    CHECK(SplitResponseFile(evenRun, DriverFamily::Msvc) == evenArgs);
     // 2n+1 backslashes before a quote: n backslashes and a literal quote.
-    std::string_view const oddRun = "/DMSG=\\\"hi\\\"";
-    CHECK(SplitResponseFile(oddRun, DriverFamily::Msvc) == Args { "/DMSG=\"hi\"" });
+    std::string_view const oddRun = R"(/DMSG=\"hi\")";
+    Args const oddArgs { R"(/DMSG="hi")" };
+    CHECK(SplitResponseFile(oddRun, DriverFamily::Msvc) == oddArgs);
     // `""` inside quotes is one literal quote.
-    std::string_view const doubled = "\"a\"\"b\"";
-    CHECK(SplitResponseFile(doubled, DriverFamily::Msvc) == Args { "a\"b" });
+    std::string_view const doubled = R"("a""b")";
+    Args const doubledArgs { R"(a"b)" };
+    CHECK(SplitResponseFile(doubled, DriverFamily::Msvc) == doubledArgs);
 }
 
 TEST_CASE("Windows grammar: an empty quoted argument is an argument", "[response-files]")
@@ -65,9 +70,11 @@ TEST_CASE("Windows grammar: an empty quoted argument is an argument", "[response
 
 TEST_CASE("GNU grammar: single quotes are literal, a backslash escapes", "[response-files]")
 {
-    std::string_view const escapes = "-c 'a b.c' -DX=\\\"y\\\" a\\ b";
-    CHECK(SplitResponseFile(escapes, DriverFamily::Gnu) == Args { "-c", "a b.c", "-DX=\"y\"", "a b" });
-    CHECK(SplitResponseFile("-I\"/opt/my inc\"\n-O2", DriverFamily::Gnu) == Args { "-I/opt/my inc", "-O2" });
+    std::string_view const escapes = R"(-c 'a b.c' -DX=\"y\" a\ b)";
+    Args const escapeArgs { "-c", "a b.c", R"(-DX="y")", "a b" };
+    CHECK(SplitResponseFile(escapes, DriverFamily::Gnu) == escapeArgs);
+    std::string_view const quotedInclude = "-I\"/opt/my inc\"\n-O2";
+    CHECK(SplitResponseFile(quotedInclude, DriverFamily::Gnu) == Args { "-I/opt/my inc", "-O2" });
 }
 
 TEST_CASE("The two grammars disagree about a backslash, which is why the family chooses", "[response-files]")
