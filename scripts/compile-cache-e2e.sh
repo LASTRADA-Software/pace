@@ -834,8 +834,12 @@ grep -q "STORED" "${workdir}/relative-1.log" \
 # paths the whole section would pass without ever exercising the defect.
 grep -qE '(^|[[:space:]])inc/h\.hpp([[:space:]]|$)' "${reldir}/build/r.d" \
     || fail "relative: the driver reported no relative dependency path, so this case proves nothing"
-# The manifest must name the TU and its header, not just whatever was absolute.
-grep -q "manifest: 2 entries" "${workdir}/relative-1.log" \
+# The manifest must name the TU and its header, not just whatever was absolute. AT
+# LEAST two rather than exactly two: since #1718 a manifest also records the library
+# headers outside the roots that the compiler's own install does not cover, and gcc
+# lists /usr/include/stdc-predef.h in every depfile. That the HEADER is among them is
+# what the edited-header step below proves, by behaviour rather than by count.
+grep -qE "manifest: ([2-9]|[1-9][0-9]+) entries" "${workdir}/relative-1.log" \
     || fail "relative: the manifest did not record both the source and its header"
 cp "${reldir}/build/r.o" "${workdir}/relative-1.o"
 
