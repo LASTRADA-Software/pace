@@ -3144,7 +3144,8 @@ int main(int argc, char** argv)
     // when the state directory holds none, and a move a crash interrupted finished -- the store a
     // dissolve left in the root archived -- before any consensus tier opens the directory. Every
     // reform adopts it again the same way (`RunNodeBodies`).
-    Node::RaftStoreArchiver archiver { Node::NodeStateDirectory(cfg) };
+    Consensus::SystemDurableFiles archiveFiles;
+    Node::RaftStoreArchiver archiver { Node::NodeStateDirectory(cfg), archiveFiles };
     Node::ReformRequest reform;
     auto adopted = Node::AdoptFormation(
         cfg, *formationStore, archiver, *endpointsFile, identityRandom, core::platform::defaultSystemWallClock());

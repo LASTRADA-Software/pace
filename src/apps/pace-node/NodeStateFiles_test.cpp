@@ -531,7 +531,8 @@ TEST_CASE("Every file the node's writers leave in its state directory has a row,
                                                              .votedFor = std::string { "n-a" } })
                     .has_value());
     }
-    REQUIRE(RaftStoreArchiver { dir }.Archive("left").has_value());
+    Consensus::SystemDurableFiles durableFiles;
+    REQUIRE(RaftStoreArchiver { dir, durableFiles }.Archive("left").has_value());
     REQUIRE(Cluster::FleetEndpointsFile { dir }
                 .Save(Cluster::FleetEndpoints {
                     .clusterId = "mine",
