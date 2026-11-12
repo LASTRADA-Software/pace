@@ -165,6 +165,11 @@ std::string DescribeVerdict(HitComparison const& comparison, std::string_view ke
             return withDetail(std::format("pace-cc: cannot verify hits for this toolchain, so the hit for key "
                                           "{} was neither confirmed nor faulted",
                                           key));
+        case HitVerdict::FreshCompileFailed:
+            return withDetail(std::format("pace-cc: VERIFY FAILED for key {} -- the fresh compile of this source "
+                                          "failed, so the served object cannot be what this compiler produces from it; "
+                                          "the served object was kept for this build, and the entry is suspect",
+                                          key));
         case HitVerdict::Nondeterministic:
             // Not a finding about the cache either (#1758): the compiler disagreed with
             // ITSELF, so the served object's difference proves nothing. Said, so a reader

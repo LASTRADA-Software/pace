@@ -48,6 +48,20 @@ enum class Outcome : std::uint8_t
     /// the path is on the `PACE_VERBOSE` line.
     /// An input that could not be OBSERVED at all is `Uncacheable`, not this.
     InputsMoved,
+    /// Compiled, and the STORE was attempted and not taken (#1707): the daemon refused it or
+    /// could not be reached for it. `Miss` claims "compiled and stored", so a store that ran out
+    /// of budget read as a healthy miss and the next build missed again for no visible reason.
+    StoreFailed,
+    /// A hit REFUSED as stale -- the replayed dependency record names a file that is gone, or the
+    /// value carries no depfile the build asked for -- so the compile ran for real and its STORE
+    /// repairs the entry (#1707). Logged as `Miss` it was indistinguishable from a cold cache, and
+    /// a cache serving stale entries read as one that was merely empty.
+    Stale,
+    /// Served, then `PACE_VERIFY`'s fresh compile of the same source FAILED (#1707). The served
+    /// object put back is the one the build uses, but a source the compiler now rejects cannot
+    /// have produced it, which is strong evidence the entry is wrong -- never the "inconclusive"
+    /// hit it was tallied as.
+    VerifyFailed,
 };
 
 /// @param outcome The outcome to name.
