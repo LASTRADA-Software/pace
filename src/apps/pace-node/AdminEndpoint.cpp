@@ -61,15 +61,15 @@ AdminHttpServer::SnapshotProvider MakeNodeSnapshotProvider(NodeScrapeSources sou
                                .diskCapacityBytes = static_cast<std::uint64_t>(disk.capacityBytes),
                                .diskFreeBytes = static_cast<std::uint64_t>(disk.freeBytes),
                                .busySlots = sources.busySlots(),
-                               .cordoned = sources.cordoned && sources.cordoned() ? std::size_t { 1 } : std::size_t { 0 },
-                               .memoryPressure = sources.memoryPressure ? sources.memoryPressure() : std::size_t { 0 } },
+                               .cordoned = sources.cordoned && sources.cordoned() ? std::size_t { 1 } : std::size_t { 0 } },
             // Raw counters rather than a utilization, so no reader's interval is cut by
             // another's; see `NodeScrapeSources::load`.
-            .hostLoad =
-                sources.load != nullptr
-                    ? std::optional { HostLoadReading { .cpu = sources.load->Cpu(),
-                                                        .availableMemoryBytes = sources.load->AvailableMemoryBytes() } }
-                    : std::nullopt,
+            .hostLoad = sources.load != nullptr
+                            ? std::optional { HostLoadReading {
+                                  .cpu = sources.load->Cpu(),
+                                  .availableMemoryBytes = sources.load->AvailableMemoryBytes(),
+                                  .memoryPressure = sources.memoryPressure ? sources.memoryPressure() : std::nullopt } }
+                            : std::nullopt,
             // Absent when there is no cache at all: a node running none has no
             // upstream question to answer either, and a `0` there would claim it
             // does and has none.

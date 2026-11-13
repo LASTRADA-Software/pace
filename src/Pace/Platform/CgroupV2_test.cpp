@@ -551,6 +551,8 @@ TEST_CASE("KillYoungest marks and kills the newest running job, then the next ne
     auto first = NewJob(source);
     auto second = NewJob(source);
     auto third = NewJob(source);
+    for (auto const name: { std::string_view { "job-1" }, std::string_view { "job-2" }, std::string_view { "job-3" } })
+        raw->files[jobs + "/" + std::string { name } + "/cgroup.events"] = "populated 1\nfrozen 0\n";
     raw->trail.clear();
 
     // The newest first: it has made the least progress, so its client loses the least by compiling it again.
@@ -570,6 +572,7 @@ TEST_CASE("KillYoungest marks and kills the newest running job, then the next ne
     third.reset();
     second.reset();
     auto fourth = NewJob(source);
+    raw->files[jobs + "/job-4/cgroup.events"] = "populated 1\nfrozen 0\n";
     fourth.reset();
     raw->trail.clear();
     CHECK(source.KillYoungest());
@@ -582,4 +585,39 @@ TEST_CASE("KillYoungest marks and kills the newest running job, then the next ne
     CHECK(kills().empty());
     first.reset();
     CHECK_FALSE(source.KillYoungest());
+}
+
+TEST_CASE("KillYoungest never chooses a job whose cgroup holds no process", "[platform][cgroup][KillYoungest]")
+{
+    // M5: between `Create` and the spawn -- and after the compiler exited, before the job is released -- the cgroup
+    // is empty. Killing it frees nothing and would spend the shed's one kill per dwell on nothing.
+    auto host = DelegatedHost();
+    auto* const raw = host.get();
+    auto const layout = Unwrap(PrepareJobCgroups(*host));
+    CgroupJobSource source { std::move(host), layout };
+    auto const jobs = layout.compiles.generic_string();
+
+    auto running = NewJob(source);
+    auto spawning = NewJob(source); // made, its compiler not started: the newest, and no victim
+    auto unreadable = NewJob(source);
+    raw->files[jobs + "/job-1/cgroup.events"] = "populated 1\nfrozen 0\n";
+    raw->files[jobs + "/job-2/cgroup.events"] = "populated 0\nfrozen 0\n";
+    // job-3 has no cgroup.events at all: unreadable proves no compile, so it is no victim either.
+    raw->trail.clear();
+
+    CHECK(source.KillYoungest());
+    CHECK(running->Shed());
+    CHECK_FALSE(spawning->Shed());
+    CHECK_FALSE(unreadable->Shed());
+    CHECK(raw->trail == std::vector<std::string> { "write " + jobs + "/job-1/cgroup.kill 1" });
+
+    // With only empty cgroups left, nothing is chosen and nothing is written.
+    raw->trail.clear();
+    CHECK_FALSE(source.KillYoungest());
+    CHECK(raw->trail.empty());
+
+    // The spawn lands: the job is a victim now.
+    raw->files[jobs + "/job-2/cgroup.events"] = "populated 1\nfrozen 0\n";
+    CHECK(source.KillYoungest());
+    CHECK(spawning->Shed());
 }

@@ -234,12 +234,21 @@ TEST_CASE("Reconfigure lowers the cap and clamps the allowance", "[node][pressur
         rig.governor.Reconfigure(20 * GiB);
         CHECK(rig.After(1s, GameStall, 30 * GiB).allowanceBytes == 20 * GiB);
     }
-    SECTION("Raising the cap does not raise the allowance; the ramp climbs toward it")
+    SECTION("Raising the cap raises an allowance pressure never lowered, at once")
     {
         Rig rig;
         rig.governor.Reconfigure(100 * GiB);
-        CHECK(rig.After(0s, Quiet, 0).allowanceBytes == Configured);
-        CHECK(rig.After(30s, Quiet, 0).allowanceBytes == Configured + (100 * GiB * 5 / 100));
+        CHECK(rig.After(0s, Quiet, 0).allowanceBytes == 100 * GiB);
+        CHECK(rig.governor.AllowanceBytes() == 100 * GiB);
+    }
+    SECTION("Raising the cap does not raise an allowance a yield lowered; the ramp climbs toward it")
+    {
+        Rig rig;
+        REQUIRE(rig.After(0s, GameStall, 30 * GiB).allowanceBytes == 30 * GiB);
+        REQUIRE(rig.After(10s, Quiet, 0).level == PressureLevel::Calm);
+        rig.governor.Reconfigure(100 * GiB);
+        CHECK(rig.After(0s, Quiet, 0).allowanceBytes == 30 * GiB);
+        CHECK(rig.After(30s, Quiet, 0).allowanceBytes == (30 * GiB) + (100 * GiB * 5 / 100));
     }
 }
 

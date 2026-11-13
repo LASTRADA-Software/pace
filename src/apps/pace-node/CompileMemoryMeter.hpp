@@ -240,8 +240,9 @@ class ICompileCeiling
 
     /// Hold every compile under @p allowanceBytes, or under the configured ceiling where that is lower: the figure
     /// written is never above what the configuration in force asks for.
-    /// @param allowanceBytes The pressure governor's allowance.
-    virtual void Apply(std::uint64_t allowanceBytes) = 0;
+    /// @param allowanceBytes The pressure governor's allowance where pressure lowered it below the configured
+    ///        ceiling; disengaged where it stands at the configuration, which a reload then moves at once.
+    virtual void Apply(std::optional<std::uint64_t> allowanceBytes) = 0;
 
     /// What every compile holds now, as the kernel counts it.
     /// @return The bytes; disengaged when the kernel would not say.
@@ -296,7 +297,7 @@ class CompileCeilingKeeper final: public ICompileCeiling
     [[nodiscard]] CeilingBasis Keep(CeilingWrite when);
 
     /// @copydoc ICompileCeiling::Apply
-    void Apply(std::uint64_t allowanceBytes) override;
+    void Apply(std::optional<std::uint64_t> allowanceBytes) override;
 
     /// @copydoc ICompileCeiling::HeldBytes
     [[nodiscard]] std::optional<std::uint64_t> HeldBytes() const override;
@@ -314,7 +315,7 @@ class CompileCeilingKeeper final: public ICompileCeiling
     ILogger& _logger;
     std::mutex _mutex;                          ///< Serialises writes and guards the two below.
     std::optional<std::uint64_t> _written {};   ///< The figure last attempted.
-    std::optional<std::uint64_t> _allowance {}; ///< The governor's allowance; disengaged until it applies one.
+    std::optional<std::uint64_t> _allowance {}; ///< The governor's lowered allowance; disengaged when none binds.
 };
 
 } // namespace Pace::Node

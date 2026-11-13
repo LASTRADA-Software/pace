@@ -353,6 +353,10 @@ class CgroupJobSource final: public IJobCgroupSource, public IYoungestKiller
 
     /// Mark the newest live job that is not already shed `Shed`, then write its `cgroup.kill`.
     ///
+    /// **Only a job running a compile is a victim**: one whose cgroup holds no process (`cgroup.events` says
+    /// `populated 0`, or cannot be read) -- made and not yet spawned into, or already exited -- is skipped, so a
+    /// shed is never spent on an empty cgroup.
+    ///
     /// Marked FIRST, so the runner reaping the killed compile reads why it died (`IJobCgroup::Shed`). A job that
     /// has finished -- its cgroup object destroyed -- is skipped, as is one already shed: that one is dying, and
     /// choosing it again would kill nothing. Called from the pressure watcher's thread while compiles start and

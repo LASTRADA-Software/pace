@@ -75,14 +75,6 @@ struct HostCapacity
     /// has, while the scheduler -- which hears the cordon in the heartbeat -- gives it none.
     std::size_t cordoned { 0 };
 
-    /// How hard this machine's memory is pressed, as the node's pressure watcher reads it from PSI:
-    /// `CompileCacheWire::PressureLevel`'s byte -- 0 calm, 1 yield, 2 shed -- and 0 where no watcher runs.
-    ///
-    /// Beside `cordoned` and for its reason: anything but calm withdraws every slot (the scheduler hears it in the
-    /// machine-budget report), and a dashboard that did not know would show the free slots as capacity the fleet
-    /// has. A `size_t` for `cordoned`'s reason.
-    std::size_t memoryPressure { 0 };
-
     [[nodiscard]] bool operator==(HostCapacity const&) const = default;
 };
 
@@ -109,6 +101,12 @@ struct HostLoadReading
     std::optional<CpuTicks> cpu {};
     /// Memory a new process could actually obtain, or absent when the platform would not say.
     std::optional<std::uint64_t> availableMemoryBytes {};
+    /// How hard this machine's memory is pressed, as the node's pressure watcher reads it from PSI:
+    /// `CompileCacheWire::PressureLevel`'s byte -- 0 calm, 1 yield, 2 shed -- or ABSENT where no watcher runs (no
+    /// PSI, another platform, a daemon): absent is not calm. Anything but calm withdraws every slot (the scheduler
+    /// hears it in the machine-budget report), and a dashboard that did not know would show the free slots as
+    /// capacity the fleet has.
+    std::optional<std::uint64_t> memoryPressure {};
 
     [[nodiscard]] bool operator==(HostLoadReading const&) const = default;
 };

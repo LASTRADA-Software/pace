@@ -42,7 +42,9 @@
 #                                       edit wins. Turning the memory tier on or
 #                                       off (to or from 0) still takes a restart
 #   compile_memory_limit                immediate: rewrites the ceiling over
-#                                       every compile this worker runs
+#                                       every compile this worker runs -- except
+#                                       a RAISE while memory pressure has the
+#                                       allowance lowered, which ramps to it
 #   memory_pressure_yield,              at the pressure watcher's next sample
 #   memory_pressure_shed                (one second): where it yields and sheds
 #
@@ -209,14 +211,17 @@
 # the kernel: past it, one is killed and its client compiles it locally.
 # k/m/g = KiB/MiB/GiB or N% of host RAM. Default: the machine budget. Below
 # that budget it lowers the budget too. Linux, with a cgroup of the node's
-# own. Reloadable: a reload rewrites the ceiling in place.
+# own. Reloadable: a reload rewrites the ceiling in place, at once -- unless it
+# raises the ceiling while memory pressure holds compiles to a lowered
+# allowance, which then grows toward the new value by 5% every 30 s.
 #compile_memory_limit:
 
 # stop admitting compiles onto this machine -- fleet ones and its own local
 # ones -- while it spends more than this share of 10 s stalled on memory (PSI
 # "some", /proc/pressure/memory) and the stall is not the compiles' own: a game
-# or an editor needs the memory. Default 10; 0 never yields. Linux.
-# Reloadable.
+# or an editor needs the memory. Running compiles are held to what they hold
+# then: one that grows past it is killed and its client compiles it locally.
+# Default 10; 0 never yields. Linux. Reloadable.
 #memory_pressure_yield:
 
 # also kill the youngest running compile, one per 10 s, while the whole

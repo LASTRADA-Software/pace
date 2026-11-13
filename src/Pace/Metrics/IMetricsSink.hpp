@@ -1612,8 +1612,10 @@ class IMetricsSink
         WorkerCompilesUnmeasured,
 
         /// Compiles the KERNEL killed inside this worker's compile memory ceiling (`memory.events`
-        /// `oom_kill`). Each was refused, so its client compiled it locally. A steady rise says the
-        /// ceiling is below what this fleet's translation units need.
+        /// `oom_kill`). Each was refused, so its client compiled it locally. Two causes: the configured
+        /// ceiling is below what this fleet's translation units need, or memory pressure lowered the
+        /// allowance (`compiles/memory.max`) to what compiles held when it began and one grew past it --
+        /// the pressure counters tell the two apart, and only the first is fixed by a higher limit.
         WorkerCompilesKilledCeiling,
         /// Compiles this node's own pressure governor killed to give memory back to the machine.
         /// Each was refused and compiled locally by its client. A rise says the machine needed its

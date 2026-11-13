@@ -1565,8 +1565,10 @@ inline constexpr EnumTable<IMetricsSink::Counter, CounterDescriptor> CounterTabl
     { .counter = IMetricsSink::Counter::WorkerCompilesKilledCeiling,
       .prometheusName = "pace_worker_compiles_killed_ceiling_total",
       .help = "Compiles the kernel killed inside this worker's compile memory ceiling. Each was "
-              "refused and compiled locally by its client; a steady rise says the ceiling is below "
-              "what the fleet's translation units need.",
+              "refused and compiled locally by its client. Two causes: the configured ceiling is below "
+              "what the fleet's translation units need, or memory pressure lowered the allowance to what "
+              "compiles held and one grew past it; check pace_node_memory_pressure_yield_seconds_total "
+              "and pace_node_memory_pressure_shed_seconds_total before raising --compile-memory-limit.",
       .type = MetricType::Counter },
     { .counter = IMetricsSink::Counter::WorkerCompilesKilledShed,
       .prometheusName = "pace_worker_compiles_killed_shed_total",

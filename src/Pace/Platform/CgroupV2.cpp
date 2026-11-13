@@ -78,6 +78,21 @@ namespace
         return value;
     }
 
+    /// Whether the cgroup @p directory holds a process now: `cgroup.events`' `populated 1`.
+    /// @param host The cgroup tree.
+    /// @param directory The cgroup.
+    /// @return True only when the file was read and said so; unreadable is false.
+    [[nodiscard]] bool Populated(ICgroupHost const& host, std::filesystem::path const& directory)
+    {
+        auto const text = host.ReadFile(directory / "cgroup.events");
+        if (!text.has_value())
+            return false;
+        auto const lines = std::string_view { *text };
+        return std::ranges::any_of(std::views::split(lines, '\n'), [](auto const line) {
+            return std::string_view { line.begin(), line.end() } == "populated 1";
+        });
+    }
+
     /// One job's cgroup directory, open.
     class CgroupJob final: public IJobCgroup
     {
@@ -436,8 +451,12 @@ bool CgroupJobSource::KillYoungest()
         for (auto const& job: _jobs | std::views::reverse)
         {
             auto live = job.lock();
+            // A job whose cgroup holds no process -- made, its compiler not yet started, or already exited -- is no
+            // victim: killing it frees nothing, and the shed's one kill per dwell would be spent on nothing.
+            if (live == nullptr || live->shed.load(std::memory_order_acquire) || !Populated(*_host, live->directory))
+                continue;
             // `exchange` claims it: a job is shed once, so two callers never choose the same victim.
-            if (live != nullptr && !live->shed.exchange(true, std::memory_order_acq_rel))
+            if (!live->shed.exchange(true, std::memory_order_acq_rel))
             {
                 victim = std::move(live);
                 break;

@@ -732,3 +732,27 @@ TEST_CASE("The admission queue renders its depth and a charge per machine, and n
     CHECK_FALSE(idle.contains("pace_admission_budget_bytes"));
     CHECK_FALSE(idle.contains("pace_admission_in_use_bytes"));
 }
+
+TEST_CASE("The memory-pressure gauge is absent where no watcher runs and 0 only when one reports calm",
+          "[metrics][prometheus][pressure]")
+{
+    AtomicMetricsSink metrics;
+    auto const render = [&metrics](std::optional<std::uint64_t> level) {
+        return RenderPrometheus(
+            metrics,
+            MetricsSnapshot {
+                .storage = std::nullopt,
+                .host = std::nullopt,
+                .hostLoad = HostLoadReading { .cpu = std::nullopt, .availableMemoryBytes = 1024, .memoryPressure = level },
+                .uptime = Uptime { 1s } });
+    };
+    auto const unwatched = render(std::nullopt);
+    // The gauge's own lines, never a prefix: the pressure COUNTERS share it and render as tallies.
+    CHECK_FALSE(unwatched.contains("# TYPE pace_node_memory_pressure gauge"));
+    CHECK_FALSE(unwatched.contains("\npace_node_memory_pressure "));
+    // The positive control: the same scrape renders its other load figure.
+    CHECK(unwatched.contains("pace_node_memory_available_bytes 1024\n"));
+
+    CHECK(render(0).contains("# TYPE pace_node_memory_pressure gauge\npace_node_memory_pressure 0\n"));
+    CHECK(render(2).contains("pace_node_memory_pressure 2\n"));
+}

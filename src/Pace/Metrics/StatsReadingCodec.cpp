@@ -37,9 +37,10 @@ namespace
     // Presence bits inside a host-load block, in the order its figures travel.
     constexpr std::uint8_t CpuPresent = 1U << 0U;             ///< `HostLoadReading::cpu`.
     constexpr std::uint8_t AvailableMemoryPresent = 1U << 1U; ///< `HostLoadReading::availableMemoryBytes`.
+    constexpr std::uint8_t MemoryPressurePresent = 1U << 2U;  ///< `HostLoadReading::memoryPressure`.
 
     /// Every bit a host-load presence byte may carry; anything else is `Malformed`.
-    constexpr std::uint8_t KnownHostLoadBits = CpuPresent | AvailableMemoryPresent;
+    constexpr std::uint8_t KnownHostLoadBits = CpuPresent | AvailableMemoryPresent | MemoryPressurePresent;
 
     /// Bytes a bitmap over @p count items occupies.
     [[nodiscard]] constexpr std::size_t BitmapBytes(std::size_t count) noexcept
@@ -153,7 +154,7 @@ namespace
     /// @return Nothing when the block read whole; otherwise why it did not.
     [[nodiscard]] std::optional<StatsReadingFault> ReadHostLoad(ByteCursor& in, HostLoadReading& load)
     {
-        auto& [cpu, availableMemoryBytes] = load;
+        auto& [cpu, availableMemoryBytes, memoryPressure] = load;
         auto loadPresence = std::uint8_t { 0 };
         if (!in.ReadU8(loadPresence))
             return StatsReadingFault::Truncated;
@@ -166,6 +167,8 @@ namespace
                 return StatsReadingFault::Truncated;
         }
         if ((loadPresence & AvailableMemoryPresent) != 0 && !in.ReadU64(availableMemoryBytes.emplace()))
+            return StatsReadingFault::Truncated;
+        if ((loadPresence & MemoryPressurePresent) != 0 && !in.ReadU64(memoryPressure.emplace()))
             return StatsReadingFault::Truncated;
         return std::nullopt;
     }
@@ -307,9 +310,10 @@ std::vector<std::byte> EncodeStatsReading(StatsReading const& reading)
 
     if (hostLoad.has_value())
     {
-        auto const& [cpu, availableMemoryBytes] = *hostLoad;
+        auto const& [cpu, availableMemoryBytes, memoryPressure] = *hostLoad;
         out.U8(static_cast<std::uint8_t>((cpu.has_value() ? CpuPresent : 0U)
-                                         | (availableMemoryBytes.has_value() ? AvailableMemoryPresent : 0U)));
+                                         | (availableMemoryBytes.has_value() ? AvailableMemoryPresent : 0U)
+                                         | (memoryPressure.has_value() ? MemoryPressurePresent : 0U)));
         if (cpu.has_value())
         {
             auto const& [busy, total] = *cpu;
@@ -318,6 +322,8 @@ std::vector<std::byte> EncodeStatsReading(StatsReading const& reading)
         }
         if (availableMemoryBytes.has_value())
             out.U64(*availableMemoryBytes);
+        if (memoryPressure.has_value())
+            out.U64(*memoryPressure);
     }
 
     if (upstreamConfigured.has_value())

@@ -84,6 +84,13 @@ class LivePressureSettings final: public IPressureSettings
     INodeCapacitySource const& _capacity;
 };
 
+/// Whether this build's platform has pressure stall information: Linux alone.
+#if defined(__linux__)
+inline constexpr bool ThisPlatformHasPsi = true;
+#else
+inline constexpr bool ThisPlatformHasPsi = false;
+#endif
+
 /// What the watcher borrows. All of it outlives the watcher.
 struct PressureWatcherParts
 {
@@ -112,6 +119,9 @@ struct PressureWatcherParts
     core::platform::IClock const& clock;
     /// How often a sample is taken.
     std::chrono::milliseconds poll { std::chrono::seconds { 1 } };
+    /// Whether this platform has PSI at all; the build's own except in a test. Where it has none the watcher is a
+    /// stated no-op and never samples.
+    bool platformHasPsi { ThisPlatformHasPsi };
 };
 
 /// The node's memory-pressure watcher: one sample per `poll`, on a thread of its own -- never a reactor, and never
@@ -138,8 +148,9 @@ class PressureWatcher
     /// Check that PSI can be read, answer the condition, publish calm, say how the watcher runs -- and, unless
     /// @p launch says not to, begin the thread.
     ///
-    /// **Without PSI the watcher does not run**: the reason is logged once, the condition is answered not evaluated
-    /// (never raised), nothing is published, and the reason is returned. Without a ceiling it runs on system PSI
+    /// **Without PSI the watcher does not run** -- on another platform, or on a kernel that offers none: a stated
+    /// no-op, the reason logged once at Info, the condition answered not evaluated (never raised), nothing published
+    /// (absent, which no reader takes for calm), and the reason returned. Without a ceiling it runs on system PSI
     /// alone, changing only what the machine reports, and its start line says so.
     /// @param launch Whether to begin the thread; a test steps by hand instead.
     /// @return Nothing once running, or why the watcher cannot run here.
@@ -173,7 +184,8 @@ class PressureWatcher
     /// @param decision What the governor decided.
     void AnswerCondition(GovernorDecision const& decision);
 
-    /// @return What compiles hold now: the kernel's figure where a ceiling reads it, else what they were charged.
+    /// @return What compiles hold now: the larger of what they are charged (the budget's figure, local leases
+    ///         included) and what `compiles/` is resident in where a ceiling reads it.
     [[nodiscard]] std::uint64_t HoldingBytes() const;
 
     std::unique_ptr<Platform::IMemoryPressureSource> _source;
@@ -188,15 +200,17 @@ class PressureWatcher
     ILogger& _logger;
     core::platform::IClock const& _clock;
     std::chrono::milliseconds _poll;
+    bool _platformHasPsi;
 
-    PressureSettings _applied;                         ///< The settings the governor was last given.
-    PressureGovernor _governor;                        ///< Stepped by the watcher's thread only.
-    PressureLevel _level { PressureLevel::Calm };      ///< The level held since the last step.
-    std::optional<std::uint64_t> _allowanceWritten {}; ///< The allowance last handed to the ceiling.
-    core::platform::SteadyTimePoint _counted;          ///< Up to when the time per level has been counted.
-    std::chrono::nanoseconds _uncounted {};            ///< The part of a second not yet counted; carried across a change.
-    bool _compilesFaultSaid { false };                 ///< The compiles' reading is said to be unreadable.
-    bool _sampleFaultSaid { false };                   ///< A failed system sample is said.
+    PressureSettings _applied;                    ///< The settings the governor was last given.
+    PressureGovernor _governor;                   ///< Stepped by the watcher's thread only.
+    PressureLevel _level { PressureLevel::Calm }; ///< The level held since the last step.
+    /// The lowered allowance last handed to the ceiling; disengaged for none, which is what the keeper starts with.
+    std::optional<std::uint64_t> _allowanceWritten {};
+    core::platform::SteadyTimePoint _counted; ///< Up to when the time per level has been counted.
+    std::chrono::nanoseconds _uncounted {};   ///< The part of a second not yet counted; carried across a change.
+    bool _compilesFaultSaid { false };        ///< The compiles' reading is said to be unreadable.
+    bool _sampleFaultSaid { false };          ///< A failed system sample is said.
 
     /// **Declared LAST**: the body touches every member above, so they are built before it starts and destroyed
     /// only after it has been stopped and joined.

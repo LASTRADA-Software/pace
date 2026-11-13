@@ -3,11 +3,15 @@
 // The pressure watcher: what a step DOES with the governor's answer -- the ceiling, the kill, the presence round,
 // the published level, the condition, the counters and the log. Every case drives `StepOnce()` by hand over fakes
 // and a manual clock; no thread runs.
+#include "CacheTier.hpp"
+#include "CompileMemoryMeter.hpp"
 #include "HeldCharges.hpp"
+#include "LiveNodeConfig.hpp"
 #include "MachineBudget.hpp"
 #include "NodeConditions.hpp"
 #include "NodeConfig.hpp"
 #include "NodePresenceTier.hpp"
+#include "NodeReload.hpp"
 #include "PressureWatcher.hpp"
 
 #include <Pace/Core/Logger.hpp>
@@ -31,7 +35,9 @@
 #include <utility>
 #include <vector>
 
+#include <IProcessRunner.hpp>
 #include <core/platform/Clock.hpp>
+#include <tests/CgroupFakes.hpp>
 #include <tests/Unwrap.hpp>
 
 using namespace Pace;
@@ -76,10 +82,10 @@ class FixedSettings final: public IPressureSettings
 class RecordingCeiling final: public ICompileCeiling
 {
   public:
-    std::vector<std::uint64_t> applied;
+    std::vector<std::optional<std::uint64_t>> applied;
     std::optional<std::uint64_t> held { Holding };
 
-    void Apply(std::uint64_t allowanceBytes) override
+    void Apply(std::optional<std::uint64_t> allowanceBytes) override
     {
         applied.push_back(allowanceBytes);
     }
@@ -167,7 +173,8 @@ struct Rig
     std::unique_ptr<PressureWatcher> watcher;
 
     /// @param cgroups Whether compiles run in a cgroup of the node's own.
-    explicit Rig(bool cgroups = true)
+    /// @param hasPsi Whether the platform has PSI at all.
+    explicit Rig(bool cgroups = true, bool hasPsi = true)
     {
         auto scripted = std::make_unique<ScriptedPressure>();
         source = scripted.get();
@@ -182,7 +189,8 @@ struct Rig
                                                                            .metrics = metrics,
                                                                            .logger = logger,
                                                                            .clock = clock,
-                                                                           .poll = 1s });
+                                                                           .poll = 1s,
+                                                                           .platformHasPsi = hasPsi });
     }
 
     /// Start the watcher without its thread, as a case steps it by hand.
@@ -223,16 +231,17 @@ TEST_CASE("Entering yield holds compiles under the allowance, asks one presence 
     rig.Started();
     CHECK(rig.conditions.StateOf(NodeCondition::MemoryPressureShedding) == Wire::ConditionState::Clear);
     CHECK(rig.Published().level == Wire::PressureLevel::Calm);
-    CHECK(rig.Published().allowanceBytes == Configured);
+    // An allowance at the configuration lowers nothing, so none is stated.
+    CHECK_FALSE(rig.Published().allowanceBytes.has_value());
 
     rig.Step(1s, Quiet);
-    // Calm at the configured figure: the ceiling hears it once, and no round is owed.
-    CHECK(rig.ceiling.applied == std::vector<std::uint64_t> { Configured });
+    // Calm at the configured figure: nothing to hand the ceiling, and no round is owed.
+    CHECK(rig.ceiling.applied.empty());
     CHECK_FALSE(RoundOwed(rig.wake));
 
     rig.Step(1s, GameStall);
-    // The allowance is what compiles hold NOW, as the kernel counts it, written through the ceiling.
-    CHECK(rig.ceiling.applied == std::vector<std::uint64_t> { Configured, Holding });
+    // The allowance is what compiles hold NOW, written through the ceiling.
+    CHECK(rig.ceiling.applied == std::vector<std::optional<std::uint64_t>> { Holding });
     CHECK(rig.Published().level == Wire::PressureLevel::Yield);
     CHECK(rig.Published().allowanceBytes == Holding);
     CHECK(RoundOwed(rig.wake));
@@ -241,7 +250,7 @@ TEST_CASE("Entering yield holds compiles under the allowance, asks one presence 
 
     // Held: nothing more is written and no further round is asked for while the level stands.
     rig.Step(1s, GameStall);
-    CHECK(rig.ceiling.applied.size() == 2);
+    CHECK(rig.ceiling.applied.size() == 1);
     CHECK_FALSE(RoundOwed(rig.wake));
 
     // Back to calm once the stall eases and the dwell is spent: a round, and the row clears.
@@ -306,18 +315,35 @@ TEST_CASE("Without a cgroup the watcher reports the level and allowance and writ
     CHECK(rig.killer.asked == 0);
 }
 
-TEST_CASE("Without PSI the watcher does not start, says why once and raises nothing", "[node][pressure]")
+TEST_CASE("Without PSI the watcher does not start, says why once at Info and raises nothing", "[node][pressure]")
 {
-    Rig rig;
-    rig.source->next = std::unexpected { std::string { "/proc/pressure/memory: No such file or directory" } };
+    SECTION("a kernel that offers none")
+    {
+        Rig rig;
+        rig.source->next = std::unexpected { std::string { "/proc/pressure/memory: No such file or directory" } };
 
-    auto const started = rig.watcher->Start(false);
-    REQUIRE_FALSE(started.has_value());
-    CHECK(started.error().contains("/proc/pressure/memory"));
-    CHECK(rig.conditions.StateOf(NodeCondition::MemoryPressureShedding) == Wire::ConditionState::NotEvaluated);
-    CHECK(rig.Lines(LogLevel::Warn) == 1);
-    // Nothing published: absent, which a reader must not take for calm.
-    CHECK_FALSE(rig.published.Current().has_value());
+        auto const started = rig.watcher->Start(false);
+        REQUIRE_FALSE(started.has_value());
+        CHECK(started.error().contains("/proc/pressure/memory"));
+        CHECK(rig.conditions.StateOf(NodeCondition::MemoryPressureShedding) == Wire::ConditionState::NotEvaluated);
+        // M4: a stated no-op, not a fault -- once, at Info.
+        CHECK(rig.Lines(LogLevel::Warn) == 0);
+        CHECK(rig.Lines(LogLevel::Info) == 1);
+        // Nothing published: absent, which a reader must not take for calm.
+        CHECK_FALSE(rig.published.Current().has_value());
+    }
+    SECTION("a platform that has none: never sampled, and said with the platform's reason")
+    {
+        Rig rig { true, false };
+        // Would succeed if asked: the platform answer comes first.
+        auto const started = rig.watcher->Start(false);
+        REQUIRE_FALSE(started.has_value());
+        CHECK(started.error().contains("this platform has no memory pressure stall information"));
+        CHECK(rig.conditions.StateOf(NodeCondition::MemoryPressureShedding) == Wire::ConditionState::NotEvaluated);
+        CHECK(rig.Lines(LogLevel::Warn) == 0);
+        CHECK(rig.Lines(LogLevel::Info) == 1);
+        CHECK_FALSE(rig.published.Current().has_value());
+    }
 }
 
 TEST_CASE("The compiles' pressure going unreadable is said on its transitions, never per sample", "[node][pressure]")
@@ -380,11 +406,64 @@ TEST_CASE("A reload moving a threshold or the ceiling reaches the next step", "[
     rig.Step(1s, Mild);
     CHECK(rig.Published().level == Wire::PressureLevel::Yield);
 
-    // A lowered ceiling clamps the allowance at once.
+    CHECK(rig.ceiling.applied.back() == Holding);
+
+    // A lowered ceiling clamps the allowance at once: down to the configuration, where it lowers nothing more, so
+    // the ceiling is handed none and writes the configured 8 GiB.
     rig.settings.settings.configuredBytes = 8 * GiB;
     rig.Step(1s, Mild);
-    CHECK(rig.Published().allowanceBytes == 8 * GiB);
-    CHECK(rig.ceiling.applied.back() == 8 * GiB);
+    CHECK_FALSE(rig.Published().allowanceBytes.has_value());
+    CHECK(rig.ceiling.applied.back() == std::nullopt);
+}
+
+TEST_CASE("A raise reaches a never-pressured watcher at once, and one after a yield ramps and is said",
+          "[node][pressure][reload]")
+{
+    // I2. An allowance pressure never lowered IS the configuration: a raise moves the ceiling and the budget at once.
+    Rig rig;
+    rig.Started();
+    rig.Step(1s, Quiet);
+    rig.settings.settings.configuredBytes = 96 * GiB;
+    rig.Step(1s, Quiet);
+    CHECK_FALSE(rig.Published().allowanceBytes.has_value());
+    CHECK(rig.ceiling.applied.empty());
+    CHECK(rig.Lines(LogLevel::Info) == 1); // the start line alone: nothing was held back
+
+    // After a yield, the lowered allowance stays and ramps: said once at Info.
+    rig.Step(1s, GameStall);
+    rig.Step(10s, Quiet);
+    REQUIRE(rig.Published().level == Wire::PressureLevel::Calm);
+    REQUIRE(rig.Published().allowanceBytes == Holding);
+    rig.settings.settings.configuredBytes = 128 * GiB;
+    rig.Step(1s, Quiet);
+    CHECK(rig.Published().allowanceBytes == Holding);
+    CHECK(std::ranges::any_of(rig.logger.Snapshot(), [](CapturingLogger::Record const& record) {
+        return record.level == LogLevel::Info && record.message.contains("compile ceiling rose to");
+    }));
+    rig.Step(30s, Quiet);
+    CHECK(rig.Published().allowanceBytes == Holding + (128 * GiB * 5 / 100));
+}
+
+TEST_CASE("The allowance a yield sets is never below what the machine's compiles are charged", "[node][pressure]")
+{
+    // M6. The budget is compared against the CHARGED bytes -- local leases included, which run outside compiles/ --
+    // so an allowance taken from compiles/memory.current alone would leave the queue admitting nothing until the
+    // ramp caught up. The larger of the two is taken; the ceiling never exceeds the configuration either way.
+    Rig rig;
+    rig.held.held.bytes = 30 * GiB; // more than compiles/ is resident in (Holding, 20 GiB)
+    rig.Started();
+    rig.Step(1s, GameStall);
+    CHECK(rig.Published().allowanceBytes == 30 * GiB);
+    CHECK(rig.ceiling.applied.back() == 30 * GiB);
+
+    // And charged bytes past the configuration lower nothing: the allowance stays the configuration.
+    Rig over;
+    over.held.held.bytes = 2 * Configured;
+    over.Started();
+    over.Step(1s, GameStall);
+    CHECK(over.Published().level == Wire::PressureLevel::Yield);
+    CHECK_FALSE(over.Published().allowanceBytes.has_value());
+    CHECK(over.ceiling.applied.empty());
 }
 
 TEST_CASE("The pressure flags map to the governor's thresholds, and zero turns a level off", "[node][pressure][config]")
@@ -406,4 +485,147 @@ TEST_CASE("The pressure flags map to the governor's thresholds, and zero turns a
     auto const off = MemoryPressureThresholdsOf(cfg);
     CHECK(std::isinf(off.yieldEnter));
     CHECK(std::isinf(off.shedEnter));
+}
+
+namespace
+{
+
+/// A cgroup tree in which everything works: a delegated cgroup offering memory, holding only the node.
+[[nodiscard]] std::shared_ptr<Testing::FakeCgroupHost> DelegatedCgroups()
+{
+    auto host = std::make_shared<Testing::FakeCgroupHost>();
+    host->files["/proc/self/cgroup"] = "0::/system.slice/pace-node.service\n";
+    host->files["/sys/fs/cgroup/system.slice/pace-node.service/cgroup.controllers"] = "memory\n";
+    host->files["/sys/fs/cgroup/system.slice/pace-node.service/cgroup.procs"] = "4242\n";
+    host->files["/sys/fs/cgroup/system.slice/pace-node.service/node/memory.peak"] = "1\n";
+    host->files["/sys/fs/cgroup/system.slice/pace-node.service/compiles/memory.current"] = "1073741824\n";
+    return host;
+}
+
+/// The figures written to `compiles/memory.max`, in order.
+[[nodiscard]] std::vector<std::uint64_t> CeilingsWritten(Testing::FakeCgroupHost const& host)
+{
+    auto const prefix = std::string { "write /sys/fs/cgroup/system.slice/pace-node.service/compiles/memory.max " };
+    auto written = std::vector<std::uint64_t> {};
+    for (auto const& entry: host.trail)
+        if (entry.starts_with(prefix))
+            written.push_back(std::stoull(entry.substr(prefix.size())));
+    return written;
+}
+
+/// The configuration in force, as a reload changes it.
+struct InForce final: INodeConfigSource
+{
+    NodeConfig cfg;
+    [[nodiscard]] NodeConfig Current() const override
+    {
+        return cfg;
+    }
+};
+
+/// What this machine is, as a cache-budget override moves it.
+struct Machine final: INodeCapacitySource
+{
+    Distributed::NodeCapacity capacity { .logicalCores = 8, .totalMemoryBytes = 32 * GiB, .reservedMemoryBytes = 0 };
+    [[nodiscard]] Distributed::NodeCapacity Current() const override
+    {
+        return capacity;
+    }
+};
+
+/// The production stack, by hand: the meter over a fake cgroup tree, the keeper, and the watcher writing through
+/// it -- the allowance in place, as `main` builds it.
+struct KeptRig
+{
+    std::shared_ptr<Testing::FakeCgroupHost> host = DelegatedCgroups();
+    AtomicMetricsSink metrics;
+    CapturingLogger logger;
+    NodeConditions conditions;
+    CompileMemoryMeter meter { host, MeterPlatform::Linux };
+    InForce inForce;
+    Machine machine;
+    CompileCeilingKeeper keeper { meter, inForce, machine, conditions, logger };
+    CompileCeilingOnReload reload { keeper };
+    LivePressureSettings settings { inForce, machine };
+    FixedHeld held;
+    PublishedPressure published;
+    PresenceWake wake;
+    core::platform::ManualClock clock;
+    ScriptedPressure* source = nullptr;
+    std::unique_ptr<PressureWatcher> watcher;
+
+    KeptRig()
+    {
+        REQUIRE(meter.MakeRunner(metrics, logger).report.state == MeterState::Measured);
+        static_cast<void>(keeper.Keep(CeilingWrite::Always));
+        auto scripted = std::make_unique<ScriptedPressure>();
+        source = scripted.get();
+        watcher = std::make_unique<PressureWatcher>(PressureWatcherParts { .source = std::move(scripted),
+                                                                           .settings = settings,
+                                                                           .ceiling = &keeper,
+                                                                           .killer = meter.YoungestKiller(),
+                                                                           .held = held,
+                                                                           .published = published,
+                                                                           .wake = wake,
+                                                                           .conditions = conditions,
+                                                                           .metrics = metrics,
+                                                                           .logger = logger,
+                                                                           .clock = clock,
+                                                                           .poll = 1s });
+        REQUIRE(watcher->Start(false).has_value());
+    }
+
+    void Step(Psi const& psi)
+    {
+        clock.advance(1s);
+        source->next = SampleOf(psi);
+        watcher->StepOnce();
+    }
+};
+
+} // namespace
+
+TEST_CASE("A reload raising the limit reaches memory.max at once on a never-pressured node", "[node][pressure][reload]")
+{
+    if (!Cc::CanSpawnIntoCgroups())
+        SKIP("this build cannot spawn into a cgroup, so the meter never prepares compiles/");
+    KeptRig rig;
+    rig.inForce.cfg.compileMemoryLimitBytes = 8 * GiB;
+    rig.reload.ReloadAccepted();
+    rig.Step(Quiet);
+    rig.inForce.cfg.compileMemoryLimitBytes = 16 * GiB;
+    rig.reload.ReloadAccepted(); // the raise: written by the reload itself, nothing held back
+    rig.Step(Quiet);
+    rig.Step(Quiet);
+
+    auto const derived = CompileCeilingOf(NodeConfig {}, rig.machine.capacity);
+    CHECK(CeilingsWritten(*rig.host) == std::vector<std::uint64_t> { derived, 8 * GiB, 16 * GiB });
+}
+
+TEST_CASE("A capacity that moves re-applies the derived ceiling with the pressure allowance in place",
+          "[node][pressure][resize][meter]")
+{
+    // Task 4's capacity case, as production runs it: the watcher writes through the same keeper. Calm, both
+    // directions follow at once; after a yield the allowance binds, and a rise waits on the ramp.
+    if (!Cc::CanSpawnIntoCgroups())
+        SKIP("this build cannot spawn into a cgroup, so the meter never prepares compiles/");
+    KeptRig rig;
+    auto const at = [&rig](std::uint64_t reserved) {
+        rig.machine.capacity.reservedMemoryBytes = reserved;
+        static_cast<void>(rig.keeper.Keep(CeilingWrite::OnChange)); // the presence round
+        rig.Step(Quiet);                                            // the watcher's next sample
+    };
+    rig.Step(Quiet);
+    at(8 * GiB); // reserve up: derived budget down
+    at(0);       // reserve back: up again, at once
+    auto const calm = CeilingsWritten(*rig.host);
+    CHECK(calm == std::vector<std::uint64_t> { 24 * GiB, 18 * GiB, 24 * GiB });
+
+    // A yield: the allowance is what compiles are charged (12 GiB, above the 1 GiB resident), and a rise waits.
+    rig.Step(GameStall);
+    rig.machine.capacity.totalMemoryBytes = 64 * GiB;
+    static_cast<void>(rig.keeper.Keep(CeilingWrite::OnChange));
+    rig.Step(GameStall);
+    auto const pressed = CeilingsWritten(*rig.host);
+    CHECK(pressed == std::vector<std::uint64_t> { 24 * GiB, 18 * GiB, 24 * GiB, 12 * GiB });
 }

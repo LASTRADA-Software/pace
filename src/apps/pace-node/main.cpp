@@ -915,13 +915,15 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     return watcher;
 }
 
-/// The memory-pressure gauge a scrape reports: the published level's byte, or calm where none was published.
+/// The memory-pressure gauge a scrape reports: the published level's byte, or absent where no watcher published one.
 /// @param published The watcher's latest decision.
-/// @return The gauge.
-[[nodiscard]] std::size_t PressureGauge(Node::PublishedPressure const& published)
+/// @return The gauge, or nothing: absent is not calm.
+[[nodiscard]] std::optional<std::uint64_t> PressureGauge(Node::PublishedPressure const& published)
 {
     auto const pressure = published.Current();
-    return pressure.has_value() ? static_cast<std::size_t>(pressure->level) : std::size_t { 0 };
+    if (!pressure.has_value())
+        return std::nullopt;
+    return static_cast<std::uint64_t>(pressure->level);
 }
 
 /// What rewrites the ceiling after every accepted reload.

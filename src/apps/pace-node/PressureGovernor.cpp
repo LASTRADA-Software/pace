@@ -98,8 +98,15 @@ GovernorDecision PressureGovernor::Step(Platform::PressureSample const& sample, 
 
 void PressureGovernor::Reconfigure(std::uint64_t configuredBytes)
 {
+    // An allowance at the configured value was never adapted: it IS the configuration, and follows it either way.
+    auto const adapted = _allowanceBytes < _configuredBytes;
     _configuredBytes = configuredBytes;
-    _allowanceBytes = std::min(_allowanceBytes, _configuredBytes);
+    _allowanceBytes = adapted ? std::min(_allowanceBytes, _configuredBytes) : _configuredBytes;
+}
+
+std::uint64_t PressureGovernor::AllowanceBytes() const noexcept
+{
+    return _allowanceBytes;
 }
 
 void PressureGovernor::Retune(PressureThresholds const& thresholds)

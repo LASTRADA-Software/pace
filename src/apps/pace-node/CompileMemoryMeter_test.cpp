@@ -779,6 +779,9 @@ TEST_CASE("A compile KillYoungest chose is reported shed by the runner that reap
     host->tree.files["/sys/fs/cgroup/system.slice/pace-node.service/cgroup.controllers"] = "memory\n";
     host->tree.files["/sys/fs/cgroup/system.slice/pace-node.service/cgroup.procs"] = "4242\n";
     host->tree.files["/sys/fs/cgroup/system.slice/pace-node.service/node/memory.peak"] = "1\n";
+    // The kernel says populated once a compiler runs in the job; the fake tree says it from the start, since this
+    // case chooses the victim between `Create` and the spawn -- a moment the real kernel would answer empty.
+    host->tree.files["/sys/fs/cgroup/system.slice/pace-node.service/compiles/job-1/cgroup.events"] = "populated 1\n";
     auto const layout = Platform::PrepareJobCgroups(*host);
     REQUIRE(layout.has_value());
     auto const source = std::make_shared<SheddingJobSource>(std::make_shared<Platform::CgroupJobSource>(host, *layout));

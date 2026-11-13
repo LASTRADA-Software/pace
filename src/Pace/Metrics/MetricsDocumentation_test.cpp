@@ -180,7 +180,9 @@ constexpr std::string_view NodePrefix = "pace_";
     // Both load figures present, for the reason the consensus block below is populated: each of
     // the three load series renders only when its figure was read, so an absent one would let the
     // page lose its row unnoticed.
-    snapshot.hostLoad = HostLoadReading { .cpu = CpuTicks { .busy = 1, .total = 2 }, .availableMemoryBytes = 1 };
+    // A node whose pressure watcher runs: the gauge is absent where none does, so the shape that renders it states one.
+    snapshot.hostLoad =
+        HostLoadReading { .cpu = CpuTicks { .busy = 1, .total = 2 }, .availableMemoryBytes = 1, .memoryPressure = 0 };
     // Consensus is a node-only block too, and it is populated with a member set AND
     // a leader rather than a default `ConsensusStatus`: two of its five series are
     // rendered only when there is something to name, so a default-constructed status

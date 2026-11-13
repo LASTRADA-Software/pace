@@ -101,8 +101,9 @@ class PressureGovernor
     /// @return The level, the allowance, and whether to kill the youngest compile.
     [[nodiscard]] GovernorDecision Step(Platform::PressureSample const& sample, std::uint64_t compilesHoldBytes);
 
-    /// Change the configured allowance. Lowering it clamps the allowance; raising it never raises the
-    /// allowance, which ramps toward the new value from where it stands.
+    /// Change the configured allowance. Lowering it clamps the allowance. Raising it raises an allowance that
+    /// stands AT the old configured value -- never lowered by pressure, or fully ramped back -- at once; one a
+    /// yield or shed lowered stays where it stands and ramps toward the new value.
     /// @param configuredBytes The new configured allowance.
     void Reconfigure(std::uint64_t configuredBytes);
 
@@ -110,6 +111,9 @@ class PressureGovernor
     /// reload moves where the next change happens, never the state the machine is in.
     /// @param thresholds The new thresholds.
     void Retune(PressureThresholds const& thresholds);
+
+    /// @return The allowance now, as the last `Step` or `Reconfigure` left it.
+    [[nodiscard]] std::uint64_t AllowanceBytes() const noexcept;
 
   private:
     /// Move to @p level at @p now, setting the allowance from what compiles hold.

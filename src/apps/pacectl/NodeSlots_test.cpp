@@ -234,12 +234,16 @@ TEST_CASE("A memory-pressure limit has the name, the remedy and the tone the nod
 TEST_CASE("A machine under memory pressure offers nothing and names memory-pressure, from one reading",
           "[cli][node-slots][pressure]")
 {
-    // C5. The node's watcher reports its level in the host block; the panel folds it into the scheduler's own
+    // C5. The node's watcher reports its level in the host-load block; the panel folds it into the scheduler's own
     // arithmetic, so a yielding machine's free slots are not shown as capacity the fleet has.
-    auto host = SixteenCores();
-    host.memoryPressure = static_cast<std::size_t>(Distributed::PressureLevel::Yield);
-    auto const previous = ReadingOf(host, Ticks(1000, 10000));
-    auto const now = ReadingOf(host, Ticks(1100, 11000));
+    auto const pressed = [](std::uint64_t busy, std::uint64_t total, std::optional<std::uint64_t> level) {
+        auto load = Ticks(busy, total);
+        load.memoryPressure = level;
+        return load;
+    };
+    auto const yield = std::optional { static_cast<std::uint64_t>(Distributed::PressureLevel::Yield) };
+    auto const previous = ReadingOf(SixteenCores(), pressed(1000, 10000, yield));
+    auto const now = ReadingOf(SixteenCores(), pressed(1100, 11000, yield));
 
     SECTION("with two readings")
     {
@@ -258,16 +262,18 @@ TEST_CASE("A machine under memory pressure offers nothing and names memory-press
     }
     SECTION("and calm names nothing it does not report")
     {
-        host.memoryPressure = static_cast<std::size_t>(Distributed::PressureLevel::Calm);
-        auto const calm = NodeSlotsOf(nullptr, ReadingOf(host, Ticks(1100, 11000)));
-        REQUIRE(calm.has_value());
-        CHECK_FALSE(Unwrap(calm).ceilings.has_value());
+        auto const calm = std::optional { static_cast<std::uint64_t>(Distributed::PressureLevel::Calm) };
+        auto const slots = NodeSlotsOf(nullptr, ReadingOf(SixteenCores(), pressed(1100, 11000, calm)));
+        REQUIRE(slots.has_value());
+        CHECK_FALSE(Unwrap(slots).ceilings.has_value());
     }
-    SECTION("and a level this build does not know is no statement")
+    SECTION("and an absent level, or one this build does not know, is no statement")
     {
-        host.memoryPressure = 7;
-        auto const unknown = NodeSlotsOf(nullptr, ReadingOf(host, Ticks(1100, 11000)));
-        REQUIRE(unknown.has_value());
-        CHECK_FALSE(Unwrap(unknown).ceilings.has_value());
+        for (auto const level: { std::optional<std::uint64_t> {}, std::optional<std::uint64_t> { 7 } })
+        {
+            auto const slots = NodeSlotsOf(nullptr, ReadingOf(SixteenCores(), pressed(1100, 11000, level)));
+            REQUIRE(slots.has_value());
+            CHECK_FALSE(Unwrap(slots).ceilings.has_value());
+        }
     }
 }

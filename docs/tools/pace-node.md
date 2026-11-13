@@ -3128,8 +3128,10 @@ section states. `raft_self` moves the address this node's peers dial for consens
 bounded slices while it serves -- and a cluster budget override set against the old value is
 dropped, because the edit is the later change (see [cache budget overrides](#cache-budget-overrides-applied-by-the-member)).
 Turning the memory tier on or off, to or from `0`, still takes a restart and is refused by name.
-`compile_memory_limit` rewrites the ceiling over every compile this worker runs, at once, and the
-machine's budget is reported to the fleet at once rather than at the next 20 s round.
+`compile_memory_limit` rewrites the ceiling over every compile this worker runs, and the machine's budget is
+reported to the fleet, at once -- except that a RAISE waits on the memory-pressure allowance while a yield or
+shed has it lowered, ramping toward the new value ([layer C](#layer-c-the-pressure-governor)); a lowering is
+always at once.
 `memory_pressure_yield` and `memory_pressure_shed` move where the pressure governor acts from its next
 sample, a second later ([layer C](#layer-c-the-pressure-governor)).
 
@@ -3489,8 +3491,9 @@ The ceiling defaults to the machine budget the node already reports to the fleet
 less the cache reservation, or `--machine-memory-budget`), so admission and the ceiling cannot
 disagree. `--compile-memory-limit` (YAML `compile_memory_limit`, **reloadable**) overrides it; typed
 below the budget, it lowers the budget the node reports too, so the queue never admits what the
-ceiling would kill. A reload rewrites the control file at once and never raises a limit above the
-configured value. The startup line states the ceiling in force and whether it was derived or typed.
+ceiling would kill. A reload rewrites the control file at once -- lowered or raised -- and never writes a limit
+above the configured value. The one exception to *at once* is a raise while the memory-pressure allowance is
+lowered (layer C below): the ceiling then stays at the allowance and grows toward the new value with it. The startup line states the ceiling in force and whether it was derived or typed.
 
 A compile the ceiling killed is **never a compiler failure**. It is classified *killed* when its
 cgroup's `memory.events` shows `oom_kill` above zero, when the node's own shedding killed it, or when
@@ -3514,7 +3517,7 @@ oscillate:
 | Level | Entered when | What the node does |
 | --- | --- | --- |
 | `calm` | — | nothing; compiles are admitted up to their allowance |
-| `yield` | PSI `some` `avg10` above `--memory-pressure-yield`, and the stall is **not the compiles' own** | admits no new compile on this machine — fleet ones **and its own local ones**; running compiles finish |
+| `yield` | PSI `some` `avg10` above `--memory-pressure-yield`, and the stall is **not the compiles' own** | admits no new compile on this machine — fleet ones **and its own local ones** — and holds the running ones at what they hold now (the allowance below): one that grows past it is killed by the ceiling and its client compiles it locally |
 | `shed` | PSI `full` `avg10` at or above `--memory-pressure-shed` (the desktop freezing, whoever causes it), or a foreign stall that has held a `yield` for twenty seconds | admits nothing, and kills the **youngest** running compile, one per ten seconds, until the level drops |
 
 - **A stall that is the compiles' own is not a yield.** When the `compiles/` cgroup carries at least
@@ -3528,12 +3531,21 @@ oscillate:
   `worker-compile-killed` with that cause and counts it in `pace_worker_compiles_killed_shed_total`;
   its client compiles it locally, as for a ceiling kill.
 - **The allowance.** Entering `yield` or `shed` sets the compiles' allowance to what they hold at that
-  moment (`compiles/memory.current`) — the work that demonstrably fits beside whatever else runs. It
-  becomes both the ceiling written on `compiles/memory.max` and the budget the machine reports, so
-  the fleet's queue and the kernel agree. While `calm` it grows back by 5% of the configured ceiling
-  every 30 s, so it reaches the configured value in ten minutes; a new yield resets it. It is never
-  raised above the configured ceiling — `--compile-memory-limit`, or the machine budget — and it lives
-  in the node process only: a restart starts calm, at the configured value.
+  moment — the larger of what `compiles/` is resident in (`compiles/memory.current`) and what the
+  machine's compiles are charged, local leases included — the work that demonstrably fits beside
+  whatever else runs. It becomes both the ceiling written on `compiles/memory.max` and the budget the
+  machine reports, so the fleet's queue and the kernel agree. **A running compile that grows past it is
+  killed by the ceiling** (`worker-compile-killed`, counted in `pace_worker_compiles_killed_ceiling_total`)
+  and its client compiles it locally: a yield stops new work *and* caps the work already running. While
+  `calm` it grows back by 5% of the configured ceiling every 30 s, so it reaches the configured value in
+  ten minutes; a new yield resets it. It is never above the configured ceiling — `--compile-memory-limit`,
+  or the machine budget — and it lives in the node process only: a restart starts calm, at the
+  configured value.
+- **A raise of the configured ceiling** (a reload of `--compile-memory-limit`, or a cache tier that
+  shrank) takes effect at once while the allowance stands at the configured value — pressure never
+  lowered it, or it has ramped all the way back. While a yield or shed has it lowered, it stays where
+  it is and ramps toward the new value instead, and the node says so once at Info (`the compile ceiling
+  rose to ... but compiles stay held to ...`). A lowered ceiling always applies at once.
 - **The fleet hears it at once.** A level change sends the machine-budget report immediately rather
   than at the next 20 s round, carrying the level beside the lowered budget, and the leader's queue
   admits nothing new on a machine whose report is not `calm` — the run-alone exception for a compile
@@ -3542,7 +3554,7 @@ oscillate:
 Each change is logged once — at Warn entering `shed`, at Info otherwise — naming the level, the
 system's `some` and `full` figures and the allowance. The level is the live condition
 `memory-pressure-shedding` (raised while not `calm`; the detail names the level and the allowance),
-the gauge `pace_node_memory_pressure` (0 calm, 1 yield, 2 shed), the counters
+the gauge `pace_node_memory_pressure` (0 calm, 1 yield, 2 shed; absent where no watcher runs), the counters
 `pace_node_memory_pressure_{yield,shed}_seconds_total` and `..._{yield,shed}_entries_total`, and the
 binding limit `memory-pressure` in `pacectl node`'s slot ceilings and the dashboard's node panel.
 
@@ -3559,8 +3571,10 @@ desktop that stutters, and 5% `full` one that freezes, so the node acts before o
 older unit, `--slots=0`), the watcher still runs on system PSI and changes only what the machine
 reports — its level and allowance, so the queue still stops admitting work there — and its start line
 says so: no ceiling is lowered and nothing is killed. Without PSI (a kernel built without it, or
-`psi=0` on its command line) the watcher does not run: the node says why once at startup and answers
-`memory-pressure-shedding` not evaluated. On a platform other than Linux it never runs.
+`psi=0` on its command line) the watcher does not run: the node says why once at startup, at Info --
+a stated no-op rather than a fault -- answers `memory-pressure-shedding` not evaluated, and reports no
+`pace_node_memory_pressure` at all. On a platform other than Linux it never samples, and says so the
+same way.
 
 ##### Layer A: compilers are the kernel's first victims
 
@@ -3908,7 +3922,7 @@ exposition cannot drift apart again without a red build.
 | `pace_worker_jobs_refused_spawn_failed_total` | Jobs refused because the compiler could not be spawned: the toolchain this worker advertises is not usable here. |
 | `pace_worker_jobs_refused_compiler_unclassified_total` | Jobs refused because this worker cannot classify the compiler its own --toolchain names: it ran, and this build does not recognise which driver it is. Not a path fault -- see pace_worker_jobs_refused_spawn_failed_total for that one. |
 | `pace_worker_jobs_refused_survey_in_flight_total` | Jobs refused because this worker had not finished identifying its toolchains: it is still starting, not misconfigured. Rises only from clients dialling this port directly -- the scheduler is not offered this worker until the survey completes. |
-| `pace_worker_compiles_killed_ceiling_total` | Compiles the kernel killed inside this worker's compile memory ceiling. Each was refused and compiled locally by its client; a steady rise says the ceiling is below what the fleet's translation units need. |
+| `pace_worker_compiles_killed_ceiling_total` | Compiles the kernel killed inside this worker's compile memory ceiling. Each was refused and compiled locally by its client. Two causes, told apart by the memory-pressure counters: the configured ceiling is below what the fleet's translation units need, or a yield or shed lowered the allowance to what compiles held and a compile grew past it. Check pace_node_memory_pressure_yield_seconds_total and ..._shed_seconds_total before raising --compile-memory-limit: a rise that moves with them is the allowance, which raising the limit does not change. |
 | `pace_worker_compiles_killed_shed_total` | Compiles this node's pressure governor killed to give memory back to the machine. Each was refused and compiled locally by its client. |
 | `pace_worker_compiles_killed_signal_total` | Compiles ended by SIGKILL that neither the compile memory ceiling nor the pressure governor accounts for: a global OOM kill, systemd-oomd, or a person. Each was refused and compiled locally by its client. |
 | `pace_node_memory_pressure_yield_seconds_total` | Seconds this node held the yield level: the machine stalled on memory for something other than its compiles, so no new compile was admitted on it, local ones included. Its rate over a window is the share of the window spent yielding; calm is the rest. |
@@ -3988,7 +4002,7 @@ fact about it. These are gauges, not counters, except the two CPU tick series.
 | `pace_node_slots_configured` | Concurrent compiles this node advertises to the scheduler. |
 | `pace_node_slots_busy` | Compiles running right now — **sampled**, so it is a reading and not a difference of two counters. |
 | `pace_node_cordoned` | 1 while an operator has cordoned this node's worker, 0 otherwise. Read beside `pace_node_slots_busy`: cordoned with compiles running is draining, cordoned with none is safe to stop. A restart clears it, so `== 1` for a day is a machine somebody forgot. |
-| `pace_node_memory_pressure` | This machine's memory-pressure level as the node's watcher reads it: 0 calm, 1 yield (no new compile admitted on it), 2 shed (that, and its youngest compile killed). 0 where no watcher runs. |
+| `pace_node_memory_pressure` | This machine's memory-pressure level as the node's watcher reads it: 0 calm, 1 yield (no new compile admitted on it), 2 shed (that, and its youngest compile killed). **Absent** where no watcher runs (no PSI, or a platform other than Linux): absent is not calm. |
 | `pace_node_cpu_busy_ticks_total` | Host-wide CPU ticks spent doing anything but idling, this node's own compiles included. A **counter** in platform ticks, whose length differs per platform, so it means nothing alone: `rate(pace_node_cpu_busy_ticks_total[1m]) / rate(pace_node_cpu_ticks_total[1m])` is the machine's busy share. Absent when the platform would not report its CPU. |
 | `pace_node_cpu_ticks_total` | Host-wide CPU ticks accounted for at all: the denominator of the row above. |
 | `pace_node_memory_available_bytes` | Memory a new process could actually obtain: *available*, not free, so the page cache the kernel hands back on demand counts. Absent when the platform would not say. |

@@ -266,7 +266,7 @@ CeilingBasis CompileCeilingKeeper::Keep(CeilingWrite when)
     return KeepLocked(when);
 }
 
-void CompileCeilingKeeper::Apply(std::uint64_t allowanceBytes)
+void CompileCeilingKeeper::Apply(std::optional<std::uint64_t> allowanceBytes)
 {
     auto const guard = std::scoped_lock { _mutex };
     _allowance = allowanceBytes;

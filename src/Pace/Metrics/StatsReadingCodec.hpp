@@ -62,8 +62,9 @@ namespace Pace
 /// storage (if present): u64 per StorageStatsWireFields row
 /// tier presence bitmap, ceil(tiers/8) bytes; then StorageStatsWireFields per present tier
 /// host (if present): u64 per HostCapacityWireFields row
-/// hostLoad (if present): u8 presence (bit0 cpu, bit1 availableMemoryBytes);
-///                        u64 busy, u64 total (if cpu); u64 bytes (if availableMemoryBytes)
+/// hostLoad (if present): u8 presence (bit0 cpu, bit1 availableMemoryBytes, bit2 memoryPressure);
+///                        u64 busy, u64 total (if cpu); u64 bytes (if availableMemoryBytes);
+///                        u64 level (if memoryPressure)
 /// upstreamConfigured (if present): u8, 0 or 1
 /// consensus (if present): u32 member count, then per member u32 length + bytes;
 ///                         u8 leader present, then u32 length + bytes; u64 term; u64 commitIndex; u8 role
@@ -135,7 +136,6 @@ namespace StatsReadingWire
         Field<HostCapacity, std::size_t> { .name = "configuredSlots", .member = &HostCapacity::configuredSlots },
         Field<HostCapacity, std::size_t> { .name = "busySlots", .member = &HostCapacity::busySlots },
         Field<HostCapacity, std::size_t> { .name = "cordoned", .member = &HostCapacity::cordoned },
-        Field<HostCapacity, std::size_t> { .name = "memoryPressure", .member = &HostCapacity::memoryPressure },
     };
 
     /// The `std::uint64_t` half of `HostCapacity`.
@@ -158,7 +158,8 @@ namespace StatsReadingWire
     /// are optionals of different shapes. The encoder's structured bindings hold the count.
     inline constexpr std::array HostLoadFieldNames { std::string_view { "cpuBusyTicks" },
                                                      std::string_view { "cpuTotalTicks" },
-                                                     std::string_view { "availableMemoryBytes" } };
+                                                     std::string_view { "availableMemoryBytes" },
+                                                     std::string_view { "memoryPressure" } };
 
     /// The fields of `ConsensusStatus` and of `MetricsSnapshot`, by name, in the order they travel.
     ///
