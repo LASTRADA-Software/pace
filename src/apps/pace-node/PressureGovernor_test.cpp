@@ -277,6 +277,61 @@ TEST_CASE("A yield whose stall eases below its entry is not escalated", "[node][
     CHECK(rig.After(25s, { .some = 7.0, .full = 0.0, .compiles = 0.0 }, 30 * GiB).level == PressureLevel::Yield);
 }
 
+TEST_CASE("Compiles stalling under the ceiling a yield set are neither escalated nor held", "[node][pressure]")
+{
+    // The likely path: a yield clamps the allowance to what compiles hold, the compiles keep growing into
+    // that ceiling and stall against it, and the game that caused the yield exits. The system's stall is
+    // then the compiles' own.
+    Rig rig;
+    REQUIRE(rig.After(0s, GameStall, 30 * GiB).level == PressureLevel::Yield);
+    auto const ownStall = Script { .some = 20.0, .full = 0.0, .compiles = 19.0 };
+
+    auto const held = rig.After(9s, ownStall, 30 * GiB);
+    CHECK(held.level == PressureLevel::Yield);
+
+    // Past the dwell the own stall is no reason to stay; past twice the dwell it is no reason to shed.
+    auto const left = rig.After(1s, ownStall, 30 * GiB);
+    CHECK(left.level == PressureLevel::Calm);
+    CHECK(left.levelChanged);
+    for ([[maybe_unused]] auto const tick: std::views::iota(0, 6))
+    {
+        auto const decision = rig.After(5s, ownStall, 30 * GiB);
+        CHECK(decision.level == PressureLevel::Calm);
+        CHECK_FALSE(decision.killYoungest);
+    }
+}
+
+TEST_CASE("Compiles stalling under their own ceiling do not hold a shed", "[node][pressure]")
+{
+    Rig rig;
+    REQUIRE(rig.After(0s, Freezing, 30 * GiB).level == PressureLevel::Shed);
+    auto const ownStall = Script { .some = 20.0, .full = 0.0, .compiles = 19.0 };
+    CHECK(rig.After(9s, ownStall, 20 * GiB).level == PressureLevel::Shed);
+    auto const left = rig.After(1s, ownStall, 20 * GiB);
+    CHECK(left.level == PressureLevel::Calm);
+    CHECK_FALSE(left.killYoungest);
+}
+
+TEST_CASE("Only a SUSTAINED foreign stall escalates a yield to shed", "[node][pressure]")
+{
+    Rig rig;
+    REQUIRE(rig.After(0s, GameStall, 30 * GiB).level == PressureLevel::Yield);
+    auto const eased = Script { .some = 7.0, .full = 0.0, .compiles = 0.0 };
+    auto const back = Script { .some = 11.0, .full = 0.0, .compiles = 0.0 };
+    CHECK(rig.After(1s, eased, 30 * GiB).level == PressureLevel::Yield);
+    CHECK(rig.After(18s, eased, 30 * GiB).level == PressureLevel::Yield);
+
+    // The stall returns at t = 20 s: its 2 × dwell starts now, not at the yield's entry.
+    auto const returned = rig.After(1s, back, 30 * GiB);
+    CHECK(returned.level == PressureLevel::Yield);
+    CHECK_FALSE(returned.killYoungest);
+    CHECK(rig.After(19s, back, 30 * GiB).level == PressureLevel::Yield);
+
+    auto const shed = rig.After(1s, back, 30 * GiB);
+    CHECK(shed.level == PressureLevel::Shed);
+    CHECK(shed.killYoungest);
+}
+
 TEST_CASE("A machine with no stall at all stays calm, with or without a compiles reading", "[node][pressure]")
 {
     Rig rig;

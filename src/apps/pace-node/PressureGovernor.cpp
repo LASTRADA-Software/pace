@@ -39,10 +39,19 @@ GovernorDecision PressureGovernor::Step(Platform::PressureSample const& sample, 
 
     // Compared as a product, never a ratio: a zero system figure divides nothing and yields no NaN.
     auto const ownStall = sample.compiles && sample.compiles->some.avg10 >= thresholds.ownShare * systemSome;
-    auto const someStalled = systemSome > thresholds.yieldEnter;
-    auto const foreignStall = someStalled && !ownStall;
+    auto const foreignStall = systemSome > thresholds.yieldEnter && !ownStall;
+    // A stall the compiles carry is the ceiling working, so it never counts as one to stay for.
+    auto const yieldEased = ownStall || systemSome < thresholds.yieldExit;
     auto const freezing = systemFull >= thresholds.shedEnter;
     auto const dwellSpent = now - _enteredAt >= thresholds.dwell;
+
+    // Escalation needs the foreign stall SUSTAINED: its clock restarts whenever the stall drops.
+    if (!foreignStall)
+        _foreignStallSince.reset();
+    else if (!_foreignStallSince)
+        _foreignStallSince = now;
+    auto const foreignStallSustained =
+        _foreignStallSince && now - *_foreignStallSince >= YieldDwellsBeforeShed * thresholds.dwell;
 
     switch (_level)
     {
@@ -53,16 +62,15 @@ GovernorDecision PressureGovernor::Step(Platform::PressureSample const& sample, 
                 Enter(PressureLevel::Yield, now, compilesHoldBytes);
             break;
         case PressureLevel::Yield:
-            if (freezing || (someStalled && now - _enteredAt >= YieldDwellsBeforeShed * thresholds.dwell))
+            if (freezing || foreignStallSustained)
                 Enter(PressureLevel::Shed, now, compilesHoldBytes);
-            else if (dwellSpent && systemSome < thresholds.yieldExit)
+            else if (dwellSpent && yieldEased)
                 Enter(PressureLevel::Calm, now, compilesHoldBytes);
             break;
         case PressureLevel::Shed:
-            // Held while either condition that sheds still holds; stepping down lands where `some` says.
-            if (dwellSpent && systemFull < thresholds.shedExit && !someStalled)
-                Enter(
-                    systemSome < thresholds.yieldExit ? PressureLevel::Calm : PressureLevel::Yield, now, compilesHoldBytes);
+            // Held while a freeze or a foreign stall persists; stepping down lands where the stall says.
+            if (dwellSpent && systemFull < thresholds.shedExit && !foreignStall)
+                Enter(yieldEased ? PressureLevel::Calm : PressureLevel::Yield, now, compilesHoldBytes);
             break;
         case PressureLevel::Last:
             break;

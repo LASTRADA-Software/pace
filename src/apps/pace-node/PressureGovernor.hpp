@@ -64,12 +64,14 @@ struct GovernorDecision
 /// - **A stall that is the compiles' own is not a yield.** System `some` above `yieldEnter` counts only
 ///   when the compiles' cgroup's `some` is below `ownShare` of it, or there is no compiles reading.
 ///   Otherwise it is the ceiling working, and the level stays `Calm`.
-/// - **Shed** on system `full` at or above `shedEnter`, whoever stalls, or once `Yield` has been held for
-///   twice `dwell` with system `some` still above `yieldEnter`. While shedding, `killYoungest` is true at
-///   most once per `dwell` -- and never when compiles hold nothing, since there is nothing to kill.
-/// - **Leaving a level** needs its figure below the exit threshold AND `dwell` since entering it. Leaving
-///   `Shed` also needs system `some` no longer above `yieldEnter` -- the figure a held yield sheds on --
-///   and lands in `Yield` unless that figure is already below `yieldExit`.
+/// - **Shed** on system `full` at or above `shedEnter`, whoever stalls, or from `Yield` once a FOREIGN
+///   stall (above) has held for twice `dwell` without a break: its clock restarts whenever it drops, so a
+///   yield that eased and then returns is not shed at once. While shedding, `killYoungest` is true at most
+///   once per `dwell` -- and never when compiles hold nothing, since there is nothing to kill.
+/// - **Leaving a level** needs its figure below the exit threshold AND `dwell` since entering it, and an
+///   own stall counts as below: compiles stalling against the ceiling a yield just set hold the node in
+///   no level. Leaving `Shed` also needs no foreign stall above `yieldEnter`, and lands in `Yield` unless
+///   the stall has already eased below `yieldExit` or is the compiles' own.
 /// - **The allowance**: entering `Yield` or `Shed` sets it to what compiles hold (never raising it); while
 ///   `Calm` it grows by `rampPercent` of the configured bytes per `rampInterval`, never past them.
 ///
@@ -112,6 +114,7 @@ class PressureGovernor
     core::platform::SteadyTimePoint _enteredAt;
     core::platform::SteadyTimePoint _rampAnchor;
     std::optional<core::platform::SteadyTimePoint> _lastKill;
+    std::optional<core::platform::SteadyTimePoint> _foreignStallSince; ///< Since when the foreign stall has held.
 };
 
 } // namespace Pace::Node
