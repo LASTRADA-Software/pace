@@ -225,6 +225,44 @@ TEST_CASE("MachineBudget.explicit-size", "[node][machinebudget]")
     CHECK(MachineBudgetOf(cfg, MachineOf(2, 2 * GiB), HeldCharges {}).memoryBudgetBytes == 12 * GiB);
 }
 
+TEST_CASE("MachineBudget.typed-compile-limit-lowers-reported-budget", "[node][machinebudget]")
+{
+    // C3: the queue must never admit what the ceiling will kill, so a typed ceiling BELOW the budget is
+    // the budget the machine reports. A 96 GiB machine with no reserve derives 75% of it.
+    auto const machine = MachineOf(16, 96 * GiB);
+    auto const derived = MachineBudgetOf(NodeConfig {}, machine, HeldCharges {}).memoryBudgetBytes;
+    REQUIRE(derived == 72 * GiB);
+
+    auto const lower = Parsed({ "--compile-memory-limit=24g" });
+    CHECK(MachineBudgetOf(lower, machine, HeldCharges {}).memoryBudgetBytes == 24 * GiB);
+
+    // A ceiling ABOVE the budget leaves the budget alone: the queue still admits only 75%.
+    auto const higher = Parsed({ "--compile-memory-limit=90g" });
+    CHECK(MachineBudgetOf(higher, machine, HeldCharges {}).memoryBudgetBytes == derived);
+
+    // And it lowers a TYPED budget as well: the lower of the two figures the operator gave.
+    auto const both = Parsed({ "--machine-memory-budget=40g", "--compile-memory-limit=24g" });
+    CHECK(MachineBudgetOf(both, machine, HeldCharges {}).memoryBudgetBytes == 24 * GiB);
+}
+
+TEST_CASE("MachineBudget.ceiling-defaults-to-budget", "[node][machinebudget]")
+{
+    // One number for admission and the cap, so they cannot disagree.
+    auto const machine = MachineOf(16, 64 * GiB, 8 * GiB);
+    auto const bare = NodeConfig {};
+    CHECK(CompileCeilingOf(bare, machine) == MachineBudgetOf(bare, machine, HeldCharges {}).memoryBudgetBytes);
+
+    // A typed budget is the ceiling too, when no ceiling is typed.
+    auto const budget = Parsed({ "--machine-memory-budget=12g" });
+    CHECK(CompileCeilingOf(budget, machine) == 12 * GiB);
+
+    // A typed ceiling is the ceiling, as given -- even above the budget, which then still binds the queue.
+    auto const typed = Parsed({ "--compile-memory-limit=90g" });
+    CHECK(CompileCeilingOf(typed, machine) == 90 * GiB);
+    CHECK(MachineBudgetOf(typed, machine, HeldCharges {}).memoryBudgetBytes
+          == MachineBudgetOf(bare, machine, HeldCharges {}).memoryBudgetBytes);
+}
+
 TEST_CASE("MachineBudget.slots-default-cores", "[node][machinebudget]")
 {
     CHECK(MachineBudgetOf(NodeConfig {}, MachineOf(24, 64 * GiB), HeldCharges {}).slots == 24);

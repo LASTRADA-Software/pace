@@ -27,6 +27,7 @@
 #include <Pace/Core/ISecureRandom.hpp>
 #include <Pace/Core/Logger.hpp>
 #include <Pace/Distributed/FleetKeyedHistory.hpp>
+#include <Pace/Platform/HostMemory.hpp>
 #include <Pace/Platform/ServiceControl.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
 
@@ -542,6 +543,7 @@ TEST_CASE("NodeConfig: every flag that is worker state reaches the supervisor", 
     cfg.machineSlots = 14;
     cfg.machineMemoryBudgetBytes = 20ULL * 1024 * 1024 * 1024;
     cfg.compileEstimateDefaultBytes = 3ULL * 1024 * 1024 * 1024;
+    cfg.compileMemoryLimitBytes = 16ULL * 1024 * 1024 * 1024;
     cfg.historyRequesters = 64;
     // Worker state like any other, and the one that supplies most of the rest: a
     // registration that dropped it would come back at every boot knowing only what
@@ -7297,6 +7299,68 @@ TEST_CASE("NodeConfig.machine-flags-parse", "[node][config][machinebudget]")
             return FlagMatches(arg, "--machine-slots") || FlagMatches(arg, "--machine-memory-budget")
                    || FlagMatches(arg, "--compile-estimate-default");
         }));
+    }
+}
+
+TEST_CASE("NodeConfig.compile-memory-limit-flag-sets-the-ceiling", "[node][config][machinebudget]")
+{
+    // The ceiling over every compile this worker runs: `--machine-memory-budget`'s grammar, and reloadable.
+    constexpr auto GiB = std::uint64_t { 1 } << 30;
+
+    SECTION("a size and a share of host RAM")
+    {
+        auto const typed = ParseNodeArgv({ "--compile-memory-limit=24g" });
+        REQUIRE(typed.has_value());
+        CHECK(typed->compileMemoryLimitBytes == std::optional<std::uint64_t> { 24 * GiB });
+
+        auto const percent = ParseNodeArgv({ "--compile-memory-limit=25%" });
+        REQUIRE(percent.has_value());
+        REQUIRE(percent->compileMemoryLimitBytes.has_value());
+        CHECK(Unwrap(percent->compileMemoryLimitBytes) > 0);
+        CHECK(Unwrap(percent->compileMemoryLimitBytes) <= QueryHostTotalMemoryBytes());
+
+        CHECK_FALSE(Unwrap(ParseNodeArgv({})).compileMemoryLimitBytes.has_value());
+    }
+
+    SECTION("zero is refused: a zero ceiling would kill every compile")
+    {
+        auto const zero = ParseNodeArgv({ "--compile-memory-limit=0" });
+        REQUIRE_FALSE(zero.has_value());
+        CHECK(zero.error().context.contains("more than zero"));
+        CHECK_FALSE(ParseNodeArgv({ "--compile-memory-limit=lots" }).has_value());
+    }
+
+    SECTION("the YAML key spells the flag, and the command line wins")
+    {
+        auto const fromFile = FromFileAndArgv({ Setting("compile_memory_limit", { "16g" }) }, {});
+        REQUIRE(fromFile.has_value());
+        CHECK(fromFile->compileMemoryLimitBytes == std::optional<std::uint64_t> { 16 * GiB });
+
+        auto const overridden =
+            FromFileAndArgv({ Setting("compile_memory_limit", { "16g" }) }, { "--compile-memory-limit=8g" });
+        REQUIRE(overridden.has_value());
+        CHECK(overridden->compileMemoryLimitBytes == std::optional<std::uint64_t> { 8 * GiB });
+    }
+
+    SECTION("reloadable, as local wiring: rewriting a control file tells the fleet nothing")
+    {
+        CHECK(std::ranges::contains(LocalReloadableFlags, std::string_view { "--compile-memory-limit" }));
+        CHECK_FALSE(std::ranges::contains(AdvertisedReloadableFlags, std::string_view { "--compile-memory-limit" }));
+    }
+
+    SECTION("a registration replays it only when typed, and it parses back")
+    {
+        auto const typed = Unwrap(ParseNodeArgv({ "--compile-memory-limit=24g" }));
+        auto const spec = MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, typed, Testing::InstallerPathProbe());
+        auto const reparsed = ReparseSpec(spec);
+        REQUIRE(reparsed.has_value());
+        CHECK(reparsed->compileMemoryLimitBytes == typed.compileMemoryLimitBytes);
+
+        auto const bare = Unwrap(ParseNodeArgv({}));
+        auto const bareSpec =
+            MakeNodeServiceSpec(std::filesystem::path { "pace-node" }, bare, Testing::InstallerPathProbe());
+        CHECK(std::ranges::none_of(bareSpec.arguments,
+                                   [](std::string const& arg) { return FlagMatches(arg, "--compile-memory-limit"); }));
     }
 }
 

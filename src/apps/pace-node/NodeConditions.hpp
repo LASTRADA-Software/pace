@@ -65,6 +65,7 @@ enum class NodeCondition : std::uint8_t
                             ///< a power loss.
     CacheBudgetOverrideDropped, ///< A cluster cache budget override was dropped: this machine's own later edit wins.
     CompileMemoryUnmeasured,    ///< The worker cannot measure a compile's peak memory, so it reports none.
+    CompileMemoryUncapped,      ///< The worker cannot hold its compiles under one memory ceiling.
     Last,                       ///< Not a condition.
 };
 
@@ -394,6 +395,21 @@ inline constexpr EnumTable<NodeCondition, NodeConditionRow> NodeConditionTable {
                 "node's own: under systemd, a drop-in with Delegate=memory, ProtectControlGroups=private (systemd 257 or "
                 "newer) and RestrictNamespaces=no, then a restart; see docs/tools/pace-node.md. The detail names what "
                 "this machine lacked." },
+    // Latched: whether `compiles/` exists is decided once, at startup, with the meter. A warning and not a notice,
+    // unlike its sibling: an uncapped compile that grows takes memory from everything else on the machine -- a
+    // desktop freezes, the out-of-memory killer picks a victim -- where an unmeasured one only teaches the fleet
+    // nothing. Worker scope: the ceiling covers the compiles this worker runs. Raised again by a reload whose
+    // ceiling the kernel refuses.
+    { .condition = NodeCondition::CompileMemoryUncapped,
+      .id = "compile-memory-uncapped",
+      .persistence = CompileCacheWire::ConditionPersistence::Latched,
+      .severity = CompileCacheWire::ConditionSeverity::Warning,
+      .scope = ConditionScope::Worker,
+      .remedy = "This worker's compiles run with no memory ceiling over them, so one that grows can take memory from "
+                "everything else on the machine. The ceiling takes a cgroup of this node's own, as measuring does: "
+                "under systemd, a drop-in with Delegate=memory, ProtectControlGroups=private (systemd 257 or newer) and "
+                "RestrictNamespaces=no, then a restart; see docs/tools/pace-node.md. The detail names what this machine "
+                "lacked." },
 } };
 static_assert(RowsInEnumeratorOrder(NodeConditionTable, &NodeConditionRow::condition),
               "NodeConditionTable must hold one row per NodeCondition, in enumerator order");

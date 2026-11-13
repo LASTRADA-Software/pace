@@ -1387,6 +1387,26 @@ std::span<OptionSpec<NodeConfig> const> NodeOptions() noexcept
             .same = FieldEq<&NodeConfig::machineMemoryBudgetBytes>(),
             .present = PresentIn<&NodeConfig::machineMemoryBudgetBytes>(),
         },
+        // The ceiling over every compile this worker runs together (`compiles/memory.max`). Not a worker row, for
+        // `--machine-memory-budget`'s reason: typed below the budget it lowers what EVERY node reports, a
+        // `--slots=0` one included. Reloadable, and local wiring: rewriting a control file is safe at any moment and
+        // tells the fleet's REGISTER nothing, so a reload puts the new figure in force without a re-survey.
+        {
+            .primary = "--compile-memory-limit",
+            .arity = Arity::Value,
+            .operand = "=<size|N%>",
+            .apply = AssignFrom<&NodeConfig::compileMemoryLimitBytes, ParseCompileMemoryBytes>(),
+            .description = "the memory every compile this worker runs may hold\n"
+                           "together, enforced by the kernel: past it, one is\n"
+                           "killed and its client compiles it locally. k/m/g =\n"
+                           "KiB/MiB/GiB or N% of host RAM. Default: the machine\n"
+                           "budget. Below that budget it lowers the budget too.\n"
+                           "Linux, with a cgroup of the node's own. Reloadable.",
+            .yamlKey = "compile_memory_limit",
+            .reloadable = Reloadable::Yes,
+            .same = FieldEq<&NodeConfig::compileMemoryLimitBytes>(),
+            .present = PresentIn<&NodeConfig::compileMemoryLimitBytes>(),
+        },
         {
             .primary = "--compile-estimate-default",
             .arity = Arity::Value,
@@ -2794,6 +2814,7 @@ ServiceSpec MakeNodeServiceSpec(std::filesystem::path const& exePath, NodeConfig
     // On presence, for `--slots` reason: absent DERIVES each from the machine at every start.
     emitIfPresent("machine-slots", cfg.machineSlots);
     emitIfPresent("machine-memory-budget", cfg.machineMemoryBudgetBytes);
+    emitIfPresent("compile-memory-limit", cfg.compileMemoryLimitBytes);
     emitIfPresent("compile-estimate-default", cfg.compileEstimateDefaultBytes);
     emitIfExplicit("admin-listen", cfg.adminListen, cfg.adminListenExplicit);
     emitIfExplicit("mcp-listen", cfg.mcpListen, cfg.mcpListenExplicit);

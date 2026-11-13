@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
+#include "CacheTier.hpp"
 #include "CompileMemoryMeter.hpp"
+#include "LiveNodeConfig.hpp"
+#include "NodeReload.hpp"
 
 #include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/NodePolicy.hpp>
 #include <Pace/Metrics/IMetricsSink.hpp>
 #include <Pace/Platform/Environment.hpp>
 
@@ -11,9 +15,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <format>
 #include <memory>
 #include <ranges>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include <core/Ranges.hpp>
@@ -209,6 +215,205 @@ TEST_CASE("A compile that cannot be placed in its cgroup is counted, and said on
     CHECK(metrics.Read(IMetricsSink::Counter::WorkerCompilesUnmeasured) == 3);
     auto const warnings = std::ranges::count(logger.Snapshot(), LogLevel::Warn, &CapturingLogger::Record::level);
     CHECK(warnings == 1);
+}
+
+namespace
+{
+
+constexpr std::uint64_t CeilingGiB = std::uint64_t { 1 } << 30;
+
+/// The `memory.max` writes of @p host's trail, in order.
+[[nodiscard]] std::vector<std::string> CeilingWrites(FakeCgroupHost const& host)
+{
+    auto const prefix = std::string { "write /sys/fs/cgroup/system.slice/pace-node.service/compiles/memory.max " };
+    auto writes = std::vector<std::string> {};
+    for (auto const& entry: host.trail)
+        if (entry.starts_with(prefix))
+            writes.push_back(entry.substr(prefix.size()));
+    return writes;
+}
+
+/// The detail @p conditions carries for @p condition.
+[[nodiscard]] std::string DetailOf(NodeConditions const& conditions, NodeCondition condition)
+{
+    auto const rows = conditions.Snapshot();
+    auto const row = std::ranges::find(rows, RowFor(condition).id, &CompileCacheWire::NodeConditionFields::id);
+    REQUIRE(row != rows.end());
+    return row->detail;
+}
+
+/// A 96 GiB machine with nothing reserved.
+[[nodiscard]] Distributed::NodeCapacity CeilingMachine()
+{
+    return Distributed::NodeCapacity { .logicalCores = 16, .totalMemoryBytes = 96 * CeilingGiB, .reservedMemoryBytes = 0 };
+}
+
+} // namespace
+
+TEST_CASE("CompileMemoryMeter.unavailable-cgroups-raise-uncapped", "[node][meter][memory-meter]")
+{
+    namespace Wire = CompileCacheWire;
+    auto const host = UndelegatedHost();
+    AtomicMetricsSink metrics;
+    CapturingLogger logger;
+    NodeConditions conditions;
+    CompileMemoryMeter meter { host, MeterPlatform::Linux };
+
+    auto const metered = meter.MakeRunner(metrics, logger);
+    ReportCompileMemoryMeter(metered.report, conditions, logger);
+    PutCompileCeilingInForce(meter, NodeConfig {}, CeilingMachine(), conditions, logger);
+
+    // Two questions with one cause today: nothing measures a compile, and nothing caps them.
+    CHECK(conditions.StateOf(NodeCondition::CompileMemoryUnmeasured) == Wire::ConditionState::Raised);
+    CHECK(conditions.StateOf(NodeCondition::CompileMemoryUncapped) == Wire::ConditionState::Raised);
+    // The detail is the preparation's own failure, as `compile-memory-unmeasured` carries it.
+    CHECK(DetailOf(conditions, NodeCondition::CompileMemoryUncapped) == metered.report.reason);
+    // And no ceiling was written anywhere: there is no compiles/ to write it to.
+    CHECK(CeilingWrites(*host).empty());
+    CHECK(std::ranges::count(logger.Snapshot(), LogLevel::Warn, &CapturingLogger::Record::level) == 2);
+}
+
+TEST_CASE("CompileMemoryMeter.reload-rewrites-the-ceiling", "[node][meter][memory-meter]")
+{
+    if (!Cc::CanSpawnIntoCgroups())
+        SKIP("this build cannot spawn into a cgroup, so the meter never prepares compiles/");
+    auto const host = DelegatedHost();
+    AtomicMetricsSink metrics;
+    CapturingLogger logger;
+    CompileMemoryMeter meter { host, MeterPlatform::Linux };
+    REQUIRE(meter.MakeRunner(metrics, logger).report.state == MeterState::Measured);
+
+    CHECK(meter.ApplyCeiling(16 * CeilingGiB).state == CeilingState::Capped);
+    CHECK(meter.ApplyCeiling(8 * CeilingGiB).state == CeilingState::Capped);
+
+    // Every application WRITES: a lowered ceiling must not wait for a restart.
+    CHECK(CeilingWrites(*host) == std::vector<std::string> { "17179869184", "8589934592" });
+}
+
+TEST_CASE("CompileMemoryMeter.accepted-reload-rewrites-the-ceiling-from-the-config-in-force", "[node][meter][memory-meter]")
+{
+    if (!Cc::CanSpawnIntoCgroups())
+        SKIP("this build cannot spawn into a cgroup, so the meter never prepares compiles/");
+    auto const host = DelegatedHost();
+    AtomicMetricsSink metrics;
+    CapturingLogger logger;
+    NodeConditions conditions;
+    CompileMemoryMeter meter { host, MeterPlatform::Linux };
+    REQUIRE(meter.MakeRunner(metrics, logger).report.state == MeterState::Measured);
+
+    /// The configuration in force, as the reloader's snapshot is: changed under the listener.
+    struct SwappableConfig final: INodeConfigSource
+    {
+        NodeConfig cfg;
+        [[nodiscard]] NodeConfig Current() const override
+        {
+            return cfg;
+        }
+    } inForce;
+    inForce.cfg.compileMemoryLimitBytes = 16 * CeilingGiB;
+    FixedNodeCapacity const capacity { CeilingMachine() };
+    CompileCeilingOnReload ceiling { meter, inForce, capacity, conditions, logger };
+
+    // Told through the fan-out `main` hands `ApplyReloadRequest`, as the budget applier is beside it.
+    struct CountingListener final: IAcceptedReloadListener
+    {
+        int told = 0;
+        void ReloadAccepted() override
+        {
+            ++told;
+        }
+    } other;
+    AcceptedReloadListeners listeners { { &other, &ceiling } };
+
+    listeners.ReloadAccepted();
+    inForce.cfg.compileMemoryLimitBytes = 8 * CeilingGiB;
+    listeners.ReloadAccepted();
+
+    CHECK(other.told == 2);
+    CHECK(CeilingWrites(*host) == std::vector<std::string> { "17179869184", "8589934592" });
+    CHECK(conditions.StateOf(NodeCondition::CompileMemoryUncapped) == CompileCacheWire::ConditionState::Clear);
+}
+
+TEST_CASE("CompileMemoryMeter.ceiling-in-force-is-said-and-clears-the-row", "[node][meter][memory-meter]")
+{
+    namespace Wire = CompileCacheWire;
+    if (!Cc::CanSpawnIntoCgroups())
+        SKIP("this build cannot spawn into a cgroup, so the meter never prepares compiles/");
+    auto const host = DelegatedHost();
+    AtomicMetricsSink metrics;
+    CapturingLogger logger;
+    NodeConditions conditions;
+    CompileMemoryMeter meter { host, MeterPlatform::Linux };
+    REQUIRE(meter.MakeRunner(metrics, logger).report.state == MeterState::Measured);
+
+    SECTION("derived: the machine budget")
+    {
+        PutCompileCeilingInForce(meter, NodeConfig {}, CeilingMachine(), conditions, logger);
+        CHECK(conditions.StateOf(NodeCondition::CompileMemoryUncapped) == Wire::ConditionState::Clear);
+        CHECK(CeilingWrites(*host) == std::vector<std::string> { std::to_string(72 * CeilingGiB) });
+        CHECK(std::ranges::contains(logger.Snapshot(),
+                                    std::format("compile memory ceiling: {} (derived)", 72 * CeilingGiB),
+                                    &CapturingLogger::Record::message));
+    }
+    SECTION("typed: the flag, as given")
+    {
+        auto cfg = NodeConfig {};
+        cfg.compileMemoryLimitBytes = 24 * CeilingGiB;
+        PutCompileCeilingInForce(meter, cfg, CeilingMachine(), conditions, logger);
+        CHECK(conditions.StateOf(NodeCondition::CompileMemoryUncapped) == Wire::ConditionState::Clear);
+        CHECK(CeilingWrites(*host) == std::vector<std::string> { std::to_string(24 * CeilingGiB) });
+        CHECK(std::ranges::contains(logger.Snapshot(),
+                                    std::format("compile memory ceiling: {} (typed)", 24 * CeilingGiB),
+                                    &CapturingLogger::Record::message));
+    }
+    SECTION("a write the kernel refuses raises the row, naming the file")
+    {
+        host->writeRefusals["/sys/fs/cgroup/system.slice/pace-node.service/compiles/memory.max"] =
+            std::errc::permission_denied;
+        PutCompileCeilingInForce(meter, NodeConfig {}, CeilingMachine(), conditions, logger);
+        CHECK(conditions.StateOf(NodeCondition::CompileMemoryUncapped) == Wire::ConditionState::Raised);
+        CHECK(DetailOf(conditions, NodeCondition::CompileMemoryUncapped).contains("memory.max"));
+    }
+}
+
+TEST_CASE("CompileMemoryMeter.ceiling-not-evaluated-off-linux", "[node][meter][memory-meter]")
+{
+    namespace Wire = CompileCacheWire;
+    auto const host = UndelegatedHost();
+    AtomicMetricsSink metrics;
+    CapturingLogger logger;
+    NodeConditions conditions;
+    CompileMemoryMeter meter { host, MeterPlatform::MacOs };
+    static_cast<void>(meter.MakeRunner(metrics, logger));
+
+    PutCompileCeilingInForce(meter, NodeConfig {}, CeilingMachine(), conditions, logger);
+
+    // No cgroup facility, so no remedy: the row says so rather than asking for one.
+    CHECK(conditions.StateOf(NodeCondition::CompileMemoryUncapped) == Wire::ConditionState::NotEvaluated);
+    CHECK(host->trail.empty());
+}
+
+TEST_CASE("CompileMemoryMeter.unapplied-compiles-settings-are-said-once", "[node][meter][memory-meter]")
+{
+    if (!Cc::CanSpawnIntoCgroups())
+        SKIP("this build cannot spawn into a cgroup, so the meter never prepares compiles/");
+    auto const host = DelegatedHost();
+    host->writeRefusals["/sys/fs/cgroup/system.slice/pace-node.service/compiles/memory.swap.max"] =
+        std::errc::no_such_file_or_directory;
+    AtomicMetricsSink metrics;
+    CapturingLogger logger;
+    NodeConditions conditions;
+    CompileMemoryMeter meter { host, MeterPlatform::Linux };
+
+    auto const metered = meter.MakeRunner(metrics, logger);
+    REQUIRE(metered.report.state == MeterState::Measured);
+    ReportCompileMemoryMeter(metered.report, conditions, logger);
+
+    auto const records = logger.Snapshot();
+    REQUIRE(std::ranges::count(records, LogLevel::Warn, &CapturingLogger::Record::level) == 1);
+    auto const warning = std::ranges::find(records, LogLevel::Warn, &CapturingLogger::Record::level);
+    CHECK(warning->message.contains("compiles may swap"));
+    CHECK(warning->message.contains("memory.swap.max"));
 }
 
 namespace

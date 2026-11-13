@@ -863,6 +863,46 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     tier->ServeAdmissionWith(*responder);
 }
 
+/// Put the compile ceiling in force for a body that runs a worker, and build what rewrites it on reload.
+///
+/// **Unconditional for a worker**: a `compiles/` an earlier run left behind keeps that run's `memory.max`, so the
+/// start writes the figure in force whatever is there. A node with no worker prepared nothing and runs no compile to
+/// cap, and its row is answered by `Settle` from the worker scope.
+/// @param worker The body's worker, or null.
+/// @param meter The process's meter, which the worker's runner prepared.
+/// @param cfg The configuration the body started with.
+/// @param inForce The configuration in force at each later reload.
+/// @param capacity What this machine is, read now and at each reload.
+/// @param conditions Where `compile-memory-uncapped` is answered.
+/// @param logger Where the ceiling is said.
+/// @return The reload listener, or null without a worker.
+[[nodiscard]] std::unique_ptr<Node::CompileCeilingOnReload> StartCompileCeiling(Node::WorkerTier const* worker,
+                                                                                Node::CompileMemoryMeter& meter,
+                                                                                NodeConfig const& cfg,
+                                                                                Node::INodeConfigSource const& inForce,
+                                                                                Node::INodeCapacitySource const& capacity,
+                                                                                Node::NodeConditions& conditions,
+                                                                                ILogger& logger)
+{
+    if (worker == nullptr)
+        return nullptr;
+    Node::PutCompileCeilingInForce(meter, cfg, capacity.Current(), conditions, logger);
+    return std::make_unique<Node::CompileCeilingOnReload>(meter, inForce, capacity, conditions, logger);
+}
+
+/// Every listener an accepted reload tells, in order: the budget overrides, then the compile ceiling if any.
+/// @param budgets The budget override applier.
+/// @param ceiling The compile ceiling's listener, or null.
+/// @return The listeners.
+[[nodiscard]] std::vector<Node::IAcceptedReloadListener*> ReloadListenersOf(Node::IAcceptedReloadListener& budgets,
+                                                                            Node::IAcceptedReloadListener* ceiling)
+{
+    auto listeners = std::vector<Node::IAcceptedReloadListener*> { &budgets };
+    if (ceiling != nullptr)
+        listeners.push_back(ceiling);
+    return listeners;
+}
+
 /// Everything the node runs, under whichever host runs it.
 /// @param cfg The configuration the node started with.
 /// @param identityKey The machine's identity key, or nothing.
@@ -1332,6 +1372,12 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
         return ExitCodeFor(workerOrRefusal.error().cause);
     }
     auto const workerTier = std::move(*workerOrRefusal);
+
+    // The ceiling over every compile the worker runs, written now that its runner has prepared `compiles/`, and the
+    // listener that rewrites it after every accepted reload. Before `Settle` below, which names
+    // `compile-memory-uncapped` undecided if this line ever goes (`StartCompileCeiling`).
+    auto const ceilingOnReload =
+        StartCompileCeiling(workerTier.get(), memoryMeter, cfg, endpointConfig, capacity, conditions, logger);
 
     // This node's one `0xFC` listener, opened once every component exists and holding a
     // reference to each (#290). Before the merge each tier bound its own port, which
@@ -2132,6 +2178,9 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     //
     // A reform ends it the same way: a move that changed this node's shape saved the record, and
     // `main` starts the next body from it once this one has drained exactly as for a stop.
+    // Told after every ACCEPTED reload: the budget overrides re-judged, and the compile ceiling rewritten from the
+    // configuration then in force (`--compile-memory-limit` reloads) where a worker prepared one.
+    Node::AcceptedReloadListeners reloadListeners { ReloadListenersOf(budgetOverrides, ceilingOnReload.get()) };
     while (!DaemonControls::Instance().StopRequested() && !formation.durables.reform.Pending())
     {
         // Taken here rather than in the handler, for the reason the handler's own note
@@ -2142,7 +2191,7 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
         // this call publishes a new configuration and says so, and the next beat picks
         // it up on its own.
         if (DaemonControls::Instance().TakeReloadRequest())
-            Node::ApplyReloadRequest(reloader, membership, conditions, logger, &budgetOverrides);
+            Node::ApplyReloadRequest(reloader, membership, conditions, logger, &reloadListeners);
         std::this_thread::sleep_for(StopPollInterval);
     }
     logger.Log(LogLevel::Info, Node::DrainSentence(formation.durables.reform.Pending()));

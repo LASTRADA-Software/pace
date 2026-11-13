@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "AdminEndpoint.hpp"
 #include "BudgetOverrideApplier.hpp"
+#include "CompileMemoryMeter.hpp"
 #include "ConsensusTier.hpp"
 #include "DiscoveryTier.hpp"
 #include "EnrollmentWindow.hpp"
@@ -53,6 +54,7 @@
 #include <core/net/BlockingConnector.hpp>
 #include <core/net/BlockingSocket.hpp>
 #include <core/platform/Clock.hpp>
+#include <tests/CgroupFakes.hpp>
 #include <tests/FormationFakes.hpp>
 #include <tests/HostNamingFakes.hpp>
 #include <tests/ManualClockWait.hpp>
@@ -389,6 +391,13 @@ TEST_CASE("Every condition row is evaluated on a fully configured node", "[node]
     auto const workerTier = worker.Start();
     REQUIRE(workerTier.has_value());
     REQUIRE(*workerTier != nullptr);
+    // And the worker's compile ceiling, put in force where `main` puts it, once the worker exists: it answers
+    // `compile-memory-uncapped`, which the worker tier leaves to it. Over a tree that delegates nothing, so the
+    // answer is the same whatever this build can spawn into.
+    auto const ceilingHost = std::make_shared<Pace::Testing::FakeCgroupHost>();
+    CompileMemoryMeter ceilingMeter { ceilingHost, MeterPlatform::Linux };
+    static_cast<void>(ceilingMeter.MakeRunner(metrics, logger));
+    PutCompileCeilingInForce(ceilingMeter, worker.cfg, worker.capacity, conditions, logger);
 
     // The enrollment scope.
     core::platform::ManualClock windowClock;

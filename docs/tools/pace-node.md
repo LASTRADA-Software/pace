@@ -3119,7 +3119,7 @@ address — so a list is written as one key with every value under it.
 
 | Reloadable | Requires a restart |
 |---|---|
-| `log_level`, `allow_compile_arg`, `requirepass`, `fleet_open`, `toolchain`, `no_toolchain_discovery`, `advertise`, `raft_self`, `cache_memory`, `cache_disk` | `slots`, `node_class`, `reserve_cores`, and every listen, cluster and TLS setting and every other cache setting |
+| `log_level`, `allow_compile_arg`, `requirepass`, `fleet_open`, `toolchain`, `no_toolchain_discovery`, `advertise`, `raft_self`, `cache_memory`, `cache_disk`, `compile_memory_limit` | `slots`, `node_class`, `reserve_cores`, and every listen, cluster and TLS setting and every other cache setting |
 
 `log_level`, `allow_compile_arg`, `requirepass` and `fleet_open` take
 effect immediately and tell the fleet nothing; `toolchain` and `no_toolchain_discovery`
@@ -3130,6 +3130,7 @@ section states. `raft_self` moves the address this node's peers dial for consens
 bounded slices while it serves -- and a cluster budget override set against the old value is
 dropped, because the edit is the later change (see [cache budget overrides](#cache-budget-overrides-applied-by-the-member)).
 Turning the memory tier on or off, to or from `0`, still takes a restart and is refused by name.
+`compile_memory_limit` rewrites the ceiling over every compile this worker runs, at once.
 
 Both default to `auto`: the address this machine routes from, on the bound port while the
 listener binds the wildcard, re-derived when the network changes (this machine's fully
@@ -3484,9 +3485,10 @@ started with `--slots=0` runs no worker and still has a machine.
 | --- | --- | --- |
 | `--machine-slots` (`machine_slots`) | the machine's logical cores | Compiles the machine runs at once, every one on it counted, local ones included. Not `--slots`, which sizes the worker and is `0` on a node with none. `0` is refused. |
 | `--machine-memory-budget` (`machine_memory_budget`) | 75% of RAM, less this node's cache tier, never below `--compile-estimate-default` | The memory those compiles may hold at once. `k`/`m`/`g` or `N%` of host RAM. A typed figure is used as given. `0` is refused. |
+| `--compile-memory-limit` (`compile_memory_limit`) | the machine budget | The memory every compile this worker runs may hold **together**, enforced by the kernel on the `compiles/` cgroup (Linux, with a cgroup of the node's own): past it, one compile is killed and its client compiles it locally. Typed below the machine budget, it lowers the budget this machine reports too, so the queue never admits what the ceiling would kill. `k`/`m`/`g` or `N%` of host RAM. `0` is refused. **Reloadable.** |
 | `--compile-estimate-default` (`compile_estimate_default`) | `2g` | What a translation unit nobody has measured is assumed to need. Too low is the out-of-memory kill the queue exists to prevent. `0` is refused. |
 
-All three are **restart-only**, and a service registration replays only the ones typed.
+All but `--compile-memory-limit` are **restart-only**, and a service registration replays only the ones typed.
 Beside the figures, the report carries what the machine's compiles hold now and a
 bounded sample of the peaks its compiler processes measured, so the leader's estimates
 learn from the machines that ran the compiles. A leader that cannot take the report
@@ -3679,6 +3681,7 @@ Every row says two things before anything else:
 | `cache-budget-override-dropped` | latched | warning | a cluster cache budget override was dropped because this machine's own `--cache-memory`/`--cache-disk` changed after the override was set (its configured value no longer equals the baseline it reported); the detail names the tier, both values and the override's figure | the machine's own configuration changed after the override was set; set it again with set_cache_budget if still wanted |
 | `formation-move-refused` | live | alert | a move of this node's formation -- to the mode the detail names -- was not taken, because the startup rules refuse the shape it would give this node: a restart into it would be refused, so the node keeps the mode it is in. Every move is judged this way before its record is written, whether or not it rebuilds the node; the detail names the rule | fix the rule the detail names and restart this node; until then it keeps the mode it is in rather than serve a shape its next restart would refuse |
 | `compile-memory-unmeasured` | latched | notice | the worker cannot measure the peak memory of a compile, so it reports none and the fleet's admission estimates stay at their default instead of learning; the detail names what this machine lacked (no delegated cgroup — the shipped Linux unit's case —, no `memory.peak`, a seccomp filter refusing `clone3`, or a glibc older than 2.39). Not evaluated on a node that runs no worker, nor on a platform other than Linux, macOS and Windows, where nothing could measure and no remedy applies | give the node a cgroup of its own: [measuring what a compile used](#measuring-what-a-compile-used-linux) |
+| `compile-memory-uncapped` | latched | warning | the worker cannot hold the compiles it runs under one memory ceiling (`--compile-memory-limit`, by default the machine budget), so one that grows can take memory from everything else on the machine; the detail names what this machine lacked, as `compile-memory-unmeasured`'s does, or the ceiling the kernel refused. Raised again by a reload whose ceiling cannot be written. Not evaluated on a node that runs no worker, nor on a platform other than Linux, which has no cgroups | give the node a cgroup of its own: [measuring what a compile used](#measuring-what-a-compile-used-linux) |
 
 The remedy each row carries is longer than this column, and it is the node's text: an older
 client or leader prints a newer node's row exactly as that node wrote it, rather than looking

@@ -12,7 +12,7 @@
 #
 # reloadable-for: pace-node
 #
-# TEN settings are reloadable and the rest are read once at startup. A reload
+# ELEVEN settings are reloadable and the rest are read once at startup. A reload
 # re-reads this file the way the start read it, so a change to anything else is
 # refused BY NAME rather than half-applied -- you are told which key needs the
 # restart instead of running a worker that disagrees with its own file.
@@ -41,6 +41,8 @@
 #                                       old value is dropped, since this later
 #                                       edit wins. Turning the memory tier on or
 #                                       off (to or from 0) still takes a restart
+#   compile_memory_limit                immediate: rewrites the ceiling over
+#                                       every compile this worker runs
 #
 # Every key is one flag, spelled with underscores instead of dashes, and there
 # is no setting that a file can express and a command line cannot. A flag on the
@@ -200,6 +202,13 @@
 # compile larger than the whole budget runs alone rather than never. Read at
 # startup only.
 #machine_memory_budget:
+
+# the memory every compile this worker runs may hold together, enforced by
+# the kernel: past it, one is killed and its client compiles it locally.
+# k/m/g = KiB/MiB/GiB or N% of host RAM. Default: the machine budget. Below
+# that budget it lowers the budget too. Linux, with a cgroup of the node's
+# own. Reloadable: a reload rewrites the ceiling in place.
+#compile_memory_limit:
 
 # what a translation unit nobody has measured is assumed to need (default 2g;
 # k/m/g = KiB/MiB/GiB). Too low is the out-of-memory kill the queue exists to

@@ -39,6 +39,8 @@ inline constexpr std::uint64_t MachineBudgetSharePercent = 75;
 ///   memory less what the node reserves for its own cache tier (`NodeCapacity::reservedMemoryBytes`,
 ///   which `NodeCapacityOf` derives from what the tier BUILT), floored at the default estimate so a
 ///   small machine can still hold one unknown compile rather than queue everything for ever.
+///   Lowered to `--compile-memory-limit` when that is typed below it, so the queue never admits what the
+///   compile ceiling will kill.
 /// - Held: passed through as given.
 /// @param cfg The parsed configuration.
 /// @param capacity What `NodeCapacityOf` made of this machine.
@@ -47,6 +49,16 @@ inline constexpr std::uint64_t MachineBudgetSharePercent = 75;
 [[nodiscard]] Distributed::MachineReport MachineBudgetOf(NodeConfig const& cfg,
                                                          Distributed::NodeCapacity const& capacity,
                                                          HeldCharges const& held) noexcept;
+
+/// The memory ceiling over every compile this worker runs together (`compiles/memory.max`).
+///
+/// `--compile-memory-limit` when typed, as given -- even above the budget, which then still binds the
+/// queue. Otherwise the machine budget `MachineBudgetOf` reports, so admission and the cap are one number
+/// and cannot disagree.
+/// @param cfg The configuration in force.
+/// @param capacity What `NodeCapacityOf` made of this machine.
+/// @return The ceiling in bytes.
+[[nodiscard]] std::uint64_t CompileCeilingOf(NodeConfig const& cfg, Distributed::NodeCapacity const& capacity) noexcept;
 
 /// One measured peak, as it is kept and sent.
 using MeasuredPeak = std::pair<CompileCacheWire::EstimateKeyFields, std::uint64_t>;

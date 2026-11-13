@@ -239,6 +239,10 @@ struct CgroupLayout
     /// The intermediate cgroup every job lives in: the one place a ceiling over ALL compiles is set, and
     /// never on `delegated`, which holds the node itself.
     std::filesystem::path compiles;
+    /// The settings of `compiles/` this kernel does not have, each as a sentence naming what goes without
+    /// it (`compiles may swap: memory.swap.max not writable (...)`). Tolerated, since the ceiling works
+    /// without them, and said by the node once at startup; empty when every one was applied.
+    std::vector<std::string> notApplied {};
 };
 
 /// The cgroup v2 mount point on every systemd and container host.

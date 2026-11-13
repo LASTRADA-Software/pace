@@ -287,7 +287,8 @@ inline constexpr std::size_t MaxConditionIdBytes = ConditionFieldCeiling(&NodeCo
 // 25 since `compile-memory-unmeasured` spent that one. Bought from the HISTORY share (`HistoryPayloadShare`, 2 KiB
 // of a half that a full batch uses barely half of), not from a field ceiling: lowering `detail` would make this
 // decoder refuse a row an older encoder legitimately sent.
-inline constexpr std::size_t MaxNodeConditions = 25;
+// 26 since `compile-memory-uncapped` spent that one, bought the same way: one more KiB of the history share.
+inline constexpr std::size_t MaxNodeConditions = 26;
 
 /// What one encoded row costs at most, framing included: every field at its ceiling behind its
 /// length prefix, plus the prefix on the row itself.

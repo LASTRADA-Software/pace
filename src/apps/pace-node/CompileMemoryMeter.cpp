@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "CompileMemoryMeter.hpp"
+#include "MachineBudget.hpp"
 
 #include <Pace/Platform/JobCgroups.hpp>
 
@@ -74,13 +75,20 @@ CompileMemoryMeter::CompileMemoryMeter(std::shared_ptr<Platform::ICgroupHost con
 
 void CompileMemoryMeter::Prepare()
 {
+    Decide();
+    _decided.store(true, std::memory_order_release);
+}
+
+void CompileMemoryMeter::Decide()
+{
     switch (MeterPlatformTable[static_cast<std::size_t>(_platform)].strategy)
     {
         case MeterStrategy::PlatformMeter:
             return;
         case MeterStrategy::NotMeasurable:
             _report = MeterReport { .state = MeterState::NotApplicable,
-                                    .reason = "this platform has no meter that measures a compile apart from the node" };
+                                    .reason = "this platform has no meter that measures a compile apart from the node",
+                                    .notApplied = {} };
             return;
         case MeterStrategy::JobCgroup:
             break;
@@ -95,10 +103,32 @@ void CompileMemoryMeter::Prepare()
                       : Platform::PrepareJobCgroups(*_host);
     if (!layout.has_value())
     {
-        _report = MeterReport { .state = MeterState::Unmeasured, .reason = layout.error().Describe() };
+        _report = MeterReport { .state = MeterState::Unmeasured, .reason = layout.error().Describe(), .notApplied = {} };
         return;
     }
+    _report.notApplied = layout->notApplied;
+    _layout = *layout;
     _source = std::make_shared<Platform::CgroupJobSource>(_host, *std::move(layout));
+}
+
+CeilingReport CompileMemoryMeter::ApplyCeiling(std::uint64_t bytes)
+{
+    // Asked of the platform first, so a platform with no cgroups answers the same before and after a worker.
+    if (MeterPlatformTable[static_cast<std::size_t>(_platform)].strategy != MeterStrategy::JobCgroup)
+        return CeilingReport { .state = CeilingState::NotApplicable,
+                               .reason = "the compile memory ceiling is a Linux cgroup, and this platform has none" };
+    if (!_decided.load(std::memory_order_acquire))
+        return CeilingReport { .state = CeilingState::Uncapped,
+                               .reason = "no worker has prepared this node's compile cgroups yet" };
+    if (!_layout.has_value())
+        // The preparation's own failure: the same cause `compile-memory-unmeasured` names.
+        return CeilingReport { .state = CeilingState::Uncapped, .reason = _report.reason };
+    if (auto const written = Platform::SetCompileCeiling(*_host, *_layout, bytes); !written.has_value())
+        return CeilingReport { .state = CeilingState::Uncapped,
+                               .reason = std::format("the ceiling could not be written to {}: {}",
+                                                     (_layout->compiles / "memory.max").string(),
+                                                     written.error().message()) };
+    return CeilingReport { .state = CeilingState::Capped, .reason = {} };
 }
 
 MeteredRunner CompileMemoryMeter::MakeRunner(IMetricsSink& metrics, ILogger& logger)
@@ -116,6 +146,15 @@ MeteredRunner CompileMemoryMeter::MakeRunner(IMetricsSink& metrics, ILogger& log
 
 void ReportCompileMemoryMeter(MeterReport const& report, NodeConditions& conditions, ILogger& logger)
 {
+    // One line for every setting of `compiles/` this kernel lacks: tolerated, and said once.
+    if (!report.notApplied.empty())
+    {
+        auto said = std::string {};
+        for (auto const& sentence: report.notApplied)
+            said += (said.empty() ? "" : "; ") + sentence;
+        logger.Logf(LogLevel::Warn, "the compiles cgroup runs without some of its settings: {}", said);
+    }
+
     switch (report.state)
     {
         case MeterState::Measured:
@@ -132,6 +171,36 @@ void ReportCompileMemoryMeter(MeterReport const& report, NodeConditions& conditi
                         "worker's compiles: {}",
                         report.reason);
             conditions.Raise(NodeCondition::CompileMemoryUnmeasured, report.reason);
+            return;
+    }
+}
+
+void PutCompileCeilingInForce(CompileMemoryMeter& meter,
+                              NodeConfig const& cfg,
+                              Distributed::NodeCapacity const& capacity,
+                              NodeConditions& conditions,
+                              ILogger& logger)
+{
+    auto const bytes = CompileCeilingOf(cfg, capacity);
+    auto const applied = meter.ApplyCeiling(bytes);
+    switch (applied.state)
+    {
+        case CeilingState::Capped:
+            logger.Logf(LogLevel::Info,
+                        "compile memory ceiling: {} ({})",
+                        bytes,
+                        cfg.compileMemoryLimitBytes.has_value() ? "typed" : "derived");
+            conditions.Clear(NodeCondition::CompileMemoryUncapped);
+            return;
+        case CeilingState::Uncapped:
+            logger.Logf(LogLevel::Warn,
+                        "compiles run with no memory ceiling over them, so one that grows can take memory from "
+                        "everything else on this machine: {}",
+                        applied.reason);
+            conditions.Raise(NodeCondition::CompileMemoryUncapped, applied.reason);
+            return;
+        case CeilingState::NotApplicable:
+            conditions.NotEvaluated(NodeCondition::CompileMemoryUncapped, applied.reason);
             return;
     }
 }

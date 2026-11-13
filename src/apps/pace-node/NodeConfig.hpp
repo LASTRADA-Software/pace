@@ -321,6 +321,15 @@ struct NodeConfig
     /// (`MachineBudgetOf`). An `optional` for `slots` reason.
     std::optional<std::uint64_t> machineMemoryBudgetBytes;
 
+    /// The memory ceiling over every compile this worker runs together, when the operator named one
+    /// (`--compile-memory-limit`, bytes after `N%` is resolved against host RAM).
+    ///
+    /// Absent is the machine budget (`CompileCeilingOf`), so admission and the cap are one number. Typed
+    /// below that budget, it lowers the budget the machine REPORTS too (`MachineBudgetOf`), so the queue
+    /// never admits what the ceiling will kill. Reloadable: rewriting a control file is safe at any
+    /// moment. An `optional` for `slots` reason.
+    std::optional<std::uint64_t> compileMemoryLimitBytes;
+
     /// What an unknown translation unit is assumed to need, when the operator named a figure.
     ///
     /// Absent is `DefaultCompileEstimateBytes` (`CompileEstimateDefaultOf`). An `optional` for `slots`
@@ -1359,9 +1368,13 @@ inline constexpr std::array<std::string_view, 2> AddressReloadableFlags { "--adv
 /// reports is re-derived from the tier the moment a budget is applied (`CacheTier`'s budget listener), which is the
 /// one place it is derived -- so a reload resizing a tier through `BudgetOverrideApplier` needs no re-survey to tell
 /// the fleet anything.
-inline constexpr std::array<std::string_view, 6> LocalReloadableFlags { "--log-level",    "--allow-compile-arg",
-                                                                        "--requirepass",  "--fleet-open",
-                                                                        "--cache-memory", "--cache-disk" };
+///
+/// `--compile-memory-limit` is local because what it changes is a control file on this machine: a reload rewrites
+/// `compiles/memory.max` (`PutCompileCeilingInForce`) and a registration carries no field for it.
+inline constexpr std::array<std::string_view, 7> LocalReloadableFlags { "--log-level",           "--allow-compile-arg",
+                                                                        "--requirepass",         "--fleet-open",
+                                                                        "--cache-memory",        "--cache-disk",
+                                                                        "--compile-memory-limit" };
 
 /// Both reloadable-flag lists, so the guards walk a derived SET rather than naming
 /// each list by hand.

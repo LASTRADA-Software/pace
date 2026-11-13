@@ -2,15 +2,20 @@
 #pragma once
 
 #include "NodeConditions.hpp"
+#include "NodeConfig.hpp"
 
 #include <Pace/Core/Logger.hpp>
+#include <Pace/Distributed/NodePolicy.hpp>
 #include <Pace/Metrics/IMetricsSink.hpp>
 #include <Pace/Platform/CgroupV2.hpp>
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
+#include <vector>
 
 #include <IProcessRunner.hpp>
 
@@ -86,6 +91,26 @@ struct MeterReport
 {
     MeterState state { MeterState::Measured }; ///< The answer.
     std::string reason {};                     ///< Why, for `Unmeasured` and `NotApplicable`.
+    /// The settings of `compiles/` this kernel lacks (`CgroupLayout::notApplied`), said once at startup.
+    std::vector<std::string> notApplied {};
+};
+
+/// Whether the compiles this worker runs are held under one memory ceiling, as `compile-memory-uncapped`
+/// needs to hear it.
+///
+/// Private: transmitted nowhere. What an operator reads is the condition row.
+enum class CeilingState : std::uint8_t
+{
+    Capped,        ///< `compiles/memory.max` holds the ceiling.
+    Uncapped,      ///< It could, and does not: an operator can fix it. Raises the condition.
+    NotApplicable, ///< It cannot on this platform (no cgroups): no remedy, so the row is not evaluated.
+};
+
+/// What applying the ceiling came to.
+struct CeilingReport
+{
+    CeilingState state { CeilingState::Capped }; ///< The answer.
+    std::string reason {};                       ///< Why, for `Uncapped` and `NotApplicable`.
 };
 
 /// The runner a node spawns compilers with, and what it says about measuring them.
@@ -116,14 +141,31 @@ class CompileMemoryMeter
     /// @return The runner and what it can measure.
     [[nodiscard]] MeteredRunner MakeRunner(IMetricsSink& metrics, ILogger& logger);
 
+    /// Hold every compile under @p bytes together: write `compiles/memory.max`.
+    ///
+    /// **Writes every time**, at startup and at every accepted reload, never only when the figure
+    /// changed: a `compiles/` an earlier run left behind keeps that run's `memory.max`, and a lowered
+    /// ceiling must not wait for a restart. Never prepares: a meter no worker has asked for a runner has
+    /// rearranged nothing, and answers `Uncapped` saying so.
+    /// @param bytes The ceiling.
+    /// @return `Capped` once written; `Uncapped` with the preparation's failure, or the write's, when no
+    ///         ceiling holds; `NotApplicable` on a platform with no cgroups.
+    [[nodiscard]] CeilingReport ApplyCeiling(std::uint64_t bytes);
+
   private:
-    /// Decide the meter; runs once.
+    /// Decide the meter, and publish that it has; runs once.
     void Prepare();
+
+    /// What `Prepare` decides.
+    void Decide();
 
     std::shared_ptr<Platform::ICgroupHost const> _host;
     MeterPlatform _platform;
     std::once_flag _prepared;
+    /// Set, with release, once `Prepare` has decided: `ApplyCeiling` reads `_layout` and `_report` only after.
+    std::atomic<bool> _decided { false };
     std::shared_ptr<Platform::CgroupJobSource> _source; ///< Null unless the strategy is `JobCgroup` and it is available.
+    std::optional<Platform::CgroupLayout> _layout;      ///< Where `compiles/` is; engaged exactly when `_source` is.
     MeterReport _report;
 };
 
@@ -132,5 +174,24 @@ class CompileMemoryMeter
 /// @param conditions Where `compile-memory-unmeasured` is answered.
 /// @param logger Where the reason is logged.
 void ReportCompileMemoryMeter(MeterReport const& report, NodeConditions& conditions, ILogger& logger);
+
+/// Put the compile memory ceiling in force, and say so: `compile memory ceiling: <bytes> (<derived|typed>)`
+/// at Info and the row clear once written, the row raised (and a Warn) when it cannot be, and the row not
+/// evaluated on a platform with no cgroups.
+///
+/// **The ONE answer for `compile-memory-uncapped`**: `ReportCompileMemoryMeter` leaves it to this, so a
+/// worker whose ceiling nobody put in force reads `undecided` -- the wiring defect `NodeConditions::Settle`
+/// names -- rather than a `clear` nobody earned. Called by `main` once a worker exists, and again after every
+/// accepted reload with the configuration then in force.
+/// @param meter The process's meter, prepared by the worker's runner.
+/// @param cfg The configuration in force.
+/// @param capacity What this machine is now.
+/// @param conditions Where `compile-memory-uncapped` is answered.
+/// @param logger Where the ceiling, or why there is none, is said.
+void PutCompileCeilingInForce(CompileMemoryMeter& meter,
+                              NodeConfig const& cfg,
+                              Distributed::NodeCapacity const& capacity,
+                              NodeConditions& conditions,
+                              ILogger& logger);
 
 } // namespace Pace::Node

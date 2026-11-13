@@ -32,6 +32,17 @@ namespace
         return std::max(usable * MachineBudgetSharePercent / 100, CompileEstimateDefaultOf(cfg));
     }
 
+    /// The budget this machine reports: typed or derived, and never above a typed compile ceiling (C3), so
+    /// the queue never admits what the ceiling will kill.
+    /// @param cfg The parsed configuration.
+    /// @param capacity What this machine is.
+    /// @return The budget in bytes.
+    [[nodiscard]] std::uint64_t BudgetOf(NodeConfig const& cfg, Distributed::NodeCapacity const& capacity) noexcept
+    {
+        auto const budget = cfg.machineMemoryBudgetBytes.value_or(DerivedBudgetOf(cfg, capacity));
+        return std::min(budget, cfg.compileMemoryLimitBytes.value_or(budget));
+    }
+
     /// The report's half of the round: say it on one connection.
     class BudgetAnnouncement final: public IAnnouncement
     {
@@ -95,12 +106,17 @@ namespace
     };
 } // namespace
 
+std::uint64_t CompileCeilingOf(NodeConfig const& cfg, Distributed::NodeCapacity const& capacity) noexcept
+{
+    return cfg.compileMemoryLimitBytes.value_or(BudgetOf(cfg, capacity));
+}
+
 Distributed::MachineReport MachineBudgetOf(NodeConfig const& cfg,
                                            Distributed::NodeCapacity const& capacity,
                                            HeldCharges const& held) noexcept
 {
     return Distributed::MachineReport {
-        .memoryBudgetBytes = cfg.machineMemoryBudgetBytes.value_or(DerivedBudgetOf(cfg, capacity)),
+        .memoryBudgetBytes = BudgetOf(cfg, capacity),
         // Zero cores is "did not say", and one is the answer `OfferableSlots` gives for it: a machine
         // that reports no slot is one the queue could never run a compile on.
         .slots = cfg.machineSlots.value_or(std::max<std::uint32_t>(capacity.logicalCores, 1)),

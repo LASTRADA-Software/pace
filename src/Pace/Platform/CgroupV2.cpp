@@ -158,6 +158,33 @@ namespace
         CgroupTeardownPolicy _teardown;
     };
 
+    /// Whether a refusal to write a control file means only that this kernel does not have it.
+    /// @param error The refusal.
+    /// @return True for a missing or unsupported file; false for everything else (a permission, a busy cgroup).
+    [[nodiscard]] bool MeansAbsent(std::error_code const& error) noexcept
+    {
+        return error == std::errc::no_such_file_or_directory || error == std::errc::not_supported
+               || error == std::errc::operation_not_supported;
+    }
+
+    /// One setting of `compiles/` beyond the ceiling.
+    struct CompilesSetting
+    {
+        std::string_view file;    ///< The control file.
+        std::string_view value;   ///< What is written.
+        std::string_view without; ///< What goes on without it, for the line that says so.
+    };
+
+    /// The settings `PrepareJobCgroups` writes on `compiles/`, in order. No swap for a compile (a thrashing
+    /// compile freezes a desktop long before it dies), and no group kill at the ceiling (a job is its own
+    /// group; the ceiling reclaims one job at a time).
+    constexpr auto CompilesSettings = std::to_array<CompilesSetting>({
+        { .file = "memory.swap.max", .value = "0", .without = "compiles may swap" },
+        { .file = "memory.oom.group",
+          .value = "0",
+          .without = "the ceiling may kill every compile at once rather than one" },
+    });
+
 } // namespace
 
 std::string CgroupFailure::Describe() const
@@ -221,7 +248,9 @@ std::expected<CgroupLayout, CgroupFailure> PrepareJobCgroups(ICgroupHost const& 
 
     // `/` is the root of THIS process's cgroup namespace (a service with `ProtectControlGroups=private`
     // sees its own subtree as the mount's root), so it joins like any other path.
-    auto layout = CgroupLayout { .delegated = own->size() > 1 ? mount / own->substr(1) : mount, .leaf = {}, .compiles = {} };
+    auto layout = CgroupLayout {
+        .delegated = own->size() > 1 ? mount / own->substr(1) : mount, .leaf = {}, .compiles = {}, .notApplied = {}
+    };
     layout.leaf = layout.delegated / NodeLeafName;
     layout.compiles = layout.delegated / CompilesCgroupName;
 
@@ -300,12 +329,19 @@ std::expected<CgroupLayout, CgroupFailure> PrepareJobCgroups(ICgroupHost const& 
     if (auto const now = host.ReadFile(compilesControl); now.has_value() && !ListsWord(*now, "memory"))
         return Failed(CgroupUnavailable::CompilesNotCreated,
                       compilesControl.string() + " does not list memory after it was enabled");
-    // No swap for a compile (a thrashing compile freezes a desktop long before it dies) and no group kill
-    // at the ceiling (a job is its own group; the ceiling reclaims one process at a time). A kernel
-    // without swap accounting has no `memory.swap.max`: the ceiling works without it, so a refusal here
-    // is tolerated rather than fatal.
-    static_cast<void>(host.WriteFile(layout.compiles / "memory.swap.max", "0"));
-    static_cast<void>(host.WriteFile(layout.compiles / "memory.oom.group", "0"));
+    // The ceiling works without any of these, so a kernel that LACKS one (no swap accounting, say) is
+    // tolerated and named; one that REFUSES one for another reason will not take the ceiling either.
+    for (auto const& setting: CompilesSettings)
+    {
+        auto const file = layout.compiles / setting.file;
+        auto const written = host.WriteFile(file, setting.value);
+        if (written.has_value())
+            continue;
+        if (!MeansAbsent(written.error()))
+            return Failed(CgroupUnavailable::CompilesNotCreated, Because(file, written.error()));
+        layout.notApplied.push_back(
+            std::format("{}: {} not writable ({})", setting.without, setting.file, written.error().message()));
+    }
 
     // A node killed before it could remove its jobs (nothing cleans a hand-delegated subtree) leaves
     // `job-*` behind -- under `compiles/`, or directly under the delegated cgroup if the node was an
@@ -369,8 +405,15 @@ std::expected<std::unique_ptr<IJobCgroup>, std::error_code> CgroupJobSource::Cre
             return std::unexpected { descriptor.error() };
         }
         // A job is killed whole when it is the victim: one compile is one process tree, and half of one is
-        // worth nothing. A kernel without the file still has the ceiling, so a refusal is tolerated.
-        static_cast<void>(_host->WriteFile(directory / "memory.oom.group", "1"));
+        // worth nothing. A kernel without the file still has the ceiling, so its ABSENCE is tolerated (and was
+        // named at preparation, on `compiles/`); any other refusal is a cgroup tree that is not the node's.
+        if (auto const grouped = _host->WriteFile(directory / "memory.oom.group", "1");
+            !grouped.has_value() && !MeansAbsent(grouped.error()))
+        {
+            _host->CloseDescriptor(*descriptor);
+            static_cast<void>(_host->RemoveCgroupDirectory(directory));
+            return std::unexpected { grouped.error() };
+        }
         return std::make_unique<CgroupJob>(_host, directory, *descriptor, _teardown);
     }
     return std::unexpected { lastError };

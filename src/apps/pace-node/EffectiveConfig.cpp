@@ -176,6 +176,7 @@ namespace
         Shown("--compile-inflight-max", &OptionalNumber<&NodeConfig::compileInflightMaxBytes>),
         Shown("--machine-slots", &OptionalNumber<&NodeConfig::machineSlots>),
         Shown("--machine-memory-budget", &OptionalNumber<&NodeConfig::machineMemoryBudgetBytes>),
+        Shown("--compile-memory-limit", &OptionalNumber<&NodeConfig::compileMemoryLimitBytes>),
         Shown("--compile-estimate-default", &OptionalNumber<&NodeConfig::compileEstimateDefaultBytes>),
         Shown("--reserve-cores", &OptionalNumber<&NodeConfig::reservedCores>),
         Shown("--node-id", &TextOrUnset<&NodeConfig::nodeId>),

@@ -20,9 +20,14 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <vector>
 
 namespace Pace::Node
 {
+
+class CompileMemoryMeter;
+class INodeCapacitySource;
+class INodeConfigSource;
 
 /// The node's reloader: `NodeConfig`, read through the option table, guarded by its
 /// `reloadable` column.
@@ -99,6 +104,52 @@ class IAcceptedReloadListener
 
     /// The reloader's snapshot is the configuration in force now. Called on the reloading thread: wake and return.
     virtual void ReloadAccepted() = 0;
+};
+
+/// Every listener an accepted reload tells, in the order given: `ApplyReloadRequest` takes ONE, so a
+/// second consumer is a row here rather than a second parameter every caller must spell.
+class AcceptedReloadListeners final: public IAcceptedReloadListener
+{
+  public:
+    /// @param listeners Each told in turn; none null, all outliving this.
+    explicit AcceptedReloadListeners(std::vector<IAcceptedReloadListener*> listeners);
+
+    /// Tell each listener.
+    void ReloadAccepted() override;
+
+  private:
+    std::vector<IAcceptedReloadListener*> _listeners;
+};
+
+/// Puts the compile memory ceiling in force again after every accepted reload: `--compile-memory-limit` is
+/// reloadable, and a lowered ceiling must not wait for a restart.
+///
+/// Rewritten whether or not the figure changed -- writing one control file is cheap, and the derived figure
+/// follows the capacity, which a cache budget may have moved since the last write. Done inline on the reloading
+/// thread for that reason: one `write(2)`, never a walk.
+class CompileCeilingOnReload final: public IAcceptedReloadListener
+{
+  public:
+    /// @param meter The process's meter; outlives this.
+    /// @param inForce The configuration in force, read at each reload; outlives this.
+    /// @param capacity What this machine is, read at each reload; outlives this.
+    /// @param conditions Where `compile-memory-uncapped` is answered; outlives this.
+    /// @param logger Where the ceiling is said; outlives this.
+    CompileCeilingOnReload(CompileMemoryMeter& meter,
+                           INodeConfigSource const& inForce,
+                           INodeCapacitySource const& capacity,
+                           NodeConditions& conditions,
+                           ILogger& logger) noexcept;
+
+    /// Write the ceiling the configuration now in force asks for.
+    void ReloadAccepted() override;
+
+  private:
+    CompileMemoryMeter& _meter;
+    INodeConfigSource const& _inForce;
+    INodeCapacitySource const& _capacity;
+    NodeConditions& _conditions;
+    ILogger& _logger;
 };
 
 /// Act on one SIGHUP, and say what happened either way.

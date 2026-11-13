@@ -176,12 +176,66 @@ TEST_CASE("A compiles/ cgroup that cannot be made is a stated cause", "[platform
     CHECK(layout.error().cause == CgroupUnavailable::CompilesNotCreated);
 }
 
-TEST_CASE("A missing memory.swap.max does not make compiles/ unavailable", "[platform][cgroup]")
+TEST_CASE("A missing memory.swap.max does not make compiles/ unavailable, and is named", "[platform][cgroup]")
 {
     auto const host = DelegatedHost();
-    host->writeRefusals[std::string { Delegated } + "/compiles/memory.swap.max"] = std::errc::no_such_file_or_directory;
 
-    CHECK(PrepareJobCgroups(*host).has_value());
+    SECTION("a fully applied compiles/ names nothing")
+    {
+        CHECK(Unwrap(PrepareJobCgroups(*host)).notApplied.empty());
+    }
+    SECTION("a kernel without the file: the ceiling still works, and what it could not do is said")
+    {
+        host->writeRefusals[std::string { Delegated } + "/compiles/memory.swap.max"] = std::errc::no_such_file_or_directory;
+        auto const layout = Unwrap(PrepareJobCgroups(*host));
+        REQUIRE(layout.notApplied.size() == 1);
+        CHECK(layout.notApplied.front().contains("compiles may swap"));
+        CHECK(layout.notApplied.front().contains("memory.swap.max"));
+    }
+    SECTION("an unsupported setting is tolerated the same way")
+    {
+        host->writeRefusals[std::string { Delegated } + "/compiles/memory.oom.group"] = std::errc::operation_not_supported;
+        auto const layout = Unwrap(PrepareJobCgroups(*host));
+        REQUIRE(layout.notApplied.size() == 1);
+        CHECK(layout.notApplied.front().contains("memory.oom.group"));
+    }
+}
+
+TEST_CASE("A compiles/ setting the kernel refuses for any other reason is a stated cause", "[platform][cgroup]")
+{
+    auto const host = DelegatedHost();
+    host->writeRefusals[std::string { Delegated } + "/compiles/memory.swap.max"] = std::errc::permission_denied;
+
+    auto const layout = PrepareJobCgroups(*host);
+
+    // Not absent, REFUSED: a tree that will not take this will not take the ceiling either.
+    REQUIRE_FALSE(layout.has_value());
+    CHECK(layout.error().cause == CgroupUnavailable::CompilesNotCreated);
+    CHECK(layout.error().detail.contains("memory.swap.max"));
+}
+
+TEST_CASE("A job whose OOM group is refused for a reason other than absence is not made", "[platform][cgroup]")
+{
+    auto host = DelegatedHost();
+    auto* const raw = host.get();
+    auto const layout = Unwrap(PrepareJobCgroups(*host));
+    auto const directory = std::string { Delegated } + "/compiles/job-1";
+
+    SECTION("absent: tolerated, the job runs without it")
+    {
+        raw->writeRefusals[directory + "/memory.oom.group"] = std::errc::no_such_file_or_directory;
+        CgroupJobSource source { std::move(host), layout };
+        CHECK(source.Create().has_value());
+    }
+    SECTION("refused: the job is not made, and its directory is not left behind")
+    {
+        raw->writeRefusals[directory + "/memory.oom.group"] = std::errc::permission_denied;
+        CgroupJobSource source { std::move(host), layout };
+        auto const made = source.Create();
+        REQUIRE_FALSE(made.has_value());
+        CHECK(made.error() == std::errc::permission_denied);
+        CHECK_FALSE(raw->directories.contains(directory));
+    }
 }
 
 TEST_CASE("A cgroup namespace root is mounted where the mount is", "[platform][cgroup]")
