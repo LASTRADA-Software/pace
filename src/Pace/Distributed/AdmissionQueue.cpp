@@ -347,12 +347,13 @@ std::vector<Decision> AdmissionQueue::Pump()
             auto const& report = *_ledgers.at(target.machine).report;
             auto const& hold = reserved[target.machine];
             auto const room = RoomOn(target.machine, hold);
-            // A machine shedding memory takes nothing, its own local compiles included (the owner's decision).
-            if (report.pressure == PressureLevel::Shed)
+            // A machine under memory pressure takes nothing new, its own local compiles included (the owner's
+            // decision). Yield and Shed are one answer here -- only the node's governor tells them apart, by
+            // killing under Shed. The room such a machine reports is what its compiles gave back as they
+            // finished, and admitting into it would refill exactly what the governor is yielding.
+            if (report.pressure != PressureLevel::Calm)
                 return false;
-            // A yielding machine is idle BECAUSE it yields, so the run-alone exception is closed there: an
-            // oversize compile is exactly the one that would take back what the governor gave away.
-            if (entry.chargedBytes > report.memoryBudgetBytes && report.pressure == PressureLevel::Calm)
+            if (entry.chargedBytes > report.memoryBudgetBytes)
                 return report.slots > 0 && room.usedBytes == 0 && room.usedSlots == 0 && hold.bytes == 0 && hold.slots == 0;
             return room.freeBytes >= entry.chargedBytes && room.freeSlots >= 1;
         });

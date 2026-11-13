@@ -901,18 +901,54 @@ TEST_CASE("AdmissionQueue.shedding-machine-takes-no-dispatched-work-and-it-runs-
 TEST_CASE("AdmissionQueue.yield-holds-local-compiles-too", "[distributed][admission]")
 {
     // The owner's decision: a local build can freeze the desktop as surely as a remote one, so a
-    // request from the pressured machine itself, for itself, waits as dispatched work does.
+    // request from the yielding machine itself, for itself, waits -- even one its reported room
+    // holds, since a yielding machine's room is what its compiles gave back as they finished.
+    SECTION("yielding: a request that fits the room and a free slot waits, and runs once calm")
+    {
+        Fixture f;
+        auto yielding = Report(8 * GiB, 4, 2, 4 * GiB); // 4 GiB and two slots free
+        yielding.pressure = PressureLevel::Yield;
+        f.queue.ReportMachine("m", yielding);
+        auto const local = f.Add(AdmitKind::LocalOnly, "m", 1 * GiB);
+        CHECK(f.queue.Pump().empty());
+        CHECK(f.queue.Depth() == 1);
+
+        // Calm again: the waiting ticket runs, on receipt of the report.
+        f.queue.ReportMachine("m", Report(8 * GiB, 4, 2, 4 * GiB));
+        CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { local });
+    }
+    SECTION("calm: the same request runs at once (control)")
+    {
+        Fixture f;
+        f.queue.ReportMachine("m", Report(8 * GiB, 4, 2, 4 * GiB));
+        auto const local = f.Add(AdmitKind::LocalOnly, "m", 1 * GiB);
+        CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { local });
+    }
+    SECTION("yielding: an oversize request waits too, and runs alone once calm")
+    {
+        Fixture f;
+        f.queue.ReportMachine("m", Pressed(4 * GiB, 4, PressureLevel::Yield));
+        auto const big = f.Add(AdmitKind::LocalOnly, "m", 6 * GiB);
+        CHECK(f.queue.Pump().empty());
+        f.queue.ReportMachine("m", Pressed(4 * GiB, 4, PressureLevel::Calm));
+        CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { big });
+    }
+}
+
+TEST_CASE("AdmissionQueue.yielding-worker-takes-no-dispatched-work-that-fits", "[distributed][admission]")
+{
+    // A dispatched request that fits a yielding worker's room is not placed there: with the caller
+    // full, it waits; once the worker is calm, it runs there.
     Fixture f;
-    f.queue.ReportMachine("m", Pressed(4 * GiB, 4, PressureLevel::Yield));
-    auto const local = f.Add(AdmitKind::LocalOnly, "m", 6 * GiB);
+    f.placement.byFingerprint["fp"] = { Placement { .workerId = "worker-1", .machine = "w", .endpoint = "10.0.0.2:6680" } };
+    f.queue.ReportMachine("c", Report(8 * GiB, 4, 4, 8 * GiB)); // the caller has no room
+    f.queue.ReportMachine("w", Pressed(8 * GiB, 4, PressureLevel::Yield));
+    auto const job = f.Add(AdmitKind::Dispatchable, "c", 1 * GiB, "fp");
     CHECK(f.queue.Pump().empty());
 
-    f.queue.ReportMachine("m", Pressed(4 * GiB, 4, PressureLevel::Shed));
-    f.Add(AdmitKind::LocalOnly, "m", 1 * GiB);
-    CHECK(f.queue.Pump().empty());
-    CHECK(f.queue.Depth() == 2);
-
-    // Calm again: the waiting oversize one runs alone, on receipt of the report.
-    f.queue.ReportMachine("m", Pressed(4 * GiB, 4, PressureLevel::Calm));
-    CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { local });
+    f.queue.ReportMachine("w", Pressed(8 * GiB, 4, PressureLevel::Calm));
+    auto const granted = f.queue.Pump();
+    REQUIRE(granted.size() == 1);
+    CHECK(granted[0].ticket == job);
+    CHECK(granted[0].kind == Pace::CompileCacheWire::GrantKind::Worker);
 }

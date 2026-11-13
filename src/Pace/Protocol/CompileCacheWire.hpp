@@ -10408,8 +10408,8 @@ struct MachineBudgetReport
     std::uint64_t heldBytes;         ///< Memory charged now.
     /// A bounded sample of measured peaks, newest meaning most useful to the leader's estimates.
     std::vector<std::pair<EstimateKeyFields, std::uint64_t>> peaks;
-    /// How hard the machine's memory is pressed now. Anything but `Calm` closes the queue's run-alone
-    /// exception there, and `Shed` admits nothing there at all -- the machine's own local compiles included.
+    /// How hard the machine's memory is pressed now. Anything but `Calm` makes the leader's queue admit
+    /// nothing new there -- the machine's own local compiles included.
     PressureLevel pressure { PressureLevel::Calm };
 
     /// @return True when every field is equal.
