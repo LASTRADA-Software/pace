@@ -70,8 +70,11 @@ struct GovernorDecision
 ///   once per `dwell` -- and never when compiles hold nothing, since there is nothing to kill.
 /// - **Leaving a level** needs its figure below the exit threshold AND `dwell` since entering it, and an
 ///   own stall counts as below: compiles stalling against the ceiling a yield just set hold the node in
-///   no level. Leaving `Shed` also needs no foreign stall above `yieldEnter`, and lands in `Yield` unless
-///   the stall has already eased below `yieldExit` or is the compiles' own.
+///   no level. That holds for `full` too: entering `Shed` on `full` asks nobody whose stall it is, but
+///   leaving it counts `full` as eased below `shedExit` OR when the compiles' own `full` is at least
+///   `ownShare` of the system's -- never when the compiles' reading or its `full` line is absent. Leaving
+///   `Shed` also needs no foreign stall above `yieldEnter`, and lands in `Yield` unless the stall has
+///   already eased below `yieldExit` or is the compiles' own.
 /// - **The allowance**: entering `Yield` or `Shed` sets it to what compiles hold (never raising it); while
 ///   `Calm` it grows by `rampPercent` of the configured bytes per `rampInterval`, never past them.
 ///

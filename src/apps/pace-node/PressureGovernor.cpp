@@ -42,7 +42,12 @@ GovernorDecision PressureGovernor::Step(Platform::PressureSample const& sample, 
     auto const foreignStall = systemSome > thresholds.yieldEnter && !ownStall;
     // A stall the compiles carry is the ceiling working, so it never counts as one to stay for.
     auto const yieldEased = ownStall || systemSome < thresholds.yieldExit;
+    // Entering a shed on `full` asks nobody whose stall it is; leaving one does, as leaving a yield does on
+    // `some`. Only a compiles `full` line that was READ can be an own stall: absent is never the compiles'.
     auto const freezing = systemFull >= thresholds.shedEnter;
+    auto const ownFull =
+        sample.compiles && sample.compiles->full && sample.compiles->full->avg10 >= thresholds.ownShare * systemFull;
+    auto const freezeEased = ownFull || systemFull < thresholds.shedExit;
     auto const dwellSpent = now - _enteredAt >= thresholds.dwell;
 
     // Escalation needs the foreign stall SUSTAINED: its clock restarts whenever the stall drops.
@@ -69,7 +74,7 @@ GovernorDecision PressureGovernor::Step(Platform::PressureSample const& sample, 
             break;
         case PressureLevel::Shed:
             // Held while a freeze or a foreign stall persists; stepping down lands where the stall says.
-            if (dwellSpent && systemFull < thresholds.shedExit && !foreignStall)
+            if (dwellSpent && freezeEased && !foreignStall)
                 Enter(yieldEased ? PressureLevel::Calm : PressureLevel::Yield, now, compilesHoldBytes);
             break;
         case PressureLevel::Last:

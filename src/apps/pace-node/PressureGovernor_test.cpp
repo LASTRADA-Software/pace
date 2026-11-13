@@ -37,9 +37,10 @@ constexpr std::uint64_t RampStep = Configured * 5 / 100;
 /// What a sample says, in PSI avg10 percentages.
 struct Script
 {
-    double some = 0.0;                    ///< System `some`.
-    std::optional<double> full = 0.0;     ///< System `full`; disengaged as on a kernel without the line.
-    std::optional<double> compiles = 0.0; ///< Compiles' `some`; disengaged when there is no compiles reading.
+    double some = 0.0;                     ///< System `some`.
+    std::optional<double> full = 0.0;      ///< System `full`; disengaged as on a kernel without the line.
+    std::optional<double> compiles = 0.0;  ///< Compiles' `some`; disengaged when there is no compiles reading.
+    std::optional<double> compilesFull {}; ///< Compiles' `full`; disengaged as on a file without the line.
 };
 
 /// @return The sample @p script describes.
@@ -53,6 +54,8 @@ Platform::PressureSample SampleOf(Script const& script)
     {
         auto compiles = Platform::PsiReading {};
         compiles.some.avg10 = *script.compiles;
+        if (script.compilesFull)
+            compiles.full = Platform::PsiLine { .avg10 = *script.compilesFull, .avg60 = 0.0, .totalMicros = 0 };
         sample.compiles = compiles;
     }
     return sample;
@@ -349,4 +352,57 @@ TEST_CASE("The pressure level's bytes are pinned", "[node][pressure][wire]")
     CHECK(static_cast<std::uint8_t>(CompileCacheWire::PressureLevel::Yield) == 1);
     CHECK(static_cast<std::uint8_t>(CompileCacheWire::PressureLevel::Shed) == 2);
     CHECK(static_cast<std::uint8_t>(CompileCacheWire::PressureLevel::Last) == 3);
+}
+
+TEST_CASE("A full stall the compiles carry does not hold a shed", "[node][pressure]")
+{
+    Rig rig;
+    REQUIRE(rig.After(0s, Freezing, 30 * GiB).level == PressureLevel::Shed);
+
+    SECTION("The compiles' own full stall: the shed ends at its dwell and kills no more")
+    {
+        auto const own = Script { .some = 3.0, .full = 3.0, .compiles = 0.0, .compilesFull = 2.9 };
+        CHECK_FALSE(rig.After(5s, own, 20 * GiB).killYoungest);
+        auto const left = rig.After(5s, own, 20 * GiB);
+        CHECK(left.level == PressureLevel::Calm);
+        CHECK(left.levelChanged);
+        CHECK_FALSE(left.killYoungest);
+        for ([[maybe_unused]] auto const tick: std::views::iota(0, 4))
+        {
+            auto const decision = rig.After(5s, own, 20 * GiB);
+            CHECK(decision.level == PressureLevel::Calm);
+            CHECK_FALSE(decision.killYoungest);
+        }
+    }
+    SECTION("Control: a full stall the compiles do not carry holds the shed")
+    {
+        auto const foreign = Script { .some = 3.0, .full = 3.0, .compiles = 0.0, .compilesFull = 0.5 };
+        CHECK(rig.After(5s, foreign, 20 * GiB).level == PressureLevel::Shed);
+        auto const held = rig.After(5s, foreign, 20 * GiB);
+        CHECK(held.level == PressureLevel::Shed);
+        CHECK(held.killYoungest);
+    }
+    SECTION("Control: no compiles full line is never an own stall")
+    {
+        auto const unknown = Script { .some = 3.0, .full = 3.0, .compiles = 0.0, .compilesFull = std::nullopt };
+        CHECK(rig.After(10s, unknown, 20 * GiB).level == PressureLevel::Shed);
+    }
+}
+
+TEST_CASE("An own-stall sample restarts the foreign stall's escalation clock", "[node][pressure]")
+{
+    // Foreign from 0 s to 9 s, the compiles' own at 9 s, foreign again from 10 s: the 2 x dwell runs from
+    // 10 s, so the shed comes at 30 s and not at 20 s.
+    Rig rig;
+    auto const ownStall = Script { .some = 20.0, .full = 0.0, .compiles = 19.0 };
+    REQUIRE(rig.After(0s, GameStall, 30 * GiB).level == PressureLevel::Yield);
+    REQUIRE(rig.After(9s, ownStall, 30 * GiB).level == PressureLevel::Yield);
+    CHECK(rig.After(1s, GameStall, 30 * GiB).level == PressureLevel::Yield);
+    auto const at20 = rig.After(10s, GameStall, 30 * GiB);
+    CHECK(at20.level == PressureLevel::Yield);
+    CHECK_FALSE(at20.killYoungest);
+    CHECK(rig.After(9s, GameStall, 30 * GiB).level == PressureLevel::Yield);
+    auto const at30 = rig.After(1s, GameStall, 30 * GiB);
+    CHECK(at30.level == PressureLevel::Shed);
+    CHECK(at30.killYoungest);
 }
