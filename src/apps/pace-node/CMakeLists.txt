@@ -87,6 +87,7 @@ add_executable(pace-node
     AdmissionResponder.cpp
     AdmitForwarder.cpp
     MachineBudget.cpp
+    PressureGovernor.cpp
     NodeRoster.cpp
     NodeConditions.cpp
     NodeConfig.cpp
@@ -250,6 +251,8 @@ if(PACE_BUILD_TESTS)
         AdmitForwarder_test.cpp
         MachineBudget.cpp
         MachineBudget_test.cpp
+        PressureGovernor.cpp
+        PressureGovernor_test.cpp
         NodeRoster.cpp
         NodeRoster_test.cpp
         NodeRefusal_test.cpp
