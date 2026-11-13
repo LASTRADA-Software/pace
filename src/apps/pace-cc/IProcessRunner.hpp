@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <Pace/Platform/JobCgroups.hpp>
+
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -40,6 +42,11 @@ struct CompileRun
     /// measured -- the process was not spawned, or the platform declined to answer -- and never 0
     /// for "unknown": a caller charging a memory budget must tell *nothing measured* from *tiny*.
     std::optional<std::uint64_t> peakMemoryBytes { std::nullopt };
+
+    /// Set when the process was ended by `SIGKILL` (POSIX), and why: a compiler killed is not a
+    /// compiler that failed. `exitCode` stays `128 + 9`. Precedence when several apply: `Shed`, then
+    /// `Ceiling`, then `Signal`.
+    std::optional<Platform::CompileKill> killed { std::nullopt };
 };
 
 /// One environment variable a spawn ADDS to the environment it inherits.

@@ -354,6 +354,26 @@ TEST_CASE("A job's cgroup is a fresh numbered directory, read for its peak, then
     CHECK(raw->trail[7] == "rmdir " + jobs + "/job-1");
 }
 
+TEST_CASE("A job's memory.events oom_kill marks it OOM-killed", "[platform][cgroup]")
+{
+    auto host = DelegatedHost();
+    auto* const raw = host.get();
+    auto const layout = Unwrap(PrepareJobCgroups(*host));
+    CgroupJobSource source { std::move(host), layout };
+    auto const events = layout.compiles.generic_string() + "/job-1/memory.events";
+
+    auto job = NewJob(source);
+    CHECK_FALSE(job->Shed());
+    // Unreadable: the kernel said nothing, so nobody was killed as far as anyone can tell.
+    CHECK_FALSE(job->OomKilled());
+    raw->files[events] = "low 0\nhigh 0\nmax 3\noom 1\noom_kill 1\noom_group_kill 1\n";
+    CHECK(job->OomKilled());
+    raw->files[events] = "low 0\nhigh 0\nmax 3\noom 0\noom_kill 0\noom_group_kill 0\n";
+    CHECK_FALSE(job->OomKilled());
+    raw->files[events] = "oom_kill banana\n";
+    CHECK_FALSE(job->OomKilled());
+}
+
 TEST_CASE("A peak the kernel reports as zero or as text is not a measurement", "[platform][cgroup]")
 {
     auto host = DelegatedHost();

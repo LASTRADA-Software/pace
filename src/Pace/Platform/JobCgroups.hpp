@@ -24,6 +24,14 @@
 namespace Pace::Platform
 {
 
+/// How a compile came to be killed. PRIVATE (no wire, no disk), so no explicit values.
+enum class CompileKill : std::uint8_t
+{
+    Ceiling, ///< The kernel OOM-killed it inside the compile memory ceiling.
+    Shed,    ///< The node's own governor killed it to relieve memory pressure.
+    Signal,  ///< Ended by `SIGKILL` for any other reason.
+};
+
 /// One job's cgroup: a directory the job is spawned into and whose `memory.peak` is its peak.
 ///
 /// **Destroying it ends the job's tree**: every task still in the cgroup is killed (`cgroup.kill`) and
@@ -48,6 +56,17 @@ class IJobCgroup
     /// Read after the job's direct child has been reaped and before this object is destroyed.
     /// @return The peak; disengaged when the kernel would not say (never 0 for "unknown").
     [[nodiscard]] virtual std::optional<std::uint64_t> PeakBytes() const = 0;
+
+    /// Whether the kernel OOM-killed a task of this job (`memory.events`, `oom_kill` > 0).
+    ///
+    /// Read after the child has been reaped and BEFORE this object is destroyed: the file goes
+    /// with the directory.
+    /// @return True only when the file was readable and said so; unreadable is false.
+    [[nodiscard]] virtual bool OomKilled() const = 0;
+
+    /// Whether the node's governor killed this job on purpose (set before it writes `cgroup.kill`).
+    /// @return True when the job was shed.
+    [[nodiscard]] virtual bool Shed() const noexcept = 0;
 };
 
 /// Makes a fresh cgroup per job.

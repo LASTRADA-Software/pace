@@ -868,6 +868,9 @@ namespace
                 result.exitCode = 128 + WTERMSIG(status);
             else
                 result.exitCode = 1;
+            // Classified while the cgroup is alive: `memory.events` goes with its directory.
+            if (WIFSIGNALED(status) && WTERMSIG(status) == SIGKILL)
+                result.killed = KillOf(job.get());
             return result;
         }
 
@@ -915,6 +918,18 @@ namespace
                 throw std::logic_error("a job cgroup was handed to a build that cannot spawn into one");
     #endif
             return ::posix_spawnp(&pid, argv[0], &actions, nullptr, argv.data(), environment);
+        }
+
+        /// Why a `SIGKILL`ed child died, as far as its cgroup can say.
+        /// @param job The job's cgroup; null when the spawn had none.
+        /// @return `Shed`, else `Ceiling`, else `Signal`.
+        [[nodiscard]] static Platform::CompileKill KillOf(Platform::IJobCgroup const* job)
+        {
+            if (job != nullptr && job->Shed())
+                return Platform::CompileKill::Shed;
+            if (job != nullptr && job->OomKilled())
+                return Platform::CompileKill::Ceiling;
+            return Platform::CompileKill::Signal;
         }
 
         /// The peak memory of a reaped child tree, from wherever this runner measures.

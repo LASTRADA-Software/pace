@@ -293,6 +293,23 @@ TEST_CASE("ProcessRunner.peak-memory-is-measured", "[pace-cc][process]")
     CHECK(Unwrap(run.peakMemoryBytes) > 0);
 }
 
+#if !defined(_WIN32)
+TEST_CASE("A compiler ended by SIGKILL is reported killed, not failed", "[cc][process]")
+{
+    auto const runner = MakeProcessRunner(PeakSource::Unmeasured);
+
+    auto const killed = runner->RunCaptureSplit(ShellCommand("kill -9 $$"));
+    CHECK(killed.exitCode == 137);
+    REQUIRE(killed.killed.has_value());
+    CHECK(Unwrap(killed.killed) == Pace::Platform::CompileKill::Signal);
+
+    // Control: the same status by a plain exit is a failure, not a kill.
+    auto const exited = runner->RunCaptureSplit(ShellCommand("exit 137"));
+    CHECK(exited.exitCode == 137);
+    CHECK_FALSE(exited.killed.has_value());
+}
+#endif
+
 TEST_CASE("ProcessRunner.peak-covers-child-process", "[pace-cc][process]")
 {
     // The parent is a shell and stays small; the 256 MiB lives in its CHILD, so only a
@@ -379,6 +396,14 @@ class UnusableJob final: public Pace::Platform::IJobCgroup
     [[nodiscard]] std::optional<std::uint64_t> PeakBytes() const override
     {
         return 12345; // Never asked for: the spawn that would have run in it was refused.
+    }
+    [[nodiscard]] bool OomKilled() const override
+    {
+        return false;
+    }
+    [[nodiscard]] bool Shed() const noexcept override
+    {
+        return false;
     }
 
   private:

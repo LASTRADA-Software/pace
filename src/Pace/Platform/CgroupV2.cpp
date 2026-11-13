@@ -3,10 +3,12 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <charconv>
 #include <format>
 #include <ranges>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 
@@ -121,9 +123,37 @@ namespace
             return ParseDecimal(*text);
         }
 
+        /// @copydoc IJobCgroup::OomKilled
+        [[nodiscard]] bool OomKilled() const override
+        {
+            auto const text = _host->ReadFile(_directory / "memory.events");
+            if (!text.has_value())
+                return false;
+            constexpr std::string_view Key = "oom_kill ";
+            auto const lines = std::string_view { *text };
+            for (auto const line: std::views::split(lines, '\n'))
+            {
+                auto const view = std::string_view { line.begin(), line.end() };
+                if (!view.starts_with(Key))
+                    continue;
+                auto value = std::uint64_t { 0 };
+                auto const digits = view.substr(Key.size());
+                auto const [end, error] = std::from_chars(digits.data(), digits.data() + digits.size(), value);
+                return error == std::errc {} && end == digits.data() + digits.size() && value > 0;
+            }
+            return false;
+        }
+
+        /// @copydoc IJobCgroup::Shed
+        [[nodiscard]] bool Shed() const noexcept override
+        {
+            return _shed.load(std::memory_order_relaxed);
+        }
+
       private:
         std::shared_ptr<ICgroupHost const> _host;
         std::filesystem::path _directory;
+        std::atomic<bool> _shed { false };
         int _descriptor;
         CgroupTeardownPolicy _teardown;
     };
