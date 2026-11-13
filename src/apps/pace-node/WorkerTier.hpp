@@ -8,6 +8,7 @@
 #include "EndpointDialer.hpp"
 #include "EndpointResolver.hpp"
 #include "HostEventInbox.hpp"
+#include "KilledCompiles.hpp"
 #include "NodeAnnounce.hpp"
 #include "NodeConditions.hpp"
 #include "NodeConfig.hpp"
@@ -526,6 +527,9 @@ class WorkerTier
     /// Which arguments this worker refused, said as a condition and once per argument in the
     /// log. Declared before `_protocol`, which borrows it, so member order keeps it alive.
     RefusedArgumentsReport _refusedArguments;
+    /// Logs each compile this machine killed, then hands every refusal to `_refusedArguments`.
+    /// Declared between the two for the same reason: `_protocol` borrows it, and it borrows that.
+    KilledCompilesLog _killedCompiles;
     Cc::WorkerProtocol _protocol;
     std::uint32_t _slots;
     core::async::ThreadPoolExecutor _pool;

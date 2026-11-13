@@ -566,22 +566,22 @@ struct CounterSoleWriter
 /// a row silently absent from the attribution and indistinguishable from one nobody had
 /// considered, cannot recur by omission ([#1501](https://github.com/LASTRADA-Software/pace/issues/1501)).
 ///
-/// **How the 246 rows are attributed**, since a scan for `Increment(Counter::X)` finds only 70
-/// of them and would have rendered the other 176 absent -- the same defect as the bug, three
+/// **How the 250 rows are attributed**, since a scan for `Increment(Counter::X)` finds only 70
+/// of them and would have rendered the other 180 absent -- the same defect as the bug, three
 /// times larger. The rows are written by five mechanisms, and reading only `SurfaceRefusal`
-/// tables (the obvious reading of *written through `Refuse(row)`*) reaches 148 of the 176 and
+/// tables (the obvious reading of *written through `Refuse(row)`*) reaches 152 of the 180 and
 /// leaves 28 looking unwritten:
 ///
 /// | mechanism | rows |
 /// |---|---|
-/// | a `.counter` table row, spent by `Refuse(row)`, `RefuseAs` or an outcome table's reader | 149 |
+/// | a `.counter` table row, spent by `Refuse(row)`, `RefuseAs` or an outcome table's reader | 153 |
 /// | a `LeaseToken.hpp` outcome row's `workerCounter` | 10 |
 /// | returned by a classifier for its caller to spend | 6 |
 /// | a `CacheTierProfile` member, spent by the tier built with it | 16 |
 /// | `Increment(Counter::X)` directly | 70 |
 ///
-/// The column sums past 245 because five rows are written two ways -- and the 148 above is not
-/// the 149 here: 149 rows HAVE a refusal row, and 148 of those have no increment site, which is
+/// The column sums past 250 because five rows are written two ways -- and the 152 above is not
+/// the 153 here: 153 rows HAVE a refusal row, and 152 of those have no increment site, which is
 /// what a `SurfaceRefusal`-only reading would reach. Two figures one apart, measuring different
 /// things, is exactly how a census comes to be quoted wrong, so both are asserted.
 ///
@@ -1067,6 +1067,12 @@ inline constexpr std::array CounterSoleWriterTable {
     CounterSoleWriter { .counter = IMetricsSink::Counter::NodeFingerprintInputsRefusedMalformed,
                         .surface = MetricsSurface::NodeFrameEndpoint },
     CounterSoleWriter { .counter = IMetricsSink::Counter::WorkerCompilesUnmeasured,
+                        .surface = MetricsSurface::CompileWorker },
+    CounterSoleWriter { .counter = IMetricsSink::Counter::WorkerCompilesKilledCeiling,
+                        .surface = MetricsSurface::CompileWorker },
+    CounterSoleWriter { .counter = IMetricsSink::Counter::WorkerCompilesKilledShed,
+                        .surface = MetricsSurface::CompileWorker },
+    CounterSoleWriter { .counter = IMetricsSink::Counter::WorkerCompilesKilledSignal,
                         .surface = MetricsSurface::CompileWorker },
 };
 

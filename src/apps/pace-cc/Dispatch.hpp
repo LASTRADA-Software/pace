@@ -581,6 +581,10 @@ inline constexpr std::array DeclineCauseTable {
     // which reads as a code this build has never heard of.
     DeclineCauseRow { .code = CompileCacheWire::ErrorCode::WorkerCompilerUnclassified,
                       .cause = DeclineCause::WorkerRefused },
+    // A compiler that worker's machine killed -- its memory ceiling, its own shedding, or an
+    // outside `SIGKILL`. One machine to look at, and the launcher compiles locally, exactly as for
+    // the two rows above; never `Compiled`, whose 137 would read as a compiler failure.
+    DeclineCauseRow { .code = CompileCacheWire::ErrorCode::WorkerCompileKilled, .cause = DeclineCause::WorkerRefused },
     DeclineCauseRow { .code = CompileCacheWire::ErrorCode::NotLeader, .cause = DeclineCause::NoLeader },
     DeclineCauseRow { .code = CompileCacheWire::ErrorCode::NotAMember, .cause = DeclineCause::NotPermitted },
     DeclineCauseRow { .code = CompileCacheWire::ErrorCode::Withdrawn, .cause = DeclineCause::Withdrawn },

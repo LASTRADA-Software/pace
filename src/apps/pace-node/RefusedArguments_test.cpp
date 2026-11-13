@@ -110,8 +110,10 @@ TEST_CASE("Only a refusal over an argument is this row's", "[node][conditions][r
     CapturingLogger logger;
     RefusedArgumentsReport report { conditions, logger, {} };
 
-    report.OnJobRefused(Cc::JobError { .reason = Cc::JobRefusal::UnknownFingerprint, .detail = {}, .subjects = {} });
-    report.OnJobRefused(Cc::JobError { .reason = Cc::JobRefusal::ScratchUnavailable, .detail = {}, .subjects = {} });
+    report.OnJobRefused(
+        Cc::JobError { .reason = Cc::JobRefusal::UnknownFingerprint, .detail = {}, .subjects = {}, .killed = std::nullopt });
+    report.OnJobRefused(
+        Cc::JobError { .reason = Cc::JobRefusal::ScratchUnavailable, .detail = {}, .subjects = {}, .killed = std::nullopt });
 
     CHECK(conditions.StateOf(NodeCondition::RefusedCompileArguments) == Wire::ConditionState::Clear);
     CHECK(logger.Snapshot().empty());

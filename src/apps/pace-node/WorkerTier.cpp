@@ -392,6 +392,7 @@ WorkerTier::WorkerTier(WorkerTierParts const& parts,
     _appliedExtraArgs { parts.cfg.extraAllowedArgs },
     _leaseState { std::move(leaseState) },
     _refusedArguments { parts.conditions, parts.logger, parts.cfg.extraAllowedArgs },
+    _killedCompiles { _refusedArguments, parts.logger },
     // The envelope ceiling is THIS surface's request cap, named rather than left to the
     // decoder's default. `AvailableCodecs()`, never a literal: this list is what the
     // worker answers a compile in, chosen against what the client accepts (#265).
@@ -401,7 +402,7 @@ WorkerTier::WorkerTier(WorkerTierParts const& parts,
     // registers nowhere, so no grant names it.
     _protocol {
         _jobs,         std::move(validator), Cc::AvailableCodecs(), parts.prover != nullptr ? &parts.prover->Key() : nullptr,
-        parts.metrics, _refusedArguments,    parts.measurements,    CompileRequestMaxOf(parts.cfg)
+        parts.metrics, _killedCompiles,      parts.measurements,    CompileRequestMaxOf(parts.cfg)
     },
     _slots { slots },
     // Sized to the slot cap, which is what makes an admitted job always find a thread,

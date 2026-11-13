@@ -1477,6 +1477,18 @@ enum class ErrorCode : std::uint8_t
     /// `WorkerToolchainSurveyInFlight`, which is retriable and true. A new byte and no version bump: the reply
     /// grammar is unchanged, and a reader that predates it reads a refusal it does not know.
     FingerprintInputsUnrecorded = 0x34,
+
+    /// The worker's compiler was KILLED before it answered: its memory ceiling was reached, the node
+    /// shed it to relieve memory pressure, or something else ended it by `SIGKILL`. The message names
+    /// which, and the source.
+    ///
+    /// A refusal rather than a compile outcome, because a killed compiler answered nothing about the
+    /// code: carried as an outcome, its 137 would read to the client as a compiler failure in a TU that
+    /// compiles. The client compiles locally, which is also where the TU's true peak gets measured.
+    /// A new byte and no version bump, for `FingerprintInputsUnrecorded`'s reason: the reply grammar is
+    /// unchanged, and a launcher that predates it reads a refusal it does not know and compiles locally
+    /// all the same.
+    WorkerCompileKilled = 0x35,
 };
 
 /// Bit for `status` within an `OpDescriptor::legalStatuses` mask.
@@ -3077,6 +3089,12 @@ inline constexpr std::array ErrorTable {
                       .defaultMessage = "the worker cannot classify its own configured compiler",
                       .retry = RetryWillNotHelp,
                       .retryWhy = "this build does not recognise the worker's compiler, and will not while asked" },
+    ErrorDescriptor { .code = ErrorCode::WorkerCompileKilled,
+                      .name = "worker-compile-killed",
+                      .defaultMessage = "the worker's compiler was killed before it finished",
+                      .retry = RetryMayHelp,
+                      .retryWhy = "a statement about the worker's memory at that moment, which passes; the client "
+                                  "compiles locally meanwhile" },
     ErrorDescriptor { .code = ErrorCode::NotLeader,
                       .name = "not-leader",
                       .defaultMessage = "this node does not lead the cluster",
@@ -3272,12 +3290,13 @@ static_assert(EveryRetryIsReasoned(), "every error code says why asking again ma
 /// the direction that costs is a transient refusal read as a decision, which gives up on a
 /// healthy cluster mid-election or mid-change.
 inline constexpr std::array RetriableErrorCodes {
-    ErrorCode::StorageWriteFailed, ErrorCode::NoWorker,
-    ErrorCode::NoCapacity,         ErrorCode::AlreadyInFlight,
-    ErrorCode::Withdrawn,          ErrorCode::ClusterChangeInFlight,
-    ErrorCode::EndpointBusy,       ErrorCode::WorkerToolchainSurveyInFlight,
-    ErrorCode::EnrollmentFull,     ErrorCode::EnrollmentHostFull,
-    ErrorCode::GrantUnverifiable,  ErrorCode::RosterNotYetApplied,
+    ErrorCode::StorageWriteFailed,  ErrorCode::NoWorker,
+    ErrorCode::NoCapacity,          ErrorCode::AlreadyInFlight,
+    ErrorCode::Withdrawn,           ErrorCode::ClusterChangeInFlight,
+    ErrorCode::EndpointBusy,        ErrorCode::WorkerToolchainSurveyInFlight,
+    ErrorCode::EnrollmentFull,      ErrorCode::EnrollmentHostFull,
+    ErrorCode::GrantUnverifiable,   ErrorCode::RosterNotYetApplied,
+    ErrorCode::WorkerCompileKilled,
 };
 
 /// Whether the table's retriable rows are exactly `RetriableErrorCodes`.

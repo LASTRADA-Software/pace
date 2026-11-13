@@ -24,12 +24,14 @@
 namespace Pace::Platform
 {
 
-/// How a compile came to be killed. PRIVATE (no wire, no disk), so no explicit values.
+/// How a compile came to be killed. PRIVATE (no wire, no disk), so no explicit values; the trailing
+/// `Last` is the count `EnumTable` reads, never a cause a `CompileRun` carries.
 enum class CompileKill : std::uint8_t
 {
     Ceiling, ///< The kernel OOM-killed it inside the compile memory ceiling.
     Shed,    ///< The node's own governor killed it to relieve memory pressure.
     Signal,  ///< Ended by `SIGKILL` for any other reason.
+    Last,    ///< Not a cause: the count, so a table over the causes takes its extent from it.
 };
 
 /// One job's cgroup: a directory the job is spawned into and whose `memory.peak` is its peak.

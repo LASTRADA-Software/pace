@@ -816,6 +816,29 @@ TEST_CASE("A decline says WHICH kind, from either end of the fleet", "[dispatch]
     CHECK(refused.decline != noWorker);
 }
 
+TEST_CASE("CompileKilled: a worker that killed the compile is declined, so the launcher compiles locally",
+          "[dispatch][decline]")
+{
+    // A compile the worker's machine killed for memory answered nothing about the code. It must
+    // never arrive as `Compiled` with the 137 a kill leaves behind -- the launcher would report a
+    // compiler failure for a TU that compiles -- and it is one machine to go and look at, so it is
+    // graded exactly as the other worker-side refusals are.
+    ScriptedFleet fleet;
+    fleet.Serve(std::string { Scheduler }, GrantReply());
+    fleet.Serve(std::string { Worker },
+                Wire::EncodeErrorReply(Wire::ErrorCode::WorkerCompileKilled,
+                                       "the compiler of a.cpp was killed (ceiling): this node's compile memory "
+                                       "ceiling was reached"));
+    std::vector<std::string> const args { "-O2" };
+    auto const result = Dispatch(fleet, Request(args));
+
+    REQUIRE(result.status == DispatchStatus::Declined);
+    CHECK(result.status != DispatchStatus::Compiled);
+    CHECK(result.decline == DeclineCause::WorkerRefused);
+    CHECK(DeclineCauseFor(Wire::ErrorCode::WorkerCompileKilled) == DeclineCauseFor(Wire::ErrorCode::WorkerSpawnFailed));
+    CHECK(DeclineCauseFor(Wire::ErrorCode::WorkerCompileKilled) != DeclineCause::Unrecognised);
+}
+
 TEST_CASE("A worker that answers endpoint-busy is tallied apart from withdrawn slots", "[dispatch][decline]")
 {
     // #1667. A granted compile the WORKER refused `endpoint-busy`: it had slots and no memory.

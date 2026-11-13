@@ -1562,6 +1562,23 @@ inline constexpr EnumTable<IMetricsSink::Counter, CounterDescriptor> CounterTabl
               "memory estimates simply never learn from it. Not counted on a node that measures "
               "nothing at all: that is the compile-memory-unmeasured condition.",
       .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::WorkerCompilesKilledCeiling,
+      .prometheusName = "pace_worker_compiles_killed_ceiling_total",
+      .help = "Compiles the kernel killed inside this worker's compile memory ceiling. Each was "
+              "refused and compiled locally by its client; a steady rise says the ceiling is below "
+              "what the fleet's translation units need.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::WorkerCompilesKilledShed,
+      .prometheusName = "pace_worker_compiles_killed_shed_total",
+      .help = "Compiles this node's pressure governor killed to give memory back to the machine. "
+              "Each was refused and compiled locally by its client.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::WorkerCompilesKilledSignal,
+      .prometheusName = "pace_worker_compiles_killed_signal_total",
+      .help = "Compiles ended by SIGKILL that neither the compile memory ceiling nor the pressure "
+              "governor accounts for: a global OOM kill, systemd-oomd, or a person. Each was refused "
+              "and compiled locally by its client.",
+      .type = MetricType::Counter },
 } };
 
 // Checked at compile time rather than by a test, because the failure this prevents

@@ -78,6 +78,13 @@ namespace
         { .refusal = JobRefusal::CompilerUnclassified,
           .code = Wire::ErrorCode::WorkerCompilerUnclassified,
           .counter = IMetricsSink::Counter::WorkerJobsRefusedCompilerUnclassified },
+        // The counter here is the row for a kill whose cause is NOT named, which the runner never
+        // produces: `JobError::killed` names one on every `CompileKilled`, and `CounterFor` takes
+        // that cause's own row from `CompileKillTable`. `Signal` is what an unattributed `SIGKILL`
+        // is, so a refusal that somehow lost its cause is still counted truthfully.
+        { .refusal = JobRefusal::CompileKilled,
+          .code = Wire::ErrorCode::WorkerCompileKilled,
+          .counter = IMetricsSink::Counter::WorkerCompilesKilledSignal },
     } };
 
     static_assert(RowsInEnumeratorOrder(RefusalTable, &RefusalDescriptor::refusal),
@@ -89,6 +96,17 @@ namespace
     [[nodiscard]] constexpr RefusalDescriptor const& DescriptorFor(JobRefusal refusal) noexcept
     {
         return RefusalTable[static_cast<std::size_t>(refusal)];
+    }
+
+    /// What a refused job is answered with and counted under: its reason's row, narrowed to the
+    /// cause's own counter for a killed compile, so the three causes are counted apart.
+    /// @param error What the runner reported.
+    /// @return The refusal to send.
+    [[nodiscard]] SurfaceRefusal RefusalFor(JobError const& error) noexcept
+    {
+        auto const& descriptor = DescriptorFor(error.reason);
+        auto const counter = error.killed.has_value() ? CompileKillRowFor(*error.killed).counter : descriptor.counter;
+        return SurfaceRefusal { .code = descriptor.code, .counter = counter };
     }
 
     /// This surface's rows. The shape, the lookup and why they exist are on
@@ -563,12 +581,10 @@ std::vector<std::byte> WorkerProtocol::Compile(std::span<std::byte const> payloa
         // can name the offending flag rather than only report that one existed. Empty
         // for every refusal that has nothing to add, which reproduces the previous
         // empty-message wire exactly.
-        auto const& descriptor = DescriptorFor(outcome.error().reason);
         // Told WHICH, at the moment the counter below is told HOW MANY and for the same row,
         // so the node can name the argument somewhere an operator looks.
         _refusals.OnJobRefused(outcome.error());
-        return Refuse(
-            _metrics, SurfaceRefusal { .code = descriptor.code, .counter = descriptor.counter }, outcome.error().detail);
+        return Refuse(_metrics, RefusalFor(outcome.error()), outcome.error().detail);
     }
 
     // The peak the compiler and its children measured, for the estimate this compile was admitted

@@ -648,7 +648,11 @@ TEST_CASE("This build's live-stats layout is the pinned one", "[metrics][livesta
     // Moved again when `worker_compiles_unmeasured_total` joined at the end of the catalogue (a node that
     // measures compile peaks in a cgroup counts the compiles it could not). Clients and nodes upgrade together.
     // Read off the built test, never computed by hand.
-    CHECK(StatsReadingLayout == 0x3289178b62af302aULL);
+    //
+    // Moved again when the three `worker_compiles_killed_{ceiling,shed,signal}_total` joined at the end of the
+    // catalogue (a killed compile is refused and counted by cause). Clients and nodes upgrade together. Read off
+    // the built test, never computed by hand.
+    CHECK(StatsReadingLayout == 0x7804242eb70e9120ULL);
 }
 
 TEST_CASE("A truncated or padded reading is refused and never half-read", "[metrics][livestats]")

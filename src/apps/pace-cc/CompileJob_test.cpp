@@ -13,6 +13,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <format>
@@ -61,7 +62,9 @@ class ScriptedRunner final: public IProcessRunner
         {
             Test::WriteStubObject(_argv);
         }
-        return CompileRun { .exitCode = _exitCode, .out = _stdoutText, .err = _stderrText };
+        return CompileRun {
+            .exitCode = _exitCode, .out = _stdoutText, .err = _stderrText, .peakMemoryBytes = _peak, .killed = _killed
+        };
     }
 
     [[nodiscard]] std::vector<std::string> const& Argv() const noexcept
@@ -83,6 +86,19 @@ class ScriptedRunner final: public IProcessRunner
     {
         _stderrText = std::move(text);
     }
+    /// Script the next run as ended by `SIGKILL`, for @p cause, as the process runner reports one.
+    /// @param cause Why it was killed.
+    void ScriptKilled(Pace::Platform::CompileKill cause) noexcept
+    {
+        _exitCode = 137;
+        _killed = cause;
+    }
+    /// Script the peak the next run reports.
+    /// @param bytes The peak.
+    void ScriptPeak(std::uint64_t bytes) noexcept
+    {
+        _peak = bytes;
+    }
     /// Look at the world at the moment the compiler would have been spawned.
     ///
     /// The only point at which what the worker WROTE is observable: `ScratchGuard`
@@ -101,6 +117,8 @@ class ScriptedRunner final: public IProcessRunner
     std::string _stderrText;
     std::vector<std::string> _argv;
     std::function<void()> _onSpawn;
+    std::optional<std::uint64_t> _peak;
+    std::optional<Pace::Platform::CompileKill> _killed;
 };
 
 /// A runner that echoes each invocation's own SOURCE back as its object, and does
@@ -1764,6 +1782,57 @@ TEST_CASE("A compiler this worker cannot classify refuses the JOB, not its argum
     REQUIRE_FALSE(withArgs.has_value());
     CHECK(withArgs.error() == JobRefusal::CompilerUnclassified);
     CHECK(withArgs.error() != JobRefusal::RejectedArgument);
+}
+
+TEST_CASE("CompileKilled: a killed compiler is a refusal naming its cause, never a compile outcome", "[compile-job]")
+{
+    // A compiler killed for memory did not answer the client's question, so its exit code must not
+    // reach the client as the compile's: a refusal sends the client to compile locally, which is
+    // the only place the TU's true answer -- and its true peak -- can come from.
+    using Pace::Platform::CompileKill;
+    struct Case
+    {
+        CompileKill cause;
+        std::string_view word;
+    };
+    for (auto const& [cause, word]: { Case { .cause = CompileKill::Ceiling, .word = "ceiling" },
+                                      Case { .cause = CompileKill::Shed, .word = "shed" },
+                                      Case { .cause = CompileKill::Signal, .word = "killed" } })
+    {
+        INFO("cause: " << word);
+        ScriptedRunner runner;
+        runner.ScriptKilled(cause);
+        runner.ScriptPeak(5'000'000'000ULL);
+        ScratchDirectory scratch { "pace-jobtest" };
+        CompileJobRunner jobs { runner, scratch.Path(), { { "gcc-13", "g++" } }, ToolchainSurvey::Completed() };
+
+        auto const result = jobs.Run(Job());
+        REQUIRE_FALSE(result.has_value());
+        CHECK(result.error() == JobRefusal::CompileKilled);
+        CHECK(result.error().killed == std::optional { cause });
+        CHECK(result.error().detail.contains(word));
+        // The source the worker was compiling, as it named it in scratch.
+        CHECK(result.error().detail.contains("a.cpp"));
+        CHECK(CompileKillWord(cause) == word);
+    }
+
+    // The control: a compiler that ran and failed WITHOUT being killed is the client's answer,
+    // exit code and all -- the exit code a kill would also produce is not what decides.
+    ScriptedRunner failing;
+    failing.ScriptExit(1);
+    ScratchDirectory scratch { "pace-jobtest" };
+    CompileJobRunner jobs { failing, scratch.Path(), { { "gcc-13", "g++" } }, ToolchainSurvey::Completed() };
+    auto const failed = jobs.Run(Job());
+    REQUIRE(failed.has_value());
+    CHECK(failed->exitCode == 1);
+
+    // And 137 itself, unattributed, is still an outcome: only the runner's `killed` decides.
+    ScriptedRunner exited137;
+    exited137.ScriptExit(137);
+    CompileJobRunner jobs137 { exited137, scratch.Path(), { { "gcc-13", "g++" } }, ToolchainSurvey::Completed() };
+    auto const plain = jobs137.Run(Job());
+    REQUIRE(plain.has_value());
+    CHECK(plain->exitCode == 137);
 }
 
 TEST_CASE("A refusal names the offending argument without echoing arbitrary bytes", "[compile-job]")

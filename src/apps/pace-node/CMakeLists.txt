@@ -94,6 +94,7 @@ add_executable(pace-node
     NodeFirewall.cpp
     NodeFormation.cpp
     NodeReload.cpp
+    KilledCompiles.cpp
     RefusedArguments.cpp
     NodeFrameSurface.cpp
     NodeIdentity.cpp
@@ -255,6 +256,8 @@ if(PACE_BUILD_TESTS)
         OneShotAnswer_test.cpp
         NodeConditions.cpp
         NodeConditions_test.cpp
+        KilledCompiles.cpp
+        KilledCompiles_test.cpp
         RefusedArguments.cpp
         RefusedArguments_test.cpp
         NodeConfig.cpp

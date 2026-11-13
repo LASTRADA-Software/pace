@@ -4,6 +4,10 @@
 #include "CmdLine.hpp"
 #include "IProcessRunner.hpp"
 
+#include <Pace/Core/EnumTable.hpp>
+#include <Pace/Metrics/IMetricsSink.hpp>
+#include <Pace/Platform/JobCgroups.hpp>
+
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -95,8 +99,63 @@ enum class JobRefusal : std::uint8_t
     /// one says it was executed and this build does not know what it is. One
     /// remedy is a path, the other is a toolchain this build does not support.
     CompilerUnclassified,
+    /// The compiler was spawned and KILLED before it answered (`CompileRun::killed`): the compile
+    /// memory ceiling was reached, the node shed it under memory pressure, or something else sent it
+    /// `SIGKILL`. `JobError::killed` says which, and `detail` names the cause and the source.
+    ///
+    /// A refusal rather than a `CompileOutcome`, though the compiler ran: it answered nothing about
+    /// the code, so its 137 is not the client's answer -- carried as one, a TU that compiles would
+    /// read as a compiler failure. Refused, the client compiles locally, and that local compile is
+    /// also where the TU's true peak is measured: this one was cut short, so its peak is a lower
+    /// bound and is reported nowhere.
+    CompileKilled,
     Last, ///< Not a refusal, and has no row: `RefusalTable`'s length.
 };
+
+/// What a worker says and counts about one cause of a killed compile.
+struct CompileKillRow
+{
+    Platform::CompileKill kill;    ///< The cause this row describes.
+    std::string_view word;         ///< The cause in one word, for the refusal's detail and the log.
+    std::string_view why;          ///< What happened, as the refusal's detail states it.
+    IMetricsSink::Counter counter; ///< What the operator sees rise.
+};
+
+/// One row per `Platform::CompileKill`, in enumerator order: the one place a cause is named and
+/// counted, so a fourth cause is a row rather than a branch in each reader.
+inline constexpr EnumTable<Platform::CompileKill, CompileKillRow> CompileKillTable { {
+    { .kill = Platform::CompileKill::Ceiling,
+      .word = "ceiling",
+      .why = "this node's compile memory ceiling was reached",
+      .counter = IMetricsSink::Counter::WorkerCompilesKilledCeiling },
+    { .kill = Platform::CompileKill::Shed,
+      .word = "shed",
+      .why = "this node shed it to give memory back to the machine",
+      .counter = IMetricsSink::Counter::WorkerCompilesKilledShed },
+    { .kill = Platform::CompileKill::Signal,
+      .word = "killed",
+      .why = "it was ended by SIGKILL from outside this node's control",
+      .counter = IMetricsSink::Counter::WorkerCompilesKilledSignal },
+} };
+
+static_assert(RowsInEnumeratorOrder(CompileKillTable, &CompileKillRow::kill),
+              "CompileKillTable must hold one row per CompileKill, in enumerator order");
+
+/// The row describing @p kill.
+/// @param kill Why the compile was killed; never `Last`.
+/// @return Its row.
+[[nodiscard]] constexpr CompileKillRow const& CompileKillRowFor(Platform::CompileKill kill) noexcept
+{
+    return CompileKillTable[static_cast<std::size_t>(kill)];
+}
+
+/// The cause of a killed compile in one word: `ceiling`, `shed` or `killed`.
+/// @param kill Why the compile was killed; never `Last`.
+/// @return The word, as the refusal's detail and the worker's log spell it.
+[[nodiscard]] constexpr std::string_view CompileKillWord(Platform::CompileKill kill) noexcept
+{
+    return CompileKillRowFor(kill).word;
+}
 
 /// One argument a `RejectedArgument` refusal names, and the rules that refused it.
 struct RefusedArgumentName
@@ -150,6 +209,19 @@ struct JobError
     /// and may be reworded, while the node LISTS refused arguments in a condition, and a list
     /// built by cutting words out of a sentence breaks the day the sentence changes.
     std::vector<RefusedArgumentName> subjects;
+    /// Why the compiler was killed, for a `CompileKilled` refusal; disengaged for every other.
+    ///
+    /// Beside `detail` rather than read back out of it, for `subjects`' reason: the worker COUNTS
+    /// by it (`CompileKillTable`), and a counter chosen by parsing a sentence breaks the day the
+    /// sentence is reworded.
+    std::optional<Platform::CompileKill> killed;
+
+    /// A `CompileKilled` refusal: the compiler of @p sourceName was killed, for @p kill.
+    /// @param kill Why, as the process runner reported it.
+    /// @param sourceName The name the worker gave the source in scratch -- `SafeSourceName`'s
+    ///        output, never the client's bytes, since this lands on the wire and in a log.
+    /// @return The refusal, its detail naming the cause word and the source.
+    [[nodiscard]] static JobError KilledCompile(Platform::CompileKill kill, std::string_view sourceName);
 
     /// A `RejectedArgument` refusal naming the offending argument.
     ///
