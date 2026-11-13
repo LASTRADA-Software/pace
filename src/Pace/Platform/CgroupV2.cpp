@@ -83,11 +83,11 @@ namespace
     {
       public:
         CgroupJob(std::shared_ptr<ICgroupHost const> host,
-                  std::filesystem::path directory,
+                  std::shared_ptr<CgroupJobSource::JobState> state,
                   int descriptor,
                   CgroupTeardownPolicy teardown):
             _host { std::move(host) },
-            _directory { std::move(directory) },
+            _state { std::move(state) },
             _descriptor { descriptor },
             _teardown { teardown }
         {
@@ -105,7 +105,7 @@ namespace
         ~CgroupJob() override
         {
             _host->CloseDescriptor(_descriptor);
-            static_cast<void>(RemoveCgroup(*_host, _directory, _teardown));
+            static_cast<void>(RemoveCgroup(*_host, _state->directory, _teardown));
         }
 
         /// @copydoc IJobCgroup::DirectoryDescriptor
@@ -117,7 +117,7 @@ namespace
         /// @copydoc IJobCgroup::PeakBytes
         [[nodiscard]] std::optional<std::uint64_t> PeakBytes() const override
         {
-            auto const text = _host->ReadFile(_directory / "memory.peak");
+            auto const text = _host->ReadFile(_state->directory / "memory.peak");
             if (!text.has_value())
                 return std::nullopt;
             return ParseDecimal(*text);
@@ -126,7 +126,7 @@ namespace
         /// @copydoc IJobCgroup::OomKilled
         [[nodiscard]] bool OomKilled() const override
         {
-            auto const text = _host->ReadFile(_directory / "memory.events");
+            auto const text = _host->ReadFile(_state->directory / "memory.events");
             if (!text.has_value())
                 return false;
             constexpr std::string_view Key = "oom_kill ";
@@ -147,13 +147,14 @@ namespace
         /// @copydoc IJobCgroup::Shed
         [[nodiscard]] bool Shed() const noexcept override
         {
-            return _shed.load(std::memory_order_relaxed);
+            // Acquire, pairing with `KillYoungest`'s release: the mark is stored before the kill is written.
+            return _state->shed.load(std::memory_order_acquire);
         }
 
       private:
         std::shared_ptr<ICgroupHost const> _host;
-        std::filesystem::path _directory;
-        std::atomic<bool> _shed { false };
+        /// Shared with the source's weak list only while this job lives, which is how a finished job drops out.
+        std::shared_ptr<CgroupJobSource::JobState> _state;
         int _descriptor;
         CgroupTeardownPolicy _teardown;
     };
@@ -414,9 +415,41 @@ std::expected<std::unique_ptr<IJobCgroup>, std::error_code> CgroupJobSource::Cre
             static_cast<void>(_host->RemoveCgroupDirectory(directory));
             return std::unexpected { grouped.error() };
         }
-        return std::make_unique<CgroupJob>(_host, directory, *descriptor, _teardown);
+        auto state = std::make_shared<JobState>();
+        state->directory = directory;
+        {
+            auto const guard = std::scoped_lock { _jobsMutex };
+            // Pruned here, so the list holds at most the jobs running plus those finished since the last make.
+            std::erase_if(_jobs, [](std::weak_ptr<JobState> const& job) { return job.expired(); });
+            _jobs.push_back(state);
+        }
+        return std::make_unique<CgroupJob>(_host, std::move(state), *descriptor, _teardown);
     }
     return std::unexpected { lastError };
+}
+
+bool CgroupJobSource::KillYoungest()
+{
+    auto victim = std::shared_ptr<JobState> {};
+    {
+        auto const guard = std::scoped_lock { _jobsMutex };
+        for (auto const& job: _jobs | std::views::reverse)
+        {
+            auto live = job.lock();
+            // `exchange` claims it: a job is shed once, so two callers never choose the same victim.
+            if (live != nullptr && !live->shed.exchange(true, std::memory_order_acq_rel))
+            {
+                victim = std::move(live);
+                break;
+            }
+        }
+    }
+    if (victim == nullptr)
+        return false;
+    // Held across the write, so the directory is the victim's however soon it finishes. A job that ended between
+    // the choice and the write answers the write with an error, which kills nothing that is not already gone.
+    static_cast<void>(_host->WriteFile(victim->directory / "cgroup.kill", "1"));
+    return true;
 }
 
 // ---------------------------------------------------------------------------------------------------

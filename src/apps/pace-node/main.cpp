@@ -64,6 +64,7 @@
 #include "NodeSurfaces.hpp"
 #include "NodeToolchains.hpp"
 #include "OperatorCredentials.hpp"
+#include "PressureWatcher.hpp"
 #include "RaftStoreArchiver.hpp"
 #include "SchedulerLink.hpp"
 #include "SchedulerReachability.hpp"
@@ -870,49 +871,83 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
 /// cap, and its row is answered by `Settle` from the worker scope.
 /// @param worker The body's worker, or null.
 /// @param meter The process's meter, which the worker's runner prepared.
-/// @param cfg The configuration the body started with.
+/// @param inForce The configuration in force, which the keeper reads at every write.
 /// @param capacity What this machine is now.
 /// @param conditions Where `compile-memory-uncapped` is answered.
 /// @param logger Where the ceiling is said.
 /// @return The keeper the presence round and the reload listener write through, or null without a worker.
 [[nodiscard]] std::unique_ptr<Node::CompileCeilingKeeper> StartCompileCeiling(Node::WorkerTier const* worker,
                                                                               Node::CompileMemoryMeter& meter,
-                                                                              NodeConfig const& cfg,
+                                                                              Node::INodeConfigSource const& inForce,
                                                                               Node::INodeCapacitySource const& capacity,
                                                                               Node::NodeConditions& conditions,
                                                                               ILogger& logger)
 {
     if (worker == nullptr)
         return nullptr;
-    auto keeper = std::make_unique<Node::CompileCeilingKeeper>(meter, conditions, logger);
-    keeper->Keep(cfg, capacity.Current(), Node::CeilingWrite::Always);
+    auto keeper = std::make_unique<Node::CompileCeilingKeeper>(meter, inForce, capacity, conditions, logger);
+    static_cast<void>(keeper->Keep(Node::CeilingWrite::Always));
     return keeper;
+}
+
+/// Start the memory-pressure watcher over the system's PSI, holding compiles through @p keeper where a worker made one.
+///
+/// Its ceiling and its killer exist only where the worker's runner prepared the compiles' cgroup -- the keeper is
+/// null without a worker, and a worker whose preparation failed has no `compiles/` to write -- so the rest of
+/// @p parts is the caller's and those three are filled in here. A watcher that cannot read PSI says why and runs no thread.
+/// @param meter The process's compile-memory meter.
+/// @param keeper The ceiling keeper, or null without a worker.
+/// @param parts Everything else the watcher borrows; `source`, `ceiling` and `killer` are replaced.
+/// @return The watcher, running unless PSI could not be read.
+[[nodiscard]] std::unique_ptr<Node::PressureWatcher> StartPressureWatcher(Node::CompileMemoryMeter const& meter,
+                                                                          Node::CompileCeilingKeeper* keeper,
+                                                                          Node::PressureWatcherParts parts)
+{
+    parts.source = std::make_unique<Platform::PsiPressureSource>(std::make_shared<Platform::SystemCgroupHost>(),
+                                                                 meter.CompilesCgroup());
+    // Only where `compiles/` exists: a worker whose cgroup preparation failed still has a keeper, and every allowance
+    // written through it would be refused and said again -- the uncapped row already says it once.
+    auto const capped = keeper != nullptr && meter.CompilesCgroup().has_value();
+    parts.ceiling = capped ? keeper : nullptr;
+    parts.killer = capped ? meter.YoungestKiller() : nullptr;
+    auto watcher = std::make_unique<Node::PressureWatcher>(std::move(parts));
+    static_cast<void>(watcher->Start());
+    return watcher;
+}
+
+/// The memory-pressure gauge a scrape reports: the published level's byte, or calm where none was published.
+/// @param published The watcher's latest decision.
+/// @return The gauge.
+[[nodiscard]] std::size_t PressureGauge(Node::PublishedPressure const& published)
+{
+    auto const pressure = published.Current();
+    return pressure.has_value() ? static_cast<std::size_t>(pressure->level) : std::size_t { 0 };
 }
 
 /// What rewrites the ceiling after every accepted reload.
 /// @param keeper The ceiling keeper, or null without a worker.
-/// @param inForce The configuration in force at each reload.
-/// @param capacity What this machine is at each reload.
 /// @return The listener, or null without a keeper.
-[[nodiscard]] std::unique_ptr<Node::CompileCeilingOnReload> CeilingOnReloadOf(Node::CompileCeilingKeeper* keeper,
-                                                                              Node::INodeConfigSource const& inForce,
-                                                                              Node::INodeCapacitySource const& capacity)
+[[nodiscard]] std::unique_ptr<Node::CompileCeilingOnReload> CeilingOnReloadOf(Node::CompileCeilingKeeper* keeper)
 {
     if (keeper == nullptr)
         return nullptr;
-    return std::make_unique<Node::CompileCeilingOnReload>(*keeper, inForce, capacity);
+    return std::make_unique<Node::CompileCeilingOnReload>(*keeper);
 }
 
-/// Every listener an accepted reload tells, in order: the budget overrides, then the compile ceiling if any.
+/// Every listener an accepted reload tells, in order: the budget overrides, the compile ceiling if any, and last the
+/// presence round that reports what both changed.
 /// @param budgets The budget override applier.
 /// @param ceiling The compile ceiling's listener, or null.
+/// @param round The presence round's listener.
 /// @return The listeners.
 [[nodiscard]] std::vector<Node::IAcceptedReloadListener*> ReloadListenersOf(Node::IAcceptedReloadListener& budgets,
-                                                                            Node::IAcceptedReloadListener* ceiling)
+                                                                            Node::IAcceptedReloadListener* ceiling,
+                                                                            Node::IAcceptedReloadListener& round)
 {
     auto listeners = std::vector<Node::IAcceptedReloadListener*> { &budgets };
     if (ceiling != nullptr)
         listeners.push_back(ceiling);
+    listeners.push_back(&round);
     return listeners;
 }
 
@@ -1349,6 +1384,11 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     // compiles no `CompileCapacity` counts (the leases this node grants). Reported every presence round.
     Node::MeasuredPeaks measuredPeaks;
     Node::HeldChargeRegistry leaseCharges;
+    // The memory-pressure watcher's latest level and allowance, and the presence loop's wait, which the watcher and
+    // the reload listener end early. The process's own, declared above every component that reads or asks them --
+    // the worker's heartbeat, the scrape, the presence loop, the watcher -- so they outlive all of them.
+    Node::PublishedPressure publishedPressure;
+    Node::PresenceWake presenceWake;
     // The leader's admission queue (#1728): parks `ADMIT` on the node's reactor and holds each grant on
     // its connection. Declared after the scheduler tier it serves and the ledger it records local leases
     // in, so it is destroyed before both.
@@ -1377,7 +1417,8 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
                                 .hostEvents = hostEvents,
                                 .suspendWait = DefaultDrainWait(),
                                 .schedulerDialer = workerDialer,
-                                .measurements = measuredPeaks },
+                                .measurements = measuredPeaks,
+                                .pressure = &publishedPressure },
         [&memoryMeter, &metrics, &logger] { return Node::MakeSystemWorkerMachine(memoryMeter, metrics, logger); });
     if (!workerOrRefusal.has_value())
     {
@@ -1390,8 +1431,37 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     // keeper the presence loop keeps it through (from the pair it reports the budget from), and the listener that
     // rewrites it after every accepted reload. Before `Settle` below, which names
     // `compile-memory-uncapped` undecided if this line ever goes (`StartCompileCeiling`).
-    auto const ceilingKeeper = StartCompileCeiling(workerTier.get(), memoryMeter, cfg, capacity, conditions, logger);
-    auto const ceilingOnReload = CeilingOnReloadOf(ceilingKeeper.get(), endpointConfig, capacity);
+    auto const ceilingKeeper =
+        StartCompileCeiling(workerTier.get(), memoryMeter, endpointConfig, capacity, conditions, logger);
+    auto const ceilingOnReload = CeilingOnReloadOf(ceilingKeeper.get());
+    // After the ceiling's listener: the round an accepted reload asks for reads the ceiling already rewritten.
+    Node::PresenceRoundOnReload roundOnReload { presenceWake };
+
+    // What compiles on this machine hold: the worker's running ones, when it runs a worker, and the
+    // leases this node grants. One sum for the report, whichever of them exist.
+    Node::CombinedHeldCharges const machineHeld {
+        workerTier != nullptr ? std::vector<Node::IHeldCharges const*> { &workerTier->Capacity(), &leaseCharges }
+                              : std::vector<Node::IHeldCharges const*> { &leaseCharges }
+    };
+
+    // Layer C: the memory-pressure watcher, on a thread of its own, on EVERY node -- every node reports its machine's
+    // budget, so a `--slots=0` node still yields its own local compiles. Holds compiles under its allowance and
+    // kills the youngest through the worker's ceiling and job source where those exist; without them it changes only
+    // what this machine reports. Without PSI it does not run, and says why. Stopped before every component it asks.
+    Node::LivePressureSettings const pressureSettings { endpointConfig, capacity };
+    auto const pressureWatcher = StartPressureWatcher(memoryMeter,
+                                                      ceilingKeeper.get(),
+                                                      Node::PressureWatcherParts { .source = nullptr,
+                                                                                   .settings = pressureSettings,
+                                                                                   .ceiling = nullptr,
+                                                                                   .killer = nullptr,
+                                                                                   .held = machineHeld,
+                                                                                   .published = publishedPressure,
+                                                                                   .wake = presenceWake,
+                                                                                   .conditions = conditions,
+                                                                                   .metrics = metrics,
+                                                                                   .logger = logger,
+                                                                                   .clock = endpointClock });
 
     // This node's one `0xFC` listener, opened once every component exists and holding a
     // reference to each (#290). Before the merge each tier bound its own port, which
@@ -1925,6 +1995,7 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
                 [worker =
                      workerTier.get()] { return worker != nullptr ? worker->Capacity().InFlight() : std::size_t { 0 }; },
             .cordoned = [worker = workerTier.get()] { return worker != nullptr && worker->Capacity().IsCordoned(); },
+            .memoryPressure = [&publishedPressure] { return PressureGauge(publishedPressure); },
             .cache = cacheTier.get(),
             // Zero and the scratch base on a node running no worker, until #1440
             // makes both absent on every surface.
@@ -2113,12 +2184,6 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     //
     // Its rounds dial through `presenceDialer`, declared just above it so it outlives the loop.
     Node::BlockingEndpointDialer presenceDialer { Node::PresenceIoTimeout };
-    // What compiles on this machine hold: the worker's running ones, when it runs a worker, and the
-    // leases this node grants. One sum for the report, whichever of them exist.
-    Node::CombinedHeldCharges const machineHeld {
-        workerTier != nullptr ? std::vector<Node::IHeldCharges const*> { &workerTier->Capacity(), &leaseCharges }
-                              : std::vector<Node::IHeldCharges const*> { &leaseCharges }
-    };
     auto const presence =
         Node::NodePresence::Start(Node::NodePresenceParts { .inForce = endpointConfig,
                                                             .schedulers = appliedSchedulers,
@@ -2137,7 +2202,9 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
                                                             .endpoints = &endpointResolver,
                                                             .held = machineHeld,
                                                             .peaks = measuredPeaks,
-                                                            .ceiling = ceilingKeeper.get() });
+                                                            .ceiling = ceilingKeeper.get(),
+                                                            .wake = presenceWake,
+                                                            .pressure = &publishedPressure });
 
     // Installed only once the listener is up and the heartbeat is running, so a
     // stop arriving during startup cannot close a listener that does not exist yet.
@@ -2195,7 +2262,8 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     // `main` starts the next body from it once this one has drained exactly as for a stop.
     // Told after every ACCEPTED reload: the budget overrides re-judged, and the compile ceiling rewritten from the
     // configuration then in force (`--compile-memory-limit` reloads) where a worker prepared one.
-    Node::AcceptedReloadListeners reloadListeners { ReloadListenersOf(budgetOverrides, ceilingOnReload.get()) };
+    Node::AcceptedReloadListeners reloadListeners { ReloadListenersOf(
+        budgetOverrides, ceilingOnReload.get(), roundOnReload) };
     while (!DaemonControls::Instance().StopRequested() && !formation.durables.reform.Pending())
     {
         // Taken here rather than in the handler, for the reason the handler's own note

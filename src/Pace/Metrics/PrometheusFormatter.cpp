@@ -167,6 +167,12 @@ static void AppendHostMetrics(std::string& out, HostCapacity const& host)
                          "compile and finishes the running ones. 0 otherwise; a restart clears it.",
                  .type = Gauge,
                  .value = static_cast<std::uint64_t>(host.cordoned) },
+        Metric { .name = "pace_node_memory_pressure",
+                 .help = "This machine's memory-pressure level as the node's watcher reads it: 0 calm, 1 yield "
+                         "(no new compile admitted on it), 2 shed (that, and its youngest compile killed). 0 where "
+                         "no watcher runs.",
+                 .type = Gauge,
+                 .value = static_cast<std::uint64_t>(host.memoryPressure) },
     };
 
     for (auto const& metric: table)

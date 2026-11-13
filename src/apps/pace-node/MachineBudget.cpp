@@ -113,16 +113,32 @@ std::uint64_t CompileCeilingOf(NodeConfig const& cfg, Distributed::NodeCapacity 
 
 Distributed::MachineReport MachineBudgetOf(NodeConfig const& cfg,
                                            Distributed::NodeCapacity const& capacity,
-                                           HeldCharges const& held) noexcept
+                                           HeldCharges const& held,
+                                           MachinePressure const& pressure) noexcept
 {
+    auto const budget = BudgetOf(cfg, capacity);
     return Distributed::MachineReport {
-        .memoryBudgetBytes = BudgetOf(cfg, capacity),
+        // Never above the configured budget: the allowance only ever lowers it.
+        .memoryBudgetBytes = std::min(budget, pressure.allowanceBytes.value_or(budget)),
         // Zero cores is "did not say", and one is the answer `OfferableSlots` gives for it: a machine
         // that reports no slot is one the queue could never run a compile on.
         .slots = cfg.machineSlots.value_or(std::max<std::uint32_t>(capacity.logicalCores, 1)),
         .heldSlots = held.slots,
         .heldBytes = held.bytes,
+        .pressure = pressure.level,
     };
+}
+
+std::optional<MachinePressure> PublishedPressure::Current() const
+{
+    auto const guard = std::scoped_lock { _mutex };
+    return _pressure;
+}
+
+void PublishedPressure::Publish(MachinePressure const& pressure)
+{
+    auto const guard = std::scoped_lock { _mutex };
+    _pressure = pressure;
 }
 
 void MeasuredPeaks::OnPeak(Wire::EstimateKeyFields const& key, std::uint64_t peakBytes)
@@ -176,7 +192,9 @@ bool SendMachineBudgetOnce(MachineBudgetRound const& round, SchedulerLink& link,
 {
     // Read per round, never captured: what is held is the one figure here that moves between rounds.
     auto taken = round.peaks.Take();
-    auto const report = MachineBudgetToWire(MachineBudgetOf(round.cfg, round.capacity, round.held.Held()), taken);
+    auto const pressure =
+        round.pressure != nullptr ? round.pressure->Current().value_or(MachinePressure {}) : MachinePressure {};
+    auto const report = MachineBudgetToWire(MachineBudgetOf(round.cfg, round.capacity, round.held.Held(), pressure), taken);
 
     BudgetAnnouncement announcement { report, round.logger, round.reachability };
     (void) DialAndAnnounce(link,

@@ -7,15 +7,18 @@
 #include "EnrollmentWindow.hpp"
 #include "FormationLoop.hpp"
 #include "FormationRuntime.hpp"
+#include "LiveNodeConfig.hpp"
 #include "NodeAnnounce.hpp"
 #include "NodeConditions.hpp"
 #include "NodeConfig.hpp"
 #include "NodeDefaults.hpp"
 #include "NodeMembership.hpp"
+#include "NodePresenceTier.hpp"
 #include "NodeProofClient.hpp"
 #include "NodeRoster.hpp"
 #include "NodeStateFiles.hpp"
 #include "NodeStatusText.hpp"
+#include "PressureWatcher.hpp"
 #include "SchedulerReachability.hpp"
 #include "SchedulerTier.hpp"
 #include "SharedCacheResponder.hpp"
@@ -351,6 +354,36 @@ TEST_CASE("Every condition row is evaluated on a fully configured node", "[node]
     Consensus::SystemDurableFiles replaceFiles;
     Platform::SystemReplacingRename const replaceRename;
     REQUIRE(ReportReplaceRoute(replaceState.Path(), replaceFiles, replaceRename, logger, metrics, conditions).has_value());
+
+    // And the memory-pressure watcher, which every node starts: PSI read through the same source `main` builds, over
+    // a cgroup tree whose system file answers (no compiles cgroup -- no worker prepared one here). Not launched: the
+    // row is answered at `Start`.
+    auto psiHost = std::make_shared<Pace::Testing::FakeCgroupHost>();
+    psiHost->files[std::string { Platform::PsiSystemPath }] = "some avg10=0.00 avg60=0.00 avg300=0.00 total=0\n"
+                                                              "full avg10=0.00 avg60=0.00 avg300=0.00 total=0\n";
+    core::platform::ManualClock pressureClock;
+    FixedNodeCapacity const pressureCapacity { Distributed::NodeCapacity { .logicalCores = 4 } };
+    auto const pressureBody = Testing::FirstStart(NodeConfig {});
+    LiveNodeConfig const pressureConfig { pressureBody, nullptr };
+    LivePressureSettings const pressureSettings { pressureConfig, pressureCapacity };
+    HeldChargeRegistry pressureHeld;
+    PublishedPressure published;
+    PresenceWake presenceWake;
+    PressureWatcher pressure { PressureWatcherParts {
+        .source = std::make_unique<Platform::PsiPressureSource>(psiHost, std::nullopt),
+        .settings = pressureSettings,
+        .ceiling = nullptr,
+        .killer = nullptr,
+        .held = pressureHeld,
+        .published = published,
+        .wake = presenceWake,
+        .conditions = conditions,
+        .metrics = metrics,
+        .logger = logger,
+        .clock = pressureClock } };
+    // Started on every platform, as `main` starts it: where PSI is Linux's alone, `Start` refuses by design and the row
+    // is answered `not-evaluated` with the platform's reason -- still answered, so still not `undecided`.
+    CHECK(pressure.Start(false).has_value() == ThisPlatformHasPsi);
 
     // The consensus scope: the membership a consensus node builds.
     auto clustered = Testing::FirstStart(NodeConfig {});

@@ -75,6 +75,14 @@ struct HostCapacity
     /// has, while the scheduler -- which hears the cordon in the heartbeat -- gives it none.
     std::size_t cordoned { 0 };
 
+    /// How hard this machine's memory is pressed, as the node's pressure watcher reads it from PSI:
+    /// `CompileCacheWire::PressureLevel`'s byte -- 0 calm, 1 yield, 2 shed -- and 0 where no watcher runs.
+    ///
+    /// Beside `cordoned` and for its reason: anything but calm withdraws every slot (the scheduler hears it in the
+    /// machine-budget report), and a dashboard that did not know would show the free slots as capacity the fleet
+    /// has. A `size_t` for `cordoned`'s reason.
+    std::size_t memoryPressure { 0 };
+
     [[nodiscard]] bool operator==(HostCapacity const&) const = default;
 };
 
@@ -566,21 +574,21 @@ struct CounterSoleWriter
 /// a row silently absent from the attribution and indistinguishable from one nobody had
 /// considered, cannot recur by omission ([#1501](https://github.com/LASTRADA-Software/pace/issues/1501)).
 ///
-/// **How the 250 rows are attributed**, since a scan for `Increment(Counter::X)` finds only 70
-/// of them and would have rendered the other 180 absent -- the same defect as the bug, three
+/// **How the 254 rows are attributed**, since a scan for `Increment(Counter::X)` finds only 70
+/// of them and would have rendered the other 184 absent -- the same defect as the bug, three
 /// times larger. The rows are written by five mechanisms, and reading only `SurfaceRefusal`
-/// tables (the obvious reading of *written through `Refuse(row)`*) reaches 152 of the 180 and
-/// leaves 28 looking unwritten:
+/// tables (the obvious reading of *written through `Refuse(row)`*) reaches 152 of the 184 and
+/// leaves 32 looking unwritten:
 ///
 /// | mechanism | rows |
 /// |---|---|
 /// | a `.counter` table row, spent by `Refuse(row)`, `RefuseAs` or an outcome table's reader | 153 |
 /// | a `LeaseToken.hpp` outcome row's `workerCounter` | 10 |
 /// | returned by a classifier for its caller to spend | 6 |
-/// | a `CacheTierProfile` member, spent by the tier built with it | 16 |
+/// | a named member of a counter table (`CacheTierProfile`, the pressure watcher's level table) | 20 |
 /// | `Increment(Counter::X)` directly | 70 |
 ///
-/// The column sums past 250 because five rows are written two ways -- and the 152 above is not
+/// The column sums past 254 because five rows are written two ways -- and the 152 above is not
 /// the 153 here: 153 rows HAVE a refusal row, and 152 of those have no increment site, which is
 /// what a `SurfaceRefusal`-only reading would reach. Two figures one apart, measuring different
 /// things, is exactly how a census comes to be quoted wrong, so both are asserted.
@@ -1074,6 +1082,16 @@ inline constexpr std::array CounterSoleWriterTable {
                         .surface = MetricsSurface::CompileWorker },
     CounterSoleWriter { .counter = IMetricsSink::Counter::WorkerCompilesKilledSignal,
                         .surface = MetricsSurface::CompileWorker },
+    // The node's memory-pressure watcher (`apps/pace-node/PressureWatcher.cpp`): built by every node and by no
+    // daemon, as the frame endpoint is -- the surface `EndpointResolver`'s node-wide counters are filed under too.
+    CounterSoleWriter { .counter = IMetricsSink::Counter::NodeMemoryPressureYieldSeconds,
+                        .surface = MetricsSurface::NodeFrameEndpoint },
+    CounterSoleWriter { .counter = IMetricsSink::Counter::NodeMemoryPressureShedSeconds,
+                        .surface = MetricsSurface::NodeFrameEndpoint },
+    CounterSoleWriter { .counter = IMetricsSink::Counter::NodeMemoryPressureYieldEntries,
+                        .surface = MetricsSurface::NodeFrameEndpoint },
+    CounterSoleWriter { .counter = IMetricsSink::Counter::NodeMemoryPressureShedEntries,
+                        .surface = MetricsSurface::NodeFrameEndpoint },
 };
 
 /// Whether every catalogue row has at least one surface attributed to it.

@@ -24,6 +24,7 @@
 
 #include <core/Ranges.hpp>
 #include <tests/CgroupFakes.hpp>
+#include <tests/OwnCgroup.hpp>
 #include <tests/Unwrap.hpp>
 
 using namespace Pace;
@@ -242,6 +243,30 @@ constexpr std::uint64_t CeilingGiB = std::uint64_t { 1 } << 30;
     return row->detail;
 }
 
+/// The configuration in force, as the reloader's snapshot is: a case changes it under the keeper.
+struct InForceConfig final: INodeConfigSource
+{
+    NodeConfig cfg;
+    [[nodiscard]] NodeConfig Current() const override
+    {
+        return cfg;
+    }
+};
+
+/// What this machine is, as a live cache-budget override moves it.
+struct MovableMachine final: INodeCapacitySource
+{
+    explicit MovableMachine(Distributed::NodeCapacity initial):
+        machine { initial }
+    {
+    }
+    Distributed::NodeCapacity machine;
+    [[nodiscard]] Distributed::NodeCapacity Current() const override
+    {
+        return machine;
+    }
+};
+
 /// A 96 GiB machine with nothing reserved.
 [[nodiscard]] Distributed::NodeCapacity CeilingMachine()
 {
@@ -312,8 +337,8 @@ TEST_CASE("CompileMemoryMeter.accepted-reload-rewrites-the-ceiling-from-the-conf
     } inForce;
     inForce.cfg.compileMemoryLimitBytes = 16 * CeilingGiB;
     FixedNodeCapacity const capacity { CeilingMachine() };
-    CompileCeilingKeeper keeper { meter, conditions, logger };
-    CompileCeilingOnReload ceiling { keeper, inForce, capacity };
+    CompileCeilingKeeper keeper { meter, inForce, capacity, conditions, logger };
+    CompileCeilingOnReload ceiling { keeper };
 
     // Told through the fan-out `main` hands `ApplyReloadRequest`, as the budget applier is beside it.
     struct CountingListener final: IAcceptedReloadListener
@@ -345,15 +370,17 @@ TEST_CASE("CompileMemoryMeter.keeper-writes-on-change-and-always-when-told", "[n
     NodeConditions conditions;
     CompileMemoryMeter meter { host, MeterPlatform::Linux };
     REQUIRE(meter.MakeRunner(metrics, logger).report.state == MeterState::Measured);
-    CompileCeilingKeeper keeper { meter, conditions, logger };
-    auto const bare = NodeConfig {};
+    InForceConfig const inForce;
+    MovableMachine capacity { CeilingMachine() };
+    CompileCeilingKeeper keeper { meter, inForce, capacity, conditions, logger };
     auto shrunk = CeilingMachine();
     shrunk.reservedMemoryBytes = 32 * CeilingGiB;
 
-    keeper.Keep(bare, CeilingMachine(), CeilingWrite::Always);   // startup
-    keeper.Keep(bare, CeilingMachine(), CeilingWrite::OnChange); // a round: unchanged, nothing written
-    keeper.Keep(bare, shrunk, CeilingWrite::OnChange);           // a round after the reserve moved
-    keeper.Keep(bare, shrunk, CeilingWrite::Always);             // a reload: written whatever it was
+    static_cast<void>(keeper.Keep(CeilingWrite::Always));   // startup
+    static_cast<void>(keeper.Keep(CeilingWrite::OnChange)); // a round: unchanged, nothing written
+    capacity.machine = shrunk;
+    static_cast<void>(keeper.Keep(CeilingWrite::OnChange)); // a round after the reserve moved
+    static_cast<void>(keeper.Keep(CeilingWrite::Always));   // a reload: written whatever it was
 
     CHECK(CeilingWrites(*host)
           == std::vector<std::string> {
@@ -545,6 +572,230 @@ TEST_CASE("A node holding a gigabyte measures a small compile as small, in a cgr
         metered.runner->RunCaptureSplit({ { "/bin/sh", "-c", "sleep 30 >/dev/null 2>&1 & echo started" } });
     CHECK(straggler.exitCode == 0);
     CHECK(JobCgroupsUnder(jobsParent) == 0);
+}
+
+TEST_CASE("CompileMemoryMeter.round-after-a-reload-never-writes-the-older-ceiling-back",
+          "[node][meter][memory-meter][reload]")
+{
+    if (!Cc::CanSpawnIntoCgroups())
+        SKIP("this build cannot spawn into a cgroup, so the meter never prepares compiles/");
+    // C2. A presence round that read the configuration BEFORE a reload, and wrote AFTER the reload's own write, put
+    // the old, higher ceiling back for an interval -- a limit above its configured value. Every writer now reads the
+    // pair under the lock it writes under, so the round that comes second writes what is in force then, or nothing.
+    auto const host = DelegatedHost();
+    AtomicMetricsSink metrics;
+    CapturingLogger logger;
+    NodeConditions conditions;
+    CompileMemoryMeter meter { host, MeterPlatform::Linux };
+    REQUIRE(meter.MakeRunner(metrics, logger).report.state == MeterState::Measured);
+    InForceConfig inForce;
+    inForce.cfg.compileMemoryLimitBytes = 16 * CeilingGiB;
+    MovableMachine const capacity { CeilingMachine() };
+    CompileCeilingKeeper keeper { meter, inForce, capacity, conditions, logger };
+    CompileCeilingOnReload reload { keeper };
+
+    static_cast<void>(keeper.Keep(CeilingWrite::Always)); // startup: 16g
+    // The round begins: under the old code it read its pair HERE, before the reload, and held it.
+    auto const roundStartedWith = inForce.Current();
+    REQUIRE(roundStartedWith.compileMemoryLimitBytes == 16 * CeilingGiB);
+    // The reload lands and writes 8g.
+    inForce.cfg.compileMemoryLimitBytes = 8 * CeilingGiB;
+    reload.ReloadAccepted();
+    // The round now keeps the ceiling: nothing older than 8g may be written, and the budget it reports is 8g's.
+    auto const basis = keeper.Keep(CeilingWrite::OnChange);
+
+    CHECK(CeilingWrites(*host) == std::vector<std::string> { "17179869184", "8589934592" });
+    CHECK(basis.cfg.compileMemoryLimitBytes == 8 * CeilingGiB);
+}
+
+TEST_CASE("CompileMemoryMeter.allowance-lowers-the-ceiling-and-never-raises-it", "[node][meter][memory-meter][pressure]")
+{
+    if (!Cc::CanSpawnIntoCgroups())
+        SKIP("this build cannot spawn into a cgroup, so the meter never prepares compiles/");
+    // The pressure watcher is the third writer: what is written is min(configured ceiling, allowance).
+    auto const host = DelegatedHost();
+    AtomicMetricsSink metrics;
+    CapturingLogger logger;
+    NodeConditions conditions;
+    CompileMemoryMeter meter { host, MeterPlatform::Linux };
+    REQUIRE(meter.MakeRunner(metrics, logger).report.state == MeterState::Measured);
+    InForceConfig inForce;
+    inForce.cfg.compileMemoryLimitBytes = 16 * CeilingGiB;
+    MovableMachine const capacity { CeilingMachine() };
+    CompileCeilingKeeper keeper { meter, inForce, capacity, conditions, logger };
+
+    static_cast<void>(keeper.Keep(CeilingWrite::Always));
+    keeper.Apply(6 * CeilingGiB);  // a yield: what compiles held
+    keeper.Apply(6 * CeilingGiB);  // unchanged: nothing written
+    keeper.Apply(40 * CeilingGiB); // an allowance above the configuration writes the configuration
+    // A reload lowering the limit below the allowance wins, and the allowance still binds below it.
+    inForce.cfg.compileMemoryLimitBytes = 12 * CeilingGiB;
+    static_cast<void>(keeper.Keep(CeilingWrite::OnChange));
+    keeper.Apply(10 * CeilingGiB);
+
+    CHECK(CeilingWrites(*host)
+          == std::vector<std::string> { std::to_string(16 * CeilingGiB),
+                                        std::to_string(6 * CeilingGiB),
+                                        std::to_string(16 * CeilingGiB),
+                                        std::to_string(12 * CeilingGiB),
+                                        std::to_string(10 * CeilingGiB) });
+    // A ceiling the allowance lowered is said at Debug: the watcher's own line names it when the level changes.
+    CHECK(std::ranges::any_of(logger.Snapshot(), [](CapturingLogger::Record const& record) {
+        return record.level == LogLevel::Debug && record.message.contains("memory-pressure allowance");
+    }));
+    CHECK(conditions.StateOf(NodeCondition::CompileMemoryUncapped) == CompileCacheWire::ConditionState::Clear);
+}
+
+TEST_CASE("CompileMemoryMeter.reads-what-compiles-hold-and-hands-out-its-killer", "[node][meter][memory-meter][pressure]")
+{
+    if (!Cc::CanSpawnIntoCgroups())
+        SKIP("this build cannot spawn into a cgroup, so the meter never prepares compiles/");
+    auto const host = DelegatedHost();
+    AtomicMetricsSink metrics;
+    CapturingLogger logger;
+    CompileMemoryMeter meter { host, MeterPlatform::Linux };
+    // Nothing prepared yet: nothing to read and nothing to kill with.
+    CHECK_FALSE(meter.CompilesHeldBytes().has_value());
+    CHECK(meter.YoungestKiller() == nullptr);
+
+    REQUIRE(meter.MakeRunner(metrics, logger).report.state == MeterState::Measured);
+    CHECK(meter.YoungestKiller() != nullptr);
+    CHECK_FALSE(meter.CompilesHeldBytes().has_value()); // the kernel said nothing yet
+    host->files["/sys/fs/cgroup/system.slice/pace-node.service/compiles/memory.current"] = "123456789\n";
+    CHECK(meter.CompilesHeldBytes() == std::optional<std::uint64_t> { 123456789 });
+    host->files["/sys/fs/cgroup/system.slice/pace-node.service/compiles/memory.current"] = "max\n";
+    CHECK_FALSE(meter.CompilesHeldBytes().has_value());
+}
+
+#endif
+
+#if defined(__linux__)
+
+namespace
+{
+
+/// A cgroup tree held in memory -- except that every job directory OPENS as this process's own cgroup, so the
+/// runner's child really runs inside a cgroup and the runner keeps the job, while nothing on the machine is made,
+/// written or removed.
+class OwnCgroupBackedHost final: public Platform::ICgroupHost
+{
+  public:
+    explicit OwnCgroupBackedHost(int ownDescriptor):
+        own { ownDescriptor }
+    {
+    }
+    FakeCgroupHost tree; ///< Everything but the descriptor.
+    int own;             ///< This process's own cgroup, borrowed.
+
+    [[nodiscard]] std::expected<std::string, std::error_code> ReadFile(std::filesystem::path const& path) const override
+    {
+        return tree.ReadFile(path);
+    }
+    [[nodiscard]] std::expected<void, std::error_code> WriteFile(std::filesystem::path const& path,
+                                                                 std::string_view text) const override
+    {
+        return tree.WriteFile(path, text);
+    }
+    [[nodiscard]] std::expected<void, std::error_code> MakeDirectory(std::filesystem::path const& path) const override
+    {
+        return tree.MakeDirectory(path);
+    }
+    [[nodiscard]] std::expected<void, std::error_code> RemoveCgroupDirectory(
+        std::filesystem::path const& path) const override
+    {
+        return tree.RemoveCgroupDirectory(path);
+    }
+    [[nodiscard]] std::expected<std::vector<std::string>, std::error_code> ListDirectory(
+        std::filesystem::path const& path) const override
+    {
+        return tree.ListDirectory(path);
+    }
+    [[nodiscard]] std::expected<int, std::error_code> OpenDirectory(std::filesystem::path const& /*path*/) const override
+    {
+        return own;
+    }
+    void CloseDescriptor(int /*descriptor*/) const noexcept override
+    {
+        // Borrowed from `OwnCgroupDirectory`, which closes it.
+    }
+    [[nodiscard]] bool IsWritable(std::filesystem::path const& path) const override
+    {
+        return tree.IsWritable(path);
+    }
+    [[nodiscard]] std::expected<void, std::error_code> ProbeSpawnInto(int directory) const override
+    {
+        return tree.ProbeSpawnInto(directory);
+    }
+    [[nodiscard]] std::uint32_t OwnProcessId() const noexcept override
+    {
+        return tree.OwnProcessId();
+    }
+    void Pause(std::chrono::microseconds duration) const override
+    {
+        tree.Pause(duration);
+    }
+};
+
+/// The node's job source, as the governor's kill reaches it: each job is chosen as the youngest the moment it is
+/// made -- before its compiler starts -- and the spawns the system refused to place are counted.
+class SheddingJobSource final: public Platform::IJobCgroupSource
+{
+  public:
+    explicit SheddingJobSource(std::shared_ptr<Platform::CgroupJobSource> source):
+        inner { std::move(source) }
+    {
+    }
+    [[nodiscard]] std::expected<std::unique_ptr<Platform::IJobCgroup>, std::error_code> Create() override
+    {
+        auto made = inner->Create();
+        if (made.has_value())
+            killed = inner->KillYoungest();
+        return made;
+    }
+    void NoteUnmeasured(Unmeasured why) noexcept override
+    {
+        if (why == Unmeasured::SpawnRefused)
+            ++refused;
+    }
+    std::shared_ptr<Platform::CgroupJobSource> inner; ///< The node's own source.
+    bool killed = false;                              ///< Whether `KillYoungest` chose the job.
+    std::atomic<int> refused { 0 };                   ///< Spawns that ran outside the cgroup.
+};
+
+} // namespace
+
+TEST_CASE("A compile KillYoungest chose is reported shed by the runner that reaps it", "[node][memory-meter][KillYoungest]")
+{
+    // C1, the production half: the mark the runner reads (`IJobCgroup::Shed`) is the one `KillYoungest` sets, on
+    // the job object the runner holds. The kill itself is the child's own `kill -9`: the fake tree swallows the
+    // `cgroup.kill` write, so nothing is killed on this machine but the child the case started.
+    if (!Cc::CanSpawnIntoCgroups())
+        SKIP("this build cannot spawn into a cgroup, so its runner never keeps a job to read");
+    Testing::OwnCgroupDirectory const own;
+    if (own.Descriptor() < 0)
+        SKIP("this process's own cgroup v2 directory cannot be opened");
+    auto host = std::make_shared<OwnCgroupBackedHost>(own.Descriptor());
+    host->tree.files["/proc/self/cgroup"] = "0::/system.slice/pace-node.service\n";
+    host->tree.files["/sys/fs/cgroup/system.slice/pace-node.service/cgroup.controllers"] = "memory\n";
+    host->tree.files["/sys/fs/cgroup/system.slice/pace-node.service/cgroup.procs"] = "4242\n";
+    host->tree.files["/sys/fs/cgroup/system.slice/pace-node.service/node/memory.peak"] = "1\n";
+    auto const layout = Platform::PrepareJobCgroups(*host);
+    REQUIRE(layout.has_value());
+    auto const source = std::make_shared<SheddingJobSource>(std::make_shared<Platform::CgroupJobSource>(host, *layout));
+    auto const runner = Cc::MakeProcessRunner(source);
+
+    auto const run = runner->RunCaptureSplit({ { "/bin/sh", "-c", "kill -9 $$" } });
+    if (source->refused != 0)
+        SKIP("the system refused to start a child inside this process's own cgroup");
+
+    CHECK(source->killed);
+    // Twice: the shed's kill, then the teardown's every finished job gets.
+    CHECK(std::ranges::count_if(host->tree.trail,
+                                [](std::string const& entry) { return entry.ends_with("/job-1/cgroup.kill 1"); })
+          == 2);
+    CHECK(run.exitCode == 137);
+    REQUIRE(run.killed.has_value());
+    CHECK(Unwrap(run.killed) == Platform::CompileKill::Shed);
 }
 
 #endif

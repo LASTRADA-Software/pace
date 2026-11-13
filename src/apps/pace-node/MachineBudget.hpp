@@ -15,6 +15,7 @@
 
 #include <cstdint>
 #include <mutex>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -27,6 +28,49 @@ namespace Pace::Node
 /// charged: 75%. The rest is the machine's own -- the person using it, the build's linker, the page
 /// cache -- which a queue that spent all of it would trade for an out-of-memory kill.
 inline constexpr std::uint64_t MachineBudgetSharePercent = 75;
+
+/// How hard this machine's memory is pressed, as its pressure watcher last read it.
+struct MachinePressure
+{
+    CompileCacheWire::PressureLevel level { CompileCacheWire::PressureLevel::Calm }; ///< The governor's level.
+    /// What compiles may hold at once now; disengaged where no governor runs, which lowers nothing.
+    std::optional<std::uint64_t> allowanceBytes {};
+};
+
+/// Where the machine budget, the heartbeat and the scrape read the pressure watcher's latest decision. Thread-safe.
+class IMachinePressureSource
+{
+  public:
+    IMachinePressureSource() = default;
+    IMachinePressureSource(IMachinePressureSource const&) = delete;
+    IMachinePressureSource(IMachinePressureSource&&) = delete;
+    IMachinePressureSource& operator=(IMachinePressureSource const&) = delete;
+    IMachinePressureSource& operator=(IMachinePressureSource&&) = delete;
+    virtual ~IMachinePressureSource() = default;
+
+    /// @return The level and allowance now; disengaged while no watcher has published one -- absent, which is not
+    ///         calm: a node without PSI does not know.
+    [[nodiscard]] virtual std::optional<MachinePressure> Current() const = 0;
+};
+
+/// The pressure watcher's latest decision, held where every reader finds it.
+///
+/// Its own object rather than the watcher, so the components that READ it -- the worker's heartbeat, the scrape,
+/// the presence loop -- can be built before the watcher exists, which needs the worker's ceiling to run.
+class PublishedPressure final: public IMachinePressureSource
+{
+  public:
+    /// @copydoc IMachinePressureSource::Current
+    [[nodiscard]] std::optional<MachinePressure> Current() const override;
+
+    /// Replace the decision every reader sees, level and allowance together.
+    /// @param pressure The watcher's latest.
+    void Publish(MachinePressure const& pressure);
+
+  private:
+    mutable std::mutex _mutex;                   ///< Guards `_pressure`: a level and its allowance are one fact.
+    std::optional<MachinePressure> _pressure {}; ///< Disengaged until a watcher publishes.
+};
 
 /// What this machine tells the fleet's queue it may be charged, and what it holds (#1728, R6).
 ///
@@ -41,14 +85,19 @@ inline constexpr std::uint64_t MachineBudgetSharePercent = 75;
 ///   small machine can still hold one unknown compile rather than queue everything for ever.
 ///   Lowered to `--compile-memory-limit` when that is typed below it, so the queue never admits what the
 ///   compile ceiling will kill.
+///   Lowered again to the pressure governor's allowance, which is what the compile ceiling holds compiles under
+///   too: in `Yield` and `Shed` that is what compiles held when pressure began, and it ramps back while calm.
 /// - Held: passed through as given.
+/// - Pressure: the governor's level, which the queue reads as "admit nothing new here" whenever it is not `Calm`.
 /// @param cfg The parsed configuration.
 /// @param capacity What `NodeCapacityOf` made of this machine.
 /// @param held What compiles on this machine hold now.
+/// @param pressure The pressure watcher's latest decision; calm and unlowered by default.
 /// @return The report.
 [[nodiscard]] Distributed::MachineReport MachineBudgetOf(NodeConfig const& cfg,
                                                          Distributed::NodeCapacity const& capacity,
-                                                         HeldCharges const& held) noexcept;
+                                                         HeldCharges const& held,
+                                                         MachinePressure const& pressure = {}) noexcept;
 
 /// The memory ceiling over every compile this worker runs together (`compiles/memory.max`).
 ///
@@ -116,6 +165,8 @@ struct MachineBudgetRound
     NodeProofClient const* prover = nullptr;   ///< How this machine proves itself; null where nothing proves.
     /// How loudly a scheduler that does not answer, or refuses, is said; the process's one.
     SchedulerReachability& reachability;
+    /// The pressure watcher's level and allowance, read per round; null where none runs (calm, unlowered).
+    IMachinePressureSource const* pressure = nullptr;
 };
 
 /// Report this machine's compile budget once: dial, prove, follow a redirect, and fall back.

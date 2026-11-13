@@ -10,6 +10,7 @@
 #include <expected>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -318,8 +319,27 @@ struct CgroupTeardownPolicy
                                                                      CgroupLayout const& layout,
                                                                      std::optional<std::uint64_t> bytes);
 
-/// Makes `job-<n>` cgroups under the node's `compiles/` cgroup, each a whole OOM group.
-class CgroupJobSource final: public IJobCgroupSource
+/// Kills the youngest running compile, for the node's pressure governor to give memory back to the machine.
+///
+/// "Youngest" because it has made the least progress, so its client loses the least by compiling it again.
+class IYoungestKiller
+{
+  public:
+    IYoungestKiller() = default;
+    IYoungestKiller(IYoungestKiller const&) = delete;
+    IYoungestKiller(IYoungestKiller&&) = delete;
+    IYoungestKiller& operator=(IYoungestKiller const&) = delete;
+    IYoungestKiller& operator=(IYoungestKiller&&) = delete;
+    virtual ~IYoungestKiller() = default;
+
+    /// Kill the newest compile still running that has not been killed already.
+    /// @return True when one was killed; false when none runs.
+    [[nodiscard]] virtual bool KillYoungest() = 0;
+};
+
+/// Makes `job-<n>` cgroups under the node's `compiles/` cgroup, each a whole OOM group, and kills the youngest of
+/// them when the node sheds.
+class CgroupJobSource final: public IJobCgroupSource, public IYoungestKiller
 {
   public:
     /// @param host The cgroup tree; shared with every job this source makes, so a job finishing late
@@ -331,11 +351,30 @@ class CgroupJobSource final: public IJobCgroupSource
     /// @copydoc IJobCgroupSource::Create
     [[nodiscard]] std::expected<std::unique_ptr<IJobCgroup>, std::error_code> Create() override;
 
+    /// Mark the newest live job that is not already shed `Shed`, then write its `cgroup.kill`.
+    ///
+    /// Marked FIRST, so the runner reaping the killed compile reads why it died (`IJobCgroup::Shed`). A job that
+    /// has finished -- its cgroup object destroyed -- is skipped, as is one already shed: that one is dying, and
+    /// choosing it again would kill nothing. Called from the pressure watcher's thread while compiles start and
+    /// finish on others.
+    /// @return True when a job was killed; false when none runs.
+    [[nodiscard]] bool KillYoungest() override;
+
+    /// What a live job shares with this source: where it is, and whether it was shed. Owned by the job, so a
+    /// finished job's state goes with it and the source's weak reference to it expires.
+    struct JobState
+    {
+        std::filesystem::path directory;  ///< The job's cgroup.
+        std::atomic<bool> shed { false }; ///< Set before `cgroup.kill` is written.
+    };
+
   private:
     std::shared_ptr<ICgroupHost const> _host;
     CgroupLayout _layout;
     CgroupTeardownPolicy _teardown;
     std::atomic<std::uint64_t> _next { 1 };
+    std::mutex _jobsMutex;                         ///< Guards `_jobs`.
+    std::vector<std::weak_ptr<JobState>> _jobs {}; ///< Every job made, oldest first; expired once finished.
 };
 
 } // namespace Pace::Platform

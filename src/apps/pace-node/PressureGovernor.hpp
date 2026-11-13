@@ -6,6 +6,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <optional>
 
 #include <core/platform/Clock.hpp>
@@ -18,6 +19,10 @@ namespace Pace::Node
 
 /// The level the governor reports. Transmitted, so it lives on the wire (`CompileCacheWire`).
 using PressureLevel = CompileCacheWire::PressureLevel;
+
+/// The threshold that turns a level off: no PSI figure (a percentage) ever exceeds it. A disabled `shedEnter` is
+/// also never reached by escalating a held yield, so `--memory-pressure-shed=0` means the node kills nothing.
+inline constexpr double DisabledPressureThreshold = std::numeric_limits<double>::infinity();
 
 /// Where the governor changes level, and how fast the allowance comes back.
 ///
@@ -48,6 +53,8 @@ struct PressureThresholds
     std::chrono::seconds dwell { 10 };        ///< Minimum time in a level; one shed kill per this period.
     std::chrono::seconds rampInterval { 30 }; ///< How often a calm allowance grows.
     std::uint32_t rampPercent { 5 };          ///< Of the configured bytes, per `rampInterval`.
+
+    [[nodiscard]] bool operator==(PressureThresholds const&) const = default;
 };
 
 /// What the governor decided on one sample.
@@ -98,6 +105,11 @@ class PressureGovernor
     /// allowance, which ramps toward the new value from where it stands.
     /// @param configuredBytes The new configured allowance.
     void Reconfigure(std::uint64_t configuredBytes);
+
+    /// Change the thresholds, dwell and ramp from the next sample on. The level held and its clocks stay: a
+    /// reload moves where the next change happens, never the state the machine is in.
+    /// @param thresholds The new thresholds.
+    void Retune(PressureThresholds const& thresholds);
 
   private:
     /// Move to @p level at @p now, setting the allowance from what compiles hold.

@@ -28,6 +28,7 @@ namespace Pace::Node
 class CompileCeilingKeeper;
 class INodeCapacitySource;
 class INodeConfigSource;
+class PresenceWake;
 
 /// The node's reloader: `NodeConfig`, read through the option table, guarded by its
 /// `reloadable` column.
@@ -125,25 +126,37 @@ class AcceptedReloadListeners final: public IAcceptedReloadListener
 /// reloadable, and a lowered ceiling must not wait for a restart.
 ///
 /// Rewritten whether or not the figure changed (`CeilingWrite::Always`) -- one control file is cheap. Done inline on
-/// the reloading thread for that reason: one `write(2)`, never a walk. The presence round reports the budget from
-/// the same configuration on its next round (`CompileCeilingKeeper`).
+/// the reloading thread for that reason: one `write(2)`, never a walk. The keeper reads the configuration now in
+/// force itself, under the lock every writer of the ceiling takes (`CompileCeilingKeeper`).
 class CompileCeilingOnReload final: public IAcceptedReloadListener
 {
   public:
     /// @param keeper The process's ceiling keeper; outlives this.
-    /// @param inForce The configuration in force, read at each reload; outlives this.
-    /// @param capacity What this machine is, read at each reload; outlives this.
-    CompileCeilingOnReload(CompileCeilingKeeper& keeper,
-                           INodeConfigSource const& inForce,
-                           INodeCapacitySource const& capacity) noexcept;
+    explicit CompileCeilingOnReload(CompileCeilingKeeper& keeper) noexcept;
 
     /// Write the ceiling the configuration now in force asks for.
     void ReloadAccepted() override;
 
   private:
     CompileCeilingKeeper& _keeper;
-    INodeConfigSource const& _inForce;
-    INodeCapacitySource const& _capacity;
+};
+
+/// Has the presence loop report this machine at once after every accepted reload, rather than at its next interval:
+/// a reload lowering `--compile-memory-limit` lowers the ceiling at once, and the budget the fleet's queue admits
+/// against must follow it before the queue places work the kernel would kill.
+///
+/// Told AFTER the ceiling's listener, so the round it asks for reads the ceiling already written.
+class PresenceRoundOnReload final: public IAcceptedReloadListener
+{
+  public:
+    /// @param wake The process's presence wait; outlives this.
+    explicit PresenceRoundOnReload(PresenceWake& wake) noexcept;
+
+    /// Ask for a round now.
+    void ReloadAccepted() override;
+
+  private:
+    PresenceWake& _wake;
 };
 
 /// Act on one SIGHUP, and say what happened either way.

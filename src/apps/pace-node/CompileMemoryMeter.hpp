@@ -11,6 +11,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -31,6 +32,9 @@
 /// estimate that never learns is otherwise a slowdown nobody can trace.
 namespace Pace::Node
 {
+
+class INodeCapacitySource;
+class INodeConfigSource;
 
 /// The platforms a meter is chosen for.
 enum class MeterPlatform : std::uint8_t
@@ -152,6 +156,20 @@ class CompileMemoryMeter
     ///         ceiling holds; `NotApplicable` on a platform with no cgroups.
     [[nodiscard]] CeilingReport ApplyCeiling(std::uint64_t bytes);
 
+    /// Where every compile this worker runs lives: the cgroup whose `memory.pressure` says whether a stall is the
+    /// compiles' own.
+    /// @return The `compiles/` directory; disengaged before a worker prepared it, or where compiles get no cgroup.
+    [[nodiscard]] std::optional<std::filesystem::path> CompilesCgroup() const;
+
+    /// What every compile this worker runs holds now: `compiles/memory.current`.
+    /// @return The bytes; disengaged before a worker prepared `compiles/`, without one, or when the kernel would not
+    ///         say.
+    [[nodiscard]] std::optional<std::uint64_t> CompilesHeldBytes() const;
+
+    /// What kills the youngest running compile when the node sheds.
+    /// @return The process's job source; null before a worker prepared it, or where compiles get no cgroup.
+    [[nodiscard]] Platform::IYoungestKiller* YoungestKiller() const noexcept;
+
   private:
     /// Decide the meter, and publish that it has; runs once.
     void Prepare();
@@ -188,11 +206,47 @@ void ReportCompileMemoryMeter(MeterReport const& report, NodeConditions& conditi
 /// @param capacity What this machine is now.
 /// @param conditions Where `compile-memory-uncapped` is answered.
 /// @param logger Where the ceiling, or why there is none, is said.
+/// @param allowanceBytes The pressure governor's allowance, which lowers the ceiling when it is below the configured
+///        figure (said at Debug then: the governor's own line names the allowance when its level changes, and a
+///        ramp moves it every interval); disengaged for none.
 void PutCompileCeilingInForce(CompileMemoryMeter& meter,
                               NodeConfig const& cfg,
                               Distributed::NodeCapacity const& capacity,
                               NodeConditions& conditions,
-                              ILogger& logger);
+                              ILogger& logger,
+                              std::optional<std::uint64_t> allowanceBytes = std::nullopt);
+
+/// The configuration and capacity one write of the ceiling was derived from, read together: the budget a presence
+/// round reports is taken from the same pair, so the two describe one moment.
+struct CeilingBasis
+{
+    NodeConfig cfg;                     ///< The configuration in force.
+    Distributed::NodeCapacity capacity; ///< What this machine is.
+};
+
+/// Where the pressure watcher holds every compile under its allowance: `compiles/memory.max`, through the ONE writer
+/// of that file.
+///
+/// Absent on a node whose compiles run in no cgroup: the watcher then changes only what the machine reports.
+class ICompileCeiling
+{
+  public:
+    ICompileCeiling() = default;
+    ICompileCeiling(ICompileCeiling const&) = delete;
+    ICompileCeiling(ICompileCeiling&&) = delete;
+    ICompileCeiling& operator=(ICompileCeiling const&) = delete;
+    ICompileCeiling& operator=(ICompileCeiling&&) = delete;
+    virtual ~ICompileCeiling() = default;
+
+    /// Hold every compile under @p allowanceBytes, or under the configured ceiling where that is lower: the figure
+    /// written is never above what the configuration in force asks for.
+    /// @param allowanceBytes The pressure governor's allowance.
+    virtual void Apply(std::uint64_t allowanceBytes) = 0;
+
+    /// What every compile holds now, as the kernel counts it.
+    /// @return The bytes; disengaged when the kernel would not say.
+    [[nodiscard]] virtual std::optional<std::uint64_t> HeldBytes() const = 0;
+};
 
 /// When `CompileCeilingKeeper::Keep` writes the ceiling.
 ///
@@ -203,36 +257,64 @@ enum class CeilingWrite : std::uint8_t
     OnChange, ///< At every presence round: only when the derived figure moved since the last write.
 };
 
-/// The ONE place the compile ceiling and the budget this machine reports are taken from the same derivation.
+/// The ONE writer of `compiles/memory.max`, and the ONE place the compile ceiling and the budget this machine reports
+/// are taken from the same derivation.
 ///
 /// `MachineBudgetOf` and `CompileCeilingOf` both read the configuration in force and the capacity; either moves
 /// under a running node -- a reload changes `--compile-memory-limit`, a cache-budget override moves the reserve the
-/// derived figure comes from. So the presence round reads both ONCE, keeps the ceiling from that pair here, and
-/// reports the budget from the same pair: the queue is never told of room the kernel would kill a compile for, nor
-/// the ceiling left below a budget that rose.
+/// derived figure comes from. So the presence round keeps the ceiling here and reports the budget from the pair
+/// `Keep` hands back: the queue is never told of room the kernel would kill a compile for, nor the ceiling left
+/// below a budget that rose.
 ///
-/// Thread-safe: `main` (startup, reload) and the presence loop call it.
-class CompileCeilingKeeper
+/// **Three writers, one figure.** The presence round (`OnChange`), an accepted reload (`Always`) and the pressure
+/// watcher (`Apply`, its allowance) all write through here, and each READS the configuration and the capacity under
+/// the lock it writes under. A writer never carries a snapshot in: a presence round that read the old configuration
+/// before a reload wrote the new ceiling would otherwise write the old, higher figure back over it -- a limit raised
+/// above its configured value until the next round. What is written is `min(configured ceiling, allowance)`, so the
+/// governor can lower the ceiling and never raise it past the configuration.
+///
+/// Thread-safe: `main` (startup, reload), the presence loop and the pressure watcher call it.
+class CompileCeilingKeeper final: public ICompileCeiling
 {
   public:
     /// @param meter The process's meter, prepared by the worker's runner; outlives this.
+    /// @param inForce The configuration in force, read at every write; outlives this.
+    /// @param capacity What this machine is, read at every write; outlives this.
     /// @param conditions Where `compile-memory-uncapped` is answered; outlives this.
     /// @param logger Where the ceiling is said; outlives this.
-    CompileCeilingKeeper(CompileMemoryMeter& meter, NodeConditions& conditions, ILogger& logger) noexcept;
+    CompileCeilingKeeper(CompileMemoryMeter& meter,
+                         INodeConfigSource const& inForce,
+                         INodeCapacitySource const& capacity,
+                         NodeConditions& conditions,
+                         ILogger& logger) noexcept;
 
-    /// Put the ceiling @p cfg and @p capacity derive in force (`PutCompileCeilingInForce`), when @p when says so.
-    /// A figure that was attempted and refused is not retried per round: the row is raised, and a reload retries.
-    /// @param cfg The configuration in force.
-    /// @param capacity What this machine is, as the caller read it for the budget it reports.
+    /// Put the ceiling the configuration in force and the capacity derive in force (`PutCompileCeilingInForce`),
+    /// lowered to the allowance last applied, when @p when says so. A figure that was attempted and refused is not
+    /// retried per round: the row is raised, and a reload retries.
     /// @param when Whether an unchanged figure is written again.
-    void Keep(NodeConfig const& cfg, Distributed::NodeCapacity const& capacity, CeilingWrite when);
+    /// @return The pair the figure was derived from, for the budget the caller reports beside it.
+    [[nodiscard]] CeilingBasis Keep(CeilingWrite when);
+
+    /// @copydoc ICompileCeiling::Apply
+    void Apply(std::uint64_t allowanceBytes) override;
+
+    /// @copydoc ICompileCeiling::HeldBytes
+    [[nodiscard]] std::optional<std::uint64_t> HeldBytes() const override;
 
   private:
+    /// Read the pair and write the figure it and the allowance give, when @p when says so. `_mutex` held.
+    /// @param when Whether an unchanged figure is written again.
+    /// @return The pair read.
+    CeilingBasis KeepLocked(CeilingWrite when);
+
     CompileMemoryMeter& _meter;
+    INodeConfigSource const& _inForce;
+    INodeCapacitySource const& _capacity;
     NodeConditions& _conditions;
     ILogger& _logger;
-    std::mutex _mutex;                        ///< Serialises writes and guards `_written`.
-    std::optional<std::uint64_t> _written {}; ///< The figure last attempted.
+    std::mutex _mutex;                          ///< Serialises writes and guards the two below.
+    std::optional<std::uint64_t> _written {};   ///< The figure last attempted.
+    std::optional<std::uint64_t> _allowance {}; ///< The governor's allowance; disengaged until it applies one.
 };
 
 } // namespace Pace::Node

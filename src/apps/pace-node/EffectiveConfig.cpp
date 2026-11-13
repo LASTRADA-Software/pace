@@ -178,6 +178,8 @@ namespace
         Shown("--machine-memory-budget", &OptionalNumber<&NodeConfig::machineMemoryBudgetBytes>),
         Shown("--compile-memory-limit", &OptionalNumber<&NodeConfig::compileMemoryLimitBytes>),
         Shown("--compile-estimate-default", &OptionalNumber<&NodeConfig::compileEstimateDefaultBytes>),
+        Shown("--memory-pressure-yield", &OptionalNumber<&NodeConfig::memoryPressureYieldPercent>),
+        Shown("--memory-pressure-shed", &OptionalNumber<&NodeConfig::memoryPressureShedPercent>),
         Shown("--reserve-cores", &OptionalNumber<&NodeConfig::reservedCores>),
         Shown("--node-id", &TextOrUnset<&NodeConfig::nodeId>),
         Shown("--listen-raft", &Text<&NodeConfig::raftListen>),

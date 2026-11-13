@@ -652,7 +652,11 @@ TEST_CASE("This build's live-stats layout is the pinned one", "[metrics][livesta
     // Moved again when the three `worker_compiles_killed_{ceiling,shed,signal}_total` joined at the end of the
     // catalogue (a killed compile is refused and counted by cause). Clients and nodes upgrade together. Read off
     // the built test, never computed by hand.
-    CHECK(StatsReadingLayout == 0x7804242eb70e9120ULL);
+    //
+    // Moved again when the memory-pressure watcher added `node_memory_pressure_{yield,shed}_{seconds,entries}_total`
+    // at the end of the catalogue and the host block gained `memoryPressure` (layer C of the compile memory
+    // defence). Clients and nodes upgrade together. Read off the built test, never computed by hand.
+    CHECK(StatsReadingLayout == 0xf35dbf7f56d1b953ULL);
 }
 
 TEST_CASE("A truncated or padded reading is refused and never half-read", "[metrics][livestats]")

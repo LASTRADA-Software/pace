@@ -1579,6 +1579,24 @@ inline constexpr EnumTable<IMetricsSink::Counter, CounterDescriptor> CounterTabl
               "governor accounts for: a global OOM kill, systemd-oomd, or a person. Each was refused "
               "and compiled locally by its client.",
       .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::NodeMemoryPressureYieldSeconds,
+      .prometheusName = "pace_node_memory_pressure_yield_seconds_total",
+      .help = "Seconds this node held the yield level: the machine stalled on memory for something other than its "
+              "compiles, so no new compile was admitted on it, local ones included.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::NodeMemoryPressureShedSeconds,
+      .prometheusName = "pace_node_memory_pressure_shed_seconds_total",
+      .help = "Seconds this node held the shed level: the machine froze on memory, so it admitted nothing and "
+              "killed its youngest compile once per dwell.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::NodeMemoryPressureYieldEntries,
+      .prometheusName = "pace_node_memory_pressure_yield_entries_total",
+      .help = "Times this node entered the yield level, from calm or stepping down from shed.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::NodeMemoryPressureShedEntries,
+      .prometheusName = "pace_node_memory_pressure_shed_entries_total",
+      .help = "Times this node entered the shed level, from calm on a freeze or escalating a sustained yield.",
+      .type = MetricType::Counter },
 } };
 
 // Checked at compile time rather than by a test, because the failure this prevents

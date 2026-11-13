@@ -5,6 +5,7 @@
 #include "NodeActivation.hpp"
 #include "NodeDefaults.hpp"
 #include "NodeFormation.hpp"
+#include "NodePresenceTier.hpp"
 #include "NodeReload.hpp"
 
 #include <Pace/Config/YamlReader.hpp>
@@ -158,18 +159,24 @@ void AcceptedReloadListeners::ReloadAccepted()
         listener->ReloadAccepted();
 }
 
-CompileCeilingOnReload::CompileCeilingOnReload(CompileCeilingKeeper& keeper,
-                                               INodeConfigSource const& inForce,
-                                               INodeCapacitySource const& capacity) noexcept:
-    _keeper { keeper },
-    _inForce { inForce },
-    _capacity { capacity }
+CompileCeilingOnReload::CompileCeilingOnReload(CompileCeilingKeeper& keeper) noexcept:
+    _keeper { keeper }
 {
 }
 
 void CompileCeilingOnReload::ReloadAccepted()
 {
-    _keeper.Keep(_inForce.Current(), _capacity.Current(), CeilingWrite::Always);
+    static_cast<void>(_keeper.Keep(CeilingWrite::Always));
+}
+
+PresenceRoundOnReload::PresenceRoundOnReload(PresenceWake& wake) noexcept:
+    _wake { wake }
+{
+}
+
+void PresenceRoundOnReload::ReloadAccepted()
+{
+    _wake.RequestRound(PresenceWakeReason::Reload);
 }
 
 } // namespace Pace::Node

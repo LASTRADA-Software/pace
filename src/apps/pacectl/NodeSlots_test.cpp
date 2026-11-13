@@ -230,3 +230,44 @@ TEST_CASE("A memory-pressure limit has the name, the remedy and the tone the nod
     CHECK(traits.remedy.contains("memory"));
     CHECK(Distributed::SlotLimitTone(Distributed::SlotLimit::MemoryPressure) == Distributed::CellTone::Limited);
 }
+
+TEST_CASE("A machine under memory pressure offers nothing and names memory-pressure, from one reading",
+          "[cli][node-slots][pressure]")
+{
+    // C5. The node's watcher reports its level in the host block; the panel folds it into the scheduler's own
+    // arithmetic, so a yielding machine's free slots are not shown as capacity the fleet has.
+    auto host = SixteenCores();
+    host.memoryPressure = static_cast<std::size_t>(Distributed::PressureLevel::Yield);
+    auto const previous = ReadingOf(host, Ticks(1000, 10000));
+    auto const now = ReadingOf(host, Ticks(1100, 11000));
+
+    SECTION("with two readings")
+    {
+        auto const slots = NodeSlotsOf(&previous, now);
+        REQUIRE(slots.has_value());
+        REQUIRE(Unwrap(slots).ceilings.has_value());
+        CHECK(Unwrap(Unwrap(slots).ceilings).available == 0);
+        CHECK(Unwrap(Unwrap(slots).ceilings).binding == Distributed::SlotLimit::MemoryPressure);
+    }
+    SECTION("with ONE reading, because a level is known from one")
+    {
+        auto const slots = NodeSlotsOf(nullptr, now);
+        REQUIRE(slots.has_value());
+        REQUIRE(Unwrap(slots).ceilings.has_value());
+        CHECK(Unwrap(Unwrap(slots).ceilings).binding == Distributed::SlotLimit::MemoryPressure);
+    }
+    SECTION("and calm names nothing it does not report")
+    {
+        host.memoryPressure = static_cast<std::size_t>(Distributed::PressureLevel::Calm);
+        auto const calm = NodeSlotsOf(nullptr, ReadingOf(host, Ticks(1100, 11000)));
+        REQUIRE(calm.has_value());
+        CHECK_FALSE(Unwrap(calm).ceilings.has_value());
+    }
+    SECTION("and a level this build does not know is no statement")
+    {
+        host.memoryPressure = 7;
+        auto const unknown = NodeSlotsOf(nullptr, ReadingOf(host, Ticks(1100, 11000)));
+        REQUIRE(unknown.has_value());
+        CHECK_FALSE(Unwrap(unknown).ceilings.has_value());
+    }
+}

@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
+#include "CacheTier.hpp"
 #include "CompileMemoryMeter.hpp"
+#include "LiveNodeConfig.hpp"
 #include "MachineBudget.hpp"
 
 #include <Pace/Platform/JobCgroups.hpp>
 
+#include <algorithm>
 #include <atomic>
+#include <charconv>
 #include <format>
 #include <utility>
 
@@ -131,6 +135,35 @@ CeilingReport CompileMemoryMeter::ApplyCeiling(std::uint64_t bytes)
     return CeilingReport { .state = CeilingState::Capped, .reason = {} };
 }
 
+std::optional<std::filesystem::path> CompileMemoryMeter::CompilesCgroup() const
+{
+    if (!_decided.load(std::memory_order_acquire) || !_layout.has_value())
+        return std::nullopt;
+    return _layout->compiles;
+}
+
+std::optional<std::uint64_t> CompileMemoryMeter::CompilesHeldBytes() const
+{
+    if (!_decided.load(std::memory_order_acquire) || !_layout.has_value())
+        return std::nullopt;
+    auto const text = _host->ReadFile(_layout->compiles / "memory.current");
+    if (!text.has_value())
+        return std::nullopt;
+    auto const digits = std::string_view { *text }.substr(0, text->find_last_not_of("\n") + 1);
+    auto value = std::uint64_t { 0 };
+    auto const [end, error] = std::from_chars(digits.data(), digits.data() + digits.size(), value);
+    if (error != std::errc {} || end != digits.data() + digits.size() || digits.empty())
+        return std::nullopt;
+    return value;
+}
+
+Platform::IYoungestKiller* CompileMemoryMeter::YoungestKiller() const noexcept
+{
+    if (!_decided.load(std::memory_order_acquire))
+        return nullptr;
+    return _source.get();
+}
+
 MeteredRunner CompileMemoryMeter::MakeRunner(IMetricsSink& metrics, ILogger& logger)
 {
     std::call_once(_prepared, [this] { Prepare(); });
@@ -179,17 +212,26 @@ void PutCompileCeilingInForce(CompileMemoryMeter& meter,
                               NodeConfig const& cfg,
                               Distributed::NodeCapacity const& capacity,
                               NodeConditions& conditions,
-                              ILogger& logger)
+                              ILogger& logger,
+                              std::optional<std::uint64_t> allowanceBytes)
 {
-    auto const bytes = CompileCeilingOf(cfg, capacity);
+    auto const configured = CompileCeilingOf(cfg, capacity);
+    auto const bytes = std::min(configured, allowanceBytes.value_or(configured));
     auto const applied = meter.ApplyCeiling(bytes);
     switch (applied.state)
     {
         case CeilingState::Capped:
-            logger.Logf(LogLevel::Info,
-                        "compile memory ceiling: {} ({})",
-                        bytes,
-                        cfg.compileMemoryLimitBytes.has_value() ? "typed" : "derived");
+            if (bytes < configured)
+                logger.Logf(LogLevel::Debug,
+                            "compile memory ceiling: {} (the memory-pressure allowance, below the {} {})",
+                            bytes,
+                            configured,
+                            cfg.compileMemoryLimitBytes.has_value() ? "typed" : "derived");
+            else
+                logger.Logf(LogLevel::Info,
+                            "compile memory ceiling: {} ({})",
+                            bytes,
+                            cfg.compileMemoryLimitBytes.has_value() ? "typed" : "derived");
             conditions.Clear(NodeCondition::CompileMemoryUncapped);
             return;
         case CeilingState::Uncapped:
@@ -205,21 +247,49 @@ void PutCompileCeilingInForce(CompileMemoryMeter& meter,
     }
 }
 
-CompileCeilingKeeper::CompileCeilingKeeper(CompileMemoryMeter& meter, NodeConditions& conditions, ILogger& logger) noexcept:
+CompileCeilingKeeper::CompileCeilingKeeper(CompileMemoryMeter& meter,
+                                           INodeConfigSource const& inForce,
+                                           INodeCapacitySource const& capacity,
+                                           NodeConditions& conditions,
+                                           ILogger& logger) noexcept:
     _meter { meter },
+    _inForce { inForce },
+    _capacity { capacity },
     _conditions { conditions },
     _logger { logger }
 {
 }
 
-void CompileCeilingKeeper::Keep(NodeConfig const& cfg, Distributed::NodeCapacity const& capacity, CeilingWrite when)
+CeilingBasis CompileCeilingKeeper::Keep(CeilingWrite when)
 {
-    auto const bytes = CompileCeilingOf(cfg, capacity);
     auto const guard = std::scoped_lock { _mutex };
+    return KeepLocked(when);
+}
+
+void CompileCeilingKeeper::Apply(std::uint64_t allowanceBytes)
+{
+    auto const guard = std::scoped_lock { _mutex };
+    _allowance = allowanceBytes;
+    static_cast<void>(KeepLocked(CeilingWrite::OnChange));
+}
+
+std::optional<std::uint64_t> CompileCeilingKeeper::HeldBytes() const
+{
+    return _meter.CompilesHeldBytes();
+}
+
+CeilingBasis CompileCeilingKeeper::KeepLocked(CeilingWrite when)
+{
+    // Read HERE, under the lock, never handed in: a pair read before another writer took the lock is older than
+    // what that writer wrote, and writing from it would put a superseded -- possibly higher -- ceiling back.
+    auto basis = CeilingBasis { .cfg = _inForce.Current(), .capacity = _capacity.Current() };
+    auto const configured = CompileCeilingOf(basis.cfg, basis.capacity);
+    auto const bytes = std::min(configured, _allowance.value_or(configured));
     if (when == CeilingWrite::OnChange && _written == bytes)
-        return;
+        return basis;
     _written = bytes;
-    PutCompileCeilingInForce(_meter, cfg, capacity, _conditions, _logger);
+    PutCompileCeilingInForce(_meter, basis.cfg, basis.capacity, _conditions, _logger, _allowance);
+    return basis;
 }
 
 } // namespace Pace::Node

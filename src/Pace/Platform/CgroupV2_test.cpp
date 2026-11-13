@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <ranges>
@@ -530,4 +531,55 @@ TEST_CASE("A stale job cgroup that will not empty makes the facility unavailable
     REQUIRE_FALSE(layout.has_value());
     CHECK(layout.error().cause == CgroupUnavailable::StaleJobCgroups);
     CHECK(layout.error().detail.contains("job-7"));
+}
+
+TEST_CASE("KillYoungest marks and kills the newest running job, then the next newest", "[platform][cgroup][KillYoungest]")
+{
+    auto host = DelegatedHost();
+    auto* const raw = host.get();
+    auto const layout = Unwrap(PrepareJobCgroups(*host));
+    CgroupJobSource source { std::move(host), layout };
+    auto const jobs = layout.compiles.generic_string();
+    auto const kills = [&raw] {
+        auto written = std::vector<std::string> {};
+        std::ranges::copy_if(raw->trail, std::back_inserter(written), [](std::string const& entry) {
+            return entry.ends_with("/cgroup.kill 1");
+        });
+        return written;
+    };
+
+    auto first = NewJob(source);
+    auto second = NewJob(source);
+    auto third = NewJob(source);
+    raw->trail.clear();
+
+    // The newest first: it has made the least progress, so its client loses the least by compiling it again.
+    CHECK(source.KillYoungest());
+    CHECK(third->Shed());
+    CHECK_FALSE(second->Shed());
+    CHECK_FALSE(first->Shed());
+    CHECK(kills() == std::vector<std::string> { "write " + jobs + "/job-3/cgroup.kill 1" });
+
+    // A job already shed is dying, not a victim to choose again: the next newest goes.
+    CHECK(source.KillYoungest());
+    CHECK(second->Shed());
+    CHECK_FALSE(first->Shed());
+    CHECK(kills().back() == "write " + jobs + "/job-2/cgroup.kill 1");
+
+    // A job that finished is skipped, whatever its age.
+    third.reset();
+    second.reset();
+    auto fourth = NewJob(source);
+    fourth.reset();
+    raw->trail.clear();
+    CHECK(source.KillYoungest());
+    CHECK(first->Shed());
+    CHECK(kills() == std::vector<std::string> { "write " + jobs + "/job-1/cgroup.kill 1" });
+
+    // With nothing left to kill, nothing is written and the caller hears so.
+    raw->trail.clear();
+    CHECK_FALSE(source.KillYoungest());
+    CHECK(kills().empty());
+    first.reset();
+    CHECK_FALSE(source.KillYoungest());
 }

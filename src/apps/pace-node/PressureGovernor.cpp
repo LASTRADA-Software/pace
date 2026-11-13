@@ -2,6 +2,7 @@
 #include "PressureGovernor.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace Pace::Node
 {
@@ -67,7 +68,7 @@ GovernorDecision PressureGovernor::Step(Platform::PressureSample const& sample, 
                 Enter(PressureLevel::Yield, now, compilesHoldBytes);
             break;
         case PressureLevel::Yield:
-            if (freezing || foreignStallSustained)
+            if (freezing || (foreignStallSustained && !std::isinf(thresholds.shedEnter)))
                 Enter(PressureLevel::Shed, now, compilesHoldBytes);
             else if (dwellSpent && yieldEased)
                 Enter(PressureLevel::Calm, now, compilesHoldBytes);
@@ -99,6 +100,11 @@ void PressureGovernor::Reconfigure(std::uint64_t configuredBytes)
 {
     _configuredBytes = configuredBytes;
     _allowanceBytes = std::min(_allowanceBytes, _configuredBytes);
+}
+
+void PressureGovernor::Retune(PressureThresholds const& thresholds)
+{
+    _thresholds = thresholds;
 }
 
 void PressureGovernor::Enter(PressureLevel level, core::platform::SteadyTimePoint now, std::uint64_t compilesHoldBytes)

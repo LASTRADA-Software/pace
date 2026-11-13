@@ -9,6 +9,7 @@
 #include "EndpointResolver.hpp"
 #include "HostEventInbox.hpp"
 #include "KilledCompiles.hpp"
+#include "MachineBudget.hpp"
 #include "NodeAnnounce.hpp"
 #include "NodeConditions.hpp"
 #include "NodeConfig.hpp"
@@ -193,6 +194,10 @@ struct WorkerTierParts
     /// Told each measured peak a compile reports, for the machine-budget report the presence loop
     /// sends (#1728). Required, and a node with no worker never builds a tier to be handed it.
     Cc::IJobMeasurementSink& measurements;
+    /// The machine's memory-pressure level, read at every beat into the load the slot ceilings `node-status` names
+    /// are computed from, so a yielding machine names `memory-pressure` as what holds it back; null where nothing
+    /// publishes one (absent, not calm).
+    IMachinePressureSource const* pressure {};
 };
 
 class WorkerTier;
@@ -414,6 +419,14 @@ class WorkerTier
     /// @return Whether the capacity had moved, and the registrars were rebuilt.
     bool FollowCapacity(core::platform::IClock const& statusClock);
 
+    /// The slot ceilings `node-status` names for one beat's load: the scheduler's own arithmetic over the capacity
+    /// the registrations in force carry, with the machine's memory-pressure level folded into the load -- the
+    /// heartbeat's load record carries none, since the scheduler hears it in the machine-budget report.
+    /// @param load What the beat sampled and sent.
+    /// @return The ceilings, `MemoryPressure` binding while the machine yields or sheds. The heartbeat thread, or
+    ///         before it runs.
+    [[nodiscard]] Distributed::SlotCeilings StatusCeilings(Distributed::NodeLoad load) const;
+
     /// @return The capacity the registrations in force carry, and that `node-status` weighs this
     ///         worker by. The heartbeat thread, or before it runs.
     [[nodiscard]] Distributed::NodeCapacity const& RegisteredCapacity() const noexcept
@@ -542,6 +555,9 @@ class WorkerTier
     /// The capacity `_advertisedWire` and the registrars in force were built from: what the scheduler's
     /// `SlotCeilingsFor` weighs this worker by, and so what `node-status` weighs it by. Heartbeat thread only.
     Distributed::NodeCapacity _registeredCapacity;
+    /// The machine's memory-pressure level, folded into the load `node-status`'s ceilings are taken over; null for
+    /// none published.
+    IMachinePressureSource const* _pressure;
     std::vector<Cc::WorkerRegistrar> _registrars;
     std::vector<Cc::WorkerRegistrar> _withdrawals;
     IEndpointDialer& _dialer;

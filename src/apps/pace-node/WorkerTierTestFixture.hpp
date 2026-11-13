@@ -249,6 +249,8 @@ struct WorkerTierFixture
     /// When set, what a started tier reads its capacity through instead of a fixed `capacity`: a case
     /// about a capacity that MOVES. Must outlive the tier.
     INodeCapacitySource const* capacitySource = nullptr;
+    /// The machine's memory-pressure level the tier folds into its status ceilings; none by default.
+    IMachinePressureSource const* pressure = nullptr;
 
     /// Start a tier for `cfg` on a machine of sixteen cores.
     [[nodiscard]] std::expected<std::unique_ptr<WorkerTier>, NodeRefusal> Start()
@@ -300,7 +302,8 @@ struct WorkerTierFixture
                               .hostEvents = hostEvents,
                               .suspendWait = suspendWait,
                               .schedulerDialer = Dialer(),
-                              .measurements = measuredPeaks },
+                              .measurements = measuredPeaks,
+                              .pressure = pressure },
             makeMachine);
     }
 };

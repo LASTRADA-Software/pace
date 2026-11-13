@@ -61,7 +61,8 @@ AdminHttpServer::SnapshotProvider MakeNodeSnapshotProvider(NodeScrapeSources sou
                                .diskCapacityBytes = static_cast<std::uint64_t>(disk.capacityBytes),
                                .diskFreeBytes = static_cast<std::uint64_t>(disk.freeBytes),
                                .busySlots = sources.busySlots(),
-                               .cordoned = sources.cordoned && sources.cordoned() ? std::size_t { 1 } : std::size_t { 0 } },
+                               .cordoned = sources.cordoned && sources.cordoned() ? std::size_t { 1 } : std::size_t { 0 },
+                               .memoryPressure = sources.memoryPressure ? sources.memoryPressure() : std::size_t { 0 } },
             // Raw counters rather than a utilization, so no reader's interval is cut by
             // another's; see `NodeScrapeSources::load`.
             .hostLoad =

@@ -544,6 +544,8 @@ TEST_CASE("NodeConfig: every flag that is worker state reaches the supervisor", 
     cfg.machineMemoryBudgetBytes = 20ULL * 1024 * 1024 * 1024;
     cfg.compileEstimateDefaultBytes = 3ULL * 1024 * 1024 * 1024;
     cfg.compileMemoryLimitBytes = 16ULL * 1024 * 1024 * 1024;
+    cfg.memoryPressureYieldPercent = 15;
+    cfg.memoryPressureShedPercent = 7;
     cfg.historyRequesters = 64;
     // Worker state like any other, and the one that supplies most of the rest: a
     // registration that dropped it would come back at every boot knowing only what

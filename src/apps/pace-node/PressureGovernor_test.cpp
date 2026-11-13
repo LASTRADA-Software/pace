@@ -406,3 +406,46 @@ TEST_CASE("An own-stall sample restarts the foreign stall's escalation clock", "
     CHECK(at30.level == PressureLevel::Shed);
     CHECK(at30.killYoungest);
 }
+
+TEST_CASE("A level whose threshold is disabled is never entered, escalation included", "[node][pressure]")
+{
+    constexpr auto DeepFreeze = Script { .some = 60.0, .full = 40.0, .compiles = 0.0 };
+
+    SECTION("yield disabled: a foreign stall stays calm, and a freeze still sheds")
+    {
+        core::platform::ManualClock clock;
+        auto thresholds = PressureThresholds {};
+        thresholds.yieldEnter = Node::DisabledPressureThreshold;
+        PressureGovernor governor { thresholds, Configured, clock };
+        CHECK(governor.Step(SampleOf(Script { .some = 60.0, .full = 0.0, .compiles = 0.0 }), 8 * GiB).level
+              == PressureLevel::Calm);
+        CHECK(governor.Step(SampleOf(DeepFreeze), 8 * GiB).level == PressureLevel::Shed);
+    }
+    SECTION("shed disabled: a freeze yields, and a yield held past twice the dwell is not escalated")
+    {
+        core::platform::ManualClock clock;
+        auto thresholds = PressureThresholds {};
+        thresholds.shedEnter = Node::DisabledPressureThreshold;
+        PressureGovernor governor { thresholds, Configured, clock };
+        CHECK(governor.Step(SampleOf(DeepFreeze), 8 * GiB).level == PressureLevel::Yield);
+        for ([[maybe_unused]] auto const tick: std::views::iota(0, 6))
+        {
+            clock.advance(10s);
+            auto const decision = governor.Step(SampleOf(DeepFreeze), 8 * GiB);
+            CHECK(decision.level == PressureLevel::Yield);
+            CHECK_FALSE(decision.killYoungest);
+        }
+    }
+}
+
+TEST_CASE("Retune moves the thresholds of a running governor", "[node][pressure]")
+{
+    Rig rig;
+    constexpr auto Mild = Script { .some = 7.0, .full = 0.0, .compiles = 0.0 };
+    CHECK(rig.After(1s, Mild, 8 * GiB).level == PressureLevel::Calm);
+    auto lower = PressureThresholds {};
+    lower.yieldEnter = 6.0;
+    lower.yieldExit = 3.0;
+    rig.governor.Retune(lower);
+    CHECK(rig.After(1s, Mild, 8 * GiB).level == PressureLevel::Yield);
+}

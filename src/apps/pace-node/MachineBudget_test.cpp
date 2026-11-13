@@ -509,3 +509,39 @@ TEST_CASE("MachineBudget.dial-setbacks-are-filed-under-the-budget-subject", "[no
     CHECK(fixture.SendThrough(up));
     CHECK(recoveries() == 1);
 }
+
+TEST_CASE("MachineBudget.pressure-allowance-lowers-the-budget-and-carries-the-level", "[node][machinebudget][pressure]")
+{
+    // C6: a yielding machine reports what compiles held when the pressure began as its whole budget, and the level
+    // that tells the queue to admit nothing new on it. Derived from `MachineBudgetOf` itself (R3), not a figure.
+    auto const machine = MachineOf(16, 96 * GiB);
+    auto const derived = MachineBudgetOf(NodeConfig {}, machine, HeldCharges {}).memoryBudgetBytes;
+    REQUIRE(derived > 30 * GiB);
+
+    auto const yielding =
+        MachineBudgetOf(NodeConfig {},
+                        machine,
+                        HeldCharges {},
+                        MachinePressure { .level = Wire::PressureLevel::Yield, .allowanceBytes = 30 * GiB });
+    CHECK(yielding.memoryBudgetBytes == 30 * GiB);
+    CHECK(yielding.pressure == Wire::PressureLevel::Yield);
+
+    // The allowance only ever LOWERS: one above the configured budget leaves the budget as configured.
+    auto const ramped =
+        MachineBudgetOf(NodeConfig {},
+                        machine,
+                        HeldCharges {},
+                        MachinePressure { .level = Wire::PressureLevel::Calm, .allowanceBytes = derived + GiB });
+    CHECK(ramped.memoryBudgetBytes == derived);
+    CHECK(ramped.pressure == Wire::PressureLevel::Calm);
+
+    // No watcher is calm and unlowered.
+    auto const unwatched = MachineBudgetOf(NodeConfig {}, machine, HeldCharges {});
+    CHECK(unwatched.memoryBudgetBytes == derived);
+    CHECK(unwatched.pressure == Wire::PressureLevel::Calm);
+
+    // And the report carries both onto the wire.
+    auto const wire = MachineBudgetToWire(yielding, {});
+    CHECK(wire.memoryBudgetBytes == 30 * GiB);
+    CHECK(wire.pressure == Wire::PressureLevel::Yield);
+}

@@ -112,6 +112,24 @@ namespace
         });
     }
 
+    /// `--memory-pressure-yield` and `--memory-pressure-shed`: a PSI `avg10` percentage, 0 to 100.
+    ///
+    /// Zero is accepted and turns that level off (`MemoryPressureThresholdsOf`); above 100 is refused, since no
+    /// stall share exceeds the whole window and such a level could never be entered -- which zero already says.
+    /// @param sv Text to parse.
+    /// @return The percentage, or why it is not one.
+    [[nodiscard]] std::expected<std::uint32_t, ConfigError> ParsePressurePercent(std::string_view sv)
+    {
+        auto value = 0U;
+        auto const* const begin = sv.data();
+        auto const* const end = std::next(begin, static_cast<std::ptrdiff_t>(sv.size()));
+        auto const [ptr, ec] = std::from_chars(begin, end, value);
+        if (ec != std::errc {} || ptr != end || value > MaxPressurePercent)
+            return std::unexpected(
+                ArgvError(ConfigErrorCode::OutOfRange, std::format("not a percentage from 0 to 100: {}", sv)));
+        return value;
+    }
+
     /// `--history-requesters`: how many keys each keyed compile history keeps by name.
     ///
     /// Zero is refused: it would keep no machine by name and fold every one into `other`, which answers "who asked"
@@ -1406,6 +1424,37 @@ std::span<OptionSpec<NodeConfig> const> NodeOptions() noexcept
             .reloadable = Reloadable::Yes,
             .same = FieldEq<&NodeConfig::compileMemoryLimitBytes>(),
             .present = PresentIn<&NodeConfig::compileMemoryLimitBytes>(),
+        },
+        // The pressure governor's two thresholds (layer C). Not worker rows, for `--machine-memory-budget`'s reason:
+        // every node reports its machine's budget, and a yielding `--slots=0` node lowers what its own local
+        // compiles may be admitted. Reloadable and local: the watcher reads them at every sample.
+        {
+            .primary = "--memory-pressure-yield",
+            .arity = Arity::Value,
+            .operand = "=<percent>",
+            .apply = AssignFrom<&NodeConfig::memoryPressureYieldPercent, ParsePressurePercent>(),
+            .description = "stop admitting compiles onto this machine while it\n"
+                           "spends more than this share of 10 s stalled on memory\n"
+                           "(PSI some) and the stall is not the compiles' own.\n"
+                           "Default 10; 0 never yields. Linux. Reloadable.",
+            .yamlKey = "memory_pressure_yield",
+            .reloadable = Reloadable::Yes,
+            .same = FieldEq<&NodeConfig::memoryPressureYieldPercent>(),
+            .present = PresentIn<&NodeConfig::memoryPressureYieldPercent>(),
+        },
+        {
+            .primary = "--memory-pressure-shed",
+            .arity = Arity::Value,
+            .operand = "=<percent>",
+            .apply = AssignFrom<&NodeConfig::memoryPressureShedPercent, ParsePressurePercent>(),
+            .description = "also kill the youngest running compile, one per 10 s,\n"
+                           "while the whole machine is frozen on memory for more\n"
+                           "than this share of 10 s (PSI full). Default 5; 0\n"
+                           "never kills. Linux. Reloadable.",
+            .yamlKey = "memory_pressure_shed",
+            .reloadable = Reloadable::Yes,
+            .same = FieldEq<&NodeConfig::memoryPressureShedPercent>(),
+            .present = PresentIn<&NodeConfig::memoryPressureShedPercent>(),
         },
         {
             .primary = "--compile-estimate-default",
@@ -2816,6 +2865,8 @@ ServiceSpec MakeNodeServiceSpec(std::filesystem::path const& exePath, NodeConfig
     emitIfPresent("machine-memory-budget", cfg.machineMemoryBudgetBytes);
     emitIfPresent("compile-memory-limit", cfg.compileMemoryLimitBytes);
     emitIfPresent("compile-estimate-default", cfg.compileEstimateDefaultBytes);
+    emitIfPresent("memory-pressure-yield", cfg.memoryPressureYieldPercent);
+    emitIfPresent("memory-pressure-shed", cfg.memoryPressureShedPercent);
     emitIfExplicit("admin-listen", cfg.adminListen, cfg.adminListenExplicit);
     emitIfExplicit("mcp-listen", cfg.mcpListen, cfg.mcpListenExplicit);
     if (cfg.dashboard)

@@ -22,6 +22,7 @@
 #include <system_error>
 #include <vector>
 
+#include <tests/OwnCgroup.hpp>
 #include <tests/Unwrap.hpp>
 
 using Pace::Testing::Unwrap;
@@ -532,6 +533,119 @@ TEST_CASE("ProcessRunner.cgroup-runner-on-a-build-without-support-never-asks-for
     REQUIRE(run.exitCode == 0);
     CHECK_FALSE(run.peakMemoryBytes.has_value());
     CHECK(source->Created() == 0);
+}
+
+#endif
+
+#if defined(__linux__)
+
+namespace
+{
+
+/// What a job reports about its own death, as a case scripts it.
+struct KillMarks
+{
+    bool shed = false;      ///< `IJobCgroup::Shed`.
+    bool oomKilled = false; ///< `IJobCgroup::OomKilled`.
+};
+
+/// A job that runs the child in a REAL cgroup -- this process's own, so nothing on the machine moves -- and answers
+/// the kill marks the case gave it. The descriptor is borrowed, never closed here.
+class MarkedJob final: public Pace::Platform::IJobCgroup
+{
+  public:
+    MarkedJob(int descriptor, KillMarks marks):
+        _descriptor { descriptor },
+        _marks { marks }
+    {
+    }
+    [[nodiscard]] int DirectoryDescriptor() const noexcept override
+    {
+        return _descriptor;
+    }
+    [[nodiscard]] std::optional<std::uint64_t> PeakBytes() const override
+    {
+        return std::nullopt;
+    }
+    [[nodiscard]] bool OomKilled() const override
+    {
+        return _marks.oomKilled;
+    }
+    [[nodiscard]] bool Shed() const noexcept override
+    {
+        return _marks.shed;
+    }
+
+  private:
+    int _descriptor;
+    KillMarks _marks;
+};
+
+/// Makes `MarkedJob`s over this process's own cgroup, and counts the spawns the system refused to place there.
+class MarkedJobSource final: public Pace::Platform::IJobCgroupSource
+{
+  public:
+    MarkedJobSource(int descriptor, KillMarks marks):
+        _descriptor { descriptor },
+        _marks { marks }
+    {
+    }
+    [[nodiscard]] std::expected<std::unique_ptr<Pace::Platform::IJobCgroup>, std::error_code> Create() override
+    {
+        return std::make_unique<MarkedJob>(_descriptor, _marks);
+    }
+    void NoteUnmeasured(Unmeasured why) noexcept override
+    {
+        if (why == Unmeasured::SpawnRefused)
+            ++_refused;
+    }
+    /// @return How many spawns ran outside the cgroup, where the runner drops the job.
+    [[nodiscard]] int Refused() const noexcept
+    {
+        return _refused;
+    }
+
+  private:
+    int _descriptor;
+    KillMarks _marks;
+    std::atomic<int> _refused { 0 };
+};
+
+} // namespace
+
+TEST_CASE("ProcessRunner.a-killed-compile-names-shed-before-ceiling-before-signal", "[pace-cc][process][KillYoungest]")
+{
+    // C1. `KillOf` reads the job's marks while its cgroup is alive: a shed is the governor's own kill and names
+    // itself whatever else is true; an OOM kill inside the ceiling comes next; anything else is a plain signal.
+    if (!CanSpawnIntoCgroups())
+        SKIP("this build cannot spawn into a cgroup, so its runner never keeps a job to read");
+    Pace::Testing::OwnCgroupDirectory const own;
+    if (own.Descriptor() < 0)
+        SKIP("this process's own cgroup v2 directory cannot be opened");
+
+    struct Row
+    {
+        KillMarks marks {};
+        Pace::Platform::CompileKill expected {};
+    };
+    auto const rows = std::array {
+        Row { .marks = { .shed = true, .oomKilled = true }, .expected = Pace::Platform::CompileKill::Shed },
+        Row { .marks = { .shed = true, .oomKilled = false }, .expected = Pace::Platform::CompileKill::Shed },
+        Row { .marks = { .shed = false, .oomKilled = true }, .expected = Pace::Platform::CompileKill::Ceiling },
+        Row { .marks = { .shed = false, .oomKilled = false }, .expected = Pace::Platform::CompileKill::Signal },
+    };
+    for (auto const& row: rows)
+    {
+        auto const source = std::make_shared<MarkedJobSource>(own.Descriptor(), row.marks);
+        auto const runner = MakeProcessRunner(source);
+        auto const killed = runner->RunCaptureSplit(ShellCommand("kill -9 $$"));
+        if (source->Refused() != 0)
+            SKIP("the system refused to start a child inside this process's own cgroup");
+        CAPTURE(row.marks.shed, row.marks.oomKilled);
+        CHECK(killed.exitCode == 137);
+        REQUIRE(killed.killed.has_value());
+        CHECK(Unwrap(killed.killed) == row.expected);
+    }
 }
 
 #endif

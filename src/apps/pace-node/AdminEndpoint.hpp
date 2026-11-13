@@ -95,6 +95,9 @@ struct NodeScrapeSources
     /// `busySlots`' reason. Empty reads as not cordoned, which is what a scrape of a node
     /// whose worker nobody wired is.
     std::function<bool()> cordoned {};
+    /// This machine's memory-pressure level, as `HostCapacity::memoryPressure` carries it; a callable for
+    /// `busySlots`' reason. Empty reads as calm, which is what a node running no pressure watcher reports.
+    std::function<std::size_t()> memoryPressure {};
     /// The node's cache, or **null** when it runs none.
     CacheTier const* cache {};
     /// Concurrent compiles this node advertises.

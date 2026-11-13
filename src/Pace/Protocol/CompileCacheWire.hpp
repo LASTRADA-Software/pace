@@ -5426,10 +5426,10 @@ inline constexpr std::size_t MaxHistoryBucketBytes =
 /// a refused heartbeat is a worker the fleet stops seeing, which is the failure this
 /// whole subsystem exists to make visible rather than to cause. Half the payload is
 /// left for everything else, which is two orders of magnitude more than the rest of
-/// a heartbeat needs. Three KiB of that half are given to the condition list, which is what bought its
-/// 25th and 26th rows without lowering a field ceiling: a full batch is `MaxHistoryBucketsPerHeartbeat` x
+/// a heartbeat needs. Four KiB of that half are given to the condition list, which is what bought its
+/// 25th, 26th and 27th rows without lowering a field ceiling: a full batch is `MaxHistoryBucketsPerHeartbeat` x
 /// `MaxHistoryBucketBytes`, still well under what is left.
-inline constexpr std::size_t HistoryPayloadShare = (MaxControlPayload / 2) - 3072;
+inline constexpr std::size_t HistoryPayloadShare = (MaxControlPayload / 2) - 4096;
 
 static_assert(MaxHistoryBucketsPerHeartbeat * MaxHistoryBucketBytes <= HistoryPayloadShare,
               "a history batch must leave room for the heartbeat carrying it");

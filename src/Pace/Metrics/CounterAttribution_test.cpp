@@ -127,6 +127,8 @@ constexpr std::array WriterFiles {
     SurfaceWriterFile { .surface = MetricsSurface::NodeFrameEndpoint, .path = "src/Pace/Distributed/TicketVerifier.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::NodeFrameEndpoint, .path = "src/Pace/Distributed/TicketVerifier.hpp" },
     SurfaceWriterFile { .surface = MetricsSurface::NodeFrameEndpoint, .path = "src/apps/pace-node/EndpointResolver.cpp" },
+    // The memory-pressure watcher: every node builds it, no daemon does -- `EndpointResolver`'s reason above.
+    SurfaceWriterFile { .surface = MetricsSurface::NodeFrameEndpoint, .path = "src/apps/pace-node/PressureWatcher.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::NodeFrameEndpoint, .path = "src/apps/pace-node/FleetTextResponder.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::NodeFrameEndpoint, .path = "src/apps/pace-node/FrameEndpoint.cpp" },
     SurfaceWriterFile { .surface = MetricsSurface::NodeFrameEndpoint, .path = "src/apps/pace-node/MembershipGate.hpp" },
@@ -730,8 +732,8 @@ TEST_CASE("counter-attribution: the mechanism figures quoted beside the table st
     CHECK(outcomeRow.size() == 10);
     CHECK(returned.size() == 6);
     // Ten members of the private tier's profile and six of the shared tier's, which leaves its
-    // upstream members absent.
-    CHECK(profileRow.size() == 16);
+    // upstream members absent -- and four of the pressure watcher's level table (`.seconds`, `.entries`).
+    CHECK(profileRow.size() == 20);
 
     auto const anyWriter = AnyWriterNames(spellings);
 
@@ -739,7 +741,7 @@ TEST_CASE("counter-attribution: the mechanism figures quoted beside the table st
     // catalogue minus the exemptions, not a count: a row nobody writes and nobody has excused is a
     // row whose surface was guessed.
     CHECK(anyWriter.size() == nonExempt.size());
-    CHECK(nonExempt.size() - incremented.size() == 180);
+    CHECK(nonExempt.size() - incremented.size() == 184);
 
     // 153 rows have a refusal row; 152 of them have no increment site. Two figures one apart
     // measuring different things is how a census gets quoted wrong -- the first draft of the

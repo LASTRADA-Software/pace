@@ -1623,6 +1623,21 @@ class IMetricsSink
         /// global OOM kill, systemd-oomd, or a person. Each was refused and compiled locally.
         WorkerCompilesKilledSignal,
 
+        /// Whole seconds this node's pressure watcher held each acting level (layer C of the compile memory
+        /// defence): `Yield` (no new compile admitted on this machine) and `Shed` (that, and its youngest compile
+        /// killed once per dwell). Their rate over a window is the share of it spent there; calm is the rest, so
+        /// it has no row -- this enumeration is two rows from its `uint8_t` limit. Counted only where the watcher
+        /// runs -- Linux with PSI -- so both stand still on a node without it.
+        NodeMemoryPressureYieldSeconds,
+        /// See `NodeMemoryPressureYieldSeconds`.
+        NodeMemoryPressureShedSeconds,
+        /// Times the pressure watcher entered each acting level: from calm, or -- for `Yield` -- stepping down
+        /// from `Shed`, and -- for `Shed` -- escalating a sustained yield. A rise in entries with few seconds behind
+        /// them is a machine stalling in short bursts.
+        NodeMemoryPressureYieldEntries,
+        /// See `NodeMemoryPressureYieldEntries`.
+        NodeMemoryPressureShedEntries,
+
         Last,
     };
 
