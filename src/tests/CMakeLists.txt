@@ -4958,6 +4958,47 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
+# A compile over its node's memory ceiling is killed by the kernel and rebuilt locally.
+#
+# Registered here rather than beside the node for the reason `dist-compile-e2e` is: it
+# names two executables, and `src/apps` walks its app table in order.
+#
+# What it covers that the fake `ICgroupHost` cases cannot: that `compiles/memory.max` is
+# written on a REAL delegated cgroup, that the kernel kills a real compiler there, and that
+# the node classifies that kill as the ceiling's and its client still builds. Skips 77 with
+# the reason on a host with no delegated memory cgroup (`systemd-run --user`), an older
+# kernel or glibc, or no Linux at all -- probed before any node starts, so a node failing
+# to cap on a host that delegates is a FAILURE rather than a skip.
+if(NOT TARGET pace-node OR NOT TARGET pace-cc)
+    message(STATUS "compile-oom-e2e: compile node or launcher not built — skipping")
+elseif(WIN32)
+    # Absent is not skipped: the ceiling is a Linux cgroup, and the row says so.
+    pace_register_skipped_test("compile-oom-e2e"
+        "the compile memory ceiling is a Linux cgroup, and this is Windows")
+else()
+    add_test(
+        NAME "compile-oom-e2e"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/compile-oom-e2e.sh"
+            --node "$<TARGET_FILE:pace-node>"
+            --launcher "$<TARGET_FILE:pace-cc>"
+            --compiler "${CMAKE_CXX_COMPILER}"
+    )
+    # Serial: it drives two compiles of ~0.5 GiB each and starts real nodes, so it must not
+    # race the other server-starting smoke tests for CPU, memory or ports. The TIMEOUT sits
+    # above the fixture's own bounds so a stall is reported by the fixture's verdict, never
+    # by a bare `***Timeout`: per node 120 s to be ready, 30 s for the ceiling line, 120 s to
+    # register and 10 s to stop, twice, plus one 120 s counter wait -- 680 s -- beside six
+    # compiles of seconds each. Measured at 20.6 s on a warm 32-core host under clang++. When
+    # `e2e_wait_seconds` in the script moves, this moves with it.
+    set_tests_properties("compile-oom-e2e" PROPERTIES
+        LABELS "smoke"
+        SKIP_RETURN_CODE 77
+        RUN_SERIAL TRUE
+        TIMEOUT 900
+    )
+endif()
+
+# ---------------------------------------------------------------------------
 # Two compile-node PROCESSES on one host must not share a scratch root (#279).
 #
 # Registered here rather than beside the node for the reason `dist-compile-e2e` is:
