@@ -191,8 +191,9 @@ std::expected<CgroupLayout, CgroupFailure> PrepareJobCgroups(ICgroupHost const& 
 
     // `/` is the root of THIS process's cgroup namespace (a service with `ProtectControlGroups=private`
     // sees its own subtree as the mount's root), so it joins like any other path.
-    auto layout = CgroupLayout { .delegated = own->size() > 1 ? mount / own->substr(1) : mount, .leaf = {} };
+    auto layout = CgroupLayout { .delegated = own->size() > 1 ? mount / own->substr(1) : mount, .leaf = {}, .compiles = {} };
     layout.leaf = layout.delegated / NodeLeafName;
+    layout.compiles = layout.delegated / CompilesCgroupName;
 
     // Read once: its absence is how a v1 or hybrid host shows (the mount holds no such file), and its
     // contents say whether the memory controller can be handed down at all.
@@ -259,21 +260,50 @@ std::expected<CgroupLayout, CgroupFailure> PrepareJobCgroups(ICgroupHost const& 
     if (auto const peak = host.ReadFile(layout.leaf / "memory.peak"); !peak.has_value())
         return Failed(CgroupUnavailable::PeakNotReadable, Because(layout.leaf / "memory.peak", peak.error()));
 
+    // `compiles/` carries the ceiling over every job, so it is a sibling of the node's leaf and never
+    // its parent: the node is never inside the limit it enforces.
+    if (auto const made = host.MakeDirectory(layout.compiles); !made.has_value() && made.error() != std::errc::file_exists)
+        return Failed(CgroupUnavailable::CompilesNotCreated, Because(layout.compiles, made.error()));
+    auto const compilesControl = layout.compiles / "cgroup.subtree_control";
+    if (auto const enabled = host.WriteFile(compilesControl, "+memory"); !enabled.has_value())
+        return Failed(CgroupUnavailable::CompilesNotCreated, Because(compilesControl, enabled.error()));
+    if (auto const now = host.ReadFile(compilesControl); now.has_value() && !ListsWord(*now, "memory"))
+        return Failed(CgroupUnavailable::CompilesNotCreated,
+                      compilesControl.string() + " does not list memory after it was enabled");
+    // No swap for a compile (a thrashing compile freezes a desktop long before it dies) and no group kill
+    // at the ceiling (a job is its own group; the ceiling reclaims one process at a time). A kernel
+    // without swap accounting has no `memory.swap.max`: the ceiling works without it, so a refusal here
+    // is tolerated rather than fatal.
+    static_cast<void>(host.WriteFile(layout.compiles / "memory.swap.max", "0"));
+    static_cast<void>(host.WriteFile(layout.compiles / "memory.oom.group", "0"));
+
     // A node killed before it could remove its jobs (nothing cleans a hand-delegated subtree) leaves
-    // `job-*` behind. Swept now, so `Create` never has to step over a long run of them; a name it still
+    // `job-*` behind -- under `compiles/`, or directly under the delegated cgroup if the node was an
+    // older build. Swept now, so `Create` never has to step over a long run of them; a name it still
     // meets is skipped there as a backstop.
-    if (auto const entries = host.ListDirectory(layout.delegated); entries.has_value())
+    for (auto const& parent: { layout.compiles, layout.delegated })
     {
+        auto const entries = host.ListDirectory(parent);
+        if (!entries.has_value())
+            continue;
         for (auto const& name: *entries)
         {
             if (!name.starts_with("job-"))
                 continue;
-            if (auto const removed = RemoveCgroup(host, layout.delegated / name, teardown); !removed.has_value())
-                return Failed(CgroupUnavailable::StaleJobCgroups, Because(layout.delegated / name, removed.error()));
+            if (auto const removed = RemoveCgroup(host, parent / name, teardown); !removed.has_value())
+                return Failed(CgroupUnavailable::StaleJobCgroups, Because(parent / name, removed.error()));
         }
     }
 
     return layout;
+}
+
+std::expected<void, std::error_code> SetCompileCeiling(ICgroupHost const& host,
+                                                       CgroupLayout const& layout,
+                                                       std::optional<std::uint64_t> bytes)
+{
+    return host.WriteFile(layout.compiles / "memory.max",
+                          bytes.has_value() ? std::to_string(*bytes) : std::string { "max" });
 }
 
 CgroupJobSource::CgroupJobSource(std::shared_ptr<ICgroupHost const> host,
@@ -293,7 +323,7 @@ std::expected<std::unique_ptr<IJobCgroup>, std::error_code> CgroupJobSource::Cre
     auto lastError = std::error_code {};
     for ([[maybe_unused]] auto const attempt: std::views::iota(std::uint32_t { 0 }, Attempts))
     {
-        auto const directory = _layout.delegated / std::format("job-{}", _next.fetch_add(1, std::memory_order_relaxed));
+        auto const directory = _layout.compiles / std::format("job-{}", _next.fetch_add(1, std::memory_order_relaxed));
         auto const made = _host->MakeDirectory(directory);
         if (!made.has_value())
         {
@@ -308,6 +338,9 @@ std::expected<std::unique_ptr<IJobCgroup>, std::error_code> CgroupJobSource::Cre
             static_cast<void>(_host->RemoveCgroupDirectory(directory));
             return std::unexpected { descriptor.error() };
         }
+        // A job is killed whole when it is the victim: one compile is one process tree, and half of one is
+        // worth nothing. A kernel without the file still has the ceiling, so a refusal is tolerated.
+        static_cast<void>(_host->WriteFile(directory / "memory.oom.group", "1"));
         return std::make_unique<CgroupJob>(_host, directory, *descriptor, _teardown);
     }
     return std::unexpected { lastError };

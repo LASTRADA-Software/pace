@@ -10,6 +10,7 @@
 #include <expected>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -155,6 +156,7 @@ enum class CgroupUnavailable : std::uint8_t
     MemoryNotEnabled,         ///< The memory controller could not be enabled for the node's children.
     PeakNotReadable,          ///< The kernel offers no `memory.peak` (older than 5.19).
     SpawnIntoRefused,         ///< The system refuses `clone3` into a cgroup (a seccomp filter).
+    CompilesNotCreated,       ///< The `compiles/` cgroup beneath the node's could not be made or given memory.
     Last,                     ///< Not a cause.
 };
 
@@ -203,6 +205,9 @@ inline constexpr EnumTable<CgroupUnavailable, CgroupUnavailableRow> CgroupUnavai
       .id = "spawn-into-refused",
       .reason = "the system refuses to start a process inside a cgroup (a seccomp filter such as "
                 "RestrictNamespaces= blocks clone3)" },
+    { .cause = CgroupUnavailable::CompilesNotCreated,
+      .id = "compiles-not-created",
+      .reason = "the compiles cgroup beneath the node's own could not be created or given the memory controller" },
 } };
 static_assert(RowsInEnumeratorOrder(CgroupUnavailableTable, &CgroupUnavailableRow::cause),
               "CgroupUnavailableTable must hold one row per CgroupUnavailable, in enumerator order");
@@ -231,6 +236,9 @@ struct CgroupLayout
 {
     std::filesystem::path delegated; ///< The node's own cgroup, whose children are the jobs.
     std::filesystem::path leaf;      ///< The leaf the node moved itself into.
+    /// The intermediate cgroup every job lives in: the one place a ceiling over ALL compiles is set, and
+    /// never on `delegated`, which holds the node itself.
+    std::filesystem::path compiles;
 };
 
 /// The cgroup v2 mount point on every systemd and container host.
@@ -239,6 +247,9 @@ inline constexpr std::string_view DefaultCgroupMount = "/sys/fs/cgroup";
 /// The name of the leaf the node moves itself into: cgroup v2 forbids a cgroup from holding processes
 /// AND delegating a controller to its children, so the node steps aside from the jobs' parent.
 inline constexpr std::string_view NodeLeafName = "node";
+
+/// The name of the intermediate cgroup holding every `job-<n>`; the compile ceiling is set on it.
+inline constexpr std::string_view CompilesCgroupName = "compiles";
 
 /// The cgroup path of a `/proc/self/cgroup` document: the unified-hierarchy line (`0::<path>`).
 /// @param document The file's text.
@@ -292,7 +303,18 @@ struct CgroupTeardownPolicy
     std::filesystem::path const& mount = std::filesystem::path { DefaultCgroupMount },
     CgroupTeardownPolicy const& teardown = {});
 
-/// Makes `job-<n>` cgroups under the node's delegated cgroup.
+/// Set the memory ceiling over all compiles: `memory.max` of `compiles/`.
+///
+/// The node itself sits in `leaf`, a sibling, so the ceiling never applies to it.
+/// @param host The cgroup tree.
+/// @param layout What `PrepareJobCgroups` returned.
+/// @param bytes The ceiling, or disengaged for none (`max`).
+/// @return Nothing, or the platform's refusal.
+[[nodiscard]] std::expected<void, std::error_code> SetCompileCeiling(ICgroupHost const& host,
+                                                                     CgroupLayout const& layout,
+                                                                     std::optional<std::uint64_t> bytes);
+
+/// Makes `job-<n>` cgroups under the node's `compiles/` cgroup, each a whole OOM group.
 class CgroupJobSource final: public IJobCgroupSource
 {
   public:

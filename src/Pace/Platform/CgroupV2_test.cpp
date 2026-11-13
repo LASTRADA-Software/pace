@@ -94,12 +94,94 @@ TEST_CASE("A delegated cgroup is prepared: leaf, move, memory, in that order", "
     CHECK(layout.leaf == std::string { Delegated } + "/node");
     // The process leaves the parent BEFORE the controller is enabled for its children: the other order is
     // refused by the kernel's no-internal-processes rule.
-    REQUIRE(host->trail.size() == 3);
+    REQUIRE(host->trail.size() >= 3);
     CHECK(host->trail[0] == "mkdir " + std::string { Delegated } + "/node");
     CHECK(host->trail[1] == "write " + std::string { Delegated } + "/node/cgroup.procs 4242");
     CHECK(host->trail[2] == "write " + std::string { Delegated } + "/cgroup.subtree_control +memory");
     // The probe's descriptor is not left open.
     CHECK(host->closed.size() == 1);
+}
+
+TEST_CASE("A prepared layout puts jobs under compiles/ and forbids them swap", "[platform][cgroup]")
+{
+    auto const host = DelegatedHost();
+    auto const compiles = std::string { Delegated } + "/compiles";
+
+    auto const layout = Unwrap(PrepareJobCgroups(*host));
+
+    CHECK(layout.compiles == layout.delegated / CompilesCgroupName);
+    CHECK(layout.compiles == compiles);
+    // The delegated cgroup's memory is enabled BEFORE compiles/ is made, and compiles/'s own BEFORE its limits.
+    auto const position = [&](std::string const& entry) -> std::ptrdiff_t {
+        auto const found = std::ranges::find(host->trail, entry);
+        REQUIRE(found != host->trail.end());
+        return found - host->trail.begin();
+    };
+    CHECK(position("write " + std::string { Delegated } + "/cgroup.subtree_control +memory")
+          < position("mkdir " + compiles));
+    CHECK(position("mkdir " + compiles) < position("write " + compiles + "/cgroup.subtree_control +memory"));
+    CHECK(position("write " + compiles + "/cgroup.subtree_control +memory")
+          < position("write " + compiles + "/memory.swap.max 0"));
+    CHECK(std::ranges::contains(host->trail, "write " + compiles + "/memory.oom.group 0"));
+}
+
+TEST_CASE("A job cgroup is a whole OOM group under compiles/", "[platform][cgroup]")
+{
+    auto host = DelegatedHost();
+    auto* const raw = host.get();
+    auto const layout = Unwrap(PrepareJobCgroups(*host));
+    CgroupJobSource source { std::move(host), layout };
+
+    auto const job = NewJob(source);
+
+    auto const directory = std::string { Delegated } + "/compiles/job-1";
+    CHECK(raw->directories.contains(directory));
+    CHECK(std::ranges::contains(raw->trail, "write " + directory + "/memory.oom.group 1"));
+}
+
+TEST_CASE("The compile ceiling is written to compiles/memory.max", "[platform][cgroup]")
+{
+    auto const host = DelegatedHost();
+    auto const layout = Unwrap(PrepareJobCgroups(*host));
+    host->trail.clear();
+    auto const written = std::string { "write " } + std::string { Delegated } + "/compiles/memory.max ";
+
+    SECTION("a byte count")
+    {
+        CHECK(SetCompileCeiling(*host, layout, std::uint64_t { 48 } * 1024 * 1024 * 1024).has_value());
+        REQUIRE(host->trail.size() == 1);
+        CHECK(host->trail[0] == written + "51539607552");
+    }
+    SECTION("no ceiling")
+    {
+        CHECK(SetCompileCeiling(*host, layout, std::nullopt).has_value());
+        REQUIRE(host->trail.size() == 1);
+        CHECK(host->trail[0] == written + "max");
+    }
+    SECTION("a refusal is the caller's to hear")
+    {
+        host->writeRefusals[std::string { Delegated } + "/compiles/memory.max"] = std::errc::permission_denied;
+        CHECK_FALSE(SetCompileCeiling(*host, layout, 1).has_value());
+    }
+}
+
+TEST_CASE("A compiles/ cgroup that cannot be made is a stated cause", "[platform][cgroup]")
+{
+    auto const host = DelegatedHost();
+    host->unmakeable.insert(std::string { Delegated } + "/compiles");
+
+    auto const layout = PrepareJobCgroups(*host);
+
+    REQUIRE_FALSE(layout.has_value());
+    CHECK(layout.error().cause == CgroupUnavailable::CompilesNotCreated);
+}
+
+TEST_CASE("A missing memory.swap.max does not make compiles/ unavailable", "[platform][cgroup]")
+{
+    auto const host = DelegatedHost();
+    host->writeRefusals[std::string { Delegated } + "/compiles/memory.swap.max"] = std::errc::no_such_file_or_directory;
+
+    CHECK(PrepareJobCgroups(*host).has_value());
 }
 
 TEST_CASE("A cgroup namespace root is mounted where the mount is", "[platform][cgroup]")
@@ -253,20 +335,23 @@ TEST_CASE("A job's cgroup is a fresh numbered directory, read for its peak, then
         auto first = NewJob(source);
         auto second = NewJob(source);
         CHECK(first->DirectoryDescriptor() != second->DirectoryDescriptor());
-        raw->files[layout.delegated.generic_string() + "/job-1/memory.peak"] = "123456\n";
+        raw->files[layout.compiles.generic_string() + "/job-1/memory.peak"] = "123456\n";
         CHECK(Unwrap(first->PeakBytes()) == 123456);
         // No file, no answer: never a made-up figure.
         CHECK_FALSE(second->PeakBytes().has_value());
     }
 
     // Destroyed in reverse: job-2 first. The kill precedes the removal, for each.
-    REQUIRE(raw->trail.size() == 6);
-    CHECK(raw->trail[0] == "mkdir " + layout.delegated.generic_string() + "/job-1");
-    CHECK(raw->trail[1] == "mkdir " + layout.delegated.generic_string() + "/job-2");
-    CHECK(raw->trail[2] == "write " + layout.delegated.generic_string() + "/job-2/cgroup.kill 1");
-    CHECK(raw->trail[3] == "rmdir " + layout.delegated.generic_string() + "/job-2");
-    CHECK(raw->trail[4] == "write " + layout.delegated.generic_string() + "/job-1/cgroup.kill 1");
-    CHECK(raw->trail[5] == "rmdir " + layout.delegated.generic_string() + "/job-1");
+    auto const jobs = layout.compiles.generic_string();
+    REQUIRE(raw->trail.size() == 8);
+    CHECK(raw->trail[0] == "mkdir " + jobs + "/job-1");
+    CHECK(raw->trail[1] == "write " + jobs + "/job-1/memory.oom.group 1");
+    CHECK(raw->trail[2] == "mkdir " + jobs + "/job-2");
+    CHECK(raw->trail[3] == "write " + jobs + "/job-2/memory.oom.group 1");
+    CHECK(raw->trail[4] == "write " + jobs + "/job-2/cgroup.kill 1");
+    CHECK(raw->trail[5] == "rmdir " + jobs + "/job-2");
+    CHECK(raw->trail[6] == "write " + jobs + "/job-1/cgroup.kill 1");
+    CHECK(raw->trail[7] == "rmdir " + jobs + "/job-1");
 }
 
 TEST_CASE("A peak the kernel reports as zero or as text is not a measurement", "[platform][cgroup]")
@@ -280,7 +365,7 @@ TEST_CASE("A peak the kernel reports as zero or as text is not a measurement", "
     for (auto const text:
          { std::string_view { "0\n" }, std::string_view { "max\n" }, std::string_view { "" }, std::string_view { "12x\n" } })
     {
-        raw->files[layout.delegated.generic_string() + "/job-1/memory.peak"] = std::string { text };
+        raw->files[layout.compiles.generic_string() + "/job-1/memory.peak"] = std::string { text };
         CHECK_FALSE(job->PeakBytes().has_value());
     }
 }
@@ -291,7 +376,7 @@ TEST_CASE("A job's cgroup that is still draining is retried until it empties, an
     auto host = DelegatedHost();
     auto* const raw = host.get();
     auto const layout = Unwrap(PrepareJobCgroups(*host));
-    raw->busyRemovals.insert(layout.delegated.generic_string() + "/job-1");
+    raw->busyRemovals.insert(layout.compiles.generic_string() + "/job-1");
 
     SECTION("it empties in time")
     {
@@ -324,12 +409,12 @@ TEST_CASE("A name an earlier node left behind is skipped, never adopted", "[plat
     auto host = DelegatedHost();
     auto* const raw = host.get();
     auto const layout = Unwrap(PrepareJobCgroups(*host));
-    raw->directories.insert(layout.delegated.generic_string() + "/job-1");
+    raw->directories.insert(layout.compiles.generic_string() + "/job-1");
     CgroupJobSource source { std::move(host), layout };
 
     auto const job = NewJob(source);
 
-    CHECK(raw->directories.contains(layout.delegated.generic_string() + "/job-2"));
+    CHECK(raw->directories.contains(layout.compiles.generic_string() + "/job-2"));
 }
 
 TEST_CASE("Job cgroups an earlier node left behind are swept at preparation, however many", "[platform][cgroup]")
@@ -337,7 +422,8 @@ TEST_CASE("Job cgroups an earlier node left behind are swept at preparation, how
     auto host = DelegatedHost();
     auto* const raw = host.get();
     for (auto const index: std::views::iota(1, 21))
-        raw->directories.insert(std::string { Delegated } + "/job-" + std::to_string(index));
+        raw->directories.insert(std::string { Delegated } + (index % 2 == 0 ? "/compiles/job-" : "/job-")
+                                + std::to_string(index));
     raw->directories.insert(std::string { Delegated } + "/not-a-job");
 
     auto const layout = Unwrap(PrepareJobCgroups(*host));
@@ -345,15 +431,15 @@ TEST_CASE("Job cgroups an earlier node left behind are swept at preparation, how
     // Killed, then removed; anything that is not a job is left alone.
     for (auto const index: std::views::iota(1, 21))
     {
-        CHECK_FALSE(raw->directories.contains(std::string { Delegated } + "/job-" + std::to_string(index)));
-        CHECK(std::ranges::contains(
-            raw->trail, "write " + std::string { Delegated } + "/job-" + std::to_string(index) + "/cgroup.kill 1"));
+        auto const where = std::string { Delegated } + (index % 2 == 0 ? "/compiles/job-" : "/job-") + std::to_string(index);
+        CHECK_FALSE(raw->directories.contains(where));
+        CHECK(std::ranges::contains(raw->trail, "write " + where + "/cgroup.kill 1"));
     }
     CHECK(raw->directories.contains(std::string { Delegated } + "/not-a-job"));
 
     CgroupJobSource source { std::move(host), layout };
     auto const job = NewJob(source);
-    CHECK(raw->directories.contains(std::string { Delegated } + "/job-1"));
+    CHECK(raw->directories.contains(std::string { Delegated } + "/compiles/job-1"));
 }
 
 TEST_CASE("A stale job cgroup that will not empty makes the facility unavailable, naming it", "[platform][cgroup]")
