@@ -2675,11 +2675,9 @@ keep it writable only by root
 tighten it to `0640 root:pace-node` if you put a `requirepass:` in it, since
 the default is readable by every local account.
 
-Compile peaks are **not measured** by the shipped unit, for the reason given under
-[measuring what a compile used](#measuring-what-a-compile-used-linux): measuring takes a
-delegated cgroup, and the unit keeps `ProtectControlGroups=yes`. The node runs correctly and says
-so with a `compile-memory-unmeasured` notice; the same section carries the drop-in that turns
-the measurement on.
+The shipped unit delegates the `memory` controller to the node, so compile peaks are measured and
+every compile runs under one memory ceiling; the reasoning for each line is under
+[memory: measurement, ceiling and pressure](#memory-measurement-ceiling-and-pressure-linux).
 
 Socket activation means systemd owns the port: it answers from boot, so a client
 that leases this worker never races its startup, and an idle worker costs
@@ -3414,7 +3412,7 @@ tally that also covers a full connection cap, so read the node's own counter: a 
 `pace_worker_jobs_refused_endpoint_busy_total` is the signal to raise
 `--compile-inflight-max`.
 
-#### Measuring what a compile used (Linux)
+#### Memory: measurement, ceiling and pressure (Linux)
 
 A worker reports the peak memory of each compile to the fleet, and the fleet's queue charges
 later compiles of the same kind by it. The figure the kernel offers every process for free,
@@ -3432,47 +3430,93 @@ left behind dies with the compile) and removed. At startup the node moves itself
 `node/` cgroup, as cgroup v2 requires of a cgroup that hands a controller to its children, and
 enables the `memory` controller for the others.
 
-That needs a cgroup the node may write to, which **the shipped unit does not give it**: it keeps
-`ProtectControlGroups=yes`, the cgroup filesystem is read-only to it, and the node runs with
-compile peaks unmeasured. It says so at startup (`compile peak memory is not measured ...` at
-Warn) and raises the `compile-memory-unmeasured` condition, whose detail names the first thing
-it found missing. Nothing else is affected: every compile is correct, and the estimator
-falls back to `--compile-estimate-default` rather than learn from a figure it cannot trust.
+That needs a cgroup the node may write to, which **the shipped units give it**. The system unit
+sets `Delegate=memory`, `ProtectControlGroups=private` and `RestrictNamespaces=no`; the user unit
+(`pace-node-user.service`) sets `Delegate=memory` and `RestrictNamespaces=no`. What each buys:
 
-To measure, give the node its own delegated cgroup with a drop-in
-(`systemctl edit pace-node`):
+- `Delegate=memory` hands the node a cgroup subtree to create children in, with the `memory`
+  controller. The node moves itself into a leaf `node/` cgroup (cgroup v2 requires it of a cgroup
+  that hands a controller to its children), enables `memory` for the others, and keeps every
+  compile under `compiles/`.
+- `ProtectControlGroups=private` gives the service a cgroup namespace with a writable mount of its
+  own delegated subtree and nothing else. It needs systemd 257 or newer; the packages declare no
+  minimum systemd, and an older one logs `Failed to parse ProtectControlGroups=private, ignoring`
+  and leaves the setting at `no`: the unit starts and delegation works, with the whole cgroup
+  filesystem writable to the service. Say `ProtectControlGroups=no` in a drop-in
+  (`systemctl edit pace-node`) to make that explicit; do not use `yes`, which makes the
+  delegated subtree read-only and leaves the node uncapped. The user unit has no such line:
+  systemd does not support it for user instances, and the user manager's tree is already writable
+  by its user.
+- `RestrictNamespaces=no` because starting a process inside a cgroup is `clone3`, which a seccomp
+  filter cannot inspect: systemd refuses it outright whenever any namespace is restricted
+  (measured on systemd 259: `ENOTSUP`). `SystemCallFilter=@system-service` permits `clone3` itself.
+- `ManagedOOMPreference=omit` takes the node out of systemd-oomd's choice of victim (see layer A
+  below).
 
-```ini
-[Service]
-# A cgroup subtree the node may create children in, with the memory controller.
-Delegate=memory
-# Hands the service its own view of the cgroup tree, writable inside the delegated
-# subtree only. Requires systemd 257 or newer; on older systemd use
-# ProtectControlGroups=no, which opens the whole cgroup filesystem to the service.
-ProtectControlGroups=private
-# Starting a process inside a cgroup is the clone3 system call, and a seccomp filter
-# cannot inspect its flags: systemd refuses clone3 outright whenever any namespace is
-# restricted. The node checks this at startup and names it if it is refused.
-RestrictNamespaces=no
-```
-
-`SystemCallFilter=@system-service` permits `clone3` on current systemd and needs no change. The
-user unit (`pace-node-user.service`) needs the same `Delegate=memory` and `RestrictNamespaces=no`
-in its drop-in (`systemctl --user edit pace-node-user`); the user manager's own cgroup tree is
-already writable by its user, so `ProtectControlGroups` does not come into it. A node started by
-hand from a terminal is not delegated — the terminal's scope holds the shell — and runs
-unmeasured; so does a node on a kernel older than 5.19, which has no `memory.peak`, or on a
-glibc older than 2.39, which cannot start a process inside a cgroup. The check is on the effect, not
-on a marker: systemd's delegation xattr is unreadable to the unprivileged account a service runs
-as, so the node verifies instead that it may write the cgroup, that nothing else lives in it,
-that the system lets it start a process inside a cgroup, and that `memory` is still enabled when it
-reads it back. On macOS and Windows a child's `ru_maxrss` / job object is the child's own and is used
-as it is. On any other platform nothing measures a compile apart from the node, and the node says so
-at Info and raises nothing: no remedy would apply.
+A node started by hand from a terminal is not delegated — the terminal's scope holds the shell — and
+runs unmeasured and uncapped; so does a node on a kernel older than 5.19, which has no `memory.peak`,
+or on a glibc older than 2.39, which cannot start a process inside a cgroup. The check is on the
+effect, not on a marker: systemd's delegation xattr is unreadable to the unprivileged account a service
+runs as, so the node verifies instead that it may write the cgroup, that nothing else lives in it, that
+the system lets it start a process inside a cgroup, and that `memory` is still enabled when it reads it
+back. Where it cannot, it says so at startup (`compile peak memory is not measured ...` and the
+ceiling's counterpart, at Warn) and raises `compile-memory-unmeasured` and `compile-memory-uncapped`,
+whose details name the first thing it found missing; under systemd the remedy for an older unit is
+the three lines above in a drop-in. Nothing else is affected: every compile is correct, and the
+estimator falls back to `--compile-estimate-default` rather than learn from a figure it cannot trust.
+On macOS and Windows a child's `ru_maxrss` / job object is the child's own and is used as it is, and
+no ceiling is applied. On any other platform nothing measures a compile apart from the node, and the
+node says so at Info and raises nothing: no remedy would apply.
 
 A compile that runs unmeasured *after* startup — a cgroup that could not be made, a compiler the
 system would not start inside it, a cgroup the kernel gave no `memory.peak` for — is counted in
 `pace_worker_compiles_unmeasured_total` and said once at Warn per body.
+
+##### Layer B: one ceiling over every compile
+
+The node writes one memory ceiling on the `compiles/` cgroup — never on the delegated cgroup, so the
+node's own memory (the cache tier) is outside it and can never be the victim of an overrun — and
+sets `memory.swap.max=0` there: a compile does not swap, since swapping buys nothing when the client can
+recompile and is what freezes a desktop. Each `job-<n>` cgroup has `memory.oom.group=1`, so the kernel
+kills a compile whole (driver, `cc1plus`, `ld`, LTO workers) and never leaves a half-dead driver waiting
+on a killed child. There is no `memory.high`: a compile throttled at it would register as memory
+stall in the machine's pressure figures and make the pressure layer see a shortage that is not there.
+
+The ceiling defaults to the machine budget the node already reports to the fleet's queue (75% of RAM
+less the cache reservation, or `--machine-memory-budget`), so admission and the ceiling cannot
+disagree. `--compile-memory-limit` (YAML `compile_memory_limit`, **reloadable**) overrides it; typed
+below the budget, it lowers the budget the node reports too, so the queue never admits what the
+ceiling would kill. A reload rewrites the control file at once and never raises a limit above the
+configured value. The startup line states the ceiling in force and whether it was derived or typed.
+
+A compile the ceiling killed is **never a compiler failure**. It is classified *killed* when its
+cgroup's `memory.events` shows `oom_kill` above zero, when the node's own shedding killed it, or when
+the compiler ended by `SIGKILL` for any other reason — a compiler never sends itself `SIGKILL`, so
+this also covers systemd-oomd or the global OOM killer. The worker answers `worker-compile-killed`
+(`0x35`), the client treats it as a miss and compiles locally, and the kill is counted by cause in
+`pace_worker_compiles_killed_ceiling_total`, `..._shed_total` and `..._signal_total` and logged once
+per kill at Info with the key.
+
+##### Layer C: the pressure governor
+
+*(Not in this build yet: it watches the machine's memory pressure, makes the node stop admitting
+compiles and then kill its own, and shows its level in `pacectl node`. This subsection is filled in
+when it lands.)*
+
+##### Layer A: compilers are the kernel's first victims
+
+*(Not in this build yet: every compiler gets `oom_score_adj=1000`, so the kernel's OOM killer picks a
+compile before a desktop process. This subsection is filled in when it lands.)*
+
+What the shipped units already do for the third party in that picture, systemd-oomd, is
+`ManagedOOMPreference=omit`. oomd kills a whole unit, and in its choice the node would take every
+compile and the cache tier with it, so the unit is omitted from its candidates; the ceiling above
+and, later, the pressure layer act on single compiles first. Whether it takes effect depends on who
+owns the monitored cgroup (systemd-oomd respects the attribute on a user-owned cgroup only when the
+monitored ancestor has the same owner): honoured for the system unit under the root-owned
+`system.slice`, and for the user unit when oomd monitors the user's own slices, which is what Fedora's
+per-slice defaults do; it is ignored for the user unit where oomd monitors a root-owned cgroup such
+as `-.slice`. Verified with `systemd-analyze verify` on systemd 259 (Fedora 44).
 
 #### The machine's compile budget
 
@@ -3680,8 +3724,8 @@ Every row says two things before anything else:
 | `state-directory-unsynced` | latched | warning | the filesystem holding the state directory answers a directory sync with "not supported here" (`EINVAL`, `ENOTSUP`, `EBADF` from `fsync`; `ERROR_INVALID_FUNCTION`, `ERROR_NOT_SUPPORTED`, `ERROR_INVALID_PARAMETER` from `FlushFileBuffers`), so a replaced state file is not known to survive a power loss: every replace still lands and is used. The detail names the directory and the answer; also counted in `pace_state_directory_syncs_unsupported_total` | stop the node, move the state directory **whole** to a local volume (it holds the node's identity, so a new empty directory is a new machine), point `--cluster-dir` at it and start; restarting on the same volume does not clear it |
 | `cache-budget-override-dropped` | latched | warning | a cluster cache budget override was dropped because this machine's own `--cache-memory`/`--cache-disk` changed after the override was set (its configured value no longer equals the baseline it reported); the detail names the tier, both values and the override's figure | the machine's own configuration changed after the override was set; set it again with set_cache_budget if still wanted |
 | `formation-move-refused` | live | alert | a move of this node's formation -- to the mode the detail names -- was not taken, because the startup rules refuse the shape it would give this node: a restart into it would be refused, so the node keeps the mode it is in. Every move is judged this way before its record is written, whether or not it rebuilds the node; the detail names the rule | fix the rule the detail names and restart this node; until then it keeps the mode it is in rather than serve a shape its next restart would refuse |
-| `compile-memory-unmeasured` | latched | notice | the worker cannot measure the peak memory of a compile, so it reports none and the fleet's admission estimates stay at their default instead of learning; the detail names what this machine lacked (no delegated cgroup — the shipped Linux unit's case —, no `memory.peak`, a seccomp filter refusing `clone3`, or a glibc older than 2.39). Not evaluated on a node that runs no worker, nor on a platform other than Linux, macOS and Windows, where nothing could measure and no remedy applies | give the node a cgroup of its own: [measuring what a compile used](#measuring-what-a-compile-used-linux) |
-| `compile-memory-uncapped` | latched | warning | the worker cannot hold the compiles it runs under one memory ceiling (`--compile-memory-limit`, by default the machine budget), so one that grows can take memory from everything else on the machine; the detail names what this machine lacked, as `compile-memory-unmeasured`'s does, or the ceiling the kernel refused. Raised again by a reload whose ceiling cannot be written. Not evaluated on a node that runs no worker, nor on a platform other than Linux, which has no cgroups | give the node a cgroup of its own: [measuring what a compile used](#measuring-what-a-compile-used-linux) |
+| `compile-memory-unmeasured` | latched | notice | the worker cannot measure the peak memory of a compile, so it reports none and the fleet's admission estimates stay at their default instead of learning; the detail names what this machine lacked (no delegated cgroup — a hand-started node or an older unit —, no `memory.peak`, a seccomp filter refusing `clone3`, or a glibc older than 2.39). Not evaluated on a node that runs no worker, nor on a platform other than Linux, macOS and Windows, where nothing could measure and no remedy applies | give the node a cgroup of its own: [memory: measurement, ceiling and pressure](#memory-measurement-ceiling-and-pressure-linux) |
+| `compile-memory-uncapped` | latched | warning | the worker cannot hold the compiles it runs under one memory ceiling (`--compile-memory-limit`, by default the machine budget), so one that grows can take memory from everything else on the machine; the detail names what this machine lacked, as `compile-memory-unmeasured`'s does, or the ceiling the kernel refused. Raised again by a reload whose ceiling cannot be written. Not evaluated on a node that runs no worker, nor on a platform other than Linux, which has no cgroups | give the node a cgroup of its own: [memory: measurement, ceiling and pressure](#memory-measurement-ceiling-and-pressure-linux) |
 
 The remedy each row carries is longer than this column, and it is the node's text: an older
 client or leader prints a newer node's row exactly as that node wrote it, rather than looking
