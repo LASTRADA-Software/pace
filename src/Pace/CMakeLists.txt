@@ -108,6 +108,7 @@ target_sources(Pace
         Platform/HostLoad.cpp
         Platform/HostMemory.cpp
         Platform/HostNaming.cpp
+        Platform/MemoryPressure.cpp
         Platform/InheritedListener.cpp
         Platform/LocalAddresses.cpp
         Platform/NarrowText.cpp
