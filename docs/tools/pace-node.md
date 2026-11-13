@@ -3440,7 +3440,7 @@ sets `Delegate=memory`, `ProtectControlGroups=private` and `RestrictNamespaces=n
   compile under `compiles/`.
 - `ProtectControlGroups=private` gives the service a cgroup namespace with a writable mount of its
   own delegated subtree and nothing else. It needs systemd 257 or newer; the packages declare no
-  minimum systemd, and an older one logs `Failed to parse ProtectControlGroups=private, ignoring`
+  minimum systemd, and an older one logs a parse warning, ignores the value
   and leaves the setting at `no`: the unit starts and delegation works, with the whole cgroup
   filesystem writable to the service. Say `ProtectControlGroups=no` in a drop-in
   (`systemctl edit pace-node`) to make that explicit; do not use `yes`, which makes the

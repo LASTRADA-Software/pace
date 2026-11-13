@@ -382,8 +382,8 @@ inline constexpr EnumTable<NodeCondition, NodeConditionRow> NodeConditionTable {
       .remedy = "the machine's own configuration changed after the override was set; set it again with "
                 "set_cache_budget if still wanted" },
     // Latched: the meter is chosen once, at startup, from what the machine's cgroup tree allowed this process;
-    // nothing the node does afterwards changes it. A notice and not a warning, because it is the SHIPPED default
-    // (the unit does not delegate a cgroup) and every compile is correct -- only the fleet's memory estimates
+    // nothing the node does afterwards changes it. A notice and not a warning, because a hand-started node or an older unit
+    // (the shipped units now delegate a cgroup) is still a legitimate way to run it, raising this routinely, and every compile is correct -- only the fleet's memory estimates
     // lose their measurements. Worker scope: no worker runs no compiles to measure.
     { .condition = NodeCondition::CompileMemoryUnmeasured,
       .id = "compile-memory-unmeasured",

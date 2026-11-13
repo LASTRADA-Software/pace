@@ -192,8 +192,8 @@ ProtectHome=yes
 # delegated subtree only; the rest of the cgroup filesystem stays out of reach, which
 # is why this is not `no`. It needs systemd 257 or newer. The packages declare a bare
 # dependency on `systemd` with no minimum (cmake/Packaging.cmake), so an older systemd
-# is possible: it does not know the value `private`, logs "Failed to parse
-# ProtectControlGroups=private, ignoring" and leaves ProtectControlGroups= at its default `no` -- the unit
+# is possible: it does not know the value `private`, logs a parse warning,
+# ignores the value and leaves ProtectControlGroups= at its default `no` -- the unit
 # still starts and delegation still works, with the whole cgroup filesystem writable
 # to the service instead of one subtree. The fallback is therefore safe, and the
 # looser one of the two ways it can go; set `ProtectControlGroups=no` in a drop-in to

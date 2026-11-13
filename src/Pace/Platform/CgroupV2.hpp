@@ -21,7 +21,7 @@
 /// may hand each compile a cgroup of its own, and the source that does.
 ///
 /// **The facility is all or nothing, and "nothing" is a stated answer.** A node that cannot get a
-/// delegated subtree (the shipped unit does not delegate one -- `ProtectControlGroups=yes`) does not
+/// delegated subtree (a hand-started node or an older unit; the shipped units delegate one) does not
 /// guess a peak from `ru_maxrss`, which is the very figure this exists to replace: it reports the
 /// peak UNKNOWN and says why (`CgroupFailure`), so the estimator falls back to its default and an
 /// operator can read the remedy off `pacectl node`.
