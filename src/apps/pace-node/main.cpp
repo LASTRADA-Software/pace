@@ -2819,6 +2819,20 @@ constexpr auto ThisNetworkWatcherStart = NetworkWatcherStart::InsideTheBody;
     return nullptr;
 }
 
+/// The OOM-victim shim this node's compilers are spawned through (`Cc::ThisProcessOomVictim`), resolved once; where
+/// there is none, says so once at Info -- a stated no-op, since compilers then run at the node's own score.
+/// @param logger Where the absence is said.
+/// @return The shim; disengaged where there is none.
+[[nodiscard]] std::optional<Cc::OomVictim> CompileOomVictim(ILogger& logger)
+{
+    auto victim = Cc::ThisProcessOomVictim();
+    if (victim.has_value())
+        return *std::move(victim);
+    logger.Logf(
+        LogLevel::Info, "compilers run at this node's own OOM score, not as the kernel's first victims: {}", victim.error());
+    return std::nullopt;
+}
+
 } // namespace
 
 // **`main` scores 37 against a threshold of 60, and NOTHING ENFORCES THAT MARGIN.**
@@ -3499,7 +3513,7 @@ int main(int argc, char** argv)
     // Every runner it makes spawns compilers through this binary as the OOM-victim shim, named once here.
     Node::CompileMemoryMeter memoryMeter { std::make_shared<Platform::SystemCgroupHost>(),
                                            Node::ThisMeterPlatform,
-                                           Cc::ThisProcessOomVictim() };
+                                           CompileOomVictim(logger) };
     auto const parts = ServingParts { .store = *formationStore,
                                       .endpoints = *endpointsFile,
                                       .archiver = archiver,

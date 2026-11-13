@@ -373,6 +373,11 @@ if(PACE_BUILD_TESTS)
         "${CMAKE_SOURCE_DIR}/src/apps/pace-cc"
         "${CMAKE_SOURCE_DIR}/src/apps/pacectl")
     target_link_libraries(pace-node-tests PRIVATE Pace Catch2::Catch2)
+    # The OOM-victim cases spawn through the launcher's test shim, found beside this executable
+    # (src/apps/pace-cc/CMakeLists.txt says why). pace-cc is earlier in the app table, so the guard is live.
+    if(TARGET oom-victim-exec-shim)
+        add_dependencies(pace-node-tests oom-victim-exec-shim)
+    endif()
     # The launchd label the macOS uninstaller boots this worker's job out by,
     # handed to the test so it compares the packaging's value against the one the
     # binary derives -- rather than against a literal of its own, which would

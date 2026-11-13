@@ -4,6 +4,8 @@
 // they use a shell one-liner that exists on every host the launcher targets.
 
 #include "IProcessRunner.hpp"
+#include "OomVictimExec.hpp"
+#include "OomVictimTestSupport.hpp"
 
 #include <Pace/Platform/Environment.hpp>
 #include <Pace/Platform/JobCgroups.hpp>
@@ -642,6 +644,48 @@ TEST_CASE("ProcessRunner.a-killed-compile-names-shed-before-ceiling-before-signa
         if (source->Refused() != 0)
             SKIP("the system refused to start a child inside this process's own cgroup");
         CAPTURE(row.marks.shed, row.marks.oomKilled);
+        CHECK(killed.exitCode == 137);
+        REQUIRE(killed.killed.has_value());
+        CHECK(Unwrap(killed.killed) == row.expected);
+    }
+}
+
+TEST_CASE("A compile spawned through the OOM-victim shim lands in its job cgroup and is classified as without it",
+          "[pace-cc][process][KillYoungest][oom]")
+{
+    // The shim is what the job cgroup receives, and it becomes the compiler by `exec`: the compiler runs at score 1000
+    // and a kill reads the same marks it reads without the shim. `Shed` and `Ceiling` are read off the job the runner
+    // KEPT, which it keeps only when the spawn was placed in its cgroup (a refused placement drops it and is skipped
+    // below), so those rows are the placement's evidence as well as the classification's.
+    using namespace Pace::Cc::OomVictimTesting;
+    if (!CanSpawnIntoCgroups())
+        SKIP("this build cannot spawn into a cgroup, so its runner never keeps a job to read");
+    Pace::Testing::OwnCgroupDirectory const own;
+    if (own.Descriptor() < 0)
+        SKIP("this process's own cgroup v2 directory cannot be opened");
+    if (OwnScore() == OomVictimScore)
+        SKIP("this test process already runs at oom_score_adj 1000, so a child inheriting it proves nothing");
+    auto const victim = OomVictim { .self = ShimPath() };
+
+    struct Row
+    {
+        KillMarks marks {};
+        Pace::Platform::CompileKill expected {};
+    };
+    auto const rows = std::array {
+        Row { .marks = { .shed = true, .oomKilled = false }, .expected = Pace::Platform::CompileKill::Shed },
+        Row { .marks = { .shed = false, .oomKilled = true }, .expected = Pace::Platform::CompileKill::Ceiling },
+        Row { .marks = { .shed = false, .oomKilled = false }, .expected = Pace::Platform::CompileKill::Signal },
+    };
+    for (auto const& row: rows)
+    {
+        auto const source = std::make_shared<MarkedJobSource>(own.Descriptor(), row.marks);
+        auto const runner = MakeProcessRunner(source, victim);
+        auto const killed = runner->RunCaptureSplit(ShellCommand("cat /proc/self/oom_score_adj; kill -9 $$"));
+        if (source->Refused() != 0)
+            SKIP("the system refused to start a child inside this process's own cgroup");
+        CAPTURE(row.marks.shed, row.marks.oomKilled, killed.err);
+        CHECK(LinesOf(killed.out) == std::vector<std::string> { "1000" });
         CHECK(killed.exitCode == 137);
         REQUIRE(killed.killed.has_value());
         CHECK(Unwrap(killed.killed) == row.expected);

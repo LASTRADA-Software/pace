@@ -22,6 +22,8 @@
 #include <system_error>
 #include <vector>
 
+#include <OomVictimExec.hpp>
+#include <OomVictimTestSupport.hpp>
 #include <core/Ranges.hpp>
 #include <tests/CgroupFakes.hpp>
 #include <tests/OwnCgroup.hpp>
@@ -799,6 +801,43 @@ TEST_CASE("A compile KillYoungest chose is reported shed by the runner that reap
     CHECK(run.exitCode == 137);
     REQUIRE(run.killed.has_value());
     CHECK(Unwrap(run.killed) == Platform::CompileKill::Shed);
+}
+
+TEST_CASE("Every runner a meter given the OOM-victim shim makes runs its compilers at oom_score_adj 1000",
+          "[node][memory-meter][oom]")
+{
+    // Layer A's production wiring: `main` hands the shim to the meter, and the meter to BOTH runner forms it can
+    // pick -- the cgroup form on a delegated node, the plain form on one that was given no cgroup. Dropping it from
+    // either branch turns Layer A off on those nodes and nothing else notices.
+    using namespace Cc::OomVictimTesting;
+    if (OwnScore() == Cc::OomVictimScore)
+        SKIP("this test process already runs at oom_score_adj 1000, so a child inheriting it proves nothing");
+    auto const victim = Cc::OomVictim { .self = ShimPath() };
+
+    struct Form
+    {
+        std::shared_ptr<FakeCgroupHost> host;
+        MeterState state; ///< Which form the meter picked: `Measured` is the cgroup form, `Unmeasured` the plain one.
+    };
+    auto forms = std::vector<Form> { { .host = UndelegatedHost(), .state = MeterState::Unmeasured } };
+    if (Cc::CanSpawnIntoCgroups())
+        forms.push_back({ .host = DelegatedHost(), .state = MeterState::Measured });
+
+    for (auto const& form: forms)
+    {
+        AtomicMetricsSink metrics;
+        CapturingLogger logger;
+        CompileMemoryMeter meter { form.host, MeterPlatform::Linux, victim };
+        auto metered = meter.MakeRunner(metrics, logger);
+        CAPTURE(metered.report.reason);
+        REQUIRE(metered.report.state == form.state);
+
+        auto const run = metered.runner->RunCaptureSplit({ { "/bin/sh", "-c", ReadScoreTwice } });
+
+        INFO(run.err);
+        REQUIRE(run.exitCode == 0);
+        CHECK(LinesOf(run.out) == std::vector<std::string> { "1000", "1000" });
+    }
 }
 
 #endif

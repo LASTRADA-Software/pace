@@ -92,16 +92,18 @@ std::optional<int> RunOomVictimExecIfInvoked([[maybe_unused]] std::span<char con
 #endif
 }
 
-std::optional<OomVictim> ThisProcessOomVictim()
+std::expected<OomVictim, std::string> ThisProcessOomVictim()
 {
 #if defined(__linux__)
     auto const link = std::filesystem::path { "/proc/self/exe" };
     auto failure = std::error_code {};
     if (auto const target = std::filesystem::read_symlink(link, failure); failure || target.empty())
-        return std::nullopt;
+        return std::unexpected { std::format("{} cannot be read ({}), so this binary cannot be spawned as the shim",
+                                             link.string(),
+                                             failure ? failure.message() : std::string { "it names nothing" }) };
     return OomVictim { .self = link };
 #else
-    return std::nullopt;
+    return std::unexpected { std::string { "this platform has no oom_score_adj" } };
 #endif
 }
 

@@ -6,15 +6,13 @@
 
 #include "IProcessRunner.hpp"
 #include "OomVictimExec.hpp"
+#include "OomVictimTestSupport.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
 #include <expected>
-#include <filesystem>
-#include <fstream>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -23,6 +21,7 @@
 #include <tests/Unwrap.hpp>
 
 using Pace::Testing::Unwrap;
+using namespace Pace::Cc::OomVictimTesting;
 
 using namespace Pace::Cc;
 
@@ -60,51 +59,6 @@ class RecordingOomScoreWriter final: public IOomScoreWriter
 
 /// A program no `PATH` holds, so the shim's `exec` of it fails and the shim returns rather than replacing the test.
 constexpr auto MissingCompiler = "/nonexistent/pace-oom-victim-test/cc";
-
-#if defined(__linux__)
-
-/// The shell line the property is read through: the compiler's own score, then that of a child it starts at once.
-constexpr auto ReadScoreTwice = R"(cat /proc/self/oom_score_adj; sh -c "cat /proc/self/oom_score_adj")";
-
-/// The path of the test shim, which the build places beside this test executable (`oom-victim-exec-shim`; the
-/// CMakeLists says why it is not named through the test environment).
-/// @return The path; the case is skipped when the shim was not built there.
-[[nodiscard]] std::string ShimPath()
-{
-    auto failure = std::error_code {};
-    auto const self = std::filesystem::read_symlink("/proc/self/exe", failure);
-    if (failure)
-        SKIP("/proc/self/exe cannot be read, so the shim beside this executable cannot be found");
-    auto const shim = self.parent_path() / "oom-victim-exec-shim";
-    if (!std::filesystem::is_regular_file(shim, failure))
-        SKIP("oom-victim-exec-shim was not built beside " + self.string());
-    return shim.string();
-}
-
-/// This process's own OOM score adjustment, as its children inherit it.
-/// @return The value's text, without the newline.
-[[nodiscard]] std::string OwnScore()
-{
-    std::ifstream file { "/proc/self/oom_score_adj" };
-    auto text = std::string {};
-    std::getline(file, text);
-    return text;
-}
-
-/// The lines of @p text.
-/// @param text What a child printed.
-/// @return Each line, without its newline.
-[[nodiscard]] std::vector<std::string> LinesOf(std::string const& text)
-{
-    auto stream = std::istringstream { text };
-    auto lines = std::vector<std::string> {};
-    auto line = std::string {};
-    while (std::getline(stream, line))
-        lines.push_back(line);
-    return lines;
-}
-
-#endif
 
 } // namespace
 

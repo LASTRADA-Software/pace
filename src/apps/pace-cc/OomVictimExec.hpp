@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <system_error>
 
@@ -95,8 +96,10 @@ class ProcSelfOomScoreWriter final: public IOomScoreWriter
 /// it executes the image its parent runs, so a package upgrade that replaces the file under a running node
 /// leaves its compiles running rather than every one failing to spawn. The link is read once here, to learn
 /// that `/proc` is there to name it.
-/// @return The shim on Linux with `/proc` mounted; disengaged elsewhere, which leaves compilers at the
-///         node's own score.
-[[nodiscard]] std::optional<OomVictim> ThisProcessOomVictim();
+///
+/// Without one, compilers run at the node's own score: a stated no-op, so the error is the sentence the caller
+/// logs.
+/// @return The shim on Linux with `/proc` mounted; otherwise why there is none.
+[[nodiscard]] std::expected<OomVictim, std::string> ThisProcessOomVictim();
 
 } // namespace Pace::Cc

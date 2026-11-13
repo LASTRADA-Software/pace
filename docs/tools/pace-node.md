@@ -3595,10 +3595,11 @@ warning on the compile's stderr and the compile still runs, at the node's score:
 more than its kill priority. On a platform other than Linux there is no `oom_score_adj`, and compilers
 are spawned directly, as before.
 
-What the shipped units already do for the third party in that picture, systemd-oomd, is
+What the shipped units do for the third party in that picture, systemd-oomd, is
 `ManagedOOMPreference=omit`. oomd kills a whole unit, and in its choice the node would take every
-compile and the cache tier with it, so the unit is omitted from its candidates; the ceiling above
-and, later, the pressure layer act on single compiles first. Whether it takes effect depends on who
+compile and the cache tier with it, so the unit is omitted from its candidates; the ceiling (layer B)
+and the pressure governor (layer C) act on single compiles first, the governor at thresholds set far
+below oomd's (above) so that it acts before oomd chooses a victim. Whether it takes effect depends on who
 owns the monitored cgroup (systemd-oomd respects the attribute on a user-owned cgroup only when the
 monitored ancestor has the same owner): honoured for the system unit under the root-owned
 `system.slice`, and for the user unit when oomd monitors the user's own slices, which is what Fedora's
