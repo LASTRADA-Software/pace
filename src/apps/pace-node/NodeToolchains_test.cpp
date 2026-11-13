@@ -60,6 +60,12 @@ class ScopedStateDir
     {
     }
 
+    /// @return Where `CachedToolchainFingerprint` files its entries for this case.
+    [[nodiscard]] std::filesystem::path FingerprintCache() const
+    {
+        return _dir.Path() / "pace-cc" / "toolchains";
+    }
+
   private:
     Pace::Testing::ScratchDirectory _dir;
     Pace::Testing::ScopedEnv _env;
@@ -460,6 +466,98 @@ TEST_CASE("NodeToolchains: a survey abandoned for a stop is neither served nor r
     // NOT the startup refusal. Its absence is the assertion: that message is what
     // makes the node exit non-zero.
     CHECK_FALSE(Logged(logger, "no toolchain to serve"));
+}
+
+namespace
+{
+/// A runner that asks the node to stop the moment the include probe runs, and then answers it.
+///
+/// The include probe is the last spawn before the walk hashes, and it runs AFTER the survey's
+/// between-toolchains check -- so this is the one place a stop lands inside a walk that has
+/// already begun, which a token stopped beforehand never reaches.
+class StopsAtIncludeProbe final: public Cc::IProcessRunner
+{
+  public:
+    /// @param inner What answers every spawn.
+    /// @param source The stop this runner requests.
+    StopsAtIncludeProbe(Cc::IProcessRunner& inner, std::stop_source& source) noexcept:
+        _inner { inner },
+        _source { source }
+    {
+    }
+
+    Cc::CompileRun RunCaptureCombined(std::span<std::string const> argv) override
+    {
+        if (std::ranges::contains(argv, "-E"))
+            _source.request_stop();
+        return _inner.RunCaptureCombined(argv);
+    }
+
+    Cc::CompileRun RunCaptureSplit(std::span<std::string const> argv) override
+    {
+        return RunCaptureCombined(argv);
+    }
+
+  private:
+    Cc::IProcessRunner& _inner;
+    std::stop_source& _source;
+};
+
+/// @param directory Where `CachedToolchainFingerprint` files its entries.
+/// @return How many entries it holds; zero when the directory was never made.
+[[nodiscard]] std::size_t CachedFingerprints(std::filesystem::path const& directory)
+{
+    std::error_code ec;
+    auto entries = std::filesystem::directory_iterator { directory, ec };
+    if (ec)
+        return 0;
+    return static_cast<std::size_t>(std::ranges::count_if(
+        entries, [](std::filesystem::directory_entry const& entry) { return entry.path().extension() == ".fingerprint"; }));
+}
+} // namespace
+
+TEST_CASE("NodeToolchains: a walk a stop cut short is never cached", "[node][toolchains]")
+{
+    // The fingerprint cache is machine-wide and keyed by a stamp that folds each root's
+    // path and mtime, never its contents -- so a digest over PART of a tree, written there,
+    // validates forever and is served by every later node and launcher on the machine.
+    // A node stopped while its walk was hashing skipped the rest of the files and still
+    // reported the walk whole: the skipped slices "ran" as far as `ProbeToolchainFiles`
+    // could tell, and the short digest was cached. The next node on that machine then served
+    // a fingerprint no client computes, and its own teardown cut the next walk short again.
+    Pace::Testing::ScratchDirectory tree { "pace-node-stopwalk" };
+    tree.Write("inc/a.hpp", "a");
+    tree.Write("inc/b.hpp", "b");
+    tree.Write("inc/c.hpp", "c");
+    tree.Write("clang", "#!/bin/sh\n");
+    auto const compiler = (tree / "clang").string();
+    auto const root = (std::filesystem::path { tree.Path().string() } / "inc").string();
+
+    SpawnScript script;
+    script.IncludeRoots(compiler, { root });
+    ScopedStateDir const state;
+    ScriptedToolchainHost host;
+    CapturingLogger logger;
+    DiscoveredToolchains const discovered { .entries = { ToolchainEntry { .fingerprint = {}, .compiler = compiler } },
+                                            .source = ToolchainSource::OperatorNamed };
+
+    std::stop_source source;
+    StopsAtIncludeProbe stopping { script, source };
+    auto const cancelled = FingerprintToolchains(
+        discovered, stopping, host, TestClock(), logger, source.get_token(), SurveyVoice::Announce, FingerprintWalk::Always);
+    REQUIRE(source.stop_requested());
+    CHECK(cancelled.outcome == SurveyOutcome::Cancelled);
+    // The walk began -- this is a stop inside it, not one before it.
+    CHECK(Logged(logger, "hashing 3 toolchain file(s)"));
+    // The assertion: nothing the short walk computed reached the machine-wide cache.
+    CHECK(CachedFingerprints(state.FingerprintCache()) == 0);
+
+    // The control: the same survey, left to finish, does write -- so the count above is
+    // read where the cache really is, and zero is an answer rather than a wrong directory.
+    auto const finished = FingerprintToolchains(
+        discovered, script, host, TestClock(), logger, std::stop_token {}, SurveyVoice::Announce, FingerprintWalk::Always);
+    REQUIRE(finished.outcome == SurveyOutcome::Served);
+    CHECK(CachedFingerprints(state.FingerprintCache()) == 1);
 }
 
 TEST_CASE("NodeToolchains: the source decides which refusal an operator is given", "[node][toolchains]")
