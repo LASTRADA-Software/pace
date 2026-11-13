@@ -96,9 +96,10 @@ std::expected<PressureSample, std::string> PsiPressureSource::Sample()
     if (_compiles)
     {
         auto compiles = read(*_compiles / PsiCgroupFileName);
-        if (!compiles)
-            return std::unexpected(std::move(compiles.error()));
-        sample.compiles = *compiles;
+        if (compiles)
+            sample.compiles = *compiles;
+        else
+            sample.compilesFault = std::move(compiles.error());
     }
     return sample;
 }

@@ -48,6 +48,10 @@ struct PressureSample
 {
     PsiReading system {};                  ///< The whole machine.
     std::optional<PsiReading> compiles {}; ///< The compiles' cgroup, when there is one.
+
+    /// Why `compiles` is absent although a compiles cgroup was configured. Disengaged when no compiles
+    /// path was configured or the read succeeded, so "not configured" and "unreadable" stay distinct.
+    std::optional<std::string> compilesFault {};
 };
 
 /// Where pressure samples come from.

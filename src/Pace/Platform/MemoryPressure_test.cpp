@@ -66,6 +66,7 @@ TEST_CASE("PsiPressureSource samples the system file and the compiles cgroup", "
         auto const sample = Unwrap(source.Sample());
         CHECK(sample.system.some.avg10 == 12.5);
         CHECK_FALSE(sample.compiles.has_value());
+        CHECK_FALSE(sample.compilesFault.has_value());
     }
     SECTION("a compiles cgroup is read from its memory.pressure")
     {
@@ -74,10 +75,13 @@ TEST_CASE("PsiPressureSource samples the system file and the compiles cgroup", "
         auto const sample = Unwrap(source.Sample());
         CHECK(Unwrap(sample.compiles).some.avg10 == 0.25);
     }
-    SECTION("an unreadable compiles file is an error, not a calm reading")
+    SECTION("an unreadable compiles file keeps the system reading and states the fault")
     {
         PsiPressureSource source { host, std::filesystem::path { "/sys/fs/cgroup/x/compiles" } };
-        CHECK_FALSE(source.Sample().has_value());
+        auto const sample = Unwrap(source.Sample());
+        CHECK(sample.system.some.avg10 == 12.5);
+        CHECK_FALSE(sample.compiles.has_value());
+        CHECK(Unwrap(sample.compilesFault).find("/sys/fs/cgroup/x/compiles") != std::string::npos);
     }
 }
 
