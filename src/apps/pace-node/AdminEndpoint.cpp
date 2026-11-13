@@ -1197,6 +1197,11 @@ std::vector<Distributed::FleetBucket> FleetSampler::Buckets(Distributed::FleetRa
 
 bool FleetSampler::SampleOnce()
 {
+    // One sample at a time, from its first read through its last record and the
+    // keyed histories' fold: the history's newest record must be its newest READING.
+    // See the header.
+    auto const sampling = std::scoped_lock { _sampling };
+
     // ALWAYS, whoever leads. What this machine's cache did and how many of its slots
     // were busy are facts about the machine, and a node that stopped recording them
     // the moment it lost an election is a node whose year of history belongs to
