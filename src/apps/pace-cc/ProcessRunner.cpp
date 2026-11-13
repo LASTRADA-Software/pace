@@ -6,7 +6,9 @@
 // sequential drain is a correctness bug, not a performance one.
 
 #include "IProcessRunner.hpp"
+#include "OomVictimExec.hpp"
 
+#include <Pace/Platform/Environment.hpp>
 #include <Pace/Platform/JobCgroups.hpp>
 
 #include <algorithm>
@@ -30,6 +32,7 @@
     #include <windows.h>
 #else
     #include <sys/resource.h>
+    #include <sys/stat.h>
     #include <sys/wait.h>
 
     #include <cerrno>
@@ -563,20 +566,54 @@ namespace
         return value;
     }
 
+    /// Whether `execvp` would find @p program: a path is taken as it is, a bare name is searched for on the
+    /// spawner's `PATH` (`/bin:/usr/bin` when unset), an empty element of which is the working directory.
+    ///
+    /// Asked before a spawn through the OOM-victim shim, which is what keeps `NotSpawned` meaning *could
+    /// not spawn* there: the shim itself always spawns, so a compiler it cannot run would otherwise read as one
+    /// that ran and exited `OomVictimExecFailed` -- and a toolchain probe that never ran must not read as one
+    /// that answered (issue #225).
+    /// @param program `argv[0]` as the caller spelled it.
+    /// @return True when a regular file it names is executable by this process.
+    [[nodiscard]] bool ExecvpWouldFind(std::string const& program)
+    {
+        auto const runnable = [](std::string const& path) {
+            struct ::stat status {};
+            return ::stat(path.c_str(), &status) == 0 && S_ISREG(status.st_mode) && ::access(path.c_str(), X_OK) == 0;
+        };
+        if (program.empty())
+            return false;
+        if (program.contains('/'))
+            return runnable(program);
+        auto const searchPath = ReadEnvironmentVariable("PATH").value_or("/bin:/usr/bin");
+        return std::ranges::any_of(std::views::split(searchPath, ':'), [&](auto const& element) {
+            auto const directory = std::string { element.begin(), element.end() };
+            return runnable((directory.empty() ? std::string { "." } : directory) + '/' + program);
+        });
+    }
+
     /// POSIX process runner: posix_spawnp with two pipes, drained with poll().
     ///
     /// Where the peak comes from is fixed at construction: a cgroup per job when a source was handed
     /// over, else `wait4`'s `ru_maxrss` when asked for, else nowhere. The three are exclusive on
     /// purpose -- a runner given a cgroup source never falls back to `ru_maxrss`, which is the figure
     /// the cgroup exists to replace.
+    ///
+    /// A runner given an `OomVictim` spawns the shim in the compiler's place, with the compiler's whole argv
+    /// after the shim's name. The shim is what the job cgroup receives, and it becomes the compiler by `exec`,
+    /// so the cgroup, the peak and the kill read exactly what they read without it.
     class PosixProcessRunner final: public IProcessRunner
     {
       public:
         /// @param peakSource Where the peak comes from when @p cgroups is null.
         /// @param cgroups Makes a cgroup per job; null for none.
-        PosixProcessRunner(PeakSource peakSource, std::shared_ptr<Platform::IJobCgroupSource> cgroups):
+        /// @param oomVictim The shim every child is spawned through; disengaged to spawn each directly.
+        PosixProcessRunner(PeakSource peakSource,
+                           std::shared_ptr<Platform::IJobCgroupSource> cgroups,
+                           std::optional<OomVictim> oomVictim):
             _peakSource { peakSource },
-            _cgroups { std::move(cgroups) }
+            _cgroups { std::move(cgroups) },
+            _oomVictim { std::move(oomVictim) }
         {
         }
 
@@ -718,6 +755,8 @@ namespace
             CompileRun result;
             if (argv.empty())
                 return result;
+            if (_oomVictim.has_value() && !ExecvpWouldFind(argv.front()))
+                return result;
 
             // Made before the spawn lock is taken -- it is a mkdir and an open, and the lock is held
             // across the spawn alone. Destroyed on every way out of this function (it kills what the job
@@ -773,7 +812,13 @@ namespace
 
                 // posix_spawn takes a non-const argv; the strings are copied by the
                 // child's exec, so this vector only needs to outlive the spawn call.
-                std::vector<std::string> owned { argv.begin(), argv.end() };
+                // Through the shim, the compiler's argv follows the shim's own name.
+                std::vector<std::string> owned;
+                owned.reserve(argv.size() + 1);
+                if (_oomVictim.has_value())
+                    owned.emplace_back(OomVictimExecName);
+                owned.insert(owned.end(), argv.begin(), argv.end());
+                auto const program = _oomVictim.has_value() ? _oomVictim->self.string() : owned.front();
                 std::vector<char*> cargv;
                 cargv.reserve(owned.size() + 1);
                 for (auto& a: owned)
@@ -830,7 +875,7 @@ namespace
                     childEnvironment = mergedPointers.data();
                 }
 
-                int spawned = SpawnProcess(pid, cargv, actions, childEnvironment, job.get());
+                int spawned = SpawnProcess(pid, program, cargv, actions, childEnvironment, job.get());
                 if (spawned != 0 && job != nullptr)
                 {
                     // The system would not place the child in the cgroup (a service's seccomp filter
@@ -839,7 +884,7 @@ namespace
                     // is then unknown rather than anybody's `ru_maxrss`. A program that cannot be
                     // spawned at all fails the same way twice, for the price of one more `clone`.
                     job.reset();
-                    spawned = SpawnProcess(pid, cargv, actions, childEnvironment, nullptr);
+                    spawned = SpawnProcess(pid, program, cargv, actions, childEnvironment, nullptr);
                     if (spawned == 0)
                         _cgroups->NoteUnmeasured(Platform::IJobCgroupSource::Unmeasured::SpawnRefused);
                 }
@@ -886,12 +931,14 @@ namespace
 
         /// `posix_spawnp`, into @p job's cgroup when there is one.
         /// @param pid Receives the child's pid.
+        /// @param program What to execute: `argv[0]`, or the shim's binary.
         /// @param argv The null-terminated argument vector.
         /// @param actions The child's file actions.
         /// @param environment The child's environment.
         /// @param job The cgroup to start the child in; null for none.
         /// @return `posix_spawnp`'s result.
         [[nodiscard]] static int SpawnProcess(::pid_t& pid,
+                                              std::string const& program,
                                               std::vector<char*>& argv,
                                               posix_spawn_file_actions_t const& actions,
                                               char** environment,
@@ -905,7 +952,7 @@ namespace
                     return failure;
                 ::posix_spawnattr_setcgroup_np(&attributes, job->DirectoryDescriptor());
                 ::posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETCGROUP);
-                int const spawned = ::posix_spawnp(&pid, argv[0], &actions, &attributes, argv.data(), environment);
+                int const spawned = ::posix_spawnp(&pid, program.c_str(), &actions, &attributes, argv.data(), environment);
                 ::posix_spawnattr_destroy(&attributes);
                 return spawned;
             }
@@ -917,7 +964,7 @@ namespace
             if (job != nullptr)
                 throw std::logic_error("a job cgroup was handed to a build that cannot spawn into one");
     #endif
-            return ::posix_spawnp(&pid, argv[0], &actions, nullptr, argv.data(), environment);
+            return ::posix_spawnp(&pid, program.c_str(), &actions, nullptr, argv.data(), environment);
         }
 
         /// Why a `SIGKILL`ed child died, as far as its cgroup can say.
@@ -1020,6 +1067,7 @@ namespace
 
         PeakSource _peakSource;
         std::shared_ptr<Platform::IJobCgroupSource> _cgroups;
+        std::optional<OomVictim> _oomVictim;
     };
 
 #endif
@@ -1037,19 +1085,21 @@ bool CanSpawnIntoCgroups() noexcept
 
 std::unique_ptr<IProcessRunner> MakeProcessRunner()
 {
-    return MakeProcessRunner(PeakSource::ResourceUsage);
+    return MakeProcessRunner(PeakSource::ResourceUsage, std::nullopt);
 }
 
-std::unique_ptr<IProcessRunner> MakeProcessRunner([[maybe_unused]] PeakSource peakSource)
+std::unique_ptr<IProcessRunner> MakeProcessRunner([[maybe_unused]] PeakSource peakSource,
+                                                  [[maybe_unused]] std::optional<OomVictim> oomVictim)
 {
 #if defined(_WIN32)
     return std::make_unique<WindowsProcessRunner>();
 #else
-    return std::make_unique<PosixProcessRunner>(peakSource, nullptr);
+    return std::make_unique<PosixProcessRunner>(peakSource, nullptr, std::move(oomVictim));
 #endif
 }
 
-std::unique_ptr<IProcessRunner> MakeProcessRunner([[maybe_unused]] std::shared_ptr<Platform::IJobCgroupSource> cgroups)
+std::unique_ptr<IProcessRunner> MakeProcessRunner([[maybe_unused]] std::shared_ptr<Platform::IJobCgroupSource> cgroups,
+                                                  [[maybe_unused]] std::optional<OomVictim> oomVictim)
 {
 #if defined(_WIN32)
     return std::make_unique<WindowsProcessRunner>();
@@ -1057,8 +1107,8 @@ std::unique_ptr<IProcessRunner> MakeProcessRunner([[maybe_unused]] std::shared_p
     // Decided here, once, rather than at every spawn: a build that cannot place a child in a cgroup gets a
     // runner that holds no source, so it never makes a cgroup it cannot use and never reads one's peak.
     if (!CanSpawnIntoCgroups())
-        return std::make_unique<PosixProcessRunner>(PeakSource::Unmeasured, nullptr);
-    return std::make_unique<PosixProcessRunner>(PeakSource::Unmeasured, std::move(cgroups));
+        return std::make_unique<PosixProcessRunner>(PeakSource::Unmeasured, nullptr, std::move(oomVictim));
+    return std::make_unique<PosixProcessRunner>(PeakSource::Unmeasured, std::move(cgroups), std::move(oomVictim));
 #endif
 }
 

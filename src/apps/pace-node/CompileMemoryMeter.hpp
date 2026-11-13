@@ -136,8 +136,11 @@ class CompileMemoryMeter
   public:
     /// @param host The machine's cgroup tree; consulted only on Linux.
     /// @param platform What to measure like; the build's own except in a test.
+    /// @param oomVictim The shim every runner spawns its compilers through, so each starts as the kernel's first
+    ///        OOM victim (`Cc::ThisProcessOomVictim`, resolved once by `main`); disengaged to spawn them directly.
     explicit CompileMemoryMeter(std::shared_ptr<Platform::ICgroupHost const> host,
-                                MeterPlatform platform = ThisMeterPlatform);
+                                MeterPlatform platform = ThisMeterPlatform,
+                                std::optional<Cc::OomVictim> oomVictim = std::nullopt);
 
     /// A runner over this process's meter, preparing it on the first call.
     /// @param metrics Where compiles that go unmeasured at run time are counted; outlives the runner.
@@ -179,6 +182,7 @@ class CompileMemoryMeter
 
     std::shared_ptr<Platform::ICgroupHost const> _host;
     MeterPlatform _platform;
+    std::optional<Cc::OomVictim> _oomVictim; ///< Handed to every runner this meter makes.
     std::once_flag _prepared;
     /// Set, with release, once `Prepare` has decided: `ApplyCeiling` reads `_layout` and `_report` only after.
     std::atomic<bool> _decided { false };

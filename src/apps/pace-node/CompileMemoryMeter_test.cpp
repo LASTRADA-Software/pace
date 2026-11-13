@@ -785,7 +785,7 @@ TEST_CASE("A compile KillYoungest chose is reported shed by the runner that reap
     auto const layout = Platform::PrepareJobCgroups(*host);
     REQUIRE(layout.has_value());
     auto const source = std::make_shared<SheddingJobSource>(std::make_shared<Platform::CgroupJobSource>(host, *layout));
-    auto const runner = Cc::MakeProcessRunner(source);
+    auto const runner = Cc::MakeProcessRunner(source, std::nullopt);
 
     auto const run = runner->RunCaptureSplit({ { "/bin/sh", "-c", "kill -9 $$" } });
     if (source->refused != 0)

@@ -314,6 +314,11 @@ if(PACE_BUILD_TESTS)
         InputWitness_test.cpp
         ObjectEquivalence_test.cpp
         ObjectSections_test.cpp
+        # The OOM-victim shim is the compile NODE's: `pace-node`'s `main` dispatches to it and the launcher never
+        # spawns through it, so like ToolchainDiscovery.cpp below it is listed here for its tests and in
+        # `_pace_node_shared` for its real consumer, never in `_pace_cc_sources`.
+        OomVictimExec.cpp
+        OomVictimExec_test.cpp
         CompileCorrelation_test.cpp
         AdmitSession_test.cpp
         MissFlow_test.cpp
@@ -367,6 +372,17 @@ if(PACE_BUILD_TESTS)
     if(TARGET peak-memory-child)
         add_dependencies(pace-cc-tests peak-memory-child)
         set(_pace_cc_peak_environment "PACE_TEST_PEAK_MEMORY_CHILD=$<TARGET_FILE:peak-memory-child>")
+    endif()
+
+    # The OOM-victim tests (OomVictimExec_test.cpp) spawn compilers through a binary whose `main` is the shim alone,
+    # with the production writer -- `pace-node` begins the same way, and is not what these tests are about. The
+    # tests find it BESIDE their own executable rather than through the test environment: a second variable in
+    # `ENVIRONMENT` is a list, which `catch_discover_tests` splits into a value and a stray argument on its way to
+    # the generated script, and the second variable then reaches no test.
+    add_executable(oom-victim-exec-shim OomVictimExecShim.cpp OomVictimExec.cpp)
+    target_include_directories(oom-victim-exec-shim PRIVATE "${CMAKE_SOURCE_DIR}/src")
+    if(TARGET oom-victim-exec-shim)
+        add_dependencies(pace-cc-tests oom-victim-exec-shim)
     endif()
     if(PACE_ENABLE_COMPRESSION AND _pace_cc_zstd AND _pace_cc_lz4)
         target_link_libraries(pace-cc-tests PRIVATE ${_pace_cc_zstd} ${_pace_cc_lz4})

@@ -297,7 +297,7 @@ TEST_CASE("ProcessRunner.peak-memory-is-measured", "[pace-cc][process]")
 #if !defined(_WIN32)
 TEST_CASE("A compiler ended by SIGKILL is reported killed, not failed", "[cc][process]")
 {
-    auto const runner = MakeProcessRunner(PeakSource::Unmeasured);
+    auto const runner = MakeProcessRunner(PeakSource::Unmeasured, std::nullopt);
 
     auto const killed = runner->RunCaptureSplit(ShellCommand("kill -9 $$"));
     CHECK(killed.exitCode == 137);
@@ -344,7 +344,7 @@ TEST_CASE("ProcessRunner.unmeasured-reports-no-peak", "[pace-cc][process]")
 {
     // The node's runner on a machine that gave it no cgroup: the compile runs, and no figure is made up.
     // On Linux the figure `ru_maxrss` would give is the SPAWNER's resident set, which is the bug.
-    auto const runner = MakeProcessRunner(PeakSource::Unmeasured);
+    auto const runner = MakeProcessRunner(PeakSource::Unmeasured, std::nullopt);
 #if defined(_WIN32)
     auto const run = runner->RunCaptureSplit(ShellCommand("echo hi"));
     REQUIRE(run.exitCode == 0);
@@ -359,7 +359,7 @@ TEST_CASE("ProcessRunner.unmeasured-reports-no-peak", "[pace-cc][process]")
 
 TEST_CASE("ProcessRunner.resource-usage-source-still-measures", "[pace-cc][process]")
 {
-    auto const runner = MakeProcessRunner(PeakSource::ResourceUsage);
+    auto const runner = MakeProcessRunner(PeakSource::ResourceUsage, std::nullopt);
     auto const run = runner->RunCaptureSplit(ShellCommand("echo hi"));
 
     REQUIRE(run.exitCode == 0);
@@ -473,7 +473,7 @@ TEST_CASE("ProcessRunner.cgroup-runner-runs-the-compile-when-no-cgroup-can-be-ma
     if (!CanSpawnIntoCgroups())
         SKIP("this build cannot spawn into a cgroup, so its runner never asks for one (see the case below)");
     auto source = std::make_shared<ScriptedJobSource>(ScriptedJobSource::Answer::RefuseToCreate);
-    auto const runner = MakeProcessRunner(source);
+    auto const runner = MakeProcessRunner(source, std::nullopt);
 
     auto const run = runner->RunCaptureSplit(ShellCommand("echo hi"));
 
@@ -489,7 +489,7 @@ TEST_CASE("ProcessRunner.cgroup-runner-runs-the-compile-when-the-system-refuses-
     if (!CanSpawnIntoCgroups())
         SKIP("this build cannot spawn into a cgroup, so its runner never asks for one (see the case below)");
     auto source = std::make_shared<ScriptedJobSource>(ScriptedJobSource::Answer::CreateUnusableJob);
-    auto const runner = MakeProcessRunner(source);
+    auto const runner = MakeProcessRunner(source, std::nullopt);
 
     auto const run = runner->RunCaptureSplit(ShellCommand("echo hi"));
 
@@ -506,7 +506,7 @@ TEST_CASE("ProcessRunner.cgroup-runner-still-reports-an-unspawnable-program", "[
     if (!CanSpawnIntoCgroups())
         SKIP("this build cannot spawn into a cgroup, so its runner never asks for one (see the case below)");
     auto source = std::make_shared<ScriptedJobSource>(ScriptedJobSource::Answer::CreateUnusableJob);
-    auto const runner = MakeProcessRunner(source);
+    auto const runner = MakeProcessRunner(source, std::nullopt);
 
     auto const run = runner->RunCaptureSplit({ { "definitely-not-a-real-program-xyzzy" } });
 
@@ -526,7 +526,7 @@ TEST_CASE("ProcessRunner.cgroup-runner-on-a-build-without-support-never-asks-for
     if (CanSpawnIntoCgroups())
         SKIP("this build can spawn into a cgroup; the case is about the one that cannot");
     auto source = std::make_shared<ScriptedJobSource>(ScriptedJobSource::Answer::CreateUnusableJob);
-    auto const runner = MakeProcessRunner(source);
+    auto const runner = MakeProcessRunner(source, std::nullopt);
 
     auto const run = runner->RunCaptureSplit(ShellCommand("echo hi"));
 
@@ -637,7 +637,7 @@ TEST_CASE("ProcessRunner.a-killed-compile-names-shed-before-ceiling-before-signa
     for (auto const& row: rows)
     {
         auto const source = std::make_shared<MarkedJobSource>(own.Descriptor(), row.marks);
-        auto const runner = MakeProcessRunner(source);
+        auto const runner = MakeProcessRunner(source, std::nullopt);
         auto const killed = runner->RunCaptureSplit(ShellCommand("kill -9 $$"));
         if (source->Refused() != 0)
             SKIP("the system refused to start a child inside this process's own cgroup");

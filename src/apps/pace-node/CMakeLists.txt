@@ -29,6 +29,7 @@ set(_pace_node_shared
     "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/DirectManifest.cpp"
     "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/Dispatch.cpp"
     "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/EndpointDial.cpp"
+    "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/OomVictimExec.cpp"
     "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/ParallelFor.cpp"
     "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/ProcessRunner.cpp"
     "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/Stats.cpp"

@@ -71,9 +71,12 @@ namespace
 
 } // namespace
 
-CompileMemoryMeter::CompileMemoryMeter(std::shared_ptr<Platform::ICgroupHost const> host, MeterPlatform platform):
+CompileMemoryMeter::CompileMemoryMeter(std::shared_ptr<Platform::ICgroupHost const> host,
+                                       MeterPlatform platform,
+                                       std::optional<Cc::OomVictim> oomVictim):
     _host { std::move(host) },
-    _platform { platform }
+    _platform { platform },
+    _oomVictim { std::move(oomVictim) }
 {
 }
 
@@ -169,12 +172,12 @@ MeteredRunner CompileMemoryMeter::MakeRunner(IMetricsSink& metrics, ILogger& log
     std::call_once(_prepared, [this] { Prepare(); });
 
     if (_source != nullptr)
-        return MeteredRunner { .runner =
-                                   Cc::MakeProcessRunner(std::make_shared<ReportingJobSource>(_source, metrics, logger)),
+        return MeteredRunner { .runner = Cc::MakeProcessRunner(
+                                   std::make_shared<ReportingJobSource>(_source, metrics, logger), _oomVictim),
                                .report = _report };
     auto const strategy = MeterPlatformTable[static_cast<std::size_t>(_platform)].strategy;
     auto const peak = strategy == MeterStrategy::PlatformMeter ? Cc::PeakSource::ResourceUsage : Cc::PeakSource::Unmeasured;
-    return MeteredRunner { .runner = Cc::MakeProcessRunner(peak), .report = _report };
+    return MeteredRunner { .runner = Cc::MakeProcessRunner(peak, _oomVictim), .report = _report };
 }
 
 void ReportCompileMemoryMeter(MeterReport const& report, NodeConditions& conditions, ILogger& logger)

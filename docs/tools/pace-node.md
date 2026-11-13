@@ -3578,8 +3578,22 @@ same way.
 
 ##### Layer A: compilers are the kernel's first victims
 
-*(Not in this build yet: every compiler gets `oom_score_adj=1000`, so the kernel's OOM killer picks a
-compile before a desktop process. This subsection is filled in when it lands.)*
+Every compiler a worker runs starts with `oom_score_adj=1000`, the kernel's largest, so when the
+machine runs out of memory the kernel's OOM killer picks a compile before a desktop process — and
+before the node, whose own score is never changed. The node does not spawn the compiler directly: it
+spawns its own binary under the name `pace-oom-victim-exec`, which writes `1000` to
+`/proc/self/oom_score_adj` and then `exec`s the compiler. The score is set **before** the `exec`, so
+the compiler and every process it starts (`cc1plus`, `ld`, LTO workers) inherit it from their first
+instruction; there is no window in which any of them runs at the node's score, which writing the score
+from outside after the spawn could not promise. The shim is what the compile's `job-<n>` cgroup
+receives, and it becomes the compiler by `exec`, so the measurement and the ceiling above are
+unchanged. The shim is chosen by the name it is invoked under, never by a flag, so nothing an operator
+types selects it and no service registration carries it.
+
+Raising its own score needs no privilege. If the write fails anyway (no `/proc`), the shim prints one
+warning on the compile's stderr and the compile still runs, at the node's score: a compile matters
+more than its kill priority. On a platform other than Linux there is no `oom_score_adj`, and compilers
+are spawned directly, as before.
 
 What the shipped units already do for the third party in that picture, systemd-oomd, is
 `ManagedOOMPreference=omit`. oomd kills a whole unit, and in its choice the node would take every

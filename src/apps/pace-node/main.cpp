@@ -146,6 +146,7 @@
 #include <CompileJob.hpp>
 #include <Dispatch.hpp>
 #include <EndpointDial.hpp>
+#include <OomVictimExec.hpp>
 #include <ToolchainDiscovery.hpp>
 #include <ToolchainHost.hpp>
 #include <WorkerProtocol.hpp>
@@ -2863,6 +2864,11 @@ int main(int argc, char** argv)
 {
     std::span<char const* const> const argvSpan { const_cast<char const* const*>(argv), static_cast<std::size_t>(argc) };
 
+    // FIRST, before any configuration, logger or thread: a node spawns every compiler through its own binary under
+    // the shim's name, which raises its OOM score and `exec`s the compiler (`Cc::RunOomVictimExecIfInvoked`).
+    if (Cc::ProcSelfOomScoreWriter oomScore; auto const failed = Cc::RunOomVictimExecIfInvoked(argvSpan, oomScore))
+        return *failed;
+
     // The rename to Pace retired the old environment prefix (Cli/RetiredEnvironment.hpp names
     // it): nothing reads it, so a node still configured through the old scheduler variable is
     // told so rather than starting without it in silence (#1713 removes this in 0.8.0).
@@ -3490,7 +3496,10 @@ int main(int argc, char** argv)
     auto const formationSrv = MakeSystemSrvResolver();
     // Built here, once: preparing the meter moves this process into a cgroup of its own, which must
     // not happen again when a reform rebuilds the worker (`Node::CompileMemoryMeter`).
-    Node::CompileMemoryMeter memoryMeter { std::make_shared<Platform::SystemCgroupHost>() };
+    // Every runner it makes spawns compilers through this binary as the OOM-victim shim, named once here.
+    Node::CompileMemoryMeter memoryMeter { std::make_shared<Platform::SystemCgroupHost>(),
+                                           Node::ThisMeterPlatform,
+                                           Cc::ThisProcessOomVictim() };
     auto const parts = ServingParts { .store = *formationStore,
                                       .endpoints = *endpointsFile,
                                       .archiver = archiver,
