@@ -89,7 +89,19 @@ constexpr Settlement Done { .outcome = SettleOutcome::NotStored, .peakBytes = st
 
 MachineReport Report(std::uint64_t budget, std::uint32_t slots, std::uint32_t heldSlots = 0, std::uint64_t heldBytes = 0)
 {
-    return MachineReport { .memoryBudgetBytes = budget, .slots = slots, .heldSlots = heldSlots, .heldBytes = heldBytes };
+    return MachineReport { .memoryBudgetBytes = budget,
+                           .slots = slots,
+                           .heldSlots = heldSlots,
+                           .heldBytes = heldBytes,
+                           .pressure = PressureLevel::Calm };
+}
+
+/// An idle machine's report at @p pressure.
+MachineReport Pressed(std::uint64_t budget, std::uint32_t slots, PressureLevel pressure)
+{
+    auto report = Report(budget, slots);
+    report.pressure = pressure;
+    return report;
 }
 
 std::vector<Ticket> Tickets(std::vector<Decision> const& decisions)
@@ -834,4 +846,73 @@ TEST_CASE("AdmissionQueue.snapshot-in-use-is-what-admission-counts-after-a-failo
     // And it is the figure admission refuses on: 2 GiB does not fit in the 1 GiB left.
     f.Local(2 * GiB);
     CHECK(f.queue.Pump().empty());
+}
+
+TEST_CASE("AdmissionQueue.pressured-machine-never-runs-oversize-alone", "[distributed][admission]")
+{
+    // The run-alone exception admits a compile larger than the whole budget onto an idle machine. A
+    // machine under memory pressure is idle BECAUSE it is yielding, so that exception is closed there.
+    SECTION("yielding: the oversize request waits")
+    {
+        Fixture f;
+        f.queue.ReportMachine("m", Pressed(4 * GiB, 4, PressureLevel::Yield));
+        f.Local(6 * GiB);
+        CHECK(f.queue.Pump().empty());
+        CHECK(f.queue.Depth() == 1);
+    }
+    SECTION("calm: the same request runs alone (control)")
+    {
+        Fixture f;
+        f.queue.ReportMachine("m", Pressed(4 * GiB, 4, PressureLevel::Calm));
+        auto const big = f.Local(6 * GiB);
+        auto const granted = f.queue.Pump();
+        REQUIRE(granted.size() == 1);
+        CHECK(granted[0].ticket == big);
+        CHECK(granted[0].ranAlone);
+    }
+}
+
+TEST_CASE("AdmissionQueue.shedding-machine-admits-nothing", "[distributed][admission]")
+{
+    Fixture f;
+    f.queue.ReportMachine("m", Pressed(8 * GiB, 4, PressureLevel::Shed));
+    auto const small = f.Local(1 * GiB);
+    CHECK(f.queue.Pump().empty());
+    CHECK(f.queue.Depth() == 1);
+
+    // The level is applied on receipt, to a ticket already waiting: calm again, it runs.
+    f.queue.ReportMachine("m", Pressed(8 * GiB, 4, PressureLevel::Calm));
+    CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { small });
+}
+
+TEST_CASE("AdmissionQueue.shedding-machine-takes-no-dispatched-work-and-it-runs-elsewhere", "[distributed][admission]")
+{
+    Fixture f;
+    f.placement.byFingerprint["fp"] = { Placement { .workerId = "worker-1", .machine = "w", .endpoint = "10.0.0.2:6680" } };
+    f.queue.ReportMachine("w", Pressed(8 * GiB, 4, PressureLevel::Shed));
+    f.queue.ReportMachine("c", Report(8 * GiB, 4));
+    auto const job = f.Add(AdmitKind::Dispatchable, "c", 1 * GiB, "fp");
+    auto const granted = f.queue.Pump();
+    REQUIRE(granted.size() == 1);
+    CHECK(granted[0].ticket == job);
+    CHECK(granted[0].kind == Pace::CompileCacheWire::GrantKind::Local); // on its caller, never on the shedding worker
+}
+
+TEST_CASE("AdmissionQueue.yield-holds-local-compiles-too", "[distributed][admission]")
+{
+    // The owner's decision: a local build can freeze the desktop as surely as a remote one, so a
+    // request from the pressured machine itself, for itself, waits as dispatched work does.
+    Fixture f;
+    f.queue.ReportMachine("m", Pressed(4 * GiB, 4, PressureLevel::Yield));
+    auto const local = f.Add(AdmitKind::LocalOnly, "m", 6 * GiB);
+    CHECK(f.queue.Pump().empty());
+
+    f.queue.ReportMachine("m", Pressed(4 * GiB, 4, PressureLevel::Shed));
+    f.Add(AdmitKind::LocalOnly, "m", 1 * GiB);
+    CHECK(f.queue.Pump().empty());
+    CHECK(f.queue.Depth() == 2);
+
+    // Calm again: the waiting oversize one runs alone, on receipt of the report.
+    f.queue.ReportMachine("m", Pressed(4 * GiB, 4, PressureLevel::Calm));
+    CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { local });
 }

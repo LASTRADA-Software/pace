@@ -347,7 +347,12 @@ std::vector<Decision> AdmissionQueue::Pump()
             auto const& report = *_ledgers.at(target.machine).report;
             auto const& hold = reserved[target.machine];
             auto const room = RoomOn(target.machine, hold);
-            if (entry.chargedBytes > report.memoryBudgetBytes)
+            // A machine shedding memory takes nothing, its own local compiles included (the owner's decision).
+            if (report.pressure == PressureLevel::Shed)
+                return false;
+            // A yielding machine is idle BECAUSE it yields, so the run-alone exception is closed there: an
+            // oversize compile is exactly the one that would take back what the governor gave away.
+            if (entry.chargedBytes > report.memoryBudgetBytes && report.pressure == PressureLevel::Calm)
                 return report.slots > 0 && room.usedBytes == 0 && room.usedSlots == 0 && hold.bytes == 0 && hold.slots == 0;
             return room.freeBytes >= entry.chargedBytes && room.freeSlots >= 1;
         });

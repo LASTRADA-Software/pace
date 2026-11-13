@@ -210,6 +210,7 @@ namespace
         { .limit = SlotLimit::Scratch, .chipClass = "chip--scratch", .tone = CellTone::Alert },
         { .limit = SlotLimit::CompileBudget, .chipClass = "chip--memory", .tone = CellTone::Limited },
         { .limit = SlotLimit::Cordoned, .chipClass = "chip--cordoned", .tone = CellTone::Limited },
+        { .limit = SlotLimit::MemoryPressure, .chipClass = "chip--memory", .tone = CellTone::Limited },
     } };
 
     static_assert(RowsInEnumeratorOrder(LimitDressTable, &LimitDress::limit),

@@ -168,7 +168,8 @@ Wire::MachineBudgetReport MachineBudgetToWire(Distributed::MachineReport const& 
                                        .slots = report.slots,
                                        .heldSlots = report.heldSlots,
                                        .heldBytes = report.heldBytes,
-                                       .peaks = std::move(peaks) };
+                                       .peaks = std::move(peaks),
+                                       .pressure = report.pressure };
 }
 
 bool SendMachineBudgetOnce(MachineBudgetRound const& round, SchedulerLink& link, IEndpointDialer& dialer)

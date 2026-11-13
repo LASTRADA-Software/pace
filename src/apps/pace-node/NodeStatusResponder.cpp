@@ -263,6 +263,8 @@ namespace
                   return c.binding == Distributed::SlotLimit::Cordoned ? std::optional { std::uint32_t { 0 } }
                                                                        : std::nullopt;
               } },
+        { .limit = Distributed::SlotLimit::MemoryPressure,
+          .read = [](Distributed::SlotCeilings const& c) { return c.byMemoryPressure; } },
     } };
     static_assert(RowsInEnumeratorOrder(CeilingReaders, &CeilingReaderRow::limit),
                   "CeilingReaders must hold one row per SlotLimit, in enumerator order");

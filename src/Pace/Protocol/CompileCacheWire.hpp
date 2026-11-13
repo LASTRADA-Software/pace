@@ -238,7 +238,14 @@ using WireVersion = std::uint8_t;
 /// `format` field, and the reply for `Json` is `/fleet.json`'s body byte for byte. `WireSurface`
 /// also gained `Mcp`. A version-16 request has three fields where this build reads four, so it is
 /// refused `UnsupportedVersion`, naming the range, by `FleetTextResponder` before any field is read.
-inline constexpr WireVersion CurrentVersion = 17;
+///
+/// **18 lets a machine's budget report carry its memory pressure**: MACHINE-BUDGET grew from 5 to 6
+/// fields, the trailing one a `PressureLevel` byte, so the leader's queue holds back a machine whose
+/// node is yielding or shedding memory. Its decoder is exact about arity in both directions: a
+/// version-17 leader would refuse every version-18 report as a malformed frame, and a version-18
+/// leader would refuse every version-17 one the same way -- a machine whose reports are refused is
+/// one the queue admits nothing on, and nothing would say why.
+inline constexpr WireVersion CurrentVersion = 18;
 
 /// The oldest version this build still accepts. Equal to `CurrentVersion` while
 /// only one version exists; widen the range when a second one ships and this
@@ -408,7 +415,12 @@ inline constexpr WireVersion CurrentVersion = 17;
 /// a version-16 request would otherwise be answered as a malformed frame, a confident wrong
 /// diagnosis for a version mismatch. `FleetTextResponder` judges the version itself, because
 /// nothing earlier on the Fleet family's path does.
-inline constexpr WireVersion MinSupportedVersion = 17;
+///
+/// Version 18 moves it for version 17's reason: MACHINE-BUDGET's field count is part of its grammar,
+/// and a version-17 report, five fields where this build reads six, would be refused as a malformed
+/// frame -- a confident wrong diagnosis for a version mismatch, on a verb whose refusal leaves the
+/// machine out of the queue. Refused by number, the mismatch names the range instead.
+inline constexpr WireVersion MinSupportedVersion = 18;
 
 /// Size of the fixed request header: magic, version, op, payload length.
 inline constexpr std::size_t RequestHeaderSize = WireFrame::HeaderSize;
@@ -2588,7 +2600,7 @@ inline constexpr std::array OpTable {
                    .identity = IdentityRequirement::AddressAdmits },
     OpDescriptor { .code = Op::MachineBudget,
                    .name = "machine-budget",
-                   .fieldCount = 5, // memory budget, slots, held slots, held bytes, peaks
+                   .fieldCount = 6, // memory budget, slots, held slots, held bytes, peaks, pressure
                    .legalStatuses = static_cast<std::uint8_t>(StatusBit(Status::Ok) | StatusBit(Status::Error)),
                    .preAuth = RequiresAuth,
                    .maxPayload = BoundedTo(MaxControlPayload),
@@ -10396,6 +10408,9 @@ struct MachineBudgetReport
     std::uint64_t heldBytes;         ///< Memory charged now.
     /// A bounded sample of measured peaks, newest meaning most useful to the leader's estimates.
     std::vector<std::pair<EstimateKeyFields, std::uint64_t>> peaks;
+    /// How hard the machine's memory is pressed now. Anything but `Calm` closes the queue's run-alone
+    /// exception there, and `Shed` admits nothing there at all -- the machine's own local compiles included.
+    PressureLevel pressure { PressureLevel::Calm };
 
     /// @return True when every field is equal.
     [[nodiscard]] bool operator==(MachineBudgetReport const&) const = default;
@@ -10628,19 +10643,22 @@ inline constexpr std::size_t AdmitGrantFieldCount = 10;
         parts.emplace_back(values.emplace_back(EncodeU64Field(peak)));
     }
     auto const peaks = WireFields::Encode(WireFields::FieldList { parts });
+    auto const pressure = Detail::EncodeEnumByte(report.pressure);
     return Detail::EncodeRequest(version,
                                  Op::MachineBudget,
                                  { std::span<std::byte const> { budget },
                                    std::span<std::byte const> { slots },
                                    std::span<std::byte const> { heldSlots },
                                    std::span<std::byte const> { heldBytes },
-                                   std::span<std::byte const> { peaks } });
+                                   std::span<std::byte const> { peaks },
+                                   std::span<std::byte const> { pressure } });
 }
 
 /// Split a MACHINE-BUDGET payload.
 /// @param payload The bytes following the request header.
 /// @return The owned report, or nullopt when malformed: a number of another width, more than
-///         `MaxMachineBudgetPeaks` peaks, a peak that is not four fields, or a string over its cap.
+///         `MaxMachineBudgetPeaks` peaks, a peak that is not four fields, a string over its cap, or a
+///         pressure level this build has no reading for.
 [[nodiscard]] inline std::optional<MachineBudgetReport> DecodeMachineBudgetPayload(std::span<std::byte const> payload)
 {
     auto const fields = SplitFields(payload, OpFieldCount(Op::MachineBudget));
@@ -10650,15 +10668,20 @@ inline constexpr std::size_t AdmitGrantFieldCount = 10;
     auto const slots = DecodeU32Field((*fields)[1]);
     auto const heldSlots = DecodeU32Field((*fields)[2]);
     auto const heldBytes = DecodeU64Field((*fields)[3]);
-    if (!budget.has_value() || !slots.has_value() || !heldSlots.has_value() || !heldBytes.has_value())
+    auto const pressure = Detail::DecodeEnumByte<PressureLevel>((*fields)[5]);
+    if (!budget.has_value() || !slots.has_value() || !heldSlots.has_value() || !heldBytes.has_value()
+        || !pressure.has_value())
         return std::nullopt;
     auto const parts = WireFields::SplitAtMost((*fields)[4], MaxMachineBudgetPeaks * 4);
     if (!parts.has_value() || parts->size() % 4 != 0)
         return std::nullopt;
 
-    MachineBudgetReport out {
-        .memoryBudgetBytes = *budget, .slots = *slots, .heldSlots = *heldSlots, .heldBytes = *heldBytes, .peaks = {}
-    };
+    MachineBudgetReport out { .memoryBudgetBytes = *budget,
+                              .slots = *slots,
+                              .heldSlots = *heldSlots,
+                              .heldBytes = *heldBytes,
+                              .peaks = {},
+                              .pressure = *pressure };
     out.peaks.reserve(parts->size() / 4);
     for (auto const index: std::views::iota(std::size_t { 0 }, parts->size() / 4))
     {

@@ -29,6 +29,7 @@ using Ticket = std::uint64_t;
 
 using CompileCacheWire::AdmitKind;
 using CompileCacheWire::GrantKind;
+using CompileCacheWire::PressureLevel;
 using CompileCacheWire::SettleOutcome;
 
 /// One compile asking to be admitted.
@@ -76,6 +77,9 @@ struct MachineReport
     std::uint32_t slots {};
     std::uint32_t heldSlots {}; ///< Every compile running on the machine (local leases + worker jobs).
     std::uint64_t heldBytes {}; ///< Their charged bytes. The ledger uses max(charged, held), never the sum.
+    /// How hard its memory is pressed. Anything but `Calm` closes the run-alone exception on it, and
+    /// `Shed` admits nothing on it at all; both reach requests already waiting, at the next `Pump()`.
+    PressureLevel pressure { PressureLevel::Calm };
 };
 
 /// An admission: what to run, and where.

@@ -5,6 +5,7 @@
 // than `registered` -- while it cannot know.
 #include "NodeSlots.hpp"
 
+#include <Pace/Distributed/FleetView.hpp>
 #include <Pace/Distributed/NodePolicy.hpp>
 #include <Pace/Metrics/StatsReading.hpp>
 #include <Pace/Platform/HostLoad.hpp>
@@ -217,4 +218,15 @@ TEST_CASE("A reading that carries no load names no limit", "[cli][node-slots]")
     CHECK(Unwrap(slots).registered == 16);
     CHECK_FALSE(Unwrap(slots).ceilings.has_value());
     CHECK_FALSE(Unwrap(slots).availableMemoryBytes.has_value());
+}
+
+TEST_CASE("A memory-pressure limit has the name, the remedy and the tone the node panel renders it with",
+          "[pacectl][node-slots][MemoryPressure]")
+{
+    // The panel names the binding limit through `SlotLimitTable` and dresses it through `SlotLimitTone`, so a
+    // limit missing from either would render as a blank or as plain text claiming nothing holds the node back.
+    auto const& traits = Distributed::TraitsFor(Distributed::SlotLimit::MemoryPressure);
+    CHECK(traits.name == "memory-pressure");
+    CHECK(traits.remedy.contains("memory"));
+    CHECK(Distributed::SlotLimitTone(Distributed::SlotLimit::MemoryPressure) == Distributed::CellTone::Limited);
 }

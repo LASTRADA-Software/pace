@@ -223,6 +223,40 @@ TEST_CASE("AdmissionResponder.machine-budget-report-enables-admission", "[node][
     CHECK(queue.service.AdmissionSnapshotNow().depth == 0);
 }
 
+TEST_CASE("AdmissionResponder.a-shedding-machine-budget-report-holds-a-waiting-ticket", "[node][admission][machine-budget]")
+{
+    // The level is applied on receipt, through the real wire path, to a ticket already parked: a shedding
+    // report keeps it waiting, and the calm one after it is what lets it run.
+    Queue queue;
+    auto const port = queue.Serve();
+
+    Client client { port };
+    client.Send(AdmitFrame(Wire::AdmitKind::LocalOnly, "k1"));
+    REQUIRE(Unwrap(client.Read()).status == Wire::Status::Progress);
+
+    queue.Report(1024 * MiB, 2, Wire::PressureLevel::Shed);
+    CHECK(queue.service.AdmissionSnapshotNow().depth == 1);
+
+    queue.Report(1024 * MiB, 2, Wire::PressureLevel::Calm);
+    CHECK(GrantOf(Unwrap(client.ReadAnswer())).kind == Wire::GrantKind::Local);
+    CHECK(queue.service.AdmissionSnapshotNow().depth == 0);
+}
+
+TEST_CASE("AdmissionResponder.a-machine-budget-of-another-version-is-refused-by-number", "[node][admission][machine-budget]")
+{
+    Queue queue;
+    auto const older = Wire::EncodeMachineBudget(
+        Wire::MachineBudgetReport {
+            .memoryBudgetBytes = 1, .slots = 1, .heldSlots = 0, .heldBytes = 0, .peaks = {}, .pressure = {} },
+        Wire::WireVersion { Wire::MinSupportedVersion - 1 });
+    auto reply = core::async::syncRun(
+        UnwrapMutable(queue.admission)
+            .Answer(older,
+                    PeerIdentity { .host = "10.0.0.2",
+                                   .proven = ProvenIdentity { .id = "scheduler", .key = queue.signer.PublicKey() } }));
+    CHECK(Pace::Testing::ErrorOf(reply.bytes) == Wire::ErrorCode::UnsupportedVersion);
+}
+
 TEST_CASE("AdmissionResponder.a-frame-other-than-settle-abandons", "[node][admission]")
 {
     Queue queue;

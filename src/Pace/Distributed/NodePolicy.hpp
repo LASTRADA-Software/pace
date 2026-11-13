@@ -3,6 +3,7 @@
 
 #include <Pace/Cache/StorageTier.hpp>
 #include <Pace/Core/EnumTable.hpp>
+#include <Pace/Protocol/CompileCacheWire.hpp>
 
 #include <algorithm>
 #include <array>
@@ -15,6 +16,8 @@
 
 namespace Pace::Distributed
 {
+
+using CompileCacheWire::PressureLevel;
 
 /// How hard a machine may be driven.
 ///
@@ -414,6 +417,11 @@ struct NodeLoad
     /// by slots AND bytes, so a worker whose budget was spent refused grants with
     /// `EndpointBusy` that the scheduler went on issuing; this is how it hears the bytes.
     std::optional<CompileBudgetLoad> compileBudget {};
+
+    /// How hard the machine's memory is pressed, as its pressure governor reads it, or absent from
+    /// a node that does not say. Anything but `Calm` withdraws every slot (`SlotLimit::MemoryPressure`):
+    /// the governor is giving memory back to whatever else runs there, and a new compile would take it.
+    std::optional<PressureLevel> pressure {};
 };
 
 namespace Detail
@@ -440,7 +448,7 @@ namespace Detail
 } // namespace Detail
 
 /// Which ceiling decided `AvailableSlots`: the registered count, one of the four
-/// resources a heartbeat reports, or an operator's cordon.
+/// resources a heartbeat reports, an operator's cordon, or the node's memory pressure.
 ///
 /// `Registered` is zero, and that is the safety property rather than an ordering
 /// convenience: a breakdown nobody filled in reads as "nothing withdrew anything",
@@ -461,6 +469,9 @@ enum class SlotLimit : std::uint8_t
     /// An operator cordoned it (#1303): it takes nothing new until the cordon is lifted
     /// or the node restarts.
     Cordoned,
+    /// Its memory is under pressure: the node's governor yields or sheds, and it takes nothing new
+    /// until the pressure eases. Applied BEFORE the cordon, which still wins a tie.
+    MemoryPressure,
     Last, ///< Not a limit, and has no row: `SlotLimitTable`'s length.
 };
 
@@ -521,6 +532,11 @@ inline constexpr EnumTable<SlotLimit, SlotLimitTraits> SlotLimitTable { {
       .name = "cordoned",
       .remedy = "an operator cordoned this machine. Lift it with `pacectl uncordon` there, or restart the node.",
       .refusal = SlotRefusal::Withdrawn },
+    { .limit = SlotLimit::MemoryPressure,
+      .name = "memory-pressure",
+      .remedy = "something else on this machine needs its memory, and the node is giving it back. It takes work "
+                "again by itself once the pressure eases; to have it sooner, free memory there.",
+      .refusal = SlotRefusal::Withdrawn },
 } };
 
 // A limit added to the enum without a row is a build failure rather than a report
@@ -563,6 +579,8 @@ struct SlotCeilings
     /// What its remaining compile byte budget supports, or absent when it did not say or
     /// holds nothing to measure a job by.
     std::optional<std::uint32_t> byCompileBudget {};
+    /// Zero while the machine reports memory pressure, absent while it is calm or did not say.
+    std::optional<std::uint32_t> byMemoryPressure {};
     /// The minimum of whichever applied; what `AvailableSlots` returns.
     std::uint32_t available { 0 };
     /// Which ceiling produced `available`.
@@ -589,6 +607,10 @@ struct SlotCeilings
 /// **`capacity.cache` is not read, and must not start to be**: how full a node's
 /// cache is says nothing about whether it can take another compile.
 ///
+/// **Memory pressure** (`NodeLoad::pressure` anything but `Calm`) withdraws every slot: the node's
+/// governor is giving memory back to the rest of the machine. It is applied after the four resource
+/// limits and before the cordon, and keeps their tie rule.
+///
 /// **A cordon is applied last and wins every tie**, which is the one exception to
 /// `SlotCeilings::binding`'s first-in-enumerator-order rule, and deliberately so. The
 /// other four limits lift themselves -- the owner stops using the machine, memory frees,
@@ -608,6 +630,7 @@ struct SlotCeilings
                           .byMemory = std::nullopt,
                           .byScratch = std::nullopt,
                           .byCompileBudget = std::nullopt,
+                          .byMemoryPressure = std::nullopt,
                           .available = registeredSlots,
                           .binding = SlotLimit::Registered };
 
@@ -689,6 +712,19 @@ struct SlotCeilings
         {
             result.available = *result.byCompileBudget;
             result.binding = SlotLimit::CompileBudget;
+        }
+    }
+
+    // Memory pressure is a decision the node's governor made, so it withdraws every slot rather than
+    // some. Named only when it lowers the count, so an earlier limit already at zero keeps the tie --
+    // pressure lifts itself as every resource limit does, which the cordon below does not.
+    if (load.pressure.has_value() && *load.pressure != PressureLevel::Calm)
+    {
+        result.byMemoryPressure = 0U;
+        if (result.available > 0)
+        {
+            result.available = 0;
+            result.binding = SlotLimit::MemoryPressure;
         }
     }
 
