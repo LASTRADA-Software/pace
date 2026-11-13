@@ -312,7 +312,8 @@ TEST_CASE("CompileMemoryMeter.accepted-reload-rewrites-the-ceiling-from-the-conf
     } inForce;
     inForce.cfg.compileMemoryLimitBytes = 16 * CeilingGiB;
     FixedNodeCapacity const capacity { CeilingMachine() };
-    CompileCeilingOnReload ceiling { meter, inForce, capacity, conditions, logger };
+    CompileCeilingKeeper keeper { meter, conditions, logger };
+    CompileCeilingOnReload ceiling { keeper, inForce, capacity };
 
     // Told through the fan-out `main` hands `ApplyReloadRequest`, as the budget applier is beside it.
     struct CountingListener final: IAcceptedReloadListener
@@ -332,6 +333,31 @@ TEST_CASE("CompileMemoryMeter.accepted-reload-rewrites-the-ceiling-from-the-conf
     CHECK(other.told == 2);
     CHECK(CeilingWrites(*host) == std::vector<std::string> { "17179869184", "8589934592" });
     CHECK(conditions.StateOf(NodeCondition::CompileMemoryUncapped) == CompileCacheWire::ConditionState::Clear);
+}
+
+TEST_CASE("CompileMemoryMeter.keeper-writes-on-change-and-always-when-told", "[node][meter][memory-meter]")
+{
+    if (!Cc::CanSpawnIntoCgroups())
+        SKIP("this build cannot spawn into a cgroup, so the meter never prepares compiles/");
+    auto const host = DelegatedHost();
+    AtomicMetricsSink metrics;
+    CapturingLogger logger;
+    NodeConditions conditions;
+    CompileMemoryMeter meter { host, MeterPlatform::Linux };
+    REQUIRE(meter.MakeRunner(metrics, logger).report.state == MeterState::Measured);
+    CompileCeilingKeeper keeper { meter, conditions, logger };
+    auto const bare = NodeConfig {};
+    auto shrunk = CeilingMachine();
+    shrunk.reservedMemoryBytes = 32 * CeilingGiB;
+
+    keeper.Keep(bare, CeilingMachine(), CeilingWrite::Always);   // startup
+    keeper.Keep(bare, CeilingMachine(), CeilingWrite::OnChange); // a round: unchanged, nothing written
+    keeper.Keep(bare, shrunk, CeilingWrite::OnChange);           // a round after the reserve moved
+    keeper.Keep(bare, shrunk, CeilingWrite::Always);             // a reload: written whatever it was
+
+    CHECK(CeilingWrites(*host)
+          == std::vector<std::string> {
+              std::to_string(72 * CeilingGiB), std::to_string(48 * CeilingGiB), std::to_string(48 * CeilingGiB) });
 }
 
 TEST_CASE("CompileMemoryMeter.ceiling-in-force-is-said-and-clears-the-row", "[node][meter][memory-meter]")

@@ -194,4 +194,45 @@ void PutCompileCeilingInForce(CompileMemoryMeter& meter,
                               NodeConditions& conditions,
                               ILogger& logger);
 
+/// When `CompileCeilingKeeper::Keep` writes the ceiling.
+///
+/// Private: transmitted nowhere.
+enum class CeilingWrite : std::uint8_t
+{
+    Always,   ///< At startup and after an accepted reload: whatever `compiles/` holds is rewritten.
+    OnChange, ///< At every presence round: only when the derived figure moved since the last write.
+};
+
+/// The ONE place the compile ceiling and the budget this machine reports are taken from the same derivation.
+///
+/// `MachineBudgetOf` and `CompileCeilingOf` both read the configuration in force and the capacity; either moves
+/// under a running node -- a reload changes `--compile-memory-limit`, a cache-budget override moves the reserve the
+/// derived figure comes from. So the presence round reads both ONCE, keeps the ceiling from that pair here, and
+/// reports the budget from the same pair: the queue is never told of room the kernel would kill a compile for, nor
+/// the ceiling left below a budget that rose.
+///
+/// Thread-safe: `main` (startup, reload) and the presence loop call it.
+class CompileCeilingKeeper
+{
+  public:
+    /// @param meter The process's meter, prepared by the worker's runner; outlives this.
+    /// @param conditions Where `compile-memory-uncapped` is answered; outlives this.
+    /// @param logger Where the ceiling is said; outlives this.
+    CompileCeilingKeeper(CompileMemoryMeter& meter, NodeConditions& conditions, ILogger& logger) noexcept;
+
+    /// Put the ceiling @p cfg and @p capacity derive in force (`PutCompileCeilingInForce`), when @p when says so.
+    /// A figure that was attempted and refused is not retried per round: the row is raised, and a reload retries.
+    /// @param cfg The configuration in force.
+    /// @param capacity What this machine is, as the caller read it for the budget it reports.
+    /// @param when Whether an unchanged figure is written again.
+    void Keep(NodeConfig const& cfg, Distributed::NodeCapacity const& capacity, CeilingWrite when);
+
+  private:
+    CompileMemoryMeter& _meter;
+    NodeConditions& _conditions;
+    ILogger& _logger;
+    std::mutex _mutex;                        ///< Serialises writes and guards `_written`.
+    std::optional<std::uint64_t> _written {}; ///< The figure last attempted.
+};
+
 } // namespace Pace::Node

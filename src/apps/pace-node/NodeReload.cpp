@@ -158,22 +158,18 @@ void AcceptedReloadListeners::ReloadAccepted()
         listener->ReloadAccepted();
 }
 
-CompileCeilingOnReload::CompileCeilingOnReload(CompileMemoryMeter& meter,
+CompileCeilingOnReload::CompileCeilingOnReload(CompileCeilingKeeper& keeper,
                                                INodeConfigSource const& inForce,
-                                               INodeCapacitySource const& capacity,
-                                               NodeConditions& conditions,
-                                               ILogger& logger) noexcept:
-    _meter { meter },
+                                               INodeCapacitySource const& capacity) noexcept:
+    _keeper { keeper },
     _inForce { inForce },
-    _capacity { capacity },
-    _conditions { conditions },
-    _logger { logger }
+    _capacity { capacity }
 {
 }
 
 void CompileCeilingOnReload::ReloadAccepted()
 {
-    PutCompileCeilingInForce(_meter, _inForce.Current(), _capacity.Current(), _conditions, _logger);
+    _keeper.Keep(_inForce.Current(), _capacity.Current(), CeilingWrite::Always);
 }
 
 } // namespace Pace::Node

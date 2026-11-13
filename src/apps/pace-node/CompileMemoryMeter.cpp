@@ -205,4 +205,21 @@ void PutCompileCeilingInForce(CompileMemoryMeter& meter,
     }
 }
 
+CompileCeilingKeeper::CompileCeilingKeeper(CompileMemoryMeter& meter, NodeConditions& conditions, ILogger& logger) noexcept:
+    _meter { meter },
+    _conditions { conditions },
+    _logger { logger }
+{
+}
+
+void CompileCeilingKeeper::Keep(NodeConfig const& cfg, Distributed::NodeCapacity const& capacity, CeilingWrite when)
+{
+    auto const bytes = CompileCeilingOf(cfg, capacity);
+    auto const guard = std::scoped_lock { _mutex };
+    if (when == CeilingWrite::OnChange && _written == bytes)
+        return;
+    _written = bytes;
+    PutCompileCeilingInForce(_meter, cfg, capacity, _conditions, _logger);
+}
+
 } // namespace Pace::Node

@@ -34,10 +34,16 @@
 namespace Pace::Node
 {
 
+class CompileCeilingKeeper;
+class INodeConfigSource;
+
 /// What the presence loop borrows from the node. All of it outlives the loop.
 struct NodePresenceParts
 {
-    NodeConfig const& cfg; ///< The configuration the node started with.
+    /// The configuration IN FORCE, read per round for the machine budget: `--compile-memory-limit` reloads, and a
+    /// budget read from the configuration the body started with would go on admitting what a lowered ceiling
+    /// kills until a restart.
+    INodeConfigSource const& inForce;
     /// Where the loop registers, re-read at every round (`AppliedSchedulers`): the process's one,
     /// shared with the worker's heartbeat and told every applied state by the consensus tier.
     ISchedulerEndpointSource const& schedulers;
@@ -70,7 +76,10 @@ struct NodePresenceParts
     /// compiles and the local leases this node grants. Read per round for the machine's budget report.
     IHeldCharges const& held;
     /// The peaks this node's worker measured and has not reported; drained into the report.
-    MeasuredPeaks& peaks;
+    MeasuredPeaks&
+        peaks; /// Keeps the compile ceiling from the same configuration and capacity the round reports the budget from;
+    /// null on a node that runs no worker, whose compiles nothing caps.
+    CompileCeilingKeeper* ceiling {};
 };
 
 /// Per-call send/recv ceiling on the presence loop's connection to a scheduler: the ceiling of
@@ -255,7 +264,7 @@ class NodePresence
     [[nodiscard]] bool WaitOutInterval(std::stop_token const& stop);
 
     // The announcement keeps no `_cfg` of its own: the scheduler list is read once in `Start`.
-    // `_cfg` is for the machine's compile BUDGET (#1728), and `_capacity` is read per round for
+    // `_inForce` is for the machine's compile BUDGET (#1728), and `_capacity` is read per round for
     // both that budget and NODE-ANNOUNCE's capacity record, since a live cache-budget override
     // moves the reserve both are derived from.
     Cc::IAdvertisedEndpointSource const& _announced;
@@ -268,7 +277,8 @@ class NodePresence
     SchedulerReachability& _reachability;
     Cluster::IAskedJoinsSource const* _askedJoins;
     IEndpointRefresh* _endpoints;         ///< Refreshed at the top of each round; null for none.
-    NodeConfig const& _cfg;               ///< The configuration, for the machine budget's flags.
+    INodeConfigSource const& _inForce;    ///< The configuration in force, for the machine budget; read per round.
+    CompileCeilingKeeper* _ceiling;       ///< Kept per round from the same pair as the budget; null without a worker.
     INodeCapacitySource const& _capacity; ///< What this machine is; read per round.
     IHeldCharges const& _held;            ///< What compiles on it hold; read per round.
     MeasuredPeaks& _peaks;                ///< Measured and unreported; drained per round.

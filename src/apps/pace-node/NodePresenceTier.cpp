@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+#include "CompileMemoryMeter.hpp"
+#include "LiveNodeConfig.hpp"
 #include "NodeFormation.hpp"
 #include "NodePresenceTier.hpp"
 
@@ -203,7 +205,8 @@ NodePresence::NodePresence(NodePresenceParts const& parts, SchedulerLink link):
     _reachability { parts.reachability },
     _askedJoins { parts.askedJoins },
     _endpoints { parts.endpoints },
-    _cfg { parts.cfg },
+    _inForce { parts.inForce },
+    _ceiling { parts.ceiling },
     _capacity { parts.capacity },
     _held { parts.held },
     _peaks { parts.peaks },
@@ -267,8 +270,16 @@ void NodePresence::Loop(std::stop_token const& stop)
         // refused the presence was reached, and the budget is its own question; and a node with no
         // endpoint to announce has no failure to be told by. Dialled on its own, so a refusal of one
         // never costs the other.
+        //
+        // The configuration IN FORCE, read once with `capacity` above: `--compile-memory-limit` reloads, and the
+        // ceiling this machine's compiles run under and the budget it reports are kept from the same pair, the
+        // ceiling FIRST -- whether or not anybody is reached -- so the fleet is never told of room the kernel would
+        // kill a compile for.
+        auto const inForce = _inForce.Current();
+        if (_ceiling != nullptr)
+            _ceiling->Keep(inForce, capacity, CeilingWrite::OnChange);
         if (reached)
-            (void) SendMachineBudgetOnce(MachineBudgetRound { .cfg = _cfg,
+            (void) SendMachineBudgetOnce(MachineBudgetRound { .cfg = inForce,
                                                               .capacity = capacity,
                                                               .held = _held,
                                                               .peaks = _peaks,

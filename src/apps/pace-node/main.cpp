@@ -863,7 +863,7 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     tier->ServeAdmissionWith(*responder);
 }
 
-/// Put the compile ceiling in force for a body that runs a worker, and build what rewrites it on reload.
+/// Put the compile ceiling in force for a body that runs a worker, and make the keeper every later write goes through.
 ///
 /// **Unconditional for a worker**: a `compiles/` an earlier run left behind keeps that run's `memory.max`, so the
 /// start writes the figure in force whatever is there. A node with no worker prepared nothing and runs no compile to
@@ -871,23 +871,36 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
 /// @param worker The body's worker, or null.
 /// @param meter The process's meter, which the worker's runner prepared.
 /// @param cfg The configuration the body started with.
-/// @param inForce The configuration in force at each later reload.
-/// @param capacity What this machine is, read now and at each reload.
+/// @param capacity What this machine is now.
 /// @param conditions Where `compile-memory-uncapped` is answered.
 /// @param logger Where the ceiling is said.
-/// @return The reload listener, or null without a worker.
-[[nodiscard]] std::unique_ptr<Node::CompileCeilingOnReload> StartCompileCeiling(Node::WorkerTier const* worker,
-                                                                                Node::CompileMemoryMeter& meter,
-                                                                                NodeConfig const& cfg,
-                                                                                Node::INodeConfigSource const& inForce,
-                                                                                Node::INodeCapacitySource const& capacity,
-                                                                                Node::NodeConditions& conditions,
-                                                                                ILogger& logger)
+/// @return The keeper the presence round and the reload listener write through, or null without a worker.
+[[nodiscard]] std::unique_ptr<Node::CompileCeilingKeeper> StartCompileCeiling(Node::WorkerTier const* worker,
+                                                                              Node::CompileMemoryMeter& meter,
+                                                                              NodeConfig const& cfg,
+                                                                              Node::INodeCapacitySource const& capacity,
+                                                                              Node::NodeConditions& conditions,
+                                                                              ILogger& logger)
 {
     if (worker == nullptr)
         return nullptr;
-    Node::PutCompileCeilingInForce(meter, cfg, capacity.Current(), conditions, logger);
-    return std::make_unique<Node::CompileCeilingOnReload>(meter, inForce, capacity, conditions, logger);
+    auto keeper = std::make_unique<Node::CompileCeilingKeeper>(meter, conditions, logger);
+    keeper->Keep(cfg, capacity.Current(), Node::CeilingWrite::Always);
+    return keeper;
+}
+
+/// What rewrites the ceiling after every accepted reload.
+/// @param keeper The ceiling keeper, or null without a worker.
+/// @param inForce The configuration in force at each reload.
+/// @param capacity What this machine is at each reload.
+/// @return The listener, or null without a keeper.
+[[nodiscard]] std::unique_ptr<Node::CompileCeilingOnReload> CeilingOnReloadOf(Node::CompileCeilingKeeper* keeper,
+                                                                              Node::INodeConfigSource const& inForce,
+                                                                              Node::INodeCapacitySource const& capacity)
+{
+    if (keeper == nullptr)
+        return nullptr;
+    return std::make_unique<Node::CompileCeilingOnReload>(*keeper, inForce, capacity);
 }
 
 /// Every listener an accepted reload tells, in order: the budget overrides, then the compile ceiling if any.
@@ -1373,11 +1386,12 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
     }
     auto const workerTier = std::move(*workerOrRefusal);
 
-    // The ceiling over every compile the worker runs, written now that its runner has prepared `compiles/`, and the
-    // listener that rewrites it after every accepted reload. Before `Settle` below, which names
+    // The ceiling over every compile the worker runs, written now that its runner has prepared `compiles/`; the
+    // keeper the presence loop keeps it through (from the pair it reports the budget from), and the listener that
+    // rewrites it after every accepted reload. Before `Settle` below, which names
     // `compile-memory-uncapped` undecided if this line ever goes (`StartCompileCeiling`).
-    auto const ceilingOnReload =
-        StartCompileCeiling(workerTier.get(), memoryMeter, cfg, endpointConfig, capacity, conditions, logger);
+    auto const ceilingKeeper = StartCompileCeiling(workerTier.get(), memoryMeter, cfg, capacity, conditions, logger);
+    auto const ceilingOnReload = CeilingOnReloadOf(ceilingKeeper.get(), endpointConfig, capacity);
 
     // This node's one `0xFC` listener, opened once every component exists and holding a
     // reference to each (#290). Before the merge each tier bound its own port, which
@@ -2106,7 +2120,7 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
                               : std::vector<Node::IHeldCharges const*> { &leaseCharges }
     };
     auto const presence =
-        Node::NodePresence::Start(Node::NodePresenceParts { .cfg = cfg,
+        Node::NodePresence::Start(Node::NodePresenceParts { .inForce = endpointConfig,
                                                             .schedulers = appliedSchedulers,
                                                             .capacity = capacity,
                                                             .announced = announced,
@@ -2122,7 +2136,8 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
                                                             .askedJoins = Node::AskedJoinsOf(formationRuntime.get()),
                                                             .endpoints = &endpointResolver,
                                                             .held = machineHeld,
-                                                            .peaks = measuredPeaks });
+                                                            .peaks = measuredPeaks,
+                                                            .ceiling = ceilingKeeper.get() });
 
     // Installed only once the listener is up and the heartbeat is running, so a
     // stop arriving during startup cannot close a listener that does not exist yet.
