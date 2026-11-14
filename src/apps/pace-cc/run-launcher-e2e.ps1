@@ -1892,7 +1892,32 @@ try {
     # `...\jx\L1\genlink\g.h`. The flat leg is the one a recorder that records nothing
     # turns red -- the 8.3 leg above passes on the seeded short forms alone. Junctions,
     # because `mklink /J` needs no elevation; removed as links before the tree is.
+    # Created is not followable (#1735): on at least one Windows 11 build a non-administrator
+    # makes junctions freely and every Win32 open through one then fails with error 448
+    # ("untrusted mount point") -- `cl` itself cannot read an include through it, so every case
+    # below failed for a property of the host. Probed once, by READING a file through a junction;
+    # an unfollowable host skips the cases and says why.
+    $junctionProbe = Join-Path ([System.IO.Path]::GetTempPath()) ("pace-cc-jxprobe-" + [guid]::NewGuid().ToString('N').Substring(0, 12))
+    $junctionsFollowable = $false
+    $junctionWhy = ""
+    try {
+        New-Item -ItemType Directory -Force -Path (Join-Path $junctionProbe "real") | Out-Null
+        Set-Content -Path (Join-Path $junctionProbe "real\probe.txt") -Value "followed"
+        New-Item -ItemType Junction -Path (Join-Path $junctionProbe "link") -Target (Join-Path $junctionProbe "real") | Out-Null
+        $junctionsFollowable = (Get-Content -Raw -ErrorAction Stop (Join-Path $junctionProbe "link\probe.txt")).Trim() -eq "followed"
+    } catch {
+        $junctionWhy = $_.Exception.Message
+    } finally {
+        $probeLink = Join-Path $junctionProbe "link"
+        if (Test-Path $probeLink) { [System.IO.Directory]::Delete($probeLink) }
+        Remove-Item -Recurse -Force $junctionProbe -ErrorAction SilentlyContinue
+    }
+    if (-not $junctionsFollowable) {
+        Write-Host "=== a junction alias of the build tree: SKIPPED -- this host cannot follow a junction this user created ($junctionWhy) ==="
+    }
+
     foreach ($cc in @("cl","clang-cl")) {
+        if (-not $junctionsFollowable) { break }
         if (-not (Get-Command $cc -ErrorAction SilentlyContinue)) { continue }
         Write-Host "=== a junction alias of the build tree ($cc) ==="
         foreach ($shape in 'flat', 'nested', 'through', 'subthrough', 'selfbuild', 'selfthrough', 'srcself', 'revthrough',

@@ -51,6 +51,7 @@
 #include <core/Ranges.hpp>
 #include <tests/AccessList.hpp>
 #include <tests/FleetHistoryFakes.hpp>
+#include <tests/FollowableLink.hpp>
 #include <tests/FoundedStateDirectory.hpp>
 #include <tests/NodeConditionFakes.hpp>
 #include <tests/NodeFormationFakes.hpp>
@@ -1062,11 +1063,11 @@ TEST_CASE("A link named like the replace probe is no leftover of it, whatever it
     auto const target = elsewhere.Path() / "a-regular-file";
     WriteText(target, "a regular file somewhere");
     ScratchDirectory const scratch { "replace-probe-link" };
-    auto made = std::error_code {};
-    std::filesystem::create_symlink(
-        target, scratch.Path() / std::filesystem::path { std::string { Consensus::ReplaceProbeFileName } }, made);
-    if (made)
-        SKIP("this host lets this process create no symbolic link: " << made.message());
+    // Created AND followable, or skipped with the reason (#1735): the assertion below reads
+    // THROUGH the link.
+    if (auto const unfollowable = Pace::Testing::MakeFollowableLink(
+            target, scratch.Path() / std::filesystem::path { std::string { Consensus::ReplaceProbeFileName } }))
+        SKIP(*unfollowable);
     REQUIRE(std::filesystem::is_regular_file(scratch.Path()
                                              / std::filesystem::path { std::string { Consensus::ReplaceProbeFileName } }));
     auto guard = ScriptedNodeKeyGuard::OwnerOnly();

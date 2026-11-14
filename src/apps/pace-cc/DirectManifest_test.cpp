@@ -24,6 +24,7 @@
 #include <vector>
 
 #include <tests/DeclaredCountBlob.hpp>
+#include <tests/FollowableLink.hpp>
 #include <tests/RetiredGenerations.hpp>
 #include <tests/ScratchPath.hpp>
 
@@ -1235,9 +1236,10 @@ TEST_CASE("AnchorWorkingDirectory re-spells a symlinked cwd in the layout's voca
     auto const& base = scratch.Path();
     std::filesystem::create_directories(base / "real" / "sub");
 
-    std::error_code ec;
-    std::filesystem::create_directory_symlink(base / "real", base / "link", ec);
-    if (ec)
+    auto const unfollowable = Pace::Testing::MakeFollowableLink(base / "real", base / "link");
+    // Created AND followable, or skipped with the reason (#1735).
+    INFO(unfollowable.value_or(std::string {}));
+    if (unfollowable)
     {
         // Symlink creation needs a privilege or developer mode on Windows. The rule
         // is unconditional; only this way of demonstrating it is not -- which is
