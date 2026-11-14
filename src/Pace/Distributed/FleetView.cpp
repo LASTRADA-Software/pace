@@ -602,6 +602,36 @@ namespace
         "(it takes nothing new) or shedding (it also stops its youngest compile). Absent when it has not reported, "
         "which is not calm.";
 
+    /// The `budget-limit` column's help, composed from `BudgetLimitTable`'s rows so a standing's word and its remedy
+    /// are written in one place: a row added there is explained here without an edit (#1771).
+    constexpr auto BudgetLimitHelpText = [] {
+        constexpr std::string_view Lead = "What holds the budget where it is.";
+        constexpr std::string_view Tail = " Absent until the machine has reported a budget.";
+        struct Text
+        {
+            std::array<char, 1024> chars {}; ///< The characters; only the first `size` are the text.
+            std::size_t size {};             ///< How many are.
+        };
+        Text text;
+        auto const append = [&text](std::string_view part) {
+            for (auto const c: part)
+                text.chars.at(text.size++) = c;
+        };
+        append(Lead);
+        for (auto const& row: BudgetLimitTable)
+        {
+            append(" ");
+            append(row.name);
+            append(": ");
+            append(row.remedy);
+        }
+        append(Tail);
+        return text;
+    }();
+
+    /// The view the column table holds.
+    constexpr std::string_view BudgetLimitHelp { BudgetLimitHelpText.chars.data(), BudgetLimitHelpText.size };
+
     /// What a compile-queue ledger row shows (#1728).
     constexpr std::array<FleetColumn<AdmissionMachineRow>, 6> BudgetColumns {
         FleetColumn<AdmissionMachineRow> {
@@ -631,18 +661,16 @@ namespace
             .format = CellFormat::Bytes,
             .keep = ColumnKeep::Vital,
             .project = [](AdmissionMachineRow const& row) { return FleetCell::Maybe(row.budgetBytes); } },
-        FleetColumn<AdmissionMachineRow> {
-            .name = "budget-limit",
-            .help = "What holds the budget where it is: configured, or pressure-allowance while the node's pressure "
-                    "governor keeps it below its configured figure, when nothing larger than it runs there even "
-                    "alone. Absent until the machine has reported a budget.",
-            .format = CellFormat::Text,
-            .keep = ColumnKeep::Vital,
-            .project =
-                [](AdmissionMachineRow const& row) {
-                    return row.standing.has_value() ? FleetCell::Of(std::string { TraitsFor(*row.standing).name })
-                                                    : FleetCell::Nothing();
-                } },
+        FleetColumn<AdmissionMachineRow> { .name = "budget-limit",
+                                           .help = BudgetLimitHelp,
+                                           .format = CellFormat::Text,
+                                           .keep = ColumnKeep::Vital,
+                                           .project =
+                                               [](AdmissionMachineRow const& row) {
+                                                   return row.standing.has_value()
+                                                              ? FleetCell::Of(std::string { TraitsFor(*row.standing).name })
+                                                              : FleetCell::Nothing();
+                                               } },
         FleetColumn<AdmissionMachineRow> {
             .name = "memory-pressure",
             .help = PressureHelp,
@@ -1464,9 +1492,15 @@ FleetTotals TotalsFor(FleetSnapshot const& snapshot) noexcept
         // rendered "8 compiling, 8 free" out of 8 registered, and the legend
         // offered a compile a start on a machine that could take none.
         //
-        // `WorkerRegistry::FreeSlots` is the definition this has to match, and it
-        // subtracts before calling anything free. Two answers to "what is free"
-        // is how a page comes to disagree with the scheduler it is describing.
+        // Subtracting before calling anything free is what `WorkerRegistry::FreeSlots`
+        // does too. But the load here carries the machine's reported pressure level
+        // (`JoinReportedPressure`, #1771), so a yielding or shedding machine offers
+        // nothing -- which matches the admission queue, which admits nothing new on it
+        // (`AdmissionQueue`'s `report.pressure != PressureLevel::Calm`), and NOT the
+        // registry: `FreeSlots` and the `Withdrawn` refusal read the registry's own
+        // heartbeat load, which carries no level, so a lease picked outside the queue
+        // can still land on a pressed machine that this total calls withheld. Two
+        // answers to "what is free" is that gap, stated rather than hidden.
         auto const ceiling = std::min(ceilings.available, registered);
         totals.free += node.fleetJobsInFlight >= ceiling ? 0U : ceiling - node.fleetJobsInFlight;
     }

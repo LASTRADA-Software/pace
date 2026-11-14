@@ -2730,13 +2730,20 @@ namespace
     {
         auto const rowEnd = body.find("</tr>", row);
         auto const line = body.substr(row, rowEnd - row);
+        // Every find is required to land: a `+ 1` on a miss would wrap `npos` to zero and read the row's FIRST cell
+        // as the column's, so a short row fails here rather than passing on the wrong cell.
         auto at = std::string_view::size_type { 0 };
         for ([[maybe_unused]] auto const skipped: std::views::iota(std::size_t { 1 }, index))
-            at = line.find("<td", at) + 1;
+        {
+            auto const cell = line.find("<td", at);
+            REQUIRE(cell != std::string_view::npos);
+            at = cell + 1;
+        }
         auto const open = line.find("<td", at);
+        REQUIRE(open != std::string_view::npos);
         auto const close = line.find("</td>", open);
-        if (open != std::string_view::npos)
-            cells.emplace_back(line.substr(open, close - open));
+        REQUIRE(close != std::string_view::npos);
+        cells.emplace_back(line.substr(open, close - open));
         row = body.find("<tr>", rowEnd);
     }
     return cells;
@@ -2824,6 +2831,9 @@ TEST_CASE("The admission ledger names the pressure allowance as what holds a bud
     REQUIRE(limits.size() == 2);
     CHECK(limits[0] == "<td>pressure-allowance");
     CHECK(limits[1].starts_with(R"(<td class="absent">)"));
+    // The column's help is composed from `BudgetLimitTable`'s rows, every word with its remedy.
+    for (auto const& row: BudgetLimitTable)
+        CHECK(html.contains(std::format("{}: {}", row.name, row.remedy.substr(0, 8))));
 
     // The same machine with its configured budget back says so, rather than going blank.
     machines[0].standing = BudgetStanding::Configured;

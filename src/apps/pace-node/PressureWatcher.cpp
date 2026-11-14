@@ -5,6 +5,7 @@
 #include "PressureWatcher.hpp"
 
 #include <Pace/Core/EnumTable.hpp>
+#include <Pace/Distributed/NodePolicy.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -24,35 +25,40 @@ namespace
     constexpr double YieldExitShare = 0.5;
     constexpr double ShedExitShare = 0.2;
 
-    /// One level: what it is called where it is said, and the two counters its time and its entries go to --
-    /// absent for `Calm`, which is the rest of the time and has no row of its own.
-    struct PressureLevelRow
+    /// One level's two counters, its time and its entries -- absent for `Calm`, which is the rest of the time and has
+    /// no row of its own. What a level is CALLED is not here: a log line and the condition's detail spell it as the
+    /// fleet page does, through `Distributed::PressureLevelTable` (#1771), so one machine is never `yield` in its own
+    /// log and `yielding` on the leader's page.
+    struct PressureCounterRow
     {
         PressureLevel level;                          ///< The enumerator this row describes.
-        std::string_view name;                        ///< As a log line and the condition's detail spell it.
         std::optional<IMetricsSink::Counter> seconds; ///< Whole seconds held.
         std::optional<IMetricsSink::Counter> entries; ///< Times entered.
     };
 
     /// Every level, in enumerator order.
-    constexpr EnumTable<PressureLevel, PressureLevelRow> PressureLevelTable { {
-        { .level = PressureLevel::Calm, .name = "calm", .seconds = std::nullopt, .entries = std::nullopt },
+    constexpr EnumTable<PressureLevel, PressureCounterRow> PressureCounterTable { {
+        { .level = PressureLevel::Calm, .seconds = std::nullopt, .entries = std::nullopt },
         { .level = PressureLevel::Yield,
-          .name = "yield",
           .seconds = IMetricsSink::Counter::NodeMemoryPressureYieldSeconds,
           .entries = IMetricsSink::Counter::NodeMemoryPressureYieldEntries },
         { .level = PressureLevel::Shed,
-          .name = "shed",
           .seconds = IMetricsSink::Counter::NodeMemoryPressureShedSeconds,
           .entries = IMetricsSink::Counter::NodeMemoryPressureShedEntries },
     } };
-    static_assert(RowsInEnumeratorOrder(PressureLevelTable, &PressureLevelRow::level),
-                  "PressureLevelTable must hold one row per PressureLevel, in enumerator order");
+    static_assert(RowsInEnumeratorOrder(PressureCounterTable, &PressureCounterRow::level),
+                  "PressureCounterTable must hold one row per PressureLevel, in enumerator order");
 
     /// @return @p level's row.
-    [[nodiscard]] PressureLevelRow const& RowOf(PressureLevel level) noexcept
+    [[nodiscard]] PressureCounterRow const& RowOf(PressureLevel level) noexcept
     {
-        return PressureLevelTable[static_cast<std::size_t>(level)];
+        return PressureCounterTable[static_cast<std::size_t>(level)];
+    }
+
+    /// @return What a report calls @p level, the fleet page's word.
+    [[nodiscard]] std::string_view NameOf(PressureLevel level) noexcept
+    {
+        return Distributed::TraitsFor(level).name;
     }
 
     /// How a threshold is said: a disabled one is "never", not the `inf%` its value would print as.
@@ -308,7 +314,7 @@ void PressureWatcher::OnLevelChanged(GovernorDecision const& decision, Platform:
     }();
     _logger.Logf(decision.level == PressureLevel::Shed ? LogLevel::Warn : LogLevel::Info,
                  "memory pressure: {} (system some {:.1f}%, full {:.1f}%); compiles may hold {} bytes; {}",
-                 RowOf(decision.level).name,
+                 NameOf(decision.level),
                  sample.system.some.avg10,
                  full,
                  decision.allowanceBytes,
@@ -325,7 +331,7 @@ void PressureWatcher::AnswerCondition(GovernorDecision const& decision)
     }
     _conditions.Raise(NodeCondition::MemoryPressureShedding,
                       std::format("level {}: compiles may hold {} bytes on this machine{}",
-                                  RowOf(decision.level).name,
+                                  NameOf(decision.level),
                                   decision.allowanceBytes,
                                   _ceiling != nullptr ? "" : " (reported only: no ceiling holds them to it)"));
 }

@@ -689,9 +689,13 @@ TEST_CASE("SchedulerAdmission.fleet-reads-a-machine's-pressure-from-its-budget-r
         CHECK_FALSE(json.contains(R"("limited-by":"memory-pressure")"));
     }
 
-    // A follower leads no queue, so it has no level to show: the row is absent again, not calm.
+    // A CONTROL, not part of the claim above: a follower leads no queue, so there is no report to read the level
+    // from and the join has nothing to copy. The absence below holds with or without the join -- it says only that a
+    // follower's document invents no level, the `calm` a default would print.
     fleet.service.SetRole(SchedulerRole::Follower, "10.9.9.9:7100", 1);
-    for (auto const& node: collect().nodes)
+    auto const follower = collect();
+    CHECK_FALSE(follower.admission.has_value());
+    for (auto const& node: follower.nodes)
         CHECK_FALSE(node.load.pressure.has_value());
 }
 

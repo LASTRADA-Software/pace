@@ -247,6 +247,13 @@ TEST_CASE("Entering yield holds compiles under the allowance, asks one presence 
     CHECK(RoundOwed(rig.wake));
     CHECK(rig.conditions.StateOf(NodeCondition::MemoryPressureShedding) == Wire::ConditionState::Raised);
     CHECK(rig.metrics.Read(IMetricsSink::Counter::NodeMemoryPressureYieldEntries) == 1);
+    // Said in the fleet page's word for the level (#1771): one machine is `yielding` in its own log, its condition
+    // and on the leader's page alike, never `yield` here and `yielding` there.
+    CHECK(std::ranges::any_of(rig.logger.Snapshot(), [](CapturingLogger::Record const& record) {
+        return record.message.contains("memory pressure: yielding (");
+    }));
+    auto const raised = rig.conditions.Snapshot();
+    CHECK(std::ranges::any_of(raised, [](auto const& row) { return row.detail.starts_with("level yielding:"); }));
 
     // Held: nothing more is written and no further round is asked for while the level stands.
     rig.Step(1s, GameStall);
