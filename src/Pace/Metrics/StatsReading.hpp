@@ -572,7 +572,7 @@ struct CounterSoleWriter
 /// a row silently absent from the attribution and indistinguishable from one nobody had
 /// considered, cannot recur by omission ([#1501](https://github.com/LASTRADA-Software/pace/issues/1501)).
 ///
-/// **How the 254 rows are attributed**, since a scan for `Increment(Counter::X)` finds only 70
+/// **How the rows are attributed**, since a scan for `Increment(Counter::X)` finds only 70
 /// of them and would have rendered the other 184 absent -- the same defect as the bug, three
 /// times larger. The rows are written by five mechanisms, and reading only `SurfaceRefusal`
 /// tables (the obvious reading of *written through `Refuse(row)`*) reaches 152 of the 184 and
@@ -586,7 +586,7 @@ struct CounterSoleWriter
 /// | a named member of a counter table (`CacheTierProfile`, the pressure watcher's level table) | 20 |
 /// | `Increment(Counter::X)` directly | 70 |
 ///
-/// The column sums past 254 because five rows are written two ways -- and the 152 above is not
+/// The column sums past the row count because five rows are written two ways -- and the 152 above is not
 /// the 153 here: 153 rows HAVE a refusal row, and 152 of those have no increment site, which is
 /// what a `SurfaceRefusal`-only reading would reach. Two figures one apart, measuring different
 /// things, is exactly how a census comes to be quoted wrong, so both are asserted.
