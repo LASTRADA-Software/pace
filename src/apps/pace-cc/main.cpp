@@ -1011,7 +1011,8 @@ class CompilerMarkerProbe: public Cc::IMarkerDiscovery
 
     [[nodiscard]] std::optional<std::string> Discover() override
     {
-        return Cc::ProbeIncludeNoteMarker(ProcessRunner(), _compiler, Cc::DriverOf(_flavor));
+        return Cc::ProbeIncludeNoteMarker(
+            ProcessRunner(), _compiler, Cc::DriverOf(_flavor), Pace::HostNarrowTextPolicy().toolCodePage);
     }
 
   private:
