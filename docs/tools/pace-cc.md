@@ -541,9 +541,15 @@ ticket for learning the prefix properly.
 
 ## How it works
 
-1. **Key.** Direct mode first: re-hash the project headers a previous compile
-   recorded and look up a manifest — far cheaper than preprocessing (~18 ms
-   versus ~1.4 s on a large translation unit). If that misses, preprocess the
+1. **Key.** Direct mode first: re-hash the project and library headers a previous
+   compile recorded, check that no same-named header has since appeared earlier
+   on the search path, and look up a manifest — far cheaper than preprocessing (~18 ms
+   versus ~1.4 s on a large translation unit). Only the compiler's own install (the
+   MSVC toolset, a Windows SDK, a clang or gcc resource directory) is left to the
+   compiler identity; a vcpkg tree or any other library is recorded and re-hashed.
+   The manifest's key also folds the include-search environment (`INCLUDE`,
+   `CPATH`, …), and `@response-file` arguments are expanded before anything reads
+   the command line. If that misses, preprocess the
    TU, relativize checkout-rooted arguments against `SOURCE_DIR`/`BINARY_DIR`,
    and hash `(compiler id + preprocessed text + relativized args + dependency
    paths)` into a 128-bit key — MurmurHash3 x64_128, which is 128 bits of
@@ -1137,6 +1143,21 @@ Two things this is **not**:
   deliberately: a partial answer here is the stale-dependency serve it exists to
   prevent. The refusal is silent unless `PACE_VERBOSE` is set, and shows in
   `--show-stats` as *uncacheable*.
+- A compile is **not cached** while an environment variable that adds compiler
+  arguments or picks the programs a driver runs is set: `CL`, `_CL_`
+  (`cl`, `clang-cl`), `CCC_OVERRIDE_OPTIONS` (clang), `COMPILER_PATH`,
+  `GCC_EXEC_PREFIX` (gcc). Such an argument is invisible to the launcher's checks
+  and is never seen by a worker, so the compile runs locally as written. An empty
+  value counts as unset. `PACE_VERBOSE` names the variable.
+- A `@response-file` the launcher cannot expand exactly — unreadable, naming
+  another response file, a non-ASCII file without a byte-order mark under `cl`,
+  or too long for a Windows command line once expanded — is compiled as written
+  and not cached.
+- Direct mode detects a header that appears in front of a recorded one (in an
+  earlier include directory, or beside the including file), but not one reached
+  through a spelling that climbs out of its directory (`#include "../x.h"`): the
+  launcher sees the paths the compiler opened, never the `#include` text.
+  `PACE_NO_DIRECT=1` closes it at the cost of a preprocess per compile.
 - Diagnostics-stream paths outside the include grammar are not yet localized.
 - Toolchain and system dependency paths are in neither the key nor the
   existence check, by design: they are the producing machine's spelling, the
@@ -1146,7 +1167,9 @@ Two things this is **not**:
   *and target the same triple*, from *different* prefixes, can still replay a
   dependency record naming a path the consumer lacks. Project headers — the ones
   that actually move — are covered by the key, so this is now confined to the
-  toolchain.
+  toolchain. (This is about the preprocessed key's dependency set; a direct-mode
+  manifest *does* record and re-hash library headers outside the roots, so a
+  library upgraded in place is a manifest miss rather than a stale hit.)
 - The cache key normalization is deliberately young (`objkey-v7`). Tune it
   against real developer↔CI hit rates before relying on it broadly. Bumping the
   schema re-keys the cache: existing entries miss once and are rewritten.

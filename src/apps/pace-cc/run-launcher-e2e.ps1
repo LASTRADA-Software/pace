@@ -1513,6 +1513,94 @@ try {
             $exit = 1
         }
 
+        # What a direct-mode manifest cannot NAME (#1693, #1694, #1718, #1754, #1756). Its key is
+        # taken before any header is opened, so every input it neither lists nor keys was one a
+        # change to which still direct-hit the old object. Each leg compiles a TU whose object
+        # carries `MARK-<value>-END`, changes ONE input, and requires the served object to carry
+        # the new value. The control is the unchanged rebuild beside the library leg, which must
+        # still HIT through the manifest -- a census or a key that refused every manifest would
+        # pass every other leg. Measured on master before the fix: every changed leg STALE.
+        Write-Host "=== direct mode follows what the manifest cannot name ($cc) ==="
+        $nameFail = [System.Collections.Generic.List[string]]::new()
+        $mainCpp = "#include `"a.hpp`"`n#define S2(x) #x`n#define S(x) S2(x)`nextern `"C`" const char mark[] = `"MARK-`" S(V) `"-END`";`n"
+        $compileFlags = @($cc, "/nologo", "/c", "/Z7", "/showIncludes", "/EHsc")
+        $writeFile = { param($path, $text)
+            New-Item -ItemType Directory -Force (Split-Path $path) | Out-Null
+            Set-Content -NoNewline -Encoding ascii -Path $path -Value $text }
+        $runLeg = { param($root, [string[]]$legArgs, [string]$want, [string]$what)
+            $legObj = Join-Path $root "build\main.obj"
+            New-Item -ItemType Directory -Force (Split-Path $legObj) | Out-Null
+            $run =Invoke-LauncherIn $root (Join-Path $root "src") (Join-Path $root "build") ($compileFlags + $legArgs + @("/Fo$legObj", "src\main.cpp"))
+            if ($run.code -ne 0 -or -not (Test-ObjectNames $legObj "MARK-$want-END")) {
+                $nameFail.Add("$what (wanted MARK-$want-END, exit $($run.code))")
+                Write-Host $run.stderr
+            }
+            return $run }
+        $caseRoot = Join-Path $BoundTemp "unnamed-inputs-$cc"
+        Remove-Item -Recurse -Force $caseRoot -ErrorAction SilentlyContinue
+
+        # #1754: a header created in an EARLIER include directory shadows the recorded one.
+        $r = Join-Path $caseRoot "shadow"
+        & $writeFile "$r\src\inc0\.keep" ""
+        & $writeFile "$r\src\inc\a.hpp" "#define V base_$($cc -replace '-','_')`n"
+        & $writeFile "$r\src\main.cpp" $mainCpp
+        $null = & $runLeg $r @("/Isrc\inc0", "/Isrc\inc") "base_$($cc -replace '-','_')" "shadow: first build"
+        & $writeFile "$r\src\inc0\a.hpp" "#define V shadow`n"
+        $null = & $runLeg $r @("/Isrc\inc0", "/Isrc\inc") "shadow" "shadow: header created in an earlier /I"
+
+        # #1756: INCLUDE moves between two directories holding a same-named header.
+        $r = Join-Path $caseRoot "include"
+        & $writeFile "$r\sys1\sysprobe.hpp" "#define V sys1_$($cc -replace '-','_')`n"
+        & $writeFile "$r\sys2\sysprobe.hpp" "#define V sys2_$($cc -replace '-','_')`n"
+        & $writeFile "$r\src\a.hpp" "#include <sysprobe.hpp>`n"
+        & $writeFile "$r\src\main.cpp" $mainCpp
+        $savedInclude = $env:INCLUDE
+        try {
+            $env:INCLUDE = "$r\sys1;$savedInclude"
+            $null = & $runLeg $r @() "sys1_$($cc -replace '-','_')" "INCLUDE: first build"
+            $env:INCLUDE = "$r\sys2;$savedInclude"
+            $null = & $runLeg $r @() "sys2_$($cc -replace '-','_')" "INCLUDE: moved to another directory"
+        } finally { $env:INCLUDE = $savedInclude }
+
+        # #1756: a response file's CONTENTS change under the same name.
+        $r = Join-Path $caseRoot "rsp"
+        & $writeFile "$r\src\a.hpp" "#ifndef V`n#define V none`n#endif`n"
+        & $writeFile "$r\src\main.cpp" $mainCpp
+        & $writeFile "$r\args.rsp" "/DV=rsp1_$($cc -replace '-','_')"
+        $null = & $runLeg $r @("@args.rsp") "rsp1_$($cc -replace '-','_')" "response file: first build"
+        & $writeFile "$r\args.rsp" "/DV=rsp2_$($cc -replace '-','_')"
+        $null = & $runLeg $r @("@args.rsp") "rsp2_$($cc -replace '-','_')" "response file: contents changed"
+
+        # #1693: `_CL_` adds a define from the environment, so the compile is not cached at all.
+        $r = Join-Path $caseRoot "cl-env"
+        & $writeFile "$r\src\a.hpp" "#ifndef V`n#define V none_$($cc -replace '-','_')`n#endif`n"
+        & $writeFile "$r\src\main.cpp" $mainCpp
+        $null = & $runLeg $r @() "none_$($cc -replace '-','_')" "_CL_: first build"
+        $env:_CL_ = "/DV=fromenv"
+        try {
+            $clRun = & $runLeg $r @() "fromenv" "_CL_: set"
+            if ($clRun.stderr -notmatch "_CL_ is set") { $nameFail.Add("_CL_: the decline does not name the variable") }
+        } finally { Remove-Item Env:_CL_ -ErrorAction SilentlyContinue }
+
+        # #1718: a vcpkg port upgraded in place under the build tree -- and the control.
+        $r = Join-Path $caseRoot "vcpkg"
+        $depDir = "$r\build\vcpkg_installed\x64-windows\include"
+        & $writeFile "$depDir\dep\api.hpp" "#define V v1_$($cc -replace '-','_')`n"
+        & $writeFile "$r\src\a.hpp" "#include <dep/api.hpp>`n"
+        & $writeFile "$r\src\main.cpp" $mainCpp
+        $null = & $runLeg $r @("/external:I$depDir", "/external:W0") "v1_$($cc -replace '-','_')" "vcpkg: first build"
+        $control = & $runLeg $r @("/external:I$depDir", "/external:W0") "v1_$($cc -replace '-','_')" "vcpkg: unchanged rebuild"
+        if ($control.stderr -notmatch "direct mode: the manifest validated") { $nameFail.Add("vcpkg: an unchanged rebuild did not HIT through the manifest (the control)") }
+        & $writeFile "$depDir\dep\api.hpp" "#define V v2_$($cc -replace '-','_')`n"
+        $null = & $runLeg $r @("/external:I$depDir", "/external:W0") "v2_$($cc -replace '-','_')" "vcpkg: port upgraded in place"
+
+        if ($nameFail.Count -eq 0) {
+            Write-Host "  shadow, INCLUDE, response file, _CL_ and an upgraded vcpkg port each re-compile; an unchanged rebuild still direct-hits: OK ($cc)" -ForegroundColor Green
+        } else {
+            foreach ($f in $nameFail) { Write-Host "  UNNAMED-INPUT FAIL ($cc): $f" -ForegroundColor Red }
+            $exit = 1
+        }
+
         Write-Host "=== a stale manifest is refused ($cc) ==="
         # Direct mode's whole safety case, in one checkout: an unchanged recompile is served
         # THROUGH the manifest, and one after a header EDIT is not -- the manifest re-hashes

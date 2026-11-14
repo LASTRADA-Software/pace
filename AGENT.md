@@ -164,8 +164,8 @@ launcher's cache key is made of. Before `apps/pace-cc/`, `CompileCache/`.
 - `/` introduces an option only on a Windows layout; on POSIX it starts a path.
 - Only machine-independent dependency paths are hashed, and a path is classified
   by what it *resolves to*, never by its spelling. A CPM cache is a ROOT (`<DEPROOT>`, `PACE_DEPS_DIR`).
-- The toolchain headers the key drops are covered by the compiler's *banner*, so every driver
-  is asked for one the way it answers: `cl` has no `--version`, and bare `cl` is its probe.
+- The toolchain headers the key drops are covered by the compiler's *banner*; bare `cl` is its probe (no `--version`).
+  The direct-mode MANIFEST is not the key: only a compiler's OWN install rides the stamp, and `CL`, `@rsp` and shadows are input.
 - A root and the paths a driver emits are reconciled on both sides, or neither.
 - Bump `manifest-v*` whenever `objkey-v*` moves. The reverse is not required.
 - The key, the object and the manifest are taken at THREE moments, so a save between them files one

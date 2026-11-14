@@ -52,6 +52,7 @@
 #include "CacheKey.hpp"
 #include "CacheProtocol.hpp"
 #include "CmdLine.hpp"
+#include "CompilerEnvironment.hpp"
 #include "DependencyOutput.hpp"
 #include "DependencyProbe.hpp"
 #include "DirectManifest.hpp"
@@ -71,8 +72,10 @@
 #include "ReactorExchange.hpp"
 #include "RefusalNotice.hpp"
 #include "ReplayGuard.hpp"
+#include "ResponseFiles.hpp"
 #include "RootBinding.hpp"
 #include "RootReconciler.hpp"
+#include "ShadowCensus.hpp"
 #include "Stats.hpp"
 #include "StreamGrammar.hpp"
 #include "TicketCredentials.hpp"
@@ -2122,6 +2125,9 @@ void NoteNoManifest(InvocationRecord const& record, std::string_view reason)
 /// @param reconciler      Translates a driver's spelling into this build's.
 /// @param content         Where each entry's hash comes from: the input witness's T1'
 ///                        snapshot, the content the key was taken from (#1650).
+/// @param includeSearch   The include-search environment, folded into the manifest key (#1756).
+/// @param searchDirectories The compile's header search directories, for the shadow census (#1754).
+/// @param listing         The filesystem the census lists.
 /// @return Whether a manifest was offered to the cache: `No` on every refusal, each of which
 ///         has already said why; `Yes` once the STORE exchange has run.
 [[nodiscard]] ManifestRecorded RecordManifest(InvocationRecord const& record,
@@ -2134,7 +2140,10 @@ void NoteNoManifest(InvocationRecord const& record, std::string_view reason)
                                               ProbedDependencies const& probed,
                                               std::string_view objectKeyForPointer,
                                               Cc::RootReconciler& reconciler,
-                                              Cc::IManifestContent const& content)
+                                              Cc::IManifestContent const& content,
+                                              std::span<std::string const> includeSearch,
+                                              std::span<std::string const> searchDirectories,
+                                              Cc::IDirectoryListing const& listing)
 {
     auto const workingDirectoryText = workingDirectory.string();
     auto const resolvedSource = reconciler.Directory(cmd.source);
@@ -2194,7 +2203,7 @@ void NoteNoManifest(InvocationRecord const& record, std::string_view reason)
     // caller cannot omit it: `ReportedDependencies` has no default constructor, so
     // there is no way to leave the question unanswered.
     auto const reported = includes.size();
-    auto const manifest = Cc::BuildManifest(
+    auto manifest = Cc::BuildManifest(
         { .sourcePath = resolvedSource,
           .reportedDependencies = includes.empty() ? Cc::ReportedDependencies::NotObserved()
                                                    : Cc::ReportedDependencies::Observed(std::move(includes)),
@@ -2239,12 +2248,18 @@ void NoteNoManifest(InvocationRecord const& record, std::string_view reason)
     // (`NoProjectDeps`, #319) and this line is not reached for it. What the pair is
     // still for is the partial version -- nine paths dropped of ten -- which is a
     // misconfigured root in every way but the one that trips the refusal.
-    Note(record.verbose,
-         std::format("manifest: {} entries from {} reported dependency path(s) plus the source",
-                     manifest->entries.size(),
-                     reported));
+    // Taken over the manifest's OWN entries, localized, so the census a hit takes later is over
+    // exactly the same set by exactly the same derivation (#1754).
+    manifest->shadowCensus = Cc::ShadowCensus(Cc::LocalizedEntries(*manifest, layout), searchDirectories, layout, listing);
 
-    auto const manifestKey = Cc::ComputeManifestKey(*canonicalSource, relativizedArgs, toolchainStamp);
+    Note(record.verbose,
+         std::format(
+             "manifest: {} entries from {} reported dependency path(s) plus the source; {} shadow candidate(s) present",
+             manifest->entries.size(),
+             reported,
+             manifest->shadowCensus.size()));
+
+    auto const manifestKey = Cc::ComputeManifestKey(*canonicalSource, relativizedArgs, toolchainStamp, includeSearch);
 
     // Wrap the manifest as a text-region-free compile value so the daemon's STORE
     // (which decodes every payload as one) accepts it.
@@ -2429,7 +2444,10 @@ void NoteNoManifest(InvocationRecord const& record, std::string_view reason)
                                                std::vector<std::string> const& relativizedArgs,
                                                std::string const& toolchainStamp,
                                                Cc::RootReconciler& reconciler,
-                                               Cc::CheckoutRoots const& checkout)
+                                               Cc::CheckoutRoots const& checkout,
+                                               std::span<std::string const> includeSearch,
+                                               std::span<std::string const> searchDirectories,
+                                               Cc::IDirectoryListing const& listing)
 {
     auto const directStarted = std::chrono::steady_clock::now();
     // Every early return records how long the attempt took, so the statistics
@@ -2456,7 +2474,7 @@ void NoteNoManifest(InvocationRecord const& record, std::string_view reason)
         // record.
         return giveUp();
 
-    auto const manifestKey = Cc::ComputeManifestKey(*canonicalSource, relativizedArgs, toolchainStamp);
+    auto const manifestKey = Cc::ComputeManifestKey(*canonicalSource, relativizedArgs, toolchainStamp, includeSearch);
     auto const manifestBytes = FetchRaw(record, cfg, "manifest fetch", manifestKey);
     if (!manifestBytes.has_value())
         return giveUp();
@@ -2489,6 +2507,18 @@ void NoteNoManifest(InvocationRecord const& record, std::string_view reason)
 
     if (!Cc::ValidateManifest(*manifest, layout, toolchainStamp))
         return giveUp();
+
+    // Every recorded header still holds what it held -- but a header created since, somewhere the
+    // compiler searches before one of them, would now be read instead (#1754). Said, because a
+    // manifest refused for this looks exactly like a cold cache otherwise.
+    if (Cc::ShadowCensus(Cc::LocalizedEntries(*manifest, layout), searchDirectories, layout, listing)
+        != manifest->shadowCensus)
+    {
+        Note(record.verbose,
+             "direct mode: a header now exists where the compiler would look before one the manifest recorded; "
+             "preprocessing instead");
+        return giveUp();
+    }
 
     record.directMs = MsSince(directStarted);
     // Follow the manifest's pointer to the object, which is stored exactly once
@@ -3169,6 +3199,9 @@ struct CachedCompile
     Cc::IInputFiles const* inputFiles;                ///< The input files; never null.
     Cc::InputWitness& witness;                        ///< T0 .. T2 for this invocation (#1650).
     Cc::WitnessedManifestContent const& keyedContent; ///< The manifest's content, as the key was taken from it.
+    std::span<std::string const> includeSearch;       ///< The include-search environment, for the manifest key.
+    std::span<std::string const> searchDirectories;   ///< The header search directories, for the shadow census.
+    Cc::IDirectoryListing const& listing;             ///< The filesystem the shadow census lists.
     bool dispatchConfigured;                          ///< A queue is named, so the compile is planned for placement.
 
     std::string key {}; ///< The cache key, once `ComputeKey` has run.
@@ -3384,7 +3417,7 @@ FetchStep CachedCompile::ComputeKey()
         record.preprocessMs = MsSince(preprocessStarted);
 
         // T1': what the key was just taken from. These hashes are what a manifest records.
-        witness.Snapshot(Cc::ProjectDependencyPaths(probed.paths, workingDirectoryText, layout), *inputFiles);
+        witness.Snapshot(Cc::ManifestDependencyPaths(probed.paths, workingDirectoryText, layout), *inputFiles);
     }
 
     return FetchStep {};
@@ -3395,8 +3428,20 @@ ManifestRecorded CachedCompile::RecordManifestNow()
     // Every manifest this invocation records -- the backfill on a HIT, the one kept when the
     // object is not stored, and the one after the STORE -- is built from the content the key was
     // taken from, never from the disk as it stands after the compile (#1650).
-    return RecordManifest(
-        record, cfg, cmd, layout, workingDirectory, relativizedArgs, toolchainStamp, probed, key, reconciler, keyedContent);
+    return RecordManifest(record,
+                          cfg,
+                          cmd,
+                          layout,
+                          workingDirectory,
+                          relativizedArgs,
+                          toolchainStamp,
+                          probed,
+                          key,
+                          reconciler,
+                          keyedContent,
+                          includeSearch,
+                          searchDirectories,
+                          listing);
 }
 
 void CachedCompile::RememberUnreachedFetch(Cc::CacheOutcome const& outcome) const
@@ -3749,7 +3794,7 @@ int CachedCompile::FinishMiss(Cc::CompileRun& run, bool& stored)
     // while the compile -- local or dispatched, whose second preprocess is inside this window --
     // was reading it.
     auto const moved = witness.AfterCompile(
-        Cc::ProjectDependencyPaths(ManifestDependencies(probed, cmd, reconciler), workingDirectoryText, layout),
+        Cc::ManifestDependencyPaths(ManifestDependencies(probed, cmd, reconciler), workingDirectoryText, layout),
         *inputFiles);
     auto permit = GuardStore(record, cfg, moved, [this] { return RecordManifestNow(); });
     if (!permit)
@@ -4010,6 +4055,17 @@ std::optional<int> CachedCompile::AdmitAndCompile()
     cmd.flavor = Cc::ClassifyCompilerFromBanner(cmd.flavor, compilerBanner);
     auto const& driver = Cc::DriverOf(cmd.flavor);
 
+    // The environment is compile input too (#1693, #1756), read once for the corrected flavour.
+    // A variable that adds arguments or picks the programs that run is invisible to every check
+    // made of the command line and is not inherited by a worker, so such a compile is not cached
+    // rather than keyed; one that only moves include resolution goes into the manifest key.
+    auto const compilerEnvironment =
+        Cc::ReadCompilerEnvironment(cmd.flavor, [](std::string_view name) { return Pace::ReadEnvironmentVariable(name); });
+    if (compilerEnvironment.changesTheCompile.has_value())
+        return Decline(record,
+                       std::format("{} is set and changes what the compiler is asked to do; not caching",
+                                   *compilerEnvironment.changesTheCompile));
+
     // Asked HERE, above the cache lookup, because the answer is a cache key input and
     // a key is needed on a hit too. That is a second spawn per invocation on a clang
     // driver, beside the `--version` one already paid, and it is the price of the key
@@ -4076,9 +4132,26 @@ std::optional<int> CachedCompile::AdmitAndCompile()
     // disagree about it (see RootBinding.hpp).
     auto const checkout = Cc::BindCheckout(reconciler, processDirectory, Cc::CompilerWorkingDirectory(processDirectory));
 
+    // Where this compile looks for headers, for the shadow census a manifest records and a hit
+    // re-takes (#1754): the command line's include directories and the include-search environment.
+    auto const searchDirectories = Cc::HeaderSearchDirectories(
+        argv.subspan(1), driver.family, workingDirectory.string(), layout, compilerEnvironment.includeSearch);
+    auto const directoryListing = Cc::MakeDiskDirectoryListing();
+
     if (cfg.direct && !SourceReferencesVolatileMacro(cmd.source))
-        if (auto served = TryDirectMode(
-                record, cfg, cmd, argv, layout, workingDirectory, relativizedArgs, toolchainStamp, reconciler, checkout))
+        if (auto served = TryDirectMode(record,
+                                        cfg,
+                                        cmd,
+                                        argv,
+                                        layout,
+                                        workingDirectory,
+                                        relativizedArgs,
+                                        toolchainStamp,
+                                        reconciler,
+                                        checkout,
+                                        compilerEnvironment.includeSearch,
+                                        searchDirectories,
+                                        *directoryListing))
             return served;
 
     // T0 (#1650). The key, the object and the manifest are each taken from the filesystem at a
@@ -4121,6 +4194,9 @@ std::optional<int> CachedCompile::AdmitAndCompile()
                         .inputFiles = inputFiles.get(),
                         .witness = witness,
                         .keyedContent = keyedContent,
+                        .includeSearch = compilerEnvironment.includeSearch,
+                        .searchDirectories = searchDirectories,
+                        .listing = *directoryListing,
                         .dispatchConfigured = dispatchConfigured };
     if (auto const keyed = run.ComputeKey(); keyed.decided)
         return keyed.result;
@@ -4301,7 +4377,27 @@ int main(int argc, char** argv)
     // what says whether there is a compiler worth asking. Nothing between here and
     // `LoadConfig` may report anything -- `record.verbose` is not settled yet -- which
     // is why the `!parsedOk` block moved down with it rather than staying put.
-    auto const cmd = Cc::ParseCommand(std::span<std::string const> { args });
+    // A response file is command line (#1756): everything below -- the key, the second-artefact
+    // refusal, what a worker may be sent -- reads the EXPANDED arguments, never a file's name. A
+    // file that cannot be expanded is refused rather than guessed at: the compile then runs exactly
+    // as the build wrote it, uncached. The pass-through below always runs the ORIGINAL `args`.
+    auto expansion = Cc::ExpandResponseFiles(
+        args,
+        Cc::DriverOf(Cc::ClassifyCompiler(args.empty() ? std::string_view {} : std::string_view { args.front() })).family,
+        [](std::string_view path) -> std::optional<std::string> {
+            auto const native = Pace::PathFromNarrowText(path);
+            if (!native.has_value())
+                return std::nullopt;
+            auto bytes = Cc::ReadFileBytes(*native);
+            if (!bytes.has_value())
+                return std::nullopt;
+            return std::string { reinterpret_cast<char const*>(bytes->data()), bytes->size() };
+        });
+    std::optional<Cc::ResponseFileFailure> const responseFileRefusal =
+        expansion.has_value() ? std::nullopt : std::optional { expansion.error() };
+    std::vector<std::string> const compileArgs = expansion.has_value() ? *std::move(expansion) : args;
+
+    auto const cmd = Cc::ParseCommand(std::span<std::string const> { compileArgs });
 
     // Read ONCE and handed to both questions, because they are two questions about one
     // value: `WantsMarkerProbe` decides whether to pay for a probe, `LoadConfig` decides
@@ -4348,7 +4444,11 @@ int main(int argc, char** argv)
     }
 
     auto const started = std::chrono::steady_clock::now();
-    auto const handled = RunCached(record, cfg, cmd, std::span<std::string const> { args });
+    if (responseFileRefusal.has_value())
+        Note(record.verbose, Cc::DescribeResponseFileFailure(*responseFileRefusal));
+    auto const handled = responseFileRefusal.has_value()
+                             ? Decline(record, "a response file could not be expanded; not caching")
+                             : RunCached(record, cfg, cmd, std::span<std::string const> { compileArgs });
     // A compile the cache declined is a compile this host runs all the same, so it queues like one too.
     int const code =
         handled.has_value() ? *handled : RunPassthrough(record, cfg, cmd, std::span<std::string const> { args });
