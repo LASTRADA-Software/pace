@@ -592,20 +592,6 @@ namespace
         return ParseIncludeEnvironment(*value);
     }
 
-    /// Schema tag for the validity stamp.
-    ///
-    /// Separate from `FingerprintSchema`, because the two version different
-    /// things: this one versions what the stamp COVERS. Adding an input to the
-    /// stamp without moving it would let a cache entry written under the old rules
-    /// validate under the new ones -- a stale fingerprint that looks fresh.
-    ///
-    /// v2 added `FingerprintSchema` itself as an input (#1656). Until then nothing
-    /// tied a cached value to the rules that computed it: bumping the fingerprint's
-    /// schema changed every freshly computed value while a cache entry written under
-    /// the old one still validated, so a launcher kept serving the old identity
-    /// against a worker that had restarted onto the new one.
-    constexpr std::string_view StampSchema = "toolchain-stamp-v2";
-
     /// A path's last-write time as its native tick count, or 0 when unreadable.
     ///
     /// The FULL resolution the filesystem offers, deliberately, and not truncated
@@ -1306,7 +1292,8 @@ IncludeSearchRoots DiscoverIncludePaths(IProcessRunner& runner,
 std::string ComputeToolchainStamp(std::string_view banner,
                                   std::string const& compiler,
                                   std::span<std::string const> roots,
-                                  std::string_view schema)
+                                  std::string_view schema,
+                                  std::string_view stampSchema)
 {
     auto const binary = PathFromNarrowText(compiler);
     if (!binary.has_value())
@@ -1322,7 +1309,7 @@ std::string ComputeToolchainStamp(std::string_view banner,
         // rewalk rather than risking a stamp that cannot detect any change.
         return {};
 
-    KeyDigest digest { StampSchema };
+    KeyDigest digest { stampSchema };
     // The rules the cached value was computed under: a schema bump then misses every
     // entry written before it, rather than serving one the new rules would not give.
     digest.Field(schema);

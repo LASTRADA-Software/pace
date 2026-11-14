@@ -3034,7 +3034,7 @@ TEST_CASE("A stamp names the fingerprint schema it validates", "[toolchain-probe
 TEST_CASE("A cache entry another fingerprint schema wrote is recomputed, not served", "[toolchain-probe][fingerprint-tree]")
 {
     // Stands for the NEXT fingerprint-schema bump made without a stamp bump. This one
-    // (#1656) also moved `StampSchema`, so a v2 entry misses here regardless; what the
+    // (#1656) also moved `ToolchainStampSchema`, so a v2 entry misses here regardless; what the
     // case pins is that a schema bump ALONE is enough, because before the stamp named
     // the schema a launcher kept handing out the old value under a stamp that still
     // validated, against a worker that had restarted onto the new rules. Planted rather
@@ -3082,6 +3082,67 @@ TEST_CASE("A cache entry another fingerprint schema wrote is recomputed, not ser
     auto const recomputed = CachedFingerprintSerially(runner, host, compiler, banner, DriverOf(Flavor::Clang));
     REQUIRE(recomputed.fingerprint == real.fingerprint);
     CHECK(StoredFingerprint(state) == real.fingerprint);
+}
+
+TEST_CASE("A cache entry written before a stopped walk stopped being cached is rewalked, not served",
+          "[toolchain-probe][fingerprint-tree]")
+{
+    // #1774. A node stopped mid-walk used to cache the short digest under a stamp folding each
+    // root's path and mtime, never its contents, so the entry validated forever on that machine.
+    // The fix stops new entries like that; the ones already written are reached only by moving
+    // the stamp's own schema, since nothing in an entry tells a truncated digest from a whole
+    // one. The old build is not here, so its entry is PLANTED, stamped as it stamped them.
+    constexpr std::string_view oldStampSchema = "toolchain-stamp-v2";
+    REQUIRE(ToolchainStampSchema != oldStampSchema);
+
+    Pace::Testing::ScratchDirectory tree { "pace-tcp-stamp-v2-plant" };
+    tree.Write("inc/a.hpp", "content");
+    tree.Write("cc", "#!/bin/sh\n");
+    auto const compiler = (tree / "cc").string();
+    auto const root = (std::filesystem::path { tree.Path().string() } / "inc").string();
+
+    Pace::Testing::ScratchDirectory state { "pace-tcp-stamp-v2-plant-state" };
+    Pace::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
+
+    CountingRunner runner { VerboseNaming(root) };
+    ScriptedToolchainHost host;
+    constexpr std::string_view banner = "cc 1.0";
+    auto const real = CachedFingerprintSerially(runner, host, compiler, banner, DriverOf(Flavor::Clang));
+    REQUIRE(real.Usable());
+    REQUIRE(real.evidence.has_value());
+    auto const& evidence = Pace::Testing::Unwrap(real.evidence);
+
+    auto const entry = [&] {
+        std::error_code ec;
+        for (auto const& candidate: std::filesystem::directory_iterator { CacheDirectory(state), ec })
+            if (candidate.path().extension() == ".fingerprint")
+                return candidate.path();
+        return std::filesystem::path {};
+    }();
+    REQUIRE_FALSE(entry.empty());
+    // A truncated walk's digest, as the old build cached it: well-formed and wrong.
+    auto const plant = [&](std::string_view stampSchema) {
+        auto const stamp = ComputeToolchainStamp(banner, evidence.compiler, evidence.roots, FingerprintSchema, stampSchema);
+        REQUIRE_FALSE(stamp.empty());
+        std::ofstream { entry, std::ios::binary | std::ios::trunc } << stamp << "\ntruncated-walk-fingerprint\n";
+    };
+
+    // The control: under THIS build's stamp schema the planted entry is served, so the plant
+    // reaches the reader and the miss below is the schema's doing, not a missed file.
+    plant(ToolchainStampSchema);
+    REQUIRE(CachedFingerprintSerially(runner, host, compiler, banner, DriverOf(Flavor::Clang)).fingerprint
+            == "truncated-walk-fingerprint");
+
+    // The assertion: written under the old stamp schema it is not served ...
+    plant(oldStampSchema);
+    auto const rewalked = CachedFingerprintSerially(runner, host, compiler, banner, DriverOf(Flavor::Clang));
+    CHECK(rewalked.fingerprint == real.fingerprint);
+    // ... it was WALKED rather than read, which a hit never does ...
+    CHECK(rewalked.inputs.has_value());
+    // ... and the entry is rewritten, so the machine heals once rather than rewalking forever.
+    CHECK(StoredFingerprint(state) == real.fingerprint);
+    CHECK(CachedFingerprintSerially(runner, host, compiler, banner, DriverOf(Flavor::Clang)).fingerprint
+          == real.fingerprint);
 }
 
 TEST_CASE("One MSVC-targeting clang fingerprints alike under the gcc and the clang row",
