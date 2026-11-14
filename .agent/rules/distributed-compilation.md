@@ -4261,6 +4261,12 @@ translation unit and every test green.
 ## Open work
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues; AGENT.md tripwires rules, not residuals -->
+- **[#1770](https://github.com/LASTRADA-Software/pace/issues/1770)** — the compile-OOM
+  defense reaches only the compiles `pace-node` runs. A compile `pace-cc` runs LOCALLY from the
+  owner's own build, and the local rebuild a killed compile falls back to, stand outside the
+  `compiles/` ceiling, the pressure governor and the OOM-victim shim. The open question is
+  whether a killed compile waits in the leader's admission queue under its learned peak rather
+  than rebuilding locally, and whether local compiles join the node's ceiling.
 - **[#661](https://github.com/LASTRADA-Software/pace/issues/661)** — `IProcessRunner`
   has no cancellable seam, so a compile whose client has GONE runs to completion and this
   machine pays for an object nobody will read. The departure is already detected and
