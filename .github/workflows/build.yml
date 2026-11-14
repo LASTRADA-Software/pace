@@ -640,8 +640,11 @@ jobs:
 
       # libssl-dev + openssl: TLS is built and tested (the tls-smoke CTest uses
       # the openssl CLI) in every platform job, not a dedicated one.
+      # Native legs only: the shared CI image carries ninja, yaml-cpp, libssl and openssl
+      # (its Dockerfile), and every step that needs them runs inside it. Installing them on
+      # the host as well made an apt outage on the runner image fail a leg that never used them.
       - name: "Install build tools"
-        if: ${{ needs.changes.outputs.code != 'false' }}
+        if: ${{ needs.changes.outputs.code != 'false' && !matrix.image }}
         run: |
           bash scripts/ci-apt-update.sh
           sudo apt-get install -y ninja-build libyaml-cpp-dev libssl-dev openssl
