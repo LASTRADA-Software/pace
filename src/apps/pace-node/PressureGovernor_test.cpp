@@ -551,7 +551,8 @@ TEST_CASE("A shed left on the compiles' own full stall is not re-entered on it",
     }
 }
 
-TEST_CASE("At-limit evidence is sticky for one dwell: a shed's own kill does not make the stall foreign", "[node][pressure]")
+TEST_CASE("At-limit evidence is sticky for two dwells: a shed's own kill does not make the stall foreign",
+          "[node][pressure]")
 {
     // The evidence describes the last second, PSI's avg10 the last ten. A shed kills the youngest; the survivors sit
     // below the ceiling at once while avg10 still carries the full stall they caused. Read instantly, that stall
@@ -610,7 +611,7 @@ TEST_CASE("At-limit evidence is sticky for one dwell: a shed's own kill does not
         // Own and sticky: the shed is left at its dwell and latched.
         CHECK(rig.After(10s, stale, 30 * GiB).level == PressureLevel::Calm);
         // Twenty seconds after the evidence was last seen the window has closed: the stall is nobody's own any more,
-        // the latch lifts, and the freeze sheds. The window ends the hold; it only delays it.
+        // the latch lifts, and the freeze sheds. The window delays the re-shed; it does not prevent it.
         CHECK(rig.After(10s, stale, 30 * GiB).level == PressureLevel::Shed);
     }
     SECTION("unreadable evidence is none: an at-limit sample does not carry over a reading that failed")

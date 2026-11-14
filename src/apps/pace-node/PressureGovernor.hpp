@@ -159,7 +159,7 @@ class PressureGovernor
     std::optional<core::platform::SteadyTimePoint> _lastKill;
     std::optional<core::platform::SteadyTimePoint> _foreignStallSince; ///< Since when the foreign stall has held.
     bool _ownFreezeLatched { false }; ///< A shed was left on the compiles' own full stall, which has not lifted since.
-    /// When the compiles were last seen at their own ceiling; counts as evidence for one `dwell` after.
+    /// When the compiles were last seen at their own ceiling; counts as evidence for `EvidenceDwells` (two) dwells after.
     std::optional<core::platform::SteadyTimePoint> _atLimitSeen;
 };
 
