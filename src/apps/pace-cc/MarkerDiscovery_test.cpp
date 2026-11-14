@@ -2,6 +2,7 @@
 #include "MarkerDiscovery.hpp"
 
 #include <Pace/CompileCache/PathCanon.hpp>
+#include <Pace/Platform/NarrowText.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -9,6 +10,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include <tests/Unwrap.hpp>
 
@@ -253,3 +255,54 @@ TEST_CASE("No probe at all is the English default, without a crash")
     CHECK(resolved.marker == Pace::PathCanon::IncludeNoteMarker);
     CHECK(resolved.source == MarkerSource::Default);
 }
+
+TEST_CASE("A note written in the console code page is matched on a non-ASCII TEMP", "[1580]")
+{
+    // #1580: the probe's header sits in %TEMP%, which on a German or French profile carries a
+    // non-ASCII byte. `cl` writes the note in the console code page (CP-850 here: U+00FC is
+    // 0x81), while this process holds the path in UTF-8 -- so a UTF-8-only comparison never
+    // matched and the probe silently learned nothing, on exactly the machines #878 is for.
+    std::string const utf8Path = "C:\\Users\\J\xC3\xBCrgen\\AppData\\Local\\Temp\\pace-marker-probe.h";
+    std::string const cp850Path = "C:\\Users\\J\x81rgen\\AppData\\Local\\Temp\\pace-marker-probe.h";
+    std::string const localizedMarker = "Hinweis: Einlesen der Datei:";
+    std::string const output = localizedMarker + " " + cp850Path + "\r\n";
+
+    // The defect, kept as the control: the UTF-8 spelling alone learns nothing.
+    CHECK_FALSE(MarkerFromProbeOutput(output, utf8Path).has_value());
+
+    // Both spellings: learned, and in the COMPILER's bytes.
+    std::vector<std::string> const spellings { utf8Path, cp850Path };
+    auto const learned = MarkerFromProbeOutput(output, spellings);
+    REQUIRE(learned.has_value());
+    CHECK(Pace::Testing::Unwrap(learned) == localizedMarker);
+}
+
+TEST_CASE("Under a UTF-8 console the UTF-8 spelling still matches", "[1580]")
+{
+    // The direction that must not regress: `cl` under CP 65001 writes UTF-8, and the first
+    // spelling is the one that matches.
+    std::string const utf8Path = "C:\\Users\\J\xC3\xBCrgen\\AppData\\Local\\Temp\\pace-marker-probe.h";
+    std::string const cp850Path = "C:\\Users\\J\x81rgen\\AppData\\Local\\Temp\\pace-marker-probe.h";
+    std::string const output = std::string { "Note: including file: " } + utf8Path + "\n";
+    std::vector<std::string> const spellings { utf8Path, cp850Path };
+    auto const learned = MarkerFromProbeOutput(output, spellings);
+    REQUIRE(learned.has_value());
+    CHECK(Pace::Testing::Unwrap(learned) == Pace::PathCanon::IncludeNoteMarker);
+}
+
+#if defined(_WIN32)
+TEST_CASE("The probe's second spelling is the one the platform transcodes to", "[1580]")
+{
+    // The spellings the probe builds, end to end on this host: `NarrowTextFromUtf8` turns the
+    // UTF-8 path into CP-850 bytes, and a note written in those bytes is matched.
+    std::string const utf8Path = "C:\\Users\\J\xC3\xBCrgen\\pace-marker-probe.h";
+    auto const encoded = Pace::NarrowTextFromUtf8(utf8Path, 850U);
+    REQUIRE(encoded.has_value());
+    CHECK(Pace::Testing::Unwrap(encoded) == "C:\\Users\\J\x81rgen\\pace-marker-probe.h");
+    std::vector<std::string> const spellings { utf8Path, Pace::Testing::Unwrap(encoded) };
+    auto const learned =
+        MarkerFromProbeOutput("Note: including file: " + Pace::Testing::Unwrap(encoded) + "\r\n", spellings);
+    REQUIRE(learned.has_value());
+    CHECK(Pace::Testing::Unwrap(learned) == Pace::PathCanon::IncludeNoteMarker);
+}
+#endif

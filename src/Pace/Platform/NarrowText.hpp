@@ -109,6 +109,21 @@ struct NarrowTextPolicy
 /// @return The UTF-8 text, or `std::nullopt` when neither candidate applies.
 [[nodiscard]] std::optional<std::string> Utf8FromNarrowText(std::string_view text, std::optional<std::uint32_t> codePage);
 
+/// UTF-8 text spelled the way a tool writing in @p codePage would spell it: the inverse of
+/// `Utf8FromNarrowText`'s second candidate, for comparing text this process holds against bytes
+/// such a tool wrote, which must stay in the tool's encoding (#1580).
+///
+/// **Refused, never substituted, when the page cannot express a character.** A best-fit or
+/// default character in a path names a different file, and the caller would then match a line
+/// that is not the one it is looking for -- worse than not matching at all.
+///
+/// @param text     UTF-8 text.
+/// @param codePage The page to spell it in. `std::nullopt` and UTF-8 itself both answer @p text
+///                 unchanged, since that tool writes UTF-8.
+/// @return The bytes; `std::nullopt` when @p text is not UTF-8, when the page cannot express it,
+///         or on a platform with no transcoder and a page other than UTF-8.
+[[nodiscard]] std::optional<std::string> NarrowTextFromUtf8(std::string_view text, std::optional<std::uint32_t> codePage);
+
 #if defined(_WIN32)
 /// The UTF-8 form of UTF-16 text a Windows API wrote.
 ///

@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "MarkerDiscovery.hpp"
 
+#include <Pace/Platform/NarrowText.hpp>
+
 #include <algorithm>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -62,7 +65,14 @@ namespace
 
 std::optional<std::string> MarkerFromProbeOutput(std::string_view probeOutput, std::string_view knownPath)
 {
-    if (knownPath.empty())
+    std::string const spelling { knownPath };
+    return MarkerFromProbeOutput(probeOutput, std::span<std::string const> { &spelling, 1 });
+}
+
+std::optional<std::string> MarkerFromProbeOutput(std::string_view probeOutput,
+                                                 std::span<std::string const> knownPathSpellings)
+{
+    if (std::ranges::all_of(knownPathSpellings, [](std::string const& spelling) { return spelling.empty(); }))
         return std::nullopt;
 
     std::optional<std::string> learned;
@@ -87,8 +97,13 @@ std::optional<std::string> MarkerFromProbeOutput(std::string_view probeOutput, s
         if (trimmedEnd == std::string_view::npos)
             continue;
         auto const body = line.substr(0, trimmedEnd + 1);
-        if (!EndsWithPath(body, knownPath))
+        // One encoding per comparison: the line is the compiler's bytes, and so is each spelling.
+        auto const matched = std::ranges::find_if(knownPathSpellings, [body](std::string const& spelling) {
+            return !spelling.empty() && EndsWithPath(body, spelling);
+        });
+        if (matched == knownPathSpellings.end())
             continue;
+        std::string_view const knownPath = *matched;
 
         // Everything in front of the path, with the DEPTH PADDING trimmed off the
         // right. `cl` pads between marker and path by one blank per level of inclusion
@@ -258,7 +273,8 @@ namespace
 
 std::optional<std::string> ProbeIncludeNoteMarker(IProcessRunner& runner,
                                                   std::string const& compiler,
-                                                  DriverSpec const& driver)
+                                                  DriverSpec const& driver,
+                                                  std::optional<std::uint32_t> toolCodePage)
 {
     auto const files = WriteProbeFiles();
     if (!files.has_value())
@@ -302,7 +318,14 @@ std::optional<std::string> ProbeIncludeNoteMarker(IProcessRunner& runner,
     // `<leftover>Note: including file:` as the prefix -- and the disagreement guard
     // cannot catch it, because the probe includes exactly one header and so emits
     // exactly one note.
-    return MarkerFromProbeOutput(run.out, files->header.string());
+    // Both spellings of the header (#1580): UTF-8, which `cl` writes under a UTF-8 console, and
+    // the console code page's, which it writes otherwise. A path the page cannot express has no
+    // second spelling, and the UTF-8 one is still asked.
+    std::vector<std::string> spellings { PathBytes(files->header) };
+    if (auto encoded = NarrowTextFromUtf8(spellings.front(), toolCodePage);
+        encoded.has_value() && *encoded != spellings.front())
+        spellings.push_back(*std::move(encoded));
+    return MarkerFromProbeOutput(run.out, spellings);
 }
 
 } // namespace Pace::Cc
