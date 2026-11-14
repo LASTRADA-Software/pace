@@ -2598,7 +2598,7 @@ TEST_CASE("A compile depending on what the key cannot see is not cached, and say
     CHECK_FALSE(Parse({ "clang-cl", "/c", "/clang:-march=native", "a.cpp", "/Foa.obj" }).parsedOk);
 }
 
-TEST_CASE("-MD without -MF names a depfile the launcher cannot reproduce", "[cmdline][1689]")
+TEST_CASE("A -MD without -MF names a depfile the launcher cannot reproduce", "[cmdline][1689]")
 {
     auto const unnamed = Parse({ "gcc", "-MMD", "-MP", "-c", "a.c", "-o", "a.o" });
     CHECK_FALSE(unnamed.parsedOk);

@@ -15,6 +15,8 @@
 #include <ranges>
 #include <utility>
 
+#include <core/Ranges.hpp>
+
 namespace Pace::Cc
 {
 namespace
@@ -1495,12 +1497,12 @@ namespace
     {
         if (auto const passed = MatchPassThrough(arg, driver.family); passed.has_value())
             return UncacheableFlagReason(passed->inner, DriverOf(passed->into));
-        auto const row = std::ranges::find_if(UncacheableFlags, [&](UncacheableFlag const& candidate) {
+        auto const* const row = core::findIfOrNull(UncacheableFlags, [&](UncacheableFlag const& candidate) {
             if (!Overlaps(candidate.families, driver.family))
                 return false;
             return candidate.match == FlagMatch::Exact ? arg == candidate.spelling : arg.starts_with(candidate.spelling);
         });
-        if (row == UncacheableFlags.end())
+        if (row == nullptr)
             return std::nullopt;
         return row->reason;
     }
