@@ -14,6 +14,16 @@ namespace
 
     /// How many dwell periods `Yield` is held, with the system still stalled, before it escalates to `Shed`.
     constexpr int YieldDwellsBeforeShed = 2;
+
+    /// How many dwell periods at-limit evidence is held after it was last seen. It must OUTLIVE the shed's first exit
+    /// check strictly, never meet it: that check comes at the first sample at least one dwell after entering, which a
+    /// real loop (step, then wait one poll) lands a little past the dwell -- and a shed can be entered on `full` from
+    /// a sample carrying no evidence, a poll after the evidence was last seen. A window of exactly one dwell expired
+    /// in both arrangements a hair before the check, read the compiles' own stall as foreign, held the shed and
+    /// killed a second compile. Twice the dwell covers both with a whole dwell to spare; the cost is that a stall
+    /// stays the compiles' own for up to twenty seconds after they last touched their ceiling, which only keeps a
+    /// stall they caused from being shed on.
+    constexpr int EvidenceDwells = 2;
 } // namespace
 
 PressureGovernor::PressureGovernor(PressureThresholds thresholds,
@@ -44,14 +54,14 @@ GovernorDecision PressureGovernor::Step(Platform::PressureSample const& sample, 
     // limit stall because the machine reclaims from everyone, a game's shortage included -- which is a yield.
     // Compared as a product, never a ratio: a zero system figure divides nothing and yields no NaN.
     //
-    // The evidence is STICKY for one dwell: it describes the last second, while the PSI averages it is weighed against
-    // describe the last ten. A shed that just killed a compile leaves the survivors below the ceiling for a moment
-    // while `avg10` still carries the stall they caused; instant evidence would read that as someone else's, hold
-    // the shed and kill again. Unreadable evidence is none at all: never the compiles' own, sticky or not.
+    // The evidence is STICKY for `EvidenceDwells` dwells: it describes the last second, while the PSI averages it is
+    // weighed against describe the last ten. A shed that just killed a compile leaves the survivors below the ceiling for a
+    // moment while `avg10` still carries the stall they caused; instant evidence would read that as someone else's, hold the
+    // shed and kill again. Unreadable evidence is none at all: never the compiles' own, sticky or not.
     if (sample.compilesAtLimit == true)
         _atLimitSeen = now;
-    auto const atLimit =
-        sample.compilesAtLimit.has_value() && _atLimitSeen.has_value() && now - *_atLimitSeen <= thresholds.dwell;
+    auto const atLimit = sample.compilesAtLimit.has_value() && _atLimitSeen.has_value()
+                         && now - *_atLimitSeen < EvidenceDwells * thresholds.dwell;
     auto const ownStall = atLimit && sample.compiles && sample.compiles->some.avg10 >= thresholds.ownShare * systemSome;
     auto const foreignStall = systemSome > thresholds.yieldEnter && !ownStall;
     // A stall the compiles carry is the ceiling working, so it never counts as one to stay for.

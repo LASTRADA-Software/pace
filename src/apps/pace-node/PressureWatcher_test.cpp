@@ -749,10 +749,15 @@ TEST_CASE("Whether the compiles stand at their ceiling going unreadable is said 
     }
     CHECK(limitWarns() == 1);
 
-    auto const infos = rig.Lines(LogLevel::Info);
+    auto const limitInfos = [&rig] {
+        return std::ranges::count_if(rig.logger.Snapshot(), [](CapturingLogger::Record const& record) {
+            return record.level == LogLevel::Info
+                   && record.message.contains("stand at their own memory ceiling can be read again");
+        });
+    };
     rig.Step(1s, Quiet);
     rig.Step(1s, Quiet);
-    CHECK(rig.Lines(LogLevel::Info) == infos + 1);
+    CHECK(limitInfos() == 1);
 
     rig.clock.advance(1s);
     rig.source->next = faulted;

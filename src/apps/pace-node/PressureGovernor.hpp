@@ -71,8 +71,9 @@ struct GovernorDecision
 ///
 /// - **A stall that is the compiles' own is not a yield.** System `some` above `yieldEnter` counts only
 ///   when the compiles' cgroup's `some` is below `ownShare` of it, or there is no compiles reading, or the
-///   compiles have not stood at their own ceiling (`PressureSample::compilesAtLimit`) within the last `dwell`
-///   -- sticky, because that evidence covers one second and the PSI averages ten. Otherwise it is the
+///   compiles have not stood at their own ceiling (`PressureSample::compilesAtLimit`) within the evidence window,
+///   twice `dwell` -- sticky, because that evidence covers one second and the PSI averages ten, and longer than
+///   the shed's exit horizon, so the exit check always sees it. Otherwise it is the
 ///   ceiling working, and the level stays `Calm`. Compiles far below their limit that stall with the
 ///   machine are stalling on someone else's shortage -- the machine reclaims from everyone -- so that yields.
 /// - **Shed** on system `full` at or above `shedEnter`, whoever stalls, or from `Yield` once a FOREIGN
@@ -83,9 +84,10 @@ struct GovernorDecision
 ///   own stall counts as below: compiles stalling against the ceiling a yield just set hold the node in
 ///   no level. That holds for `full` too: entering `Shed` on `full` asks nobody whose stall it is, but
 ///   leaving it counts `full` as eased below `shedExit` OR when the compiles' own `full` is at least
-///   `ownShare` of the system's (and they stand at their ceiling) -- never when the compiles' reading or its
-///   `full` line is absent. Leaving `Shed` also needs no foreign stall above `yieldEnter`, and lands in `Yield`
-///   unless the stall has already eased below `yieldExit` or is the compiles' own.
+///   `ownShare` of the system's (and they stood at their ceiling within the evidence window) -- never when the
+///   compiles' reading or its `full` line is absent. Leaving `Shed` also needs no foreign stall above
+///   `yieldEnter`, and lands in `Yield` unless the stall has already eased below `yieldExit` or is the
+///   compiles' own.
 /// - **A shed left on an own full stall LATCHES**: while that stall persists, `full` at or above `shedEnter`
 ///   does not re-enter `Shed`. The latch lifts once the full stall turns foreign or falls below `shedExit`,
 ///   and entry is "regardless of whose" again from then -- otherwise one own stall flaps `Shed` and `Calm`

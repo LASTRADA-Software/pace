@@ -3523,10 +3523,10 @@ oscillate:
 | `shed` | PSI `full` `avg10` at or above `--memory-pressure-shed` (the desktop freezing, whoever causes it), or a foreign stall that has held a `yield` for twenty seconds | admits nothing, and kills the **youngest** running compile, one per ten seconds, until the level drops |
 
 - **A stall that is the compiles' own is not a yield.** When the `compiles/` cgroup carries at least
-  80% of the machine's `some` stall **and has stood at its own ceiling within the last ten seconds**
+  80% of the machine's `some` stall **and has stood at its own ceiling within the last twenty seconds**
   — its `memory.events` `max` count rose between two samples, or `memory.current` was within 5% of
-  `memory.max` — the stall is the ceiling working. The evidence is held for one dwell because it
-  describes a second while PSI's `avg10` describes ten: a shed's own kill leaves the survivors below
+  `memory.max` — the stall is the ceiling working. The evidence is held for two dwells because it
+  describes a second while PSI's `avg10` describes ten, and must outlive the first moment a shed may end: a shed's own kill leaves the survivors below
   the ceiling while the average still carries the stall they caused. When those files cannot be read
   the node says so once at Warn, and every stall counts as foreign until they can. An own stall
   keeps the level calm; a yield caused by something else is not held by the

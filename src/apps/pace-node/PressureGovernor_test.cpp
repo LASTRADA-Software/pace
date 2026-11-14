@@ -14,8 +14,10 @@
 #include <cstdint>
 #include <optional>
 #include <ranges>
+#include <utility>
 
 #include <core/platform/Clock.hpp>
+#include <tests/Unwrap.hpp>
 
 using namespace Pace;
 using namespace std::chrono_literals;
@@ -23,6 +25,7 @@ using Node::GovernorDecision;
 using Node::PressureGovernor;
 using Node::PressureLevel;
 using Node::PressureThresholds;
+using Pace::Testing::Unwrap;
 
 namespace
 {
@@ -73,8 +76,9 @@ struct Rig
     core::platform::ManualClock clock;
     PressureGovernor governor { PressureThresholds {}, Configured, Floor, clock };
 
-    /// Advance the clock by @p elapsed, then step one sample.
-    GovernorDecision After(std::chrono::seconds elapsed, Script const& script, std::uint64_t hold)
+    /// Advance the clock by @p elapsed, then step one sample. Milliseconds, so a case can step at a real loop's
+    /// cadence -- a poll waited AFTER each step lands every sample a little past a whole second.
+    GovernorDecision After(std::chrono::milliseconds elapsed, Script const& script, std::uint64_t hold)
     {
         clock.advance(elapsed);
         return governor.Step(SampleOf(script), hold);
@@ -593,7 +597,7 @@ TEST_CASE("At-limit evidence is sticky for one dwell: a shed's own kill does not
         CHECK(kills == 1);
         CHECK(sheds == 1);
     }
-    SECTION("control: evidence absent for longer than a dwell lets the full stall count as foreign again")
+    SECTION("control: evidence absent for longer than the window lets the full stall count as foreign again")
     {
         Rig rig;
         REQUIRE(rig.After(0s, { .some = 3.0, .full = 3.0, .compiles = 2.9, .compilesFull = 2.9, .atLimit = true }, 30 * GiB)
@@ -605,8 +609,9 @@ TEST_CASE("At-limit evidence is sticky for one dwell: a shed's own kill does not
                 == PressureLevel::Shed);
         // Own and sticky: the shed is left at its dwell and latched.
         CHECK(rig.After(10s, stale, 30 * GiB).level == PressureLevel::Calm);
-        // Eleven seconds without evidence: the stall is nobody's own any more, the latch lifts, and it sheds.
-        CHECK(rig.After(1s, stale, 30 * GiB).level == PressureLevel::Shed);
+        // Twenty seconds after the evidence was last seen the window has closed: the stall is nobody's own any more,
+        // the latch lifts, and the freeze sheds. The window ends the hold; it only delays it.
+        CHECK(rig.After(10s, stale, 30 * GiB).level == PressureLevel::Shed);
     }
     SECTION("unreadable evidence is none: an at-limit sample does not carry over a reading that failed")
     {
@@ -615,5 +620,107 @@ TEST_CASE("At-limit evidence is sticky for one dwell: a shed's own kill does not
                 == PressureLevel::Calm);
         CHECK(rig.After(1s, { .some = 20.0, .full = 0.0, .compiles = 19.0, .atLimit = std::nullopt }, 30 * GiB).level
               == PressureLevel::Yield);
+    }
+}
+
+namespace
+{
+
+/// Section 1's scenario at a cadence: an own freeze shed at t = 0, the evidence gone with the kill, full avg10
+/// decaying from 6% with a ten-second time constant.
+/// @param step The time between samples.
+/// @return How many compiles were killed and how many times `Shed` was entered, over sixty seconds.
+[[nodiscard]] std::pair<int, int> OwnFreezeAfterKill(std::chrono::milliseconds step)
+{
+    Rig rig;
+    auto kills = 0;
+    auto sheds = 0;
+    auto const tally = [&](GovernorDecision const& decision) {
+        kills += decision.killYoungest ? 1 : 0;
+        sheds += decision.levelChanged && decision.level == PressureLevel::Shed ? 1 : 0;
+    };
+    tally(rig.After(0s, { .some = 8.0, .full = 6.0, .compiles = 7.9, .compilesFull = 5.9, .atLimit = true }, 30 * GiB));
+    auto elapsed = std::chrono::milliseconds {};
+    while (elapsed < 60s)
+    {
+        elapsed += step;
+        auto const full = 6.0 * std::exp(-std::chrono::duration<double>(elapsed).count() / 10.0);
+        tally(rig.After(step,
+                        { .some = full * 1.3, .full = full, .compiles = full * 1.3, .compilesFull = full, .atLimit = false },
+                        20 * GiB));
+    }
+    return { kills, sheds };
+}
+
+} // namespace
+
+TEST_CASE("At-limit evidence outlives the shed's first exit check at a real loop's cadence", "[node][pressure]")
+{
+    // A real loop steps, then waits one poll, so every sample lands a little past a whole second and the shed's first
+    // exit check a little past its dwell. Evidence held for exactly one dwell expired a hair before that check.
+    SECTION("1001 ms: one kill, no re-shed, in a minute")
+    {
+        auto const [kills, sheds] = OwnFreezeAfterKill(std::chrono::milliseconds { 1001 });
+        CHECK(kills == 1);
+        CHECK(sheds == 1);
+    }
+    SECTION("1010 ms: one kill, no re-shed, in a minute")
+    {
+        auto const [kills, sheds] = OwnFreezeAfterKill(std::chrono::milliseconds { 1010 });
+        CHECK(kills == 1);
+        CHECK(sheds == 1);
+    }
+    SECTION("control: whole seconds still give one kill")
+    {
+        auto const [kills, sheds] = OwnFreezeAfterKill(1s);
+        CHECK(kills == 1);
+        CHECK(sheds == 1);
+    }
+    SECTION("a shed entered on full from a sample with no evidence, the evidence one poll older: one kill")
+    {
+        // The freeze is entered on `full` regardless of whose it is, from a sample that carries no evidence; the
+        // evidence was last seen one poll earlier, so at the first exit check it is a dwell AND a poll old.
+        Rig rig;
+        auto kills = 0;
+        auto sheds = 0;
+        auto const tally = [&](GovernorDecision const& decision) {
+            kills += decision.killYoungest ? 1 : 0;
+            sheds += decision.levelChanged && decision.level == PressureLevel::Shed ? 1 : 0;
+            return decision;
+        };
+        auto const before = Script { .some = 3.0, .full = 3.0, .compiles = 2.9, .compilesFull = 2.9, .atLimit = true };
+        REQUIRE(tally(rig.After(0s, before, 30 * GiB)).level == PressureLevel::Calm);
+        auto const own = Script { .some = 8.0, .full = 6.0, .compiles = 7.9, .compilesFull = 5.9, .atLimit = false };
+        REQUIRE(tally(rig.After(1s, own, 30 * GiB)).level == PressureLevel::Shed);
+        for ([[maybe_unused]] auto const second: std::views::iota(0, 10))
+            static_cast<void>(tally(rig.After(1s, own, 30 * GiB)));
+        CHECK(kills == 1);
+        CHECK(sheds == 1);
+    }
+    SECTION("section 3's leave-and-latch at the loop's cadence: left at the first exit check")
+    {
+        Rig rig;
+        auto const step = std::chrono::milliseconds { 1001 };
+        REQUIRE(rig.After(0s, { .some = 3.0, .full = 3.0, .compiles = 2.9, .compilesFull = 2.9, .atLimit = true }, 30 * GiB)
+                    .level
+                == PressureLevel::Calm);
+        REQUIRE(
+            rig.After(step, { .some = 8.0, .full = 6.0, .compiles = 7.9, .compilesFull = 5.9, .atLimit = true }, 30 * GiB)
+                .level
+            == PressureLevel::Shed);
+        auto const stale = Script { .some = 3.0, .full = 6.0, .compiles = 2.9, .compilesFull = 5.9, .atLimit = false };
+        auto left = std::optional<GovernorDecision> {};
+        auto steps = 0;
+        while (!left.has_value() && steps < 15)
+        {
+            ++steps;
+            auto const decision = rig.After(step, stale, 30 * GiB);
+            CHECK_FALSE(decision.killYoungest);
+            if (decision.level != PressureLevel::Shed)
+                left = decision;
+        }
+        REQUIRE(left.has_value());
+        CHECK(steps == 10); // the first sample at least one dwell after entering
+        CHECK(Unwrap(left).level == PressureLevel::Calm);
     }
 }
