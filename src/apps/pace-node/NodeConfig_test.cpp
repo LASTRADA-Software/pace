@@ -5936,6 +5936,37 @@ TEST_CASE("A compression setting that reaches no tier refuses the node", "[node]
     }
 }
 
+TEST_CASE("The memory pressure thresholds take a percentage, with or without its sign", "[node][config][pressure]")
+{
+    // The value IS a percentage, so `10%` is how an operator writes it: accepted, and the same as `10`.
+    for (auto const* good: { "--memory-pressure-yield=10%", "--memory-pressure-yield=10" })
+    {
+        auto const parsed = ParseNodeArgv({ good });
+        INFO("flag: " << good);
+        REQUIRE(parsed.has_value());
+        CHECK(parsed->memoryPressureYieldPercent == 10U);
+    }
+    for (auto const* good: { "--memory-pressure-shed=0%", "--memory-pressure-shed=100%" })
+    {
+        auto const parsed = ParseNodeArgv({ good });
+        INFO("flag: " << good);
+        REQUIRE(parsed.has_value());
+    }
+    // And the other direction: the sign does not widen the grammar to what is not a percentage from 0 to 100.
+    for (auto const* bad: { "--memory-pressure-yield=%",
+                            "--memory-pressure-yield=10%%",
+                            "--memory-pressure-yield=101%",
+                            "--memory-pressure-shed=%5",
+                            "--memory-pressure-shed=5 %",
+                            "--memory-pressure-shed=-1%" })
+    {
+        auto const parsed = ParseNodeArgv({ bad });
+        INFO("flag: " << bad);
+        REQUIRE_FALSE(parsed.has_value());
+        CHECK(parsed.error().code == ConfigErrorCode::OutOfRange);
+    }
+}
+
 TEST_CASE("The compression level is range-checked at both ends", "[node][config][compression]")
 {
     for (auto const* good: { "--compression-level=1", "--compression-level=22" })

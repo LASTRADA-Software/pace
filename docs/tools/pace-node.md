@@ -3502,7 +3502,8 @@ the compiler ended by `SIGKILL` for any other reason — a compiler never sends 
 this also covers systemd-oomd or the global OOM killer. The worker answers `worker-compile-killed`
 (`0x35`), the client treats it as a miss and compiles locally, and the kill is counted by cause in
 `pace_worker_compiles_killed_ceiling_total`, `..._shed_total` and `..._signal_total` and logged once
-per kill at Info with the key.
+per kill at Info, naming the cause and the source file's name as the worker gave it in scratch (its base
+name) -- not its cache key, which the worker does not hold, and not its full path.
 
 ##### Layer C: the pressure governor
 
@@ -3572,9 +3573,10 @@ binding limit `memory-pressure` in `pacectl node`'s slot ceilings and the dashbo
 | `--memory-pressure-yield` (`memory_pressure_yield`) | `10` | The PSI `some` `avg10` percentage above which a foreign stall yields; it eases below half of it. `0` never yields. **Reloadable.** |
 | `--memory-pressure-shed` (`memory_pressure_shed`) | `5` | The PSI `full` `avg10` percentage at which the node sheds; it eases below a fifth of it. `0` never sheds — a held yield is not escalated either. **Reloadable.** |
 
-The defaults sit far below systemd-oomd's (Fedora kills a whole user slice at 50% pressure held for
-20 s — the desktop, the game and the editor with it): 10% `some` over ten seconds is already a
-desktop that stutters, and 5% `full` one that freezes, so the node acts before oomd chooses a victim.
+The defaults sit far below systemd-oomd's (Fedora 44's per-slice defaults kill a whole cgroup in
+`system.slice` or in a user's slices at 80% pressure held for 20 s — under the user unit that is the
+desktop, the game and the editor with it): 10% `some` over ten seconds is already a desktop that
+stutters, and 5% `full` one that freezes, so the node acts before oomd chooses a victim.
 
 **Degraded modes.** On a node whose compiles run in no cgroup of its own (a hand-started node, an
 older unit, `--slots=0`), the watcher still runs on system PSI and changes only what the machine
@@ -3829,7 +3831,7 @@ Every row says two things before anything else:
 | `cache-budget-override-dropped` | latched | warning | a cluster cache budget override was dropped because this machine's own `--cache-memory`/`--cache-disk` changed after the override was set (its configured value no longer equals the baseline it reported); the detail names the tier, both values and the override's figure | the machine's own configuration changed after the override was set; set it again with set_cache_budget if still wanted |
 | `formation-move-refused` | live | alert | a move of this node's formation -- to the mode the detail names -- was not taken, because the startup rules refuse the shape it would give this node: a restart into it would be refused, so the node keeps the mode it is in. Every move is judged this way before its record is written, whether or not it rebuilds the node; the detail names the rule | fix the rule the detail names and restart this node; until then it keeps the mode it is in rather than serve a shape its next restart would refuse |
 | `compile-memory-unmeasured` | latched | notice | the worker cannot measure the peak memory of a compile, so it reports none and the fleet's admission estimates stay at their default instead of learning; the detail names what this machine lacked (no delegated cgroup — a hand-started node or an older unit —, no `memory.peak`, a seccomp filter refusing `clone3`, or a glibc older than 2.39). Not evaluated on a node that runs no worker, nor on a platform other than Linux, macOS and Windows, where nothing could measure and no remedy applies | give the node a cgroup of its own: [memory: measurement, ceiling and pressure](#memory-measurement-ceiling-and-pressure-linux) |
-| `compile-memory-uncapped` | latched | warning | the worker cannot hold the compiles it runs under one memory ceiling (`--compile-memory-limit`, by default the machine budget), so one that grows can take memory from everything else on the machine; the detail names what this machine lacked, as `compile-memory-unmeasured`'s does, or the ceiling the kernel refused. Raised again by a reload whose ceiling cannot be written. Not evaluated on a node that runs no worker, nor on a platform other than Linux, which has no cgroups | give the node a cgroup of its own: [memory: measurement, ceiling and pressure](#memory-measurement-ceiling-and-pressure-linux) |
+| `compile-memory-uncapped` | live | warning | the worker cannot hold the compiles it runs under one memory ceiling (`--compile-memory-limit`, by default the machine budget), so one that grows can take memory from everything else on the machine; the detail names what this machine lacked, as `compile-memory-unmeasured`'s does, or the ceiling the kernel refused. Raised again by a reload whose ceiling cannot be written, and cleared by the next write that lands. Not evaluated on a node that runs no worker, nor on a platform other than Linux, which has no cgroups | give the node a cgroup of its own: [memory: measurement, ceiling and pressure](#memory-measurement-ceiling-and-pressure-linux) |
 | `memory-pressure-shedding` | live | notice | the machine stalls waiting for memory and the stall is not the compiles' own, so the node's pressure governor yields — admits no new compile on this machine, local ones included — or, while the whole machine freezes, sheds — also kills its youngest compile once per ten seconds; the detail names the level and what compiles may hold. Clears by itself once the stall eases. Not evaluated where PSI cannot be read | usually nothing: something else needed the memory, and compiles return gradually once it is free. Raised with nothing else running means the compiles alone outgrow the machine: lower `--compile-memory-limit`. `--memory-pressure-yield` and `--memory-pressure-shed` move where it acts: [layer C](#layer-c-the-pressure-governor) |
 
 The remedy each row carries is longer than this column, and it is the node's text: an older

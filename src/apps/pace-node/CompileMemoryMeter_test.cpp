@@ -444,6 +444,12 @@ TEST_CASE("CompileMemoryMeter.ceiling-in-force-is-said-and-clears-the-row", "[no
         PutCompileCeilingInForce(meter, NodeConfig {}, CeilingMachine(), conditions, logger);
         CHECK(conditions.StateOf(NodeCondition::CompileMemoryUncapped) == Wire::ConditionState::Raised);
         CHECK(DetailOf(conditions, NodeCondition::CompileMemoryUncapped).contains("memory.max"));
+
+        // And the next write that lands clears it, so the row says it is LIVE: one that clears is not latched.
+        host->writeRefusals.clear();
+        PutCompileCeilingInForce(meter, NodeConfig {}, CeilingMachine(), conditions, logger);
+        CHECK(conditions.StateOf(NodeCondition::CompileMemoryUncapped) == Wire::ConditionState::Clear);
+        CHECK(RowFor(NodeCondition::CompileMemoryUncapped).persistence == Wire::ConditionPersistence::Live);
     }
 }
 

@@ -116,15 +116,17 @@ namespace
     ///
     /// Zero is accepted and turns that level off (`MemoryPressureThresholdsOf`); above 100 is refused, since no
     /// stall share exceeds the whole window and such a level could never be entered -- which zero already says.
+    /// One trailing `%` is accepted, since the value IS a percentage and an operator writes it as one (`10%`).
     /// @param sv Text to parse.
     /// @return The percentage, or why it is not one.
     [[nodiscard]] std::expected<std::uint32_t, ConfigError> ParsePressurePercent(std::string_view sv)
     {
         auto value = 0U;
-        auto const* const begin = sv.data();
-        auto const* const end = std::next(begin, static_cast<std::ptrdiff_t>(sv.size()));
+        auto const digits = sv.ends_with('%') ? sv.substr(0, sv.size() - 1) : sv;
+        auto const* const begin = digits.data();
+        auto const* const end = std::next(begin, static_cast<std::ptrdiff_t>(digits.size()));
         auto const [ptr, ec] = std::from_chars(begin, end, value);
-        if (ec != std::errc {} || ptr != end || value > MaxPressurePercent)
+        if (digits.empty() || ec != std::errc {} || ptr != end || value > MaxPressurePercent)
             return std::unexpected(
                 ArgvError(ConfigErrorCode::OutOfRange, std::format("not a percentage from 0 to 100: {}", sv)));
         return value;

@@ -397,14 +397,15 @@ inline constexpr EnumTable<NodeCondition, NodeConditionRow> NodeConditionTable {
                 "node's own: under systemd, a drop-in with Delegate=memory, ProtectControlGroups=private (systemd 257 or "
                 "newer) and RestrictNamespaces=no, then a restart; see docs/tools/pace-node.md. The detail names what "
                 "this machine lacked." },
-    // Latched: whether `compiles/` exists is decided once, at startup, with the meter. A warning and not a notice,
-    // unlike its sibling: an uncapped compile that grows takes memory from everything else on the machine -- a
-    // desktop freezes, the out-of-memory killer picks a victim -- where an unmeasured one only teaches the fleet
-    // nothing. Worker scope: the ceiling covers the compiles this worker runs. Raised again by a reload whose
-    // ceiling the kernel refuses.
+    // Live: whether `compiles/` exists is decided once, at startup, with the meter -- but whether its ceiling HOLDS is
+    // asked again at every write: a reload whose ceiling the kernel refuses raises it, and the next write that lands
+    // clears it. A row that clears is live; reading it as latched would tell an operator a cleared fault still
+    // stands. A warning and not a notice, unlike its sibling: an uncapped compile that grows takes memory from
+    // everything else on the machine -- a desktop freezes, the out-of-memory killer picks a victim -- where an
+    // unmeasured one only teaches the fleet nothing. Worker scope: the ceiling covers the compiles this worker runs.
     { .condition = NodeCondition::CompileMemoryUncapped,
       .id = "compile-memory-uncapped",
-      .persistence = CompileCacheWire::ConditionPersistence::Latched,
+      .persistence = CompileCacheWire::ConditionPersistence::Live,
       .severity = CompileCacheWire::ConditionSeverity::Warning,
       .scope = ConditionScope::Worker,
       .remedy = "This worker's compiles run with no memory ceiling over them, so one that grows can take memory from "

@@ -78,7 +78,6 @@ struct NodePresenceParts
     /// compiles and the local leases this node grants. Read per round for the machine's budget report.
     IHeldCharges const& held;
     /// The peaks this node's worker measured and has not reported; drained into the report.
-    /// The peaks this node's worker measured and has not reported; drained into the report.
     MeasuredPeaks& peaks;
     /// Keeps the compile ceiling from the same configuration and capacity the round reports the budget from;
     /// null on a node that runs no worker, whose compiles nothing caps.
