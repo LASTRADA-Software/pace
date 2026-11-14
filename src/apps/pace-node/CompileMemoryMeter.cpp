@@ -95,7 +95,8 @@ void CompileMemoryMeter::Decide()
         case MeterStrategy::NotMeasurable:
             _report = MeterReport { .state = MeterState::NotApplicable,
                                     .reason = "this platform has no meter that measures a compile apart from the node",
-                                    .notApplied = {} };
+                                    .notApplied = {},
+                                    .oomdOmitRefused = std::nullopt };
             return;
         case MeterStrategy::JobCgroup:
             break;
@@ -110,10 +111,14 @@ void CompileMemoryMeter::Decide()
                       : Platform::PrepareJobCgroups(*_host);
     if (!layout.has_value())
     {
-        _report = MeterReport { .state = MeterState::Unmeasured, .reason = layout.error().Describe(), .notApplied = {} };
+        _report = MeterReport { .state = MeterState::Unmeasured,
+                                .reason = layout.error().Describe(),
+                                .notApplied = {},
+                                .oomdOmitRefused = std::nullopt };
         return;
     }
     _report.notApplied = layout->notApplied;
+    _report.oomdOmitRefused = layout->oomdOmitRefused;
     _layout = *layout;
     _source = std::make_shared<Platform::CgroupJobSource>(_host, *std::move(layout));
 }
@@ -190,6 +195,12 @@ void ReportCompileMemoryMeter(MeterReport const& report, NodeConditions& conditi
             said += (said.empty() ? "" : "; ") + sentence;
         logger.Logf(LogLevel::Warn, "the compiles cgroup runs without some of its settings: {}", said);
     }
+    // Said once, never fatal: oomd remains free to pick the node, as it was before the node marked anything.
+    if (report.oomdOmitRefused.has_value())
+        logger.Logf(LogLevel::Warn,
+                    "systemd-oomd may choose this node, its cache with it, as a victim: {} could not be set ({})",
+                    Platform::OomdOmitAttribute,
+                    *report.oomdOmitRefused);
 
     switch (report.state)
     {

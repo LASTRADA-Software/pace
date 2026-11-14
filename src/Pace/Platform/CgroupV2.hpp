@@ -107,6 +107,15 @@ class ICgroupHost
     /// Wait @p duration. The ONE clock the facility reads: a fake records it and returns.
     /// @param duration How long.
     virtual void Pause(std::chrono::microseconds duration) const = 0;
+
+    /// Set an extended attribute on a (cgroup) directory, as `setxattr(2)` does.
+    /// @param path The directory.
+    /// @param name The attribute's full name, namespace included (`user.oomd_omit`).
+    /// @param value Its value.
+    /// @return Nothing, or the platform's refusal.
+    [[nodiscard]] virtual std::expected<void, std::error_code> SetExtendedAttribute(std::filesystem::path const& path,
+                                                                                    std::string_view name,
+                                                                                    std::string_view value) const = 0;
 };
 
 /// The real cgroup tree: `/proc`, `/sys/fs/cgroup`, `posix_spawn`. Linux alone; on every other
@@ -139,6 +148,10 @@ class SystemCgroupHost final: public ICgroupHost
     [[nodiscard]] std::uint32_t OwnProcessId() const noexcept override;
     /// @copydoc ICgroupHost::Pause
     void Pause(std::chrono::microseconds duration) const override;
+    /// @copydoc ICgroupHost::SetExtendedAttribute
+    [[nodiscard]] std::expected<void, std::error_code> SetExtendedAttribute(std::filesystem::path const& path,
+                                                                            std::string_view name,
+                                                                            std::string_view value) const override;
 };
 
 /// Why the facility is unavailable.
@@ -244,6 +257,9 @@ struct CgroupLayout
     /// it (`compiles may swap: memory.swap.max not writable (...)`). Tolerated, since the ceiling works
     /// without them, and said by the node once at startup; empty when every one was applied.
     std::vector<std::string> notApplied {};
+    /// Why `leaf` could not be marked `OomdOmitAttribute`, so systemd-oomd may still choose the node; disengaged
+    /// when it was marked. Never a reason to refuse the facility: the ceiling and the measurement work without it.
+    std::optional<std::string> oomdOmitRefused {};
 };
 
 /// The cgroup v2 mount point on every systemd and container host.
@@ -255,6 +271,18 @@ inline constexpr std::string_view NodeLeafName = "node";
 
 /// The name of the intermediate cgroup holding every `job-<n>`; the compile ceiling is set on it.
 inline constexpr std::string_view CompilesCgroupName = "compiles";
+
+/// The extended attribute that takes a cgroup out of systemd-oomd's choice of victim, and the value that does.
+///
+/// Written on the node's own leaf (`node/`), never on `compiles/`: oomd kills a whole cgroup, and the node holding
+/// the cache tier is the one cgroup here it must not choose -- the compiles are the ones the node sheds itself.
+/// oomd honours a `user.` attribute only on a cgroup owned by the user its manager runs as, so it takes effect under
+/// the shipped USER unit; under the system unit the node's account owns `node/` and root's oomd ignores it, so a
+/// system-unit node stays oomd-eligible (a `pace.slice` for it is follow-up work). The unit's own
+/// `ManagedOOMPreference=omit` reaches neither, since oomd reads the attribute on the cgroup it would kill and does not
+/// inherit it down a delegated subtree.
+inline constexpr std::string_view OomdOmitAttribute = "user.oomd_omit";
+inline constexpr std::string_view OomdOmitValue = "1";
 
 /// The cgroup path of a `/proc/self/cgroup` document: the unified-hierarchy line (`0::<path>`).
 /// @param document The file's text.

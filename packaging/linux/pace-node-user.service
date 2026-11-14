@@ -76,13 +76,13 @@ Delegate=memory
 # no, because starting a process inside a cgroup is `clone3`, which systemd refuses
 # whenever any namespace is restricted.
 RestrictNamespaces=no
-# Out of systemd-oomd's choice of victim: it kills whole units, which here would be the node
-# with every compile and its cache tier; the node sheds its own compiles first. Honoured for
-# a user unit when the monitored cgroup is the user's own (user@UID.service or a slice below
-# it, which is where Fedora's per-slice defaults put the 80% pressure rule), because
-# systemd-oomd respects the attribute on a user-owned cgroup only when the monitored
-# ancestor has the same owner (man systemd.resource-control). Where oomd monitors a
-# root-owned cgroup such as -.slice, it is ignored for this unit.
+# Out of systemd-oomd's choice of victim: it kills whole cgroups, which here would be the node
+# with its cache tier; the node sheds its own compiles first. With `Delegate=` this unit is no
+# leaf and oomd ranks the cgroups below it, which do not inherit this line's mark -- so the node
+# also marks its own `node/` cgroup `user.oomd_omit=1` itself at startup, which is what takes it
+# out. oomd honours a `user.` mark on a cgroup owned by the user its manager runs as, which under
+# this user unit it is (the user's own slices are where Fedora 44's per-slice default kills at
+# 80% pressure held for 20 s). The node logs once at Warn when it cannot set the mark.
 ManagedOOMPreference=omit
 RestrictRealtime=yes
 RestrictSUIDSGID=yes

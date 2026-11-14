@@ -97,6 +97,9 @@ struct MeterReport
     std::string reason {};                     ///< Why, for `Unmeasured` and `NotApplicable`.
     /// The settings of `compiles/` this kernel lacks (`CgroupLayout::notApplied`), said once at startup.
     std::vector<std::string> notApplied {};
+    /// Why the node's own cgroup could not be taken out of systemd-oomd's choice (`CgroupLayout::oomdOmitRefused`),
+    /// said once at startup; disengaged when it was, or when there is no cgroup to mark.
+    std::optional<std::string> oomdOmitRefused {};
 };
 
 /// Whether the compiles this worker runs are held under one memory ceiling, as `compile-memory-uncapped`

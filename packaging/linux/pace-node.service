@@ -204,14 +204,17 @@ ProtectControlGroups=private
 # ceiling is set on `compiles/` and never on the delegated cgroup, so the node's own
 # memory (the cache tier) is outside it.
 Delegate=memory
-# systemd-oomd chooses its victim by whole unit: left in its choice, a memory squeeze would
-# kill the node together with every compile and the cache tier, where the node's own ceiling
-# and shedding kill one compile and the client recompiles it. So the node is taken out of
-# oomd's candidates. Verified on systemd 259 (Fedora 44): `systemd-analyze verify` accepts it,
-# and the manager honours it where the unit's cgroup owner is also the owner of the
-# monitored ancestor (man systemd.resource-control); system.slice is root-owned, so here it
-# is honoured. The attribute is not inherited by cgroups below the unit, which does not
-# matter: oomd ranks the unit. Known since systemd 248; an older one ignores it, with a log line.
+# systemd-oomd kills a whole cgroup: left in its choice, a memory squeeze would kill the node
+# together with its cache tier, where the node's own ceiling and shedding kill one compile and
+# the client recompiles it. This line marks the UNIT's cgroup, and is NOT what protects the node
+# here: with `Delegate=` the unit is no leaf, oomd ranks the cgroups below it, and the mark is
+# not inherited by them. The node marks its own `node/` cgroup itself (`user.oomd_omit`), but
+# oomd honours a `user.` mark only on a cgroup owned by the user its manager runs as, and
+# under this SYSTEM unit `node/` belongs to the service account while root's oomd monitors
+# system.slice -- so a node started by this unit stays oomd-eligible, as it was before. Fedora
+# 44's per-slice default kills in system.slice at 80% pressure held for 20 s; the node sheds its
+# own compiles far below that. Kept as the unit's statement of intent; a dedicated slice for
+# the system unit is follow-up work. Known since systemd 248.
 ManagedOOMPreference=omit
 ProtectKernelLogs=yes
 ProtectKernelModules=yes

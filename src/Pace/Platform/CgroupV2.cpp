@@ -16,6 +16,7 @@
     #include <sys/stat.h>
     #include <sys/types.h>
     #include <sys/wait.h>
+    #include <sys/xattr.h>
 
     #include <cerrno>
 
@@ -264,9 +265,11 @@ std::expected<CgroupLayout, CgroupFailure> PrepareJobCgroups(ICgroupHost const& 
 
     // `/` is the root of THIS process's cgroup namespace (a service with `ProtectControlGroups=private`
     // sees its own subtree as the mount's root), so it joins like any other path.
-    auto layout = CgroupLayout {
-        .delegated = own->size() > 1 ? mount / own->substr(1) : mount, .leaf = {}, .compiles = {}, .notApplied = {}
-    };
+    auto layout = CgroupLayout { .delegated = own->size() > 1 ? mount / own->substr(1) : mount,
+                                 .leaf = {},
+                                 .compiles = {},
+                                 .notApplied = {},
+                                 .oomdOmitRefused = std::nullopt };
     layout.leaf = layout.delegated / NodeLeafName;
     layout.compiles = layout.delegated / CompilesCgroupName;
 
@@ -334,6 +337,11 @@ std::expected<CgroupLayout, CgroupFailure> PrepareJobCgroups(ICgroupHost const& 
     // The leaf is a child, so it has the file exactly when the kernel offers it.
     if (auto const peak = host.ReadFile(layout.leaf / "memory.peak"); !peak.has_value())
         return Failed(CgroupUnavailable::PeakNotReadable, Because(layout.leaf / "memory.peak", peak.error()));
+
+    // Out of systemd-oomd's choice: the node and its cache are what oomd must not kill with the compiles. Tolerated
+    // and named when it cannot be marked -- the ceiling works without it, and oomd stays the only thing it decides.
+    if (auto const marked = host.SetExtendedAttribute(layout.leaf, OomdOmitAttribute, OomdOmitValue); !marked.has_value())
+        layout.oomdOmitRefused = Because(layout.leaf, marked.error());
 
     // `compiles/` carries the ceiling over every job, so it is a sibling of the node's leaf and never
     // its parent: the node is never inside the limit it enforces.
@@ -632,6 +640,16 @@ std::uint32_t SystemCgroupHost::OwnProcessId() const noexcept
     return static_cast<std::uint32_t>(::getpid());
 }
 
+std::expected<void, std::error_code> SystemCgroupHost::SetExtendedAttribute(std::filesystem::path const& path,
+                                                                            std::string_view name,
+                                                                            std::string_view value) const
+{
+    auto const attribute = std::string { name };
+    if (::setxattr(path.c_str(), attribute.c_str(), value.data(), value.size(), 0) != 0)
+        return std::unexpected { LastError() };
+    return {};
+}
+
 #else // not Linux
 
 std::expected<std::string, std::error_code> SystemCgroupHost::ReadFile(std::filesystem::path const&) const
@@ -679,6 +697,13 @@ std::expected<void, std::error_code> SystemCgroupHost::ProbeSpawnInto(int) const
 std::uint32_t SystemCgroupHost::OwnProcessId() const noexcept
 {
     return 0;
+}
+
+std::expected<void, std::error_code> SystemCgroupHost::SetExtendedAttribute(std::filesystem::path const&,
+                                                                            std::string_view,
+                                                                            std::string_view) const
+{
+    return std::unexpected { std::make_error_code(std::errc::operation_not_supported) };
 }
 
 #endif

@@ -3455,8 +3455,9 @@ sets `Delegate=memory`, `ProtectControlGroups=private` and `RestrictNamespaces=n
 - `RestrictNamespaces=no` because starting a process inside a cgroup is `clone3`, which a seccomp
   filter cannot inspect: systemd refuses it outright whenever any namespace is restricted
   (measured on systemd 259: `ENOTSUP`). `SystemCallFilter=@system-service` permits `clone3` itself.
-- `ManagedOOMPreference=omit` takes the node out of systemd-oomd's choice of victim (see layer A
-  below).
+- `ManagedOOMPreference=omit` states the intent to keep the node out of systemd-oomd's choice of
+  victim; what actually takes it out is the node's own mark on its `node/` cgroup, and only under the
+  user unit (see layer A below).
 
 A node started by hand from a terminal is not delegated — the terminal's scope holds the shell — and
 runs unmeasured and uncapped; so does a node on a kernel older than 5.19, which has no `memory.peak`,
@@ -3595,16 +3596,21 @@ warning on the compile's stderr and the compile still runs, at the node's score:
 more than its kill priority. On a platform other than Linux there is no `oom_score_adj`, and compilers
 are spawned directly, as before.
 
-What the shipped units do for the third party in that picture, systemd-oomd, is
-`ManagedOOMPreference=omit`. oomd kills a whole unit, and in its choice the node would take every
-compile and the cache tier with it, so the unit is omitted from its candidates; the ceiling (layer B)
-and the pressure governor (layer C) act on single compiles first, the governor at thresholds set far
-below oomd's (above) so that it acts before oomd chooses a victim. Whether it takes effect depends on who
-owns the monitored cgroup (systemd-oomd respects the attribute on a user-owned cgroup only when the
-monitored ancestor has the same owner): honoured for the system unit under the root-owned
-`system.slice`, and for the user unit when oomd monitors the user's own slices, which is what Fedora's
-per-slice defaults do; it is ignored for the user unit where oomd monitors a root-owned cgroup such
-as `-.slice`. Verified with `systemd-analyze verify` on systemd 259 (Fedora 44).
+For the third party in that picture, systemd-oomd: oomd kills a whole cgroup, and with the node in
+its choice the node would die with its cache tier, so the node takes its own `node/` cgroup out of
+oomd's choice by setting the extended attribute `user.oomd_omit=1` on it at startup; the ceiling
+(layer B) and the pressure governor (layer C) act on single compiles first, the governor at thresholds
+set far below oomd's (above) so that it acts before oomd chooses a victim. The units' own
+`ManagedOOMPreference=omit` line does not do this by itself: it marks the unit's cgroup, which under
+`Delegate=` is no leaf, and oomd reads the mark on the cgroup it would kill rather than inheriting it.
+
+**Where the mark is honoured.** oomd honours a `user.` attribute only on a cgroup owned by the user its
+manager runs as. Under the shipped **user** unit the node's `node/` cgroup is the user's own, so the
+mark takes effect. Under the **system** unit `node/` is owned by the service account while root's oomd
+monitors `system.slice`, so the mark is ignored and a system-unit node stays oomd-eligible, as it was
+before; a dedicated slice for the system unit is follow-up work. When the mark cannot be set at all
+(a kernel without user extended attributes on cgroupfs) the node says so once at Warn, naming the
+cgroup, and runs as before.
 
 #### The machine's compile budget
 

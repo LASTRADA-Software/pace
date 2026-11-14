@@ -28,6 +28,7 @@ class FakeCgroupHost final: public Platform::ICgroupHost
     std::set<std::string> unmakeable;               ///< Directories `mkdir` is refused for.
     std::set<std::string> unwritable;               ///< Files `IsWritable` denies.
     std::map<std::string, std::errc> writeRefusals; ///< Files whose write is refused.
+    std::map<std::string, std::errc> xattrRefusals; ///< Directories whose `setxattr` is refused.
     std::set<std::string> busyRemovals;             ///< Directories `rmdir` answers busy for, this many times.
     std::uint32_t busyFor { 0 };                    ///< How many `rmdir`s of a busy directory fail.
     /// What probing a spawn into a cgroup answers: `no_such_file_or_directory` is success (see the real probe).
@@ -116,6 +117,16 @@ class FakeCgroupHost final: public Platform::ICgroupHost
     void Pause(std::chrono::microseconds /*duration*/) const override
     {
         ++pauses;
+    }
+
+    [[nodiscard]] std::expected<void, std::error_code> SetExtendedAttribute(std::filesystem::path const& path,
+                                                                            std::string_view name,
+                                                                            std::string_view value) const override
+    {
+        if (auto const refused = xattrRefusals.find(path.generic_string()); refused != xattrRefusals.end())
+            return std::unexpected { std::make_error_code(refused->second) };
+        trail.push_back("xattr " + path.generic_string() + " " + std::string { name } + "=" + std::string { value });
+        return {};
     }
 };
 

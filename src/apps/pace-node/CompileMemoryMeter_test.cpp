@@ -59,6 +59,22 @@ TEST_CASE("compile-memory-unmeasured is raised with the reason, logged, and clea
         CHECK(records.front().message.contains("the cgroup is not delegated"));
     }
 
+    SECTION("a node systemd-oomd may still choose is said once at Warn, and the meter still counts as working")
+    {
+        ReportCompileMemoryMeter(MeterReport { .state = MeterState::Measured,
+                                               .reason = {},
+                                               .notApplied = {},
+                                               .oomdOmitRefused = "/sys/fs/cgroup/x/node: Operation not supported" },
+                                 conditions,
+                                 logger);
+        CHECK(conditions.StateOf(NodeCondition::CompileMemoryUnmeasured) == Wire::ConditionState::Clear);
+        auto const records = logger.Snapshot();
+        REQUIRE(records.size() == 1);
+        CHECK(records.front().level == LogLevel::Warn);
+        CHECK(records.front().message.contains("user.oomd_omit"));
+        CHECK(records.front().message.contains("/sys/fs/cgroup/x/node"));
+    }
+
     SECTION("a platform with nothing to measure with raises nothing: the remedy would not apply there")
     {
         ReportCompileMemoryMeter(
@@ -735,6 +751,12 @@ class OwnCgroupBackedHost final: public Platform::ICgroupHost
     void Pause(std::chrono::microseconds duration) const override
     {
         tree.Pause(duration);
+    }
+    [[nodiscard]] std::expected<void, std::error_code> SetExtendedAttribute(std::filesystem::path const& path,
+                                                                            std::string_view name,
+                                                                            std::string_view value) const override
+    {
+        return tree.SetExtendedAttribute(path, name, value);
     }
 };
 

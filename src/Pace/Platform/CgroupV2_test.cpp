@@ -202,6 +202,33 @@ TEST_CASE("A missing memory.swap.max does not make compiles/ unavailable, and is
     }
 }
 
+TEST_CASE("The node's own leaf is taken out of systemd-oomd's choice, and a refusal is named, never fatal",
+          "[platform][cgroup][oomd]")
+{
+    auto const host = DelegatedHost();
+    auto const leaf = std::string { Delegated } + "/node";
+
+    SECTION("marked user.oomd_omit=1 on node/, never on compiles/ or the delegated cgroup")
+    {
+        auto const layout = Unwrap(PrepareJobCgroups(*host));
+        CHECK_FALSE(layout.oomdOmitRefused.has_value());
+        auto const marks =
+            std::ranges::count_if(host->trail, [](std::string const& step) { return step.starts_with("xattr "); });
+        CHECK(marks == 1);
+        CHECK(std::ranges::find(host->trail, "xattr " + leaf + " user.oomd_omit=1") != host->trail.end());
+    }
+    SECTION("a refusal leaves the facility working and says why")
+    {
+        host->xattrRefusals[leaf] = std::errc::operation_not_supported;
+        auto const layout = Unwrap(PrepareJobCgroups(*host));
+        REQUIRE(layout.oomdOmitRefused.has_value());
+        // Named the way the refusal names it, in this platform's own separators: `leaf` above is the fake's spelling.
+        CHECK(layout.leaf == std::filesystem::path { leaf });
+        CHECK(Unwrap(layout.oomdOmitRefused).contains(layout.leaf.string()));
+        CHECK(layout.compiles == std::string { Delegated } + "/compiles");
+    }
+}
+
 TEST_CASE("A compiles/ setting the kernel refuses for any other reason is a stated cause", "[platform][cgroup]")
 {
     auto const host = DelegatedHost();
