@@ -6,9 +6,11 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string_view>
+#include <type_traits>
 
 namespace Pace
 {
@@ -70,7 +72,7 @@ class IMetricsSink
     /// change, a snapshot field's included. Only `ConnectionsTotal = 0` carries a value
     /// (`readability-enum-initial-value`'s accepted form), and an omission is a build failure:
     /// `MetricsCatalog` is an `EnumTable` guarded by `RowsInEnumeratorOrder`.
-    enum class Counter : std::uint8_t
+    enum class Counter : std::uint16_t
     {
         ConnectionsTotal = 0,
         ConnectionsAdmissionRejected,
@@ -1628,7 +1630,7 @@ class IMetricsSink
         /// Whole seconds this node's pressure watcher held each acting level (layer C of the compile memory
         /// defence): `Yield` (no new compile admitted on this machine) and `Shed` (that, and its youngest compile
         /// killed once per dwell). Their rate over a window is the share of it spent there; calm is the rest, so
-        /// it has no row -- this enumeration is two rows from its `uint8_t` limit. Counted only where the watcher
+        /// it has no row. Counted only where the watcher
         /// runs -- Linux with PSI -- so both stand still on a node without it.
         NodeMemoryPressureYieldSeconds,
         /// See `NodeMemoryPressureYieldSeconds`.
@@ -1688,6 +1690,16 @@ class IMetricsSink
 /// pulling in `Core/EnumTable.hpp` -- and with it `<ranges>`, `<algorithm>` and `<functional>` --
 /// would be the wrong trade for one constant.
 inline constexpr std::size_t CounterCount = static_cast<std::size_t>(IMetricsSink::Counter::Last);
+
+/// The enum's width is a decision, not a default (#1772): it was a byte until the catalogue reached 254 of 255, and the
+/// next two counters would not have built. Nothing transmitted carries the WIDTH -- the live-stats reading is positional
+/// `u64` values under a digest of NAMES, `/metrics` and the history use names -- so widening moved no layout.
+///
+/// Phrased to fire only when something is wrong: the catalogue may take no more than half of what the type holds, so a
+/// future narrowing or a runaway catalogue is refused with room to spare rather than at the last enumerator, where the
+/// failure is a cast that silently wraps `Last` to a valid row.
+static_assert(CounterCount <= std::numeric_limits<std::underlying_type_t<IMetricsSink::Counter>>::max() / 2,
+              "IMetricsSink::Counter is more than half full: widen its underlying type before adding another row (#1772)");
 
 namespace CounterSkew
 {

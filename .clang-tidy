@@ -145,6 +145,12 @@ UseColor: true
 HeaderFilterRegex: '.*[/\\]src[/\\](CowTree|Pace|apps|tests)[/\\].*'
 FormatStyle:     none
 CheckOptions:
+  # performance-enum-size sizes an enum by the values it holds TODAY and so would demand the byte
+  # `IMetricsSink::Counter` nearly filled, at 254 of 255 enumerators (#1772). Its width is headroom on
+  # purpose -- the catalogue keeps growing -- and is guarded by the static_assert beside
+  # `CounterCount`. Only this enum is exempt; the check stays on for every other one.
+  - key:             performance-enum-size.EnumIgnoreList
+    value:           '::Pace::IMetricsSink::Counter'
   - key:             readability-function-cognitive-complexity.Threshold
     value:           '60'
   - key:             readability-function-cognitive-complexity.IgnoreMacros

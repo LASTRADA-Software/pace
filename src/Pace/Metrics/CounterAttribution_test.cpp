@@ -319,7 +319,7 @@ constexpr std::array<DeclaredAheadOfItsWriter, 0> DeclaredAheadOfItsWriterTable 
 [[nodiscard]] std::vector<std::string> CounterSpellings()
 {
     auto const text = ReadWhole(RepositoryRoot() / "src/Pace/Metrics/IMetricsSink.hpp");
-    auto const open = text.find("enum class Counter : std::uint8_t");
+    auto const open = text.find("enum class Counter : std::uint16_t");
     REQUIRE(open != std::string::npos);
     auto const close = text.find("\n    };", open);
     REQUIRE(close != std::string::npos);

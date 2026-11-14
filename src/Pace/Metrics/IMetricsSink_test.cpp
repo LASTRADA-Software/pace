@@ -6,8 +6,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <ranges>
+#include <type_traits>
 #include <utility>
 
 using namespace Pace;
@@ -160,4 +162,22 @@ TEST_CASE("A counter table hands each counter its own cell, in enumerator order,
 
     CHECK(cells.Find(IMetricsSink::Counter::Last) == nullptr);
     CHECK(std::as_const(cells).Find(IMetricsSink::Counter::Last) == nullptr);
+}
+
+TEST_CASE("The counter enum is wide enough to keep headroom and a widening moved no transmitted layout", "[metrics][sink]")
+{
+    using Underlying = std::underlying_type_t<IMetricsSink::Counter>;
+
+    // The catalogue outgrew a byte at 254 of 255 (#1772). The header refuses more than half-full at build
+    // time; this asserts the same bound from the other side, so neither can be loosened unseen.
+    STATIC_REQUIRE(std::is_unsigned_v<Underlying>);
+    STATIC_REQUIRE(sizeof(Underlying) >= 2);
+    STATIC_REQUIRE(DeclaredCounters <= std::numeric_limits<Underlying>::max() / 2);
+
+    // `Last` itself is a valid value of the type, and one past it still is: a decode that cast a wire value
+    // to the enum would have somewhere to put an out-of-range reading and then be told so by `CounterIndex`.
+    CHECK_FALSE(CounterIndex(static_cast<IMetricsSink::Counter>(static_cast<Underlying>(DeclaredCounters) + 1)).has_value());
+
+    // What the widening did NOT move: the live-stats layout digest names counters and never their width, and
+    // `StatsReadingCodec_test.cpp`'s pinned `StatsReadingLayout` is unchanged by this commit.
 }
