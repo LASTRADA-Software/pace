@@ -2543,9 +2543,10 @@ TEST_CASE("FleetView.admission-section-renders", "[distributed][fleetview][admis
     CHECK(json.contains(R"("admission":{"depth":12,"clients":[)"));
     CHECK(json.contains(R"({"machine":"ws-92","tree":"contour-wt3","running":4,"queued":12})"));
     CHECK(json.contains(R"({"machine":"ws-17","tree":"pace-main","running":0,"queued":3})"));
-    CHECK(json.contains(R"("machines":[{"machine":"ws-92","charged":6442450944,"in-use":6442450944,"budget":17179869184})"));
+    CHECK(json.contains(R"("machines":[{"machine":"ws-92","charged":6442450944,"in-use":6442450944,"budget":17179869184,)"));
     // A machine that never stated a budget has none, rather than zero.
-    CHECK(json.contains(R"({"machine":"ws-17","charged":0,"in-use":0,"budget":null})"));
+    CHECK(json.contains(
+        R"({"machine":"ws-17","charged":0,"in-use":0,"budget":null,"budget-limit":null,"memory-pressure":null})"));
 
     auto const clients = RenderFleetText(snapshot, NoHistory(), FleetSection::Clients);
     CHECK(clients.starts_with("machine\ttree\trunning\tqueued\n"));
@@ -2585,7 +2586,7 @@ TEST_CASE("FleetView.admission-ledger-reads-in-use-beside-charged", "[distribute
     UnwrapMutable(snapshot.admission).machines.front().chargedBytes = 0;
     UnwrapMutable(snapshot.admission).machines.front().inUseBytes = 7ULL << 30;
     auto const json = RenderFleetJson(snapshot, NoHistory());
-    CHECK(json.contains(R"({"machine":"ws-92","charged":0,"in-use":7516192768,"budget":17179869184})"));
+    CHECK(json.contains(R"({"machine":"ws-92","charged":0,"in-use":7516192768,"budget":17179869184,)"));
 }
 
 TEST_CASE("FleetView.queue-tile-says-an-idle-leader-has-seen-nothing", "[distributed][fleetview][admission]")
@@ -2681,4 +2682,152 @@ TEST_CASE("The compile list reaches the JSON and the page through one column tab
     CHECK(html.contains(std::format("src/tu-{:03}.cpp", DashboardCompileRows)));
     CHECK_FALSE(html.contains(std::format("src/tu-{:03}.cpp", DashboardCompileRows + 1)));
     CHECK(html.contains(std::format("the {} oldest of {}", DashboardCompileRows, DashboardCompileRows + 6)));
+}
+
+namespace
+{
+
+/// Split one tab-separated document into rows of cells.
+/// @param text The document.
+/// @return Its lines, each split at every tab.
+[[nodiscard]] std::vector<std::vector<std::string>> TextRows(std::string_view text)
+{
+    std::vector<std::vector<std::string>> rows;
+    for (auto const line: std::views::split(text, '\n'))
+    {
+        if (std::ranges::empty(line))
+            continue;
+        auto& row = rows.emplace_back();
+        for (auto const cell: std::views::split(line, '\t'))
+            row.emplace_back(std::ranges::begin(cell), std::ranges::end(cell));
+    }
+    return rows;
+}
+
+/// The cells of one named column in the first page table whose header carries it, one per body row.
+///
+/// Read off the markup rather than searched for, because a word like `calm` appears in a header's help text
+/// and a dash in every absent cell on the page: presence in the document says nothing about WHICH cell.
+/// @param html The page.
+/// @param column The column's header text.
+/// @return Each body row's cell markup, in order; empty when no table carries the column.
+[[nodiscard]] std::vector<std::string> HtmlColumn(std::string_view html, std::string_view column)
+{
+    auto const header = html.find(std::format(">{}</th>", column));
+    if (header == std::string_view::npos)
+        return {};
+    auto const tableStart = html.rfind("<table>", header);
+    auto const tableEnd = html.find("</table>", header);
+    auto const table = html.substr(tableStart, tableEnd - tableStart);
+    auto const head = table.substr(0, table.find("</thead>"));
+    auto const index = CountOccurrences(head.substr(0, header - tableStart), "<th ");
+    REQUIRE(index >= 1);
+
+    std::vector<std::string> cells;
+    auto body = table.substr(table.find("<tbody>"));
+    auto row = body.find("<tr>");
+    while (row != std::string_view::npos)
+    {
+        auto const rowEnd = body.find("</tr>", row);
+        auto const line = body.substr(row, rowEnd - row);
+        auto at = std::string_view::size_type { 0 };
+        for ([[maybe_unused]] auto const skipped: std::views::iota(std::size_t { 1 }, index))
+            at = line.find("<td", at) + 1;
+        auto const open = line.find("<td", at);
+        auto const close = line.find("</td>", open);
+        if (open != std::string_view::npos)
+            cells.emplace_back(line.substr(open, close - open));
+        row = body.find("<tr>", rowEnd);
+    }
+    return cells;
+}
+
+/// A leader whose fleet holds a calm machine, a shedding one, and one that has stated no level.
+[[nodiscard]] FleetSnapshot PressedFleet()
+{
+    auto snapshot = LeadingSnapshot();
+    auto calm = Machine("10.0.0.2:7100", 32);
+    calm.load.pressure = PressureLevel::Calm;
+    auto shedding = Machine("10.0.0.3:7100", 16);
+    shedding.load.pressure = PressureLevel::Shed;
+    auto silent = Machine("10.0.0.4:7100", 8);
+    snapshot.nodes = { calm, shedding, silent };
+    return snapshot;
+}
+
+} // namespace
+
+TEST_CASE("A machine's memory-pressure level reaches the page, the JSON and the text, and absent is never calm",
+          "[distributed][fleetview][pressure]")
+{
+    auto const snapshot = PressedFleet();
+
+    SECTION("the JSON")
+    {
+        auto const json = RenderFleetJson(snapshot, NoHistory());
+        CHECK(CountOccurrences(json, R"("memory-pressure":"calm")") == 1);
+        CHECK(CountOccurrences(json, R"("memory-pressure":"shedding")") == 1);
+        CHECK(CountOccurrences(json, R"("memory-pressure":null)") == 1);
+        CHECK_FALSE(json.contains(R"("memory-pressure":"yielding")"));
+    }
+
+    SECTION("the text, one cell per machine in the column's own position")
+    {
+        auto const rows = TextRows(RenderFleetText(snapshot, NoHistory(), FleetSection::Machines));
+        REQUIRE(rows.size() == 4);
+        auto const at = std::ranges::find(rows.front(), std::string { "memory-pressure" });
+        REQUIRE(at != rows.front().end());
+        auto const column = static_cast<std::size_t>(std::ranges::distance(rows.front().begin(), at));
+        CHECK(rows[1].at(column) == "calm");
+        CHECK(rows[2].at(column) == "shedding");
+        CHECK(rows[3].at(column) == "-");
+    }
+
+    SECTION("the page")
+    {
+        auto const cells = HtmlColumn(RenderFleetHtml(snapshot, NoHistory(), 10), "memory-pressure");
+        REQUIRE(cells.size() == 3);
+        CHECK(cells[0] == "<td>calm");
+        CHECK(cells[1] == "<td>shedding");
+        CHECK(cells[2].starts_with(R"(<td class="absent">)"));
+        CHECK_FALSE(cells[2].contains("calm"));
+    }
+}
+
+TEST_CASE("Every pressure level and budget standing has its report word", "[distributed][fleetview][pressure]")
+{
+    CHECK(TraitsFor(PressureLevel::Calm).name == "calm");
+    CHECK(TraitsFor(PressureLevel::Yield).name == "yielding");
+    CHECK(TraitsFor(PressureLevel::Shed).name == "shedding");
+    CHECK(TraitsFor(BudgetStanding::Configured).name == "configured");
+    CHECK(TraitsFor(BudgetStanding::HeldByAllowance).name == "pressure-allowance");
+}
+
+TEST_CASE("The admission ledger names the pressure allowance as what holds a budget, and absent is absent",
+          "[distributed][fleetview][admission][pressure]")
+{
+    auto snapshot = QueueingSnapshot();
+    auto& machines = UnwrapMutable(snapshot.admission).machines;
+    REQUIRE(machines.size() == 2);
+    machines[0].pressure = PressureLevel::Yield;
+    machines[0].standing = BudgetStanding::HeldByAllowance;
+    // ws-17 has stated no budget: its standing and level stay absent.
+
+    auto const json = RenderFleetJson(snapshot, NoHistory());
+    CHECK(json.contains(R"({"machine":"ws-92","charged":6442450944,"in-use":6442450944,"budget":17179869184,)"
+                        R"("budget-limit":"pressure-allowance","memory-pressure":"yielding"})"));
+    CHECK(json.contains(
+        R"({"machine":"ws-17","charged":0,"in-use":0,"budget":null,"budget-limit":null,"memory-pressure":null})"));
+
+    auto const html = RenderFleetHtml(snapshot, NoHistory(), 0);
+    auto const limits = HtmlColumn(html, "budget-limit");
+    REQUIRE(limits.size() == 2);
+    CHECK(limits[0] == "<td>pressure-allowance");
+    CHECK(limits[1].starts_with(R"(<td class="absent">)"));
+
+    // The same machine with its configured budget back says so, rather than going blank.
+    machines[0].standing = BudgetStanding::Configured;
+    machines[0].pressure = PressureLevel::Calm;
+    auto const restored = RenderFleetJson(snapshot, NoHistory());
+    CHECK(restored.contains(R"("budget":17179869184,"budget-limit":"configured","memory-pressure":"calm"})"));
 }

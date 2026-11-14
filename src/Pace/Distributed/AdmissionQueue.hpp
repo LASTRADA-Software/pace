@@ -119,6 +119,11 @@ struct MachineLedgerView
     std::uint64_t chargedBytes {};            ///< What this ledger has charged it.
     std::uint64_t inUseBytes {};              ///< What the queue admits against: `max(charged, held by its report)`.
     std::optional<std::uint64_t> budgetBytes; ///< Its own stated budget; absent until it reports one.
+    /// How hard its memory is pressed, as its last report said; absent until it reports one (#1771).
+    std::optional<PressureLevel> pressure;
+    /// Whether that budget is its configured one or one the pressure allowance holds below it; absent until
+    /// it reports one (#1771).
+    std::optional<BudgetStanding> standing;
 };
 
 /// One ticket the queue holds, as a report reads it: who asked, for what, and where it stands.

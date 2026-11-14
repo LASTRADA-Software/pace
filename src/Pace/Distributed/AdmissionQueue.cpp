@@ -89,7 +89,9 @@ QueueView AdmissionQueue::Snapshot() const
             .machine = machine,
             .chargedBytes = ledger.chargedBytes,
             .inUseBytes = InUseBytes(ledger),
-            .budgetBytes = ledger.report.has_value() ? std::optional { ledger.report->memoryBudgetBytes } : std::nullopt });
+            .budgetBytes = ledger.report.transform([](MachineReport const& report) { return report.memoryBudgetBytes; }),
+            .pressure = ledger.report.transform([](MachineReport const& report) { return report.pressure; }),
+            .standing = ledger.report.transform([](MachineReport const& report) { return report.standing; }) });
     }
     return view;
 }

@@ -240,6 +240,8 @@ void CheckSameRow(Json::Value const& document, Json::Value const& projected)
         Machine("10.0.0.2:6674", "0.9.1", std::nullopt),
         Machine("10.0.0.3:6674", "", std::vector<Wire::NodeConditionFields> {}),
     };
+    // One machine whose budget report stated a level, the others none (#1771).
+    snapshot.nodes[0].load.pressure = Wire::PressureLevel::Yield;
     snapshot.leases = std::vector<std::uint64_t>(Dist::LeaseOutcomeTable.size(), 0);
 
     auto compiles = Dist::CompileSection {};
@@ -357,6 +359,10 @@ TEST_CASE("Every fleet tool reads the leader's fleet document and reports what i
 
         // The machine that reported no version is absent there, and makes the skew undecidable rather than false.
         CHECK(At(nodes[2], "version").IsNull());
+        // The pressure column reaches MCP through the same table: a word where a level was reported, null where none
+        // was, never `calm` (#1771).
+        CHECK(Text(At(nodes[0], "memory_pressure")) == R"("yielding")");
+        CHECK(At(nodes[1], "memory_pressure").IsNull());
         CHECK(Text(At(structured, "versions")) == R"(["0.9.1"])");
         CHECK(Text(At(structured, "versions_unreported")) == R"(["10.0.0.3:6674"])");
         CHECK(At(structured, "version_skew").IsNull());

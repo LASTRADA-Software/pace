@@ -17,6 +17,7 @@
 namespace Pace::Distributed
 {
 
+using CompileCacheWire::BudgetStanding;
 using CompileCacheWire::PressureLevel;
 
 /// How hard a machine may be driven.
@@ -550,6 +551,71 @@ static_assert(RowsInEnumeratorOrder(SlotLimitTable, &SlotLimitTraits::limit),
 [[nodiscard]] constexpr SlotLimitTraits const& TraitsFor(SlotLimit limit) noexcept
 {
     return SlotLimitTable[static_cast<std::size_t>(limit)];
+}
+
+/// What a report calls one memory-pressure level (#1771).
+///
+/// The leader's words, read off the level a machine's budget report carries, so the fleet page, its JSON
+/// and `FLEET-TEXT` spell one vocabulary. Participles, because the column says what the machine is doing:
+/// a node at `Yield` is yielding memory back, not "a yield".
+struct PressureLevelTraits
+{
+    PressureLevel level;   ///< The level this row describes.
+    std::string_view name; ///< Spelling a report uses.
+};
+
+/// Every level, in enumerator order.
+inline constexpr EnumTable<PressureLevel, PressureLevelTraits> PressureLevelTable { {
+    { .level = PressureLevel::Calm, .name = "calm" },
+    { .level = PressureLevel::Yield, .name = "yielding" },
+    { .level = PressureLevel::Shed, .name = "shedding" },
+} };
+
+static_assert(RowsInEnumeratorOrder(PressureLevelTable, &PressureLevelTraits::level),
+              "PressureLevelTable must hold one row per PressureLevel, in enumerator order");
+
+/// The traits for a pressure level.
+/// @param level The level.
+/// @return Its row.
+[[nodiscard]] constexpr PressureLevelTraits const& TraitsFor(PressureLevel level) noexcept
+{
+    return PressureLevelTable[static_cast<std::size_t>(level)];
+}
+
+/// What holds a machine's admission budget where it is (#1771): one row per `BudgetStanding`.
+///
+/// The budget a machine reports is either its configured one or one its pressure governor's allowance holds
+/// below that, and the leader's queue admits against whichever it was told. The row names the limit the way
+/// `SlotLimitTable` names a slot ceiling, remedy included, so an operator reading a small budget on the
+/// admission view learns whether to raise a flag or to wait for the machine's memory to come back.
+struct BudgetLimitTraits
+{
+    BudgetStanding standing; ///< The standing this row describes.
+    std::string_view name;   ///< Spelling a report uses.
+    std::string_view remedy; ///< What an operator does about it.
+};
+
+/// Every standing, in enumerator order.
+inline constexpr EnumTable<BudgetStanding, BudgetLimitTraits> BudgetLimitTable { {
+    { .standing = BudgetStanding::Configured,
+      .name = "configured",
+      .remedy = "nothing holds the budget below what the node was configured with." },
+    { .standing = BudgetStanding::HeldByAllowance,
+      .name = "pressure-allowance",
+      .remedy = "the node's pressure governor holds the budget below its configured figure after memory pressure, "
+                "and ramps it back by itself while the machine stays calm; nothing larger than it runs there "
+                "meanwhile, even alone." },
+} };
+
+static_assert(RowsInEnumeratorOrder(BudgetLimitTable, &BudgetLimitTraits::standing),
+              "BudgetLimitTable must hold one row per BudgetStanding, in enumerator order");
+
+/// The traits for a budget standing.
+/// @param standing The standing.
+/// @return Its row.
+[[nodiscard]] constexpr BudgetLimitTraits const& TraitsFor(BudgetStanding standing) noexcept
+{
+    return BudgetLimitTable[static_cast<std::size_t>(standing)];
 }
 
 /// The ceilings behind `AvailableSlots`, unfolded.
