@@ -419,7 +419,7 @@ inline constexpr WireVersion CurrentVersion = 18;
 /// nothing earlier on the Fleet family's path does.
 ///
 /// Version 18 moves it for version 17's reason: MACHINE-BUDGET's field count is part of its grammar,
-/// and a version-17 report, five fields where this build reads six, would be refused as a malformed
+/// and a version-17 report, five fields where this build reads seven, would be refused as a malformed
 /// frame -- a confident wrong diagnosis for a version mismatch, on a verb whose refusal leaves the
 /// machine out of the queue. Refused by number, the mismatch names the range instead.
 inline constexpr WireVersion MinSupportedVersion = 18;

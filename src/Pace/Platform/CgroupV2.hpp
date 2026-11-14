@@ -282,6 +282,8 @@ inline constexpr std::string_view CompilesCgroupName = "compiles";
 /// `ManagedOOMPreference=omit` reaches neither, since oomd reads the attribute on the cgroup it would kill and does not
 /// inherit it down a delegated subtree.
 inline constexpr std::string_view OomdOmitAttribute = "user.oomd_omit";
+
+/// The value `OomdOmitAttribute` is set to: `1`, which oomd reads as "never choose this cgroup".
 inline constexpr std::string_view OomdOmitValue = "1";
 
 /// The cgroup path of a `/proc/self/cgroup` document: the unified-hierarchy line (`0::<path>`).

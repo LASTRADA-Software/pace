@@ -627,7 +627,7 @@ core::async::Task<FrameReply> AdmissionResponder::Answer(std::span<std::byte con
         co_return FrameReply {};
     // The version is judged HERE, before any payload is read, for `FleetTextResponder`'s reason: nothing
     // earlier on this family's path asks `IsSupported`, and a version-17 MACHINE-BUDGET (five fields where
-    // this build reads six) would otherwise be refused as a malformed frame, a confident wrong diagnosis.
+    // this build reads seven) would otherwise be refused as a malformed frame, a confident wrong diagnosis.
     if (!Wire::IsSupported(header->version))
         co_return FrameReply { Cc::RefuseWithoutCounter(VersionNotSupported,
                                                         std::format("supported versions {}..{}",

@@ -6568,7 +6568,8 @@ TEST_CASE("A MACHINE-BUDGET report carries its pressure level, one byte, and ref
         CHECK(Unwrap(back).pressure == level);
     }
 
-    // The byte, not only the name: the level is the payload's sixth and last field, one byte long.
+    // The byte, not only the name: the level is the payload's sixth field of seven, one byte long; the budget
+    // standing follows it.
     report.pressure = PressureLevel::Shed;
     auto frame = EncodeMachineBudget(report);
     auto const fields = WireFields::SplitAll(PayloadOfFrame(frame));
