@@ -172,6 +172,10 @@ class PressureWatcher
     /// @param fault The sample's `compilesFault`.
     void NoteCompilesFault(std::optional<std::string> const& fault);
 
+    /// Say whether the compiles stand at their ceiling going unreadable, or readable again -- on the transition only.
+    /// @param fault The sample's `compilesLimitFault`.
+    void NoteLimitFault(std::optional<std::string> const& fault);
+
     /// Count the time since the previous step against the level held through it.
     /// @param now This step's time.
     void CountTime(core::platform::SteadyTimePoint now);
@@ -211,6 +215,7 @@ class PressureWatcher
     core::platform::SteadyTimePoint _counted; ///< Up to when the time per level has been counted.
     std::chrono::nanoseconds _uncounted {};   ///< The part of a second not yet counted; carried across a change.
     bool _compilesFaultSaid { false };        ///< The compiles' reading is said to be unreadable.
+    bool _limitFaultSaid { false };           ///< Whether they stand at their ceiling is said to be unreadable.
     bool _sampleFaultSaid { false };          ///< A failed system sample is said.
 
     /// **Declared LAST**: the body touches every member above, so they are built before it starts and destroyed

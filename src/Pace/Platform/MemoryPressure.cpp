@@ -129,28 +129,37 @@ std::expected<PressureSample, std::string> PsiPressureSource::Sample()
             sample.compiles = *compiles;
         else
             sample.compilesFault = std::move(compiles.error());
-        sample.compilesAtLimit = CompilesAtLimit(*_compiles);
+        auto atLimit = CompilesAtLimit(*_compiles);
+        if (atLimit)
+            sample.compilesAtLimit = *atLimit;
+        else
+            sample.compilesLimitFault = std::move(atLimit.error());
     }
     return sample;
 }
 
-bool PsiPressureSource::CompilesAtLimit(std::filesystem::path const& compiles)
+std::expected<bool, std::string> PsiPressureSource::CompilesAtLimit(std::filesystem::path const& compiles)
 {
-    auto const readNumber = [&](std::string_view name) -> std::optional<std::uint64_t> {
-        auto const text = _host->ReadFile(compiles / name);
-        return text ? DecimalOf(*text) : std::nullopt;
-    };
-
     // Rising since the previous sample: the kernel counted the compiles reaching their ceiling in between.
-    auto const events = _host->ReadFile(compiles / "memory.events");
+    auto const eventsPath = compiles / "memory.events";
+    auto const events = _host->ReadFile(eventsPath);
     auto const maxEvents = events ? KeyedOf(*events, "max") : std::nullopt;
     auto const rose = maxEvents && _maxEventsSeen && *maxEvents > *_maxEventsSeen;
     _maxEventsSeen = maxEvents;
 
-    // Standing just under a numeric ceiling now; `max` (no ceiling) is never near.
-    auto const current = readNumber("memory.current");
-    auto const ceiling = readNumber("memory.max");
-    auto const near = current && ceiling && *current >= *ceiling - (*ceiling / CeilingNearDivisor);
+    // Standing just under a numeric ceiling now. `max` (no ceiling) is a READING -- never near -- and not a fault.
+    auto const current = _host->ReadFile(compiles / "memory.current");
+    auto const ceiling = _host->ReadFile(compiles / "memory.max");
+    auto const currentBytes = current ? DecimalOf(*current) : std::nullopt;
+    auto const unlimited = ceiling && ceiling->starts_with("max");
+    auto const ceilingBytes = ceiling ? DecimalOf(*ceiling) : std::nullopt;
+    auto const near = currentBytes && ceilingBytes && *currentBytes >= *ceilingBytes - (*ceilingBytes / CeilingNearDivisor);
+
+    if (!maxEvents && !(currentBytes && (ceilingBytes || unlimited)))
+        return std::unexpected(std::format("neither {} nor memory.current and memory.max can be read in {}{}",
+                                           eventsPath.filename().generic_string(),
+                                           compiles.generic_string(),
+                                           events ? std::string {} : std::format(" ({})", events.error().message())));
     return rose || near;
 }
 

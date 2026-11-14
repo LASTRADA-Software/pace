@@ -127,8 +127,11 @@ Distributed::MachineReport MachineBudgetOf(NodeConfig const& cfg,
         .heldSlots = held.slots,
         .heldBytes = held.bytes,
         .pressure = pressure.level,
-        .standing =
-            reported < budget ? Distributed::BudgetStanding::HeldByAllowance : Distributed::BudgetStanding::Configured,
+        // Configured only once the CEILING is: a typed `--compile-memory-limit` above the budget leaves a ramping
+        // allowance between the two, reporting the whole budget while `compiles/memory.max` still sits below the
+        // limit -- and a compile run alone there would meet that lower ceiling. Any allowance at all is a held one.
+        .standing = pressure.allowanceBytes.has_value() ? Distributed::BudgetStanding::HeldByAllowance
+                                                        : Distributed::BudgetStanding::Configured,
     };
 }
 

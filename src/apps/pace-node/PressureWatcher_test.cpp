@@ -691,3 +691,71 @@ TEST_CASE("The allowance floor reaches the governor from the configuration", "[n
     CHECK(rig.Published().allowanceBytes == 3 * GiB);
     CHECK(rig.ceiling.applied.back() == 3 * GiB);
 }
+
+TEST_CASE("A ceiling typed above the budget reports Held until the ceiling, not the budget, is back", "[node][pressure]")
+{
+    // The chain: the watcher hands on an allowance for as long as it stands below the configured CEILING, and the
+    // budget report reads its presence. With the ceiling typed above the budget the report reaches the whole budget
+    // long before the ceiling is back; it must still say Held until then, or run-alone opens under a lower ceiling.
+    Rig rig; // configured ceiling: `Configured`
+    auto const machine =
+        Distributed::NodeCapacity { .logicalCores = 16, .totalMemoryBytes = 64 * GiB, .reservedMemoryBytes = 0 };
+    auto cfg = NodeConfig {};
+    cfg.compileMemoryLimitBytes = Configured;
+    auto const budget = MachineBudgetOf(cfg, machine, HeldCharges {}).memoryBudgetBytes;
+    REQUIRE(budget < Configured);
+
+    rig.Started();
+    rig.Step(1s, GameStall);
+    REQUIRE(rig.Published().allowanceBytes == Holding);
+    rig.Step(10s, Quiet);
+    REQUIRE(rig.Published().level == Wire::PressureLevel::Calm);
+
+    auto sawWholeBudgetHeld = false;
+    auto steps = 0;
+    while (rig.Published().allowanceBytes.has_value() && steps < 40)
+    {
+        auto const report = MachineBudgetOf(cfg, machine, HeldCharges {}, rig.Published());
+        CHECK(report.standing == Distributed::BudgetStanding::HeldByAllowance);
+        sawWholeBudgetHeld = sawWholeBudgetHeld || report.memoryBudgetBytes == budget;
+        rig.Step(30s, Quiet);
+        ++steps;
+    }
+    CHECK(sawWholeBudgetHeld);
+    REQUIRE_FALSE(rig.Published().allowanceBytes.has_value());
+    CHECK(MachineBudgetOf(cfg, machine, HeldCharges {}, rig.Published()).standing
+          == Distributed::BudgetStanding::Configured);
+}
+
+TEST_CASE("Whether the compiles stand at their ceiling going unreadable is said on its transitions", "[node][pressure]")
+{
+    // Unreadable counts as not-own -- the safe direction for the desktop -- but it is not the same answer as
+    // not-at-the-ceiling, so it is said once at Warn when it starts and once at Info when it ends.
+    Rig rig;
+    rig.Started();
+    auto faulted = SampleOf(Quiet);
+    faulted.compilesLimitFault = "neither memory.events nor memory.current and memory.max can be read in compiles";
+
+    auto const limitWarns = [&rig] {
+        return std::ranges::count_if(rig.logger.Snapshot(), [](CapturingLogger::Record const& record) {
+            return record.level == LogLevel::Warn && record.message.contains("stand at their own memory ceiling");
+        });
+    };
+    for ([[maybe_unused]] auto const sample: std::views::iota(0, 3))
+    {
+        rig.clock.advance(1s);
+        rig.source->next = faulted;
+        rig.watcher->StepOnce();
+    }
+    CHECK(limitWarns() == 1);
+
+    auto const infos = rig.Lines(LogLevel::Info);
+    rig.Step(1s, Quiet);
+    rig.Step(1s, Quiet);
+    CHECK(rig.Lines(LogLevel::Info) == infos + 1);
+
+    rig.clock.advance(1s);
+    rig.source->next = faulted;
+    rig.watcher->StepOnce();
+    CHECK(limitWarns() == 2);
+}

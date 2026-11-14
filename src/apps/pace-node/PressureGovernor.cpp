@@ -43,7 +43,15 @@ GovernorDecision PressureGovernor::Step(Platform::PressureSample const& sample, 
     // A stall is the compiles' own only when they carry it AND stand at their own ceiling: compiles far below their
     // limit stall because the machine reclaims from everyone, a game's shortage included -- which is a yield.
     // Compared as a product, never a ratio: a zero system figure divides nothing and yields no NaN.
-    auto const atLimit = sample.compilesAtLimit;
+    //
+    // The evidence is STICKY for one dwell: it describes the last second, while the PSI averages it is weighed against
+    // describe the last ten. A shed that just killed a compile leaves the survivors below the ceiling for a moment
+    // while `avg10` still carries the stall they caused; instant evidence would read that as someone else's, hold
+    // the shed and kill again. Unreadable evidence is none at all: never the compiles' own, sticky or not.
+    if (sample.compilesAtLimit == true)
+        _atLimitSeen = now;
+    auto const atLimit =
+        sample.compilesAtLimit.has_value() && _atLimitSeen.has_value() && now - *_atLimitSeen <= thresholds.dwell;
     auto const ownStall = atLimit && sample.compiles && sample.compiles->some.avg10 >= thresholds.ownShare * systemSome;
     auto const foreignStall = systemSome > thresholds.yieldEnter && !ownStall;
     // A stall the compiles carry is the ceiling working, so it never counts as one to stay for.

@@ -215,6 +215,7 @@ void PressureWatcher::StepOnce()
     if (std::exchange(_sampleFaultSaid, false))
         _logger.Log(LogLevel::Info, "memory pressure can be read again");
     NoteCompilesFault(sample->compilesFault);
+    NoteLimitFault(sample->compilesLimitFault);
 
     auto const decision = _governor.Step(*sample, HoldingBytes());
     // Only an allowance pressure LOWERED binds anything; one at the configured value is the configuration, so it is
@@ -250,6 +251,23 @@ void PressureWatcher::NoteCompilesFault(std::optional<std::string> const& fault)
     {
         _compilesFaultSaid = false;
         _logger.Log(LogLevel::Info, "the compiles' own memory pressure can be read again");
+    }
+}
+
+void PressureWatcher::NoteLimitFault(std::optional<std::string> const& fault)
+{
+    if (fault.has_value() && !_limitFaultSaid)
+    {
+        _limitFaultSaid = true;
+        _logger.Logf(LogLevel::Warn,
+                     "whether the compiles stand at their own memory ceiling cannot be read ({}), so a stall they carry "
+                     "cannot be told from the ceiling working: every stall counts as foreign until it can",
+                     *fault);
+    }
+    else if (!fault.has_value() && _limitFaultSaid)
+    {
+        _limitFaultSaid = false;
+        _logger.Log(LogLevel::Info, "whether the compiles stand at their own memory ceiling can be read again");
     }
 }
 

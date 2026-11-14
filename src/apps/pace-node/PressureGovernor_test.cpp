@@ -10,6 +10,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <optional>
 #include <ranges>
@@ -44,7 +45,7 @@ struct Script
     std::optional<double> full = 0.0;      ///< System `full`; disengaged as on a kernel without the line.
     std::optional<double> compiles = 0.0;  ///< Compiles' `some`; disengaged when there is no compiles reading.
     std::optional<double> compilesFull {}; ///< Compiles' `full`; disengaged as on a file without the line.
-    bool atLimit = false;                  ///< The compiles stand at their own ceiling (`compilesAtLimit`).
+    std::optional<bool> atLimit = false;   ///< The compiles stand at their own ceiling; disengaged for unreadable.
 };
 
 /// @return The sample @p script describes.
@@ -543,5 +544,76 @@ TEST_CASE("A shed left on the compiles' own full stall is not re-entered on it",
     {
         REQUIRE(rig.After(1s, Quiet, 30 * GiB).level == PressureLevel::Calm);
         CHECK(rig.After(1s, own, 30 * GiB).level == PressureLevel::Shed);
+    }
+}
+
+TEST_CASE("At-limit evidence is sticky for one dwell: a shed's own kill does not make the stall foreign", "[node][pressure]")
+{
+    // The evidence describes the last second, PSI's avg10 the last ten. A shed kills the youngest; the survivors sit
+    // below the ceiling at once while avg10 still carries the full stall they caused. Read instantly, that stall
+    // looks foreign at the dwell, the shed holds, and a second compile dies.
+    SECTION("the evidence drops right after the kill while avg10 decays: one kill, no re-shed, in a minute")
+    {
+        Rig rig;
+        auto kills = 0;
+        auto sheds = 0;
+        auto const tally = [&](GovernorDecision const& decision) {
+            kills += decision.killYoungest ? 1 : 0;
+            sheds += decision.levelChanged && decision.level == PressureLevel::Shed ? 1 : 0;
+        };
+        tally(rig.After(0s, { .some = 8.0, .full = 6.0, .compiles = 7.9, .compilesFull = 5.9, .atLimit = true }, 30 * GiB));
+        REQUIRE(rig.governor.AllowanceBytes() == 30 * GiB);
+        for (auto const second: std::views::iota(1, 61))
+        {
+            // avg10 decays with a ten-second time constant: 6% * e^(-t/10), ~2.2% at t = 10 -- above shedExit.
+            auto const full = 6.0 * std::exp(-static_cast<double>(second) / 10.0);
+            tally(rig.After(
+                1s,
+                { .some = full * 1.3, .full = full, .compiles = full * 1.3, .compilesFull = full, .atLimit = false },
+                20 * GiB));
+        }
+        CHECK(kills == 1);
+        CHECK(sheds == 1);
+    }
+    SECTION("an own freeze whose evidence flickers stays latched: one kill, no re-shed, in a minute")
+    {
+        Rig rig;
+        auto kills = 0;
+        auto sheds = 0;
+        for (auto const second: std::views::iota(0, 61))
+        {
+            // At the ceiling two seconds in three; full stays at 6%, at or above shedEnter, the whole minute.
+            auto const decision =
+                rig.After(second == 0 ? 0s : 1s,
+                          { .some = 8.0, .full = 6.0, .compiles = 7.9, .compilesFull = 5.9, .atLimit = second % 3 != 2 },
+                          30 * GiB);
+            kills += decision.killYoungest ? 1 : 0;
+            sheds += decision.levelChanged && decision.level == PressureLevel::Shed ? 1 : 0;
+        }
+        CHECK(kills == 1);
+        CHECK(sheds == 1);
+    }
+    SECTION("control: evidence absent for longer than a dwell lets the full stall count as foreign again")
+    {
+        Rig rig;
+        REQUIRE(rig.After(0s, { .some = 3.0, .full = 3.0, .compiles = 2.9, .compilesFull = 2.9, .atLimit = true }, 30 * GiB)
+                    .level
+                == PressureLevel::Calm);
+        auto const stale = Script { .some = 3.0, .full = 6.0, .compiles = 2.9, .compilesFull = 5.9, .atLimit = false };
+        REQUIRE(rig.After(1s, { .some = 8.0, .full = 6.0, .compiles = 7.9, .compilesFull = 5.9, .atLimit = true }, 30 * GiB)
+                    .level
+                == PressureLevel::Shed);
+        // Own and sticky: the shed is left at its dwell and latched.
+        CHECK(rig.After(10s, stale, 30 * GiB).level == PressureLevel::Calm);
+        // Eleven seconds without evidence: the stall is nobody's own any more, the latch lifts, and it sheds.
+        CHECK(rig.After(1s, stale, 30 * GiB).level == PressureLevel::Shed);
+    }
+    SECTION("unreadable evidence is none: an at-limit sample does not carry over a reading that failed")
+    {
+        Rig rig;
+        REQUIRE(rig.After(0s, { .some = 20.0, .full = 0.0, .compiles = 19.0, .atLimit = true }, 30 * GiB).level
+                == PressureLevel::Calm);
+        CHECK(rig.After(1s, { .some = 20.0, .full = 0.0, .compiles = 19.0, .atLimit = std::nullopt }, 30 * GiB).level
+              == PressureLevel::Yield);
     }
 }

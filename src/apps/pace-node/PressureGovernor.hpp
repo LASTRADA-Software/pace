@@ -71,7 +71,8 @@ struct GovernorDecision
 ///
 /// - **A stall that is the compiles' own is not a yield.** System `some` above `yieldEnter` counts only
 ///   when the compiles' cgroup's `some` is below `ownShare` of it, or there is no compiles reading, or the
-///   compiles do not stand at their own ceiling (`PressureSample::compilesAtLimit`). Otherwise it is the
+///   compiles have not stood at their own ceiling (`PressureSample::compilesAtLimit`) within the last `dwell`
+///   -- sticky, because that evidence covers one second and the PSI averages ten. Otherwise it is the
 ///   ceiling working, and the level stays `Calm`. Compiles far below their limit that stall with the
 ///   machine are stalling on someone else's shortage -- the machine reclaims from everyone -- so that yields.
 /// - **Shed** on system `full` at or above `shedEnter`, whoever stalls, or from `Yield` once a FOREIGN
@@ -156,6 +157,8 @@ class PressureGovernor
     std::optional<core::platform::SteadyTimePoint> _lastKill;
     std::optional<core::platform::SteadyTimePoint> _foreignStallSince; ///< Since when the foreign stall has held.
     bool _ownFreezeLatched { false }; ///< A shed was left on the compiles' own full stall, which has not lifted since.
+    /// When the compiles were last seen at their own ceiling; counts as evidence for one `dwell` after.
+    std::optional<core::platform::SteadyTimePoint> _atLimitSeen;
 };
 
 } // namespace Pace::Node

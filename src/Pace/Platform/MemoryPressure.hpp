@@ -63,9 +63,15 @@ struct PressureSample
     ///
     /// The evidence that a stall the compiles carry is the CEILING working rather than the machine running short:
     /// compiles far below their limit stall only because the machine reclaims from everything, a game's shortage
-    /// included. False where no compiles cgroup is configured, where none of it can be read, and where no ceiling
-    /// is set (`max`) -- each of which counts the compiles' stall as nobody's own, the safe direction (a yield).
-    bool compilesAtLimit { false };
+    /// included. False where no ceiling is set (`max`) and nothing rose. DISENGAGED where no compiles cgroup is
+    /// configured, or where none of it can be read (`compilesLimitFault` says why) -- not-at-limit and could-not-tell
+    /// are two answers, though a reader counts both as nobody's own stall, the safe direction (a yield).
+    std::optional<bool> compilesAtLimit {};
+
+    /// Why `compilesAtLimit` is disengaged although a compiles cgroup was configured: neither its `memory.events` nor
+    /// its `memory.current` and `memory.max` could be read. Disengaged when no compiles path was configured or a
+    /// reading was had.
+    std::optional<std::string> compilesLimitFault {};
 };
 
 /// Where pressure samples come from.
@@ -97,8 +103,8 @@ class PsiPressureSource final: public IMemoryPressureSource
 
   private:
     /// @param compiles The compiles' cgroup directory.
-    /// @return Whether the compiles stand at their ceiling now; updates the `max` count seen.
-    [[nodiscard]] bool CompilesAtLimit(std::filesystem::path const& compiles);
+    /// @return Whether the compiles stand at their ceiling now, or why that cannot be read; updates the `max` count.
+    [[nodiscard]] std::expected<bool, std::string> CompilesAtLimit(std::filesystem::path const& compiles);
 
     std::shared_ptr<ICgroupHost const> _host;
     std::optional<std::filesystem::path> _compiles;

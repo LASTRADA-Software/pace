@@ -102,22 +102,24 @@ TEST_CASE("PsiPressureSource says whether the compiles stand at their own ceilin
         host->files["/sys/fs/cgroup/x/compiles/memory.max"] = "8589934592\n";
         host->files["/sys/fs/cgroup/x/compiles/memory.events"] = events(0);
         PsiPressureSource source { host, compiles };
-        CHECK_FALSE(Unwrap(source.Sample()).compilesAtLimit);
-        CHECK_FALSE(Unwrap(source.Sample()).compilesAtLimit);
+        CHECK(Unwrap(source.Sample()).compilesAtLimit == false);
+        CHECK(Unwrap(source.Sample()).compilesAtLimit == false);
     }
     SECTION("within a twentieth of the ceiling: at it")
     {
         host->files["/sys/fs/cgroup/x/compiles/memory.current"] = "8200000000\n";
         host->files["/sys/fs/cgroup/x/compiles/memory.max"] = "8589934592\n";
         PsiPressureSource source { host, compiles };
-        CHECK(Unwrap(source.Sample()).compilesAtLimit);
+        CHECK(Unwrap(source.Sample()).compilesAtLimit == true);
     }
-    SECTION("no ceiling (max) is never near, however much they hold")
+    SECTION("no ceiling (max) is never near, however much they hold -- and is a reading, not a fault")
     {
         host->files["/sys/fs/cgroup/x/compiles/memory.current"] = "8589934592\n";
         host->files["/sys/fs/cgroup/x/compiles/memory.max"] = "max\n";
         PsiPressureSource source { host, compiles };
-        CHECK_FALSE(Unwrap(source.Sample()).compilesAtLimit);
+        auto const sample = Unwrap(source.Sample());
+        CHECK(sample.compilesAtLimit == false);
+        CHECK_FALSE(sample.compilesLimitFault.has_value());
     }
     SECTION("a max count that rose since the previous sample: at it, though below now")
     {
@@ -126,16 +128,34 @@ TEST_CASE("PsiPressureSource says whether the compiles stand at their own ceilin
         host->files["/sys/fs/cgroup/x/compiles/memory.events"] = events(7);
         PsiPressureSource source { host, compiles };
         // The first sample has nothing to compare with: a count already standing is no rise.
-        CHECK_FALSE(Unwrap(source.Sample()).compilesAtLimit);
+        CHECK(Unwrap(source.Sample()).compilesAtLimit == false);
         host->files["/sys/fs/cgroup/x/compiles/memory.events"] = events(9);
-        CHECK(Unwrap(source.Sample()).compilesAtLimit);
+        CHECK(Unwrap(source.Sample()).compilesAtLimit == true);
         // Standing still again is no rise.
-        CHECK_FALSE(Unwrap(source.Sample()).compilesAtLimit);
+        CHECK(Unwrap(source.Sample()).compilesAtLimit == false);
     }
-    SECTION("nothing readable: not at it, which counts every stall as foreign")
+    SECTION("nothing readable: no answer at all, and why -- never a plain not-at-it")
     {
         PsiPressureSource source { host, compiles };
-        CHECK_FALSE(Unwrap(source.Sample()).compilesAtLimit);
+        auto const sample = Unwrap(source.Sample());
+        CHECK_FALSE(sample.compilesAtLimit.has_value());
+        REQUIRE(sample.compilesLimitFault.has_value());
+        CHECK(Unwrap(sample.compilesLimitFault).contains("/sys/fs/cgroup/x/compiles"));
+    }
+    SECTION("memory.events alone is a reading")
+    {
+        host->files["/sys/fs/cgroup/x/compiles/memory.events"] = events(1);
+        PsiPressureSource source { host, compiles };
+        auto const sample = Unwrap(source.Sample());
+        CHECK(sample.compilesAtLimit == false);
+        CHECK_FALSE(sample.compilesLimitFault.has_value());
+    }
+    SECTION("no compiles cgroup configured: no answer and no fault")
+    {
+        PsiPressureSource source { host, std::nullopt };
+        auto const sample = Unwrap(source.Sample());
+        CHECK_FALSE(sample.compilesAtLimit.has_value());
+        CHECK_FALSE(sample.compilesLimitFault.has_value());
     }
 }
 

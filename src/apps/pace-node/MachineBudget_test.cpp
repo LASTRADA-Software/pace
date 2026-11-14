@@ -562,11 +562,37 @@ TEST_CASE("MachineBudget.allowance-held-budget-says-so-at-every-level", "[node][
     CHECK(ramping.standing == Wire::BudgetStanding::HeldByAllowance);
     CHECK(MachineBudgetToWire(ramping, {}).standing == Wire::BudgetStanding::HeldByAllowance);
 
-    // At or above the configured budget it is the configuration; with no watcher it is too.
+    // Ramped all the way back the watcher publishes no allowance, and that is the configuration; no watcher is too.
     auto const ramped = MachineBudgetOf(NodeConfig {},
                                         machine,
                                         HeldCharges {},
-                                        MachinePressure { .level = Wire::PressureLevel::Calm, .allowanceBytes = derived });
+                                        MachinePressure { .level = Wire::PressureLevel::Calm, .allowanceBytes = {} });
     CHECK(ramped.standing == Wire::BudgetStanding::Configured);
     CHECK(MachineBudgetOf(NodeConfig {}, machine, HeldCharges {}).standing == Wire::BudgetStanding::Configured);
+}
+
+TEST_CASE("MachineBudget.typed-limit-above-budget-is-held-until-the-ceiling-is-back", "[node][machinebudget][pressure]")
+{
+    // A `--compile-memory-limit` typed above the machine budget: the ceiling is the limit, the queue's budget the
+    // smaller figure. An allowance ramping back between the two reports the WHOLE budget -- yet `compiles/memory.max`
+    // still stands below the limit, so a compile run alone on that budget would meet a ceiling lower than configured.
+    auto const machine = MachineOf(16, 96 * GiB);
+    auto const derived = MachineBudgetOf(NodeConfig {}, machine, HeldCharges {}).memoryBudgetBytes;
+    auto cfg = NodeConfig {};
+    cfg.compileMemoryLimitBytes = derived + (8 * GiB);
+    REQUIRE(CompileCeilingOf(cfg, machine) == derived + (8 * GiB));
+
+    auto const between =
+        MachineBudgetOf(cfg,
+                        machine,
+                        HeldCharges {},
+                        MachinePressure { .level = Wire::PressureLevel::Calm, .allowanceBytes = derived + GiB });
+    CHECK(between.memoryBudgetBytes == derived);
+    CHECK(between.standing == Wire::BudgetStanding::HeldByAllowance);
+
+    // Configured only once the ceiling is: the watcher hands on no allowance once it reaches the limit.
+    auto const back = MachineBudgetOf(
+        cfg, machine, HeldCharges {}, MachinePressure { .level = Wire::PressureLevel::Calm, .allowanceBytes = {} });
+    CHECK(back.memoryBudgetBytes == derived);
+    CHECK(back.standing == Wire::BudgetStanding::Configured);
 }

@@ -33,7 +33,8 @@ inline constexpr std::uint64_t MachineBudgetSharePercent = 75;
 struct MachinePressure
 {
     CompileCacheWire::PressureLevel level { CompileCacheWire::PressureLevel::Calm }; ///< The governor's level.
-    /// What compiles may hold at once now; disengaged where no governor runs, which lowers nothing.
+    /// What compiles may hold at once now, engaged only while it is BELOW the configured compile ceiling;
+    /// disengaged where no governor runs or the ceiling is at its configured value, which lowers nothing.
     std::optional<std::uint64_t> allowanceBytes {};
 };
 
@@ -89,8 +90,10 @@ class PublishedPressure final: public IMachinePressureSource
 ///   too: in `Yield` and `Shed` that is what compiles held when pressure began, and it ramps back while calm.
 /// - Held: passed through as given.
 /// - Pressure: the governor's level, which the queue reads as "admit nothing new here" whenever it is not `Calm`.
-/// - Standing: `HeldByAllowance` whenever the allowance holds the budget below the configured one, `Configured`
-///   otherwise -- the queue's run-alone exception is open only on the latter, at any level.
+/// - Standing: `HeldByAllowance` whenever there is an allowance at all -- the compile ceiling stands below its
+///   configured value, even where the reported budget does not (a typed `--compile-memory-limit` above the budget)
+///   -- and `Configured` only once the ceiling is back at its configured value. The queue's run-alone exception is
+///   open only on the latter, at any level.
 /// @param cfg The parsed configuration.
 /// @param capacity What `NodeCapacityOf` made of this machine.
 /// @param held What compiles on this machine hold now.
