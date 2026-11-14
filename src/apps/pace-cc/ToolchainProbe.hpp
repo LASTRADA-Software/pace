@@ -199,10 +199,21 @@ struct ToolchainFileScan
 /// signal a caller needs: it must then discover the target the ordinary way. It is
 /// not a `bool` beside the string, because two fields that can disagree are two
 /// states nothing could describe.
+/// Whether a driver identified itself, or was named by its file name because it did not.
+/// Private to the launcher, never transmitted or persisted.
+enum class IdentityEvidence : std::uint8_t
+{
+    Answered, ///< The driver printed a banner.
+    NameOnly, ///< The probe failed or printed nothing; `banner` is the normalized basename.
+};
+
 struct DriverIdentityProbe
 {
     std::string banner;       ///< The identity line, or the basename fallback.
     std::string driverOutput; ///< The `-###` output the banner came from; empty otherwise.
+    /// Which of the two `banner` is. A name keys every version of that compiler alike, so a
+    /// cache must not key on it (#1698); a fingerprint already treats it as no evidence.
+    IdentityEvidence evidence { IdentityEvidence::NameOnly };
 };
 
 /// Ask a driver who it is, in as few spawns as that driver allows.

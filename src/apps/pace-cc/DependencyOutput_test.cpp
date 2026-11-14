@@ -163,3 +163,19 @@ TEST_CASE("An empty dependency set renders no notes at all", "[dependency-output
     // path, which is the shape this repository's testing rule warns about.
     CHECK(RenderShowIncludes({}, IncludeNoteMarker).empty());
 }
+
+TEST_CASE("A depfile carries every target and gcc's -MP phony rules", "[dependency-output][1696]")
+{
+    std::vector<std::string> const targets { "obj/a.o", "a.o" };
+    std::vector<std::string> const deps { "a.cpp", "inc/a.hpp", "inc/b.hpp" };
+    auto const text = RenderDepFile(targets, deps, /*phonyPerDependency=*/true, "a.cpp");
+    CHECK(text.starts_with("obj/a.o a.o:"));
+    CHECK(text.contains("\ninc/a.hpp:\n"));
+    CHECK(text.contains("\ninc/b.hpp:\n"));
+    // The main source gets no phony rule, as with gcc.
+    CHECK_FALSE(text.contains("\na.cpp:\n"));
+
+    // Without -MP, exactly the single-rule depfile it always was.
+    CHECK(RenderDepFile(std::vector<std::string> { "a.o" }, deps, /*phonyPerDependency=*/false, "a.cpp")
+          == RenderDepFile("a.o", deps));
+}

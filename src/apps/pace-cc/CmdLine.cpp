@@ -15,6 +15,8 @@
 #include <ranges>
 #include <utility>
 
+#include <core/Ranges.hpp>
+
 namespace Pace::Cc
 {
 namespace
@@ -659,7 +661,7 @@ namespace
     /// and matches nothing here. It is left out rather than half-matched, because a
     /// row that fires on `-Xclang` alone would un-cache every build that passes any
     /// `-Xclang` flag at all.
-    constexpr std::array<SideArtefactFlag, 19> SideArtefacts { {
+    constexpr std::array<SideArtefactFlag, 25> SideArtefacts { {
         { .spelling = "/interface", .families = DriverFamily::Msvc },
         { .spelling = "-interface", .families = DriverFamily::Msvc },
         { .spelling = "/internalPartition", .families = DriverFamily::Msvc },
@@ -673,6 +675,17 @@ namespace
         { .spelling = "-fmodule-output", .families = DriverFamily::Gnu },
         { .spelling = "-fmodule-mapper", .families = DriverFamily::Gnu },
         { .spelling = "--precompile", .families = DriverFamily::Gnu },
+        // The GNU flags that write a file beside the object (#1691), each measured by the
+        // audit to write its side file: split DWARF (`a.dwo`, whose id the skeleton names),
+        // coverage notes (`a.gcno`), clang's time trace (`a.json`), stack usage (`a.su`), and
+        // every intermediate. A hit restores the object alone, so the side file is missing or
+        // from another compile.
+        { .spelling = "-gsplit-dwarf", .families = DriverFamily::Gnu },
+        { .spelling = "--coverage", .families = DriverFamily::Gnu },
+        { .spelling = "-ftest-coverage", .families = DriverFamily::Gnu },
+        { .spelling = "-ftime-trace", .families = DriverFamily::Gnu },
+        { .spelling = "-fstack-usage", .families = DriverFamily::Gnu },
+        { .spelling = "-save-temps", .families = DriverFamily::Gnu },
         // `cl`'s shared-PDB debug formats. The object only REFERS to the PDB, which holds
         // every translation unit's types, so a hit restores an object whose types were
         // never written anywhere. clang-cl reads these spellings as `/Z7` -- its own option
@@ -699,6 +712,100 @@ namespace
     // nothing. An empty spelling is exactly what such a row has.
     static_assert(std::ranges::none_of(SideArtefacts, [](SideArtefactFlag const& row) { return row.spelling.empty(); }),
                   "SideArtefacts' stated extent must equal its row count -- an empty row is a padded one");
+
+    /// How an `UncacheableFlag` row is matched. Private to the launcher.
+    enum class FlagMatch : std::uint8_t
+    {
+        Exact,  ///< The whole argument.
+        Prefix, ///< The argument begins with the spelling (a fused value follows).
+    };
+
+    /// One argument that makes a compile uncacheable, and why.
+    struct UncacheableFlag
+    {
+        std::string_view spelling;
+        DriverFamily families;
+        FlagMatch match;
+        std::string_view reason; ///< Said in the launcher's note; names what the key cannot see.
+    };
+
+    /// Arguments that make a compile depend on something the key does not hash (#1688, #1692),
+    /// or ask for a depfile the launcher cannot name (#1689). REFUSED rather than keyed: each is
+    /// either unknowable from the command line (`native` is this machine's CPU) or a file whose
+    /// contents would have to be hashed on every compile, and the cost of the refusal is one
+    /// local compile. A worker never sees them either, since a line the launcher does not cache
+    /// it does not dispatch.
+    constexpr std::array UncacheableFlags {
+        UncacheableFlag { .spelling = "-march=native",
+                          .families = DriverFamily::Gnu,
+                          .match = FlagMatch::Exact,
+                          .reason = "-march=native compiles for THIS machine's CPU, which the key cannot see" },
+        UncacheableFlag { .spelling = "-mcpu=native",
+                          .families = DriverFamily::Gnu,
+                          .match = FlagMatch::Exact,
+                          .reason = "-mcpu=native compiles for THIS machine's CPU, which the key cannot see" },
+        UncacheableFlag { .spelling = "-mtune=native",
+                          .families = DriverFamily::Gnu,
+                          .match = FlagMatch::Exact,
+                          .reason = "-mtune=native tunes for THIS machine's CPU, which the key cannot see" },
+        UncacheableFlag { .spelling = "-fprofile-use",
+                          .families = DriverFamily::Gnu,
+                          .match = FlagMatch::Prefix,
+                          .reason = "a profile-guided compile reads a profile the key cannot see" },
+        UncacheableFlag { .spelling = "-fprofile-sample-use",
+                          .families = DriverFamily::Gnu,
+                          .match = FlagMatch::Prefix,
+                          .reason = "a profile-guided compile reads a profile the key cannot see" },
+        UncacheableFlag { .spelling = "-fauto-profile",
+                          .families = DriverFamily::Gnu,
+                          .match = FlagMatch::Prefix,
+                          .reason = "a profile-guided compile reads a profile the key cannot see" },
+        UncacheableFlag { .spelling = "-fprofile-instr-use",
+                          .families = DriverFamily::Gnu,
+                          .match = FlagMatch::Prefix,
+                          .reason = "a profile-guided compile reads a profile the key cannot see" },
+        UncacheableFlag { .spelling = "-fplugin=",
+                          .families = DriverFamily::Gnu,
+                          .match = FlagMatch::Prefix,
+                          .reason = "a compiler plugin changes the compile and the key cannot see it" },
+        UncacheableFlag { .spelling = "-fpass-plugin=",
+                          .families = DriverFamily::Gnu,
+                          .match = FlagMatch::Prefix,
+                          .reason = "a compiler plugin changes the compile and the key cannot see it" },
+        UncacheableFlag { .spelling = "-specs=",
+                          .families = DriverFamily::Gnu,
+                          .match = FlagMatch::Prefix,
+                          .reason = "a specs file rewrites the driver's command lines and the key cannot see it" },
+        UncacheableFlag { .spelling = "--specs=",
+                          .families = DriverFamily::Gnu,
+                          .match = FlagMatch::Prefix,
+                          .reason = "a specs file rewrites the driver's command lines and the key cannot see it" },
+        UncacheableFlag { .spelling = "-B",
+                          .families = DriverFamily::Gnu,
+                          .match = FlagMatch::Prefix,
+                          .reason = "-B replaces the programs the driver runs under the same banner" },
+        UncacheableFlag { .spelling = "-Wp,-MD",
+                          .families = DriverFamily::Gnu,
+                          .match = FlagMatch::Prefix,
+                          .reason = "a depfile requested through -Wp is one a hit cannot reproduce" },
+        UncacheableFlag { .spelling = "-Wp,-MMD",
+                          .families = DriverFamily::Gnu,
+                          .match = FlagMatch::Prefix,
+                          .reason = "a depfile requested through -Wp is one a hit cannot reproduce" },
+    };
+
+    /// The reason a GNU `-MD`/`-MMD` with no `-MF` is uncacheable (#1689): the driver derives
+    /// the depfile's name from the output, the launcher knows a depfile only through `-MF`, and a
+    /// hit that restores no depfile leaves make with no header dependencies for the object.
+    constexpr std::string_view UnnamedDepFile =
+        "-MD/-MMD without -MF writes a depfile the launcher cannot name, so a hit could not reproduce it";
+
+    /// The `UncacheableFlags` reason for one argument, judged by the driver a pass-through hands
+    /// it to, as `ProducesSideArtefact` judges it.
+    /// @param arg    One argument.
+    /// @param driver The driver's row.
+    /// @return The reason, or nothing.
+    [[nodiscard]] std::optional<std::string_view> UncacheableFlagReason(std::string_view arg, DriverSpec const& driver);
 
     /// Which introducer characters each family's options start with.
     constexpr std::array<std::pair<DriverFamily, std::string_view>, 4> FamilyIntroducers { {
@@ -1384,6 +1491,23 @@ std::optional<std::string_view> CarriedSourcePrefixMap(std::string_view arg, Dri
     return std::nullopt;
 }
 
+namespace
+{
+    std::optional<std::string_view> UncacheableFlagReason(std::string_view arg, DriverSpec const& driver)
+    {
+        if (auto const passed = MatchPassThrough(arg, driver.family); passed.has_value())
+            return UncacheableFlagReason(passed->inner, DriverOf(passed->into));
+        auto const* const row = core::findIfOrNull(UncacheableFlags, [&](UncacheableFlag const& candidate) {
+            if (!Overlaps(candidate.families, driver.family))
+                return false;
+            return candidate.match == FlagMatch::Exact ? arg == candidate.spelling : arg.starts_with(candidate.spelling);
+        });
+        if (row == nullptr)
+            return std::nullopt;
+        return row->reason;
+    }
+} // namespace
+
 bool ProducesSideArtefact(std::string_view arg, DriverSpec const& driver)
 {
     // Judged as what a pass-through carries, by the driver it is handed to (#1680): clang-cl
@@ -1542,6 +1666,7 @@ ParsedCommand ParseCommand(std::span<std::string const> argv)
     auto const args = argv.subspan(1);
     bool sawCompileOnly = false;
     bool preprocessOnly = false;
+    bool requestsGnuDepFile = false;
     std::size_t skipUntil = 0; // index the next iteration must not re-process
 
     for (auto const i: std::views::iota(std::size_t { 0 }, args.size()))
@@ -1566,6 +1691,13 @@ ParsedCommand ParseCommand(std::span<std::string const> argv)
         if (a == "-E" || a == "/EP" || a == "/P")
         {
             preprocessOnly = true;
+            continue;
+        }
+        if (driver.family == DriverFamily::Gnu && (a == "-MD" || a == "-MMD"))
+            requestsGnuDepFile = true;
+        if (auto const because = UncacheableFlagReason(a, driver))
+        {
+            out.uncacheable = *because;
             continue;
         }
 
@@ -1648,8 +1780,11 @@ ParsedCommand ParseCommand(std::span<std::string const> argv)
     if (auto const language = LanguageOfSource(out.source); language.has_value() && !UncacheableBecause(*language).empty())
         out.sideArtefact = true;
 
+    if (requestsGnuDepFile && out.depPath.empty() && out.uncacheable.empty())
+        out.uncacheable = UnnamedDepFile;
+
     out.parsedOk = !out.source.empty() && !out.objPath.empty() && sawCompileOnly && !preprocessOnly && !out.sideArtefact
-                   && !out.separatedPassThrough;
+                   && !out.separatedPassThrough && out.uncacheable.empty();
     return out;
 }
 
@@ -1724,6 +1859,12 @@ namespace
         // one local compile; guessing hands back an object nobody asked for.
         for (auto const i: std::views::iota(std::size_t { 1 }, argv.size()))
         {
+            // A GNU driver applies `-x` to the inputs AFTER it, and one after the last input
+            // has no effect -- `gcc -c x.c -x c++` compiles C (#1697). Reading it anyway handed
+            // the worker `-x c++-cpp-output` and stored a C++ object under the C key. An MSVC
+            // `/TP`/`/TC` applies to every input wherever it stands, so only GNU stops here.
+            if (driver.family == DriverFamily::Gnu && argv[i] == cmd.source)
+                break;
             auto const* row = MatchLanguageSelector(argv[i], driver.family);
             if (row == nullptr)
                 continue;
@@ -2154,6 +2295,76 @@ std::expected<std::string, std::string> DispatchedMacroPrologue(ParsedCommand co
         ++at;
     }
     return prologue;
+}
+
+DepFileRules DepFileRulesOf(ParsedCommand const& cmd, std::span<std::string const> argv)
+{
+    // gcc's own quoting for `-MQ`: a space is escaped, `$` doubled and `#` escaped, which is what
+    // make needs to read the name back as written.
+    auto const quoted = [](std::string_view target) {
+        std::string out;
+        for (auto const c: target)
+        {
+            if (c == '$')
+                out += '$';
+            else if (c == ' ' || c == '#')
+                out += '\\';
+            out += c;
+        }
+        return out;
+    };
+
+    DepFileRules rules;
+    std::size_t at = 1;
+    while (at < argv.size())
+    {
+        std::string_view const arg = argv[at];
+        if (arg == "-MP")
+            rules.phonyPerDependency = true;
+        for (auto const spelling: { std::string_view { "-MT" }, std::string_view { "-MQ" } })
+        {
+            if (!arg.starts_with(spelling))
+                continue;
+            std::string_view value = arg.substr(spelling.size());
+            if (value.empty() && at + 1 < argv.size())
+            {
+                ++at; // the separated spelling: the target is the next argument
+                value = argv[at];
+            }
+            if (!value.empty())
+                rules.targets.push_back(spelling == "-MQ" ? quoted(value) : std::string { value });
+            break;
+        }
+        ++at;
+    }
+    if (rules.targets.empty())
+        rules.targets.push_back(quoted(cmd.objPath));
+    return rules;
+}
+
+std::vector<std::string> ImplicitPrecompiledHeaderCandidates(std::span<std::string const> argv,
+                                                             DriverFamily family,
+                                                             std::span<std::string const> dependencies)
+{
+    std::vector<std::string> candidates;
+    if (family != DriverFamily::Gnu)
+        return candidates;
+    std::size_t at = 1;
+    while (at < argv.size())
+    {
+        std::string_view const arg = argv[at];
+        if (arg == "-include" && at + 1 < argv.size())
+        {
+            ++at;
+            candidates.push_back(argv[at] + ".gch");
+        }
+        else if (arg.starts_with("-include") && arg.size() > std::string_view { "-include" }.size())
+            candidates.push_back(std::string { arg.substr(std::string_view { "-include" }.size()) } + ".gch");
+        ++at;
+    }
+    for (auto const& dependency: dependencies)
+        candidates.push_back(dependency + ".gch");
+    return candidates;
 }
 
 std::vector<std::string> PreprocessCommand(ParsedCommand const& cmd,

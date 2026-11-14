@@ -2546,3 +2546,106 @@ TEST_CASE("A real clang-cl worker compiles under /WX what the client compiles, m
     REQUIRE(expanded.exitCode == 0);
     CHECK(workerCompile(expanded.out, "plain").exitCode != 0);
 }
+
+// ---------------------------------------------------------------------------
+// What the key cannot see (#1688, #1689, #1691, #1692, #1697, #1700)
+
+TEST_CASE("A compile writing a GNU side file is not cached", "[cmdline][1691]")
+{
+    for (auto const* flag: { "-gsplit-dwarf",
+                             "--coverage",
+                             "-ftest-coverage",
+                             "-ftime-trace",
+                             "-ftime-trace=t.json",
+                             "-fstack-usage",
+                             "-save-temps",
+                             "-save-temps=obj" })
+    {
+        INFO("flag: " << flag);
+        auto const cmd = Parse({ "g++", "-c", flag, "a.cpp", "-o", "a.o" });
+        CHECK(cmd.sideArtefact);
+        CHECK_FALSE(cmd.parsedOk);
+    }
+    // The control: debug info IN the object is still cached.
+    CHECK(Parse({ "g++", "-c", "-g", "a.cpp", "-o", "a.o" }).parsedOk);
+}
+
+TEST_CASE("A compile depending on what the key cannot see is not cached, and says why", "[cmdline][1688][1692]")
+{
+    for (auto const* flag: { "-march=native",
+                             "-mcpu=native",
+                             "-mtune=native",
+                             "-fprofile-use",
+                             "-fprofile-use=p.gcda",
+                             "-fprofile-sample-use=p.prof",
+                             "-fauto-profile=p.afdo",
+                             "-fprofile-instr-use=p.profdata",
+                             "-fplugin=x.so",
+                             "-fpass-plugin=x.so",
+                             "-specs=my.specs",
+                             "--specs=my.specs",
+                             "-B/opt/gcc" })
+    {
+        INFO("flag: " << flag);
+        auto const cmd = Parse({ "g++", "-c", flag, "a.cpp", "-o", "a.o" });
+        CHECK_FALSE(cmd.parsedOk);
+        CHECK_FALSE(cmd.uncacheable.empty());
+        CHECK_FALSE(cmd.sideArtefact);
+    }
+    // The controls: a NAMED architecture is what the key already hashes, and the clang-cl
+    // pass-through of a refused flag is refused too.
+    CHECK(Parse({ "g++", "-c", "-march=x86-64-v3", "a.cpp", "-o", "a.o" }).parsedOk);
+    CHECK_FALSE(Parse({ "clang-cl", "/c", "/clang:-march=native", "a.cpp", "/Foa.obj" }).parsedOk);
+}
+
+TEST_CASE("A -MD without -MF names a depfile the launcher cannot reproduce", "[cmdline][1689]")
+{
+    auto const unnamed = Parse({ "gcc", "-MMD", "-MP", "-c", "a.c", "-o", "a.o" });
+    CHECK_FALSE(unnamed.parsedOk);
+    CHECK(unnamed.uncacheable.contains("-MF"));
+    CHECK_FALSE(Parse({ "gcc", "-Wp,-MMD,a.d", "-c", "a.c", "-o", "a.o" }).parsedOk);
+    // The control: CMake's spelling names the file, and is cached.
+    auto const named = Parse({ "gcc", "-MD", "-MT", "a.o", "-MF", "a.o.d", "-c", "a.c", "-o", "a.o" });
+    CHECK(named.parsedOk);
+    CHECK(named.uncacheable.empty());
+}
+
+TEST_CASE("A -x after the source does not decide the dispatched language", "[dispatch][1697]")
+{
+    // gcc ignores a `-x` after the last input: `gcc -c x.c -x c++` compiles C.
+    std::vector<std::string> const trailing { "gcc", "-c", "x.c", "-x", "c++", "-o", "x.o" };
+    auto const remote = RemoteCompileArgs(ParseCommand(trailing), trailing, /*targetTriple=*/ {});
+    REQUIRE(remote.has_value());
+    CHECK(std::ranges::contains(*remote, "cpp-output"));
+    CHECK_FALSE(std::ranges::contains(*remote, "c++-cpp-output"));
+
+    // The control: one BEFORE the source decides it.
+    std::vector<std::string> const leading { "gcc", "-c", "-x", "c++", "x.c", "-o", "x.o" };
+    auto const remoteLeading = RemoteCompileArgs(ParseCommand(leading), leading, /*targetTriple=*/ {});
+    REQUIRE(remoteLeading.has_value());
+    CHECK(std::ranges::contains(*remoteLeading, "c++-cpp-output"));
+}
+
+TEST_CASE("A depfile's rule is read off -MT, -MQ and -MP", "[dispatch][1696]")
+{
+    std::vector<std::string> const argv { "g++", "-MD", "-MT", "obj/a.o", "-MQ", "lib$ a.o", "-MP",
+                                          "-MF", "a.d", "-c",  "a.cpp",   "-o",  "a.o" };
+    auto const rules = DepFileRulesOf(ParseCommand(argv), argv);
+    CHECK(rules.targets == std::vector<std::string> { "obj/a.o", R"(lib$$\ a.o)" });
+    CHECK(rules.phonyPerDependency);
+
+    // No -MT/-MQ: the object, quoted for make. No -MP: no phony rules.
+    std::vector<std::string> const plain { "g++", "-MD", "-MF", "a.d", "-c", "a.cpp", "-o", "my obj.o" };
+    auto const defaults = DepFileRulesOf(ParseCommand(plain), plain);
+    CHECK(defaults.targets == std::vector<std::string> { R"(my\ obj.o)" });
+    CHECK_FALSE(defaults.phonyPerDependency);
+}
+
+TEST_CASE("Every -include and every dependency names a .gch candidate, for GNU drivers only", "[cmdline][1700]")
+{
+    std::vector<std::string> const argv { "g++", "-include", "pch.h", "-includeother.h", "-c", "a.cpp", "-o", "a.o" };
+    std::vector<std::string> const deps { "inc/a.hpp" };
+    CHECK(ImplicitPrecompiledHeaderCandidates(argv, DriverFamily::Gnu, deps)
+          == std::vector<std::string> { "pch.h.gch", "other.h.gch", "inc/a.hpp.gch" });
+    CHECK(ImplicitPrecompiledHeaderCandidates(argv, DriverFamily::Msvc, deps).empty());
+}
