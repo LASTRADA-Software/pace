@@ -1209,6 +1209,7 @@ Outcome OutcomeOfServedHit(HitVerdict verdict) noexcept
         case HitVerdict::Matched:
         case HitVerdict::Inconclusive:
         case HitVerdict::Unsupported:
+        case HitVerdict::Nondeterministic:
             break;
     }
     return Outcome::Hit;
