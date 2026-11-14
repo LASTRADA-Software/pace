@@ -1628,6 +1628,44 @@ boot, silently, because a registration replays its command line forever. So:
   sweep cannot see a line naming the wrong field or the wrong bit, because a
   neighbour's emission covers it.
 
+## The slice a system node runs in, and why it limits nothing
+
+<!-- agent-tripwire: none: one shipped unit and one slice, and `ctest -R node-working-directory` (default set) refuses every way of undoing it with the reasoning in its own refusal text -->
+
+- **The SYSTEM `pace-node.service` names `Slice=pace.slice`, a top-level slice the
+  package ships, so systemd-oomd never weighs the node** (#1773). oomd kills a whole
+  cgroup, and only one BELOW a cgroup it monitors. Fedora's defaults monitor exactly
+  `system.slice` and the user managers' slices
+  (`/usr/lib/systemd/{system/system.slice.d,user/slice.d}/10-oomd-per-slice-defaults.conf`,
+  80% pressure held for 20 s), and nothing on the root slice: measured on Fedora 44 /
+  systemd 259, `oomctl` lists those and no others. A unit with no `Slice=` lands in
+  `system.slice`, inside that choice, where the node would die with its cache tier.
+  `pace.slice` has no `-` in its name, so its parent is the root slice: a sibling of
+  `system.slice`. `system-pace.slice` would be a CHILD of `system.slice` by its name
+  alone, which is the mistake that looks like the fix.
+- **Neither of the other two marks reaches the system unit's node.** oomd ranks
+  LEAVES (or `memory.oom.group=1` cgroups), so `ManagedOOMPreference=omit` on a unit
+  with `Delegate=` marks a cgroup that is no leaf and is not inherited below it. The
+  node writes `user.oomd_omit=1` on its own `node/` cgroup, but oomd honours a `user.`
+  xattr only on a cgroup owned by the user its manager runs as: under the system unit
+  `node/` belongs to the service account while root's oomd is watching, so the mark is
+  ignored. **The USER unit keeps no slice and needs none** — there the user owns
+  `node/`, the user's own oomd honours the mark, and the slice table has no row for it.
+- **The slice limits nothing, and its `[Slice]` section stays empty.** The node already
+  holds its compiles under one ceiling on `compiles/`, never on its own cgroup; a
+  `MemoryMax=` on the slice would put the cache tier under the same ceiling, the
+  arrangement that ceiling exists to avoid, and a `ManagedOOM*=kill` would put the
+  node straight back in oomd's choice.
+- **A slice with no unit file still loads** (`LoadState=loaded`, no fragment, measured
+  on 259), so a unit naming a slice nobody installed STARTS — silently, in an empty
+  slice. That is why the check reads the packaging asset table for exactly one row
+  installing the slice into `${PACE_SYSTEMD_SYSTEM_DIR}`, and not only the unit.
+- Blind spot, failing OPEN: which slices oomd monitors is the HOST's policy. A
+  distribution that also monitors the root slice includes `pace.slice` again with
+  every check green; `oomctl` on the host is the answer, and the CI package jobs assert
+  the running worker's `ControlGroup` is `/pace.slice/pace-node.service`. A node
+  running at a package upgrade moves there at its next restart.
+
 ## Open work
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues; AGENT.md tripwires rules, not residuals -->
