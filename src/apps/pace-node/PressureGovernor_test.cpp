@@ -31,6 +31,9 @@ constexpr std::uint64_t GiB = std::uint64_t { 1 } << 30U;
 /// The configured allowance every case starts from: a 96 GiB machine's 75%.
 constexpr std::uint64_t Configured = 72 * GiB;
 
+/// The least a yield lowers the allowance to: the default compile estimate, as production configures it.
+constexpr std::uint64_t Floor = 2 * GiB;
+
 /// One ramp step at the default 5%, derived the way the rule states it.
 constexpr std::uint64_t RampStep = Configured * 5 / 100;
 
@@ -41,6 +44,7 @@ struct Script
     std::optional<double> full = 0.0;      ///< System `full`; disengaged as on a kernel without the line.
     std::optional<double> compiles = 0.0;  ///< Compiles' `some`; disengaged when there is no compiles reading.
     std::optional<double> compilesFull {}; ///< Compiles' `full`; disengaged as on a file without the line.
+    bool atLimit = false;                  ///< The compiles stand at their own ceiling (`compilesAtLimit`).
 };
 
 /// @return The sample @p script describes.
@@ -58,6 +62,7 @@ Platform::PressureSample SampleOf(Script const& script)
             compiles.full = Platform::PsiLine { .avg10 = *script.compilesFull, .avg60 = 0.0, .totalMicros = 0 };
         sample.compiles = compiles;
     }
+    sample.compilesAtLimit = script.atLimit;
     return sample;
 }
 
@@ -65,7 +70,7 @@ Platform::PressureSample SampleOf(Script const& script)
 struct Rig
 {
     core::platform::ManualClock clock;
-    PressureGovernor governor { PressureThresholds {}, Configured, clock };
+    PressureGovernor governor { PressureThresholds {}, Configured, Floor, clock };
 
     /// Advance the clock by @p elapsed, then step one sample.
     GovernorDecision After(std::chrono::seconds elapsed, Script const& script, std::uint64_t hold)
@@ -101,7 +106,7 @@ TEST_CASE("Compiles stalling under their own ceiling is not a yield", "[node][pr
     SECTION("Compiles carry the stall: the ceiling is working")
     {
         Rig rig;
-        auto const decision = rig.After(0s, { .some = 20.0, .full = 0.0, .compiles = 19.0 }, 30 * GiB);
+        auto const decision = rig.After(0s, { .some = 20.0, .full = 0.0, .compiles = 19.0, .atLimit = true }, 30 * GiB);
         CHECK(decision.level == PressureLevel::Calm);
         CHECK(decision.allowanceBytes == Configured);
         CHECK_FALSE(decision.levelChanged);
@@ -109,12 +114,14 @@ TEST_CASE("Compiles stalling under their own ceiling is not a yield", "[node][pr
     SECTION("Control: compiles below 80% of the system's stall is someone else's")
     {
         Rig rig;
-        CHECK(rig.After(0s, { .some = 20.0, .full = 0.0, .compiles = 15.0 }, 30 * GiB).level == PressureLevel::Yield);
+        CHECK(rig.After(0s, { .some = 20.0, .full = 0.0, .compiles = 15.0, .atLimit = true }, 30 * GiB).level
+              == PressureLevel::Yield);
     }
     SECTION("A freezing desktop sheds whoever stalls")
     {
         Rig rig;
-        CHECK(rig.After(0s, { .some = 20.0, .full = 8.0, .compiles = 19.0 }, 30 * GiB).level == PressureLevel::Shed);
+        CHECK(rig.After(0s, { .some = 20.0, .full = 8.0, .compiles = 19.0, .atLimit = true }, 30 * GiB).level
+              == PressureLevel::Shed);
     }
 }
 
@@ -200,18 +207,20 @@ TEST_CASE("A yield during the ramp resets the allowance to current holding", "[n
     }
 }
 
-TEST_CASE("A stall with no compiles running yields with allowance 0 and asks no kill", "[node][pressure]")
+TEST_CASE("A stall with no compiles running yields with allowance at the floor and asks no kill", "[node][pressure]")
 {
+    // Held to what compiles held -- nothing -- the machine would report a budget no compile fits, and the queue would
+    // refuse every compile there until the ramp came back: one default estimate is the least it is lowered to.
     Rig rig;
     auto const yield = rig.After(0s, { .some = 20.0, .full = 0.0, .compiles = std::nullopt }, 0);
     CHECK(yield.level == PressureLevel::Yield);
-    CHECK(yield.allowanceBytes == 0);
+    CHECK(yield.allowanceBytes == Floor);
     CHECK_FALSE(yield.killYoungest);
 
     auto const shed = rig.After(1s, Freezing, 0);
     CHECK(shed.level == PressureLevel::Shed);
     CHECK_FALSE(shed.killYoungest);
-    CHECK(shed.allowanceBytes == 0);
+    CHECK(shed.allowanceBytes == Floor);
 
     // Nothing was killed, so the first compile to hold memory under a freeze is shed at once.
     CHECK(rig.After(1s, Freezing, 1 * GiB).killYoungest);
@@ -222,22 +231,22 @@ TEST_CASE("Reconfigure lowers the cap and clamps the allowance", "[node][pressur
     SECTION("A calm allowance at the old cap drops to the new one")
     {
         Rig rig;
-        rig.governor.Reconfigure(40 * GiB);
+        rig.governor.Reconfigure(40 * GiB, Floor);
         CHECK(rig.After(0s, Quiet, 0).allowanceBytes == 40 * GiB);
     }
     SECTION("An allowance under the new cap is kept")
     {
         Rig rig;
         REQUIRE(rig.After(0s, GameStall, 30 * GiB).allowanceBytes == 30 * GiB);
-        rig.governor.Reconfigure(40 * GiB);
+        rig.governor.Reconfigure(40 * GiB, Floor);
         CHECK(rig.After(1s, GameStall, 30 * GiB).allowanceBytes == 30 * GiB);
-        rig.governor.Reconfigure(20 * GiB);
+        rig.governor.Reconfigure(20 * GiB, Floor);
         CHECK(rig.After(1s, GameStall, 30 * GiB).allowanceBytes == 20 * GiB);
     }
     SECTION("Raising the cap raises an allowance pressure never lowered, at once")
     {
         Rig rig;
-        rig.governor.Reconfigure(100 * GiB);
+        rig.governor.Reconfigure(100 * GiB, Floor);
         CHECK(rig.After(0s, Quiet, 0).allowanceBytes == 100 * GiB);
         CHECK(rig.governor.AllowanceBytes() == 100 * GiB);
     }
@@ -246,7 +255,7 @@ TEST_CASE("Reconfigure lowers the cap and clamps the allowance", "[node][pressur
         Rig rig;
         REQUIRE(rig.After(0s, GameStall, 30 * GiB).allowanceBytes == 30 * GiB);
         REQUIRE(rig.After(10s, Quiet, 0).level == PressureLevel::Calm);
-        rig.governor.Reconfigure(100 * GiB);
+        rig.governor.Reconfigure(100 * GiB, Floor);
         CHECK(rig.After(0s, Quiet, 0).allowanceBytes == 30 * GiB);
         CHECK(rig.After(30s, Quiet, 0).allowanceBytes == (30 * GiB) + (100 * GiB * 5 / 100));
     }
@@ -296,7 +305,7 @@ TEST_CASE("Compiles stalling under the ceiling a yield set are neither escalated
     // then the compiles' own.
     Rig rig;
     REQUIRE(rig.After(0s, GameStall, 30 * GiB).level == PressureLevel::Yield);
-    auto const ownStall = Script { .some = 20.0, .full = 0.0, .compiles = 19.0 };
+    auto const ownStall = Script { .some = 20.0, .full = 0.0, .compiles = 19.0, .atLimit = true };
 
     auto const held = rig.After(9s, ownStall, 30 * GiB);
     CHECK(held.level == PressureLevel::Yield);
@@ -317,7 +326,7 @@ TEST_CASE("Compiles stalling under their own ceiling do not hold a shed", "[node
 {
     Rig rig;
     REQUIRE(rig.After(0s, Freezing, 30 * GiB).level == PressureLevel::Shed);
-    auto const ownStall = Script { .some = 20.0, .full = 0.0, .compiles = 19.0 };
+    auto const ownStall = Script { .some = 20.0, .full = 0.0, .compiles = 19.0, .atLimit = true };
     CHECK(rig.After(9s, ownStall, 20 * GiB).level == PressureLevel::Shed);
     auto const left = rig.After(1s, ownStall, 20 * GiB);
     CHECK(left.level == PressureLevel::Calm);
@@ -370,7 +379,7 @@ TEST_CASE("A full stall the compiles carry does not hold a shed", "[node][pressu
 
     SECTION("The compiles' own full stall: the shed ends at its dwell and kills no more")
     {
-        auto const own = Script { .some = 3.0, .full = 3.0, .compiles = 0.0, .compilesFull = 2.9 };
+        auto const own = Script { .some = 3.0, .full = 3.0, .compiles = 0.0, .compilesFull = 2.9, .atLimit = true };
         CHECK_FALSE(rig.After(5s, own, 20 * GiB).killYoungest);
         auto const left = rig.After(5s, own, 20 * GiB);
         CHECK(left.level == PressureLevel::Calm);
@@ -385,7 +394,7 @@ TEST_CASE("A full stall the compiles carry does not hold a shed", "[node][pressu
     }
     SECTION("Control: a full stall the compiles do not carry holds the shed")
     {
-        auto const foreign = Script { .some = 3.0, .full = 3.0, .compiles = 0.0, .compilesFull = 0.5 };
+        auto const foreign = Script { .some = 3.0, .full = 3.0, .compiles = 0.0, .compilesFull = 0.5, .atLimit = true };
         CHECK(rig.After(5s, foreign, 20 * GiB).level == PressureLevel::Shed);
         auto const held = rig.After(5s, foreign, 20 * GiB);
         CHECK(held.level == PressureLevel::Shed);
@@ -393,7 +402,8 @@ TEST_CASE("A full stall the compiles carry does not hold a shed", "[node][pressu
     }
     SECTION("Control: no compiles full line is never an own stall")
     {
-        auto const unknown = Script { .some = 3.0, .full = 3.0, .compiles = 0.0, .compilesFull = std::nullopt };
+        auto const unknown =
+            Script { .some = 3.0, .full = 3.0, .compiles = 0.0, .compilesFull = std::nullopt, .atLimit = true };
         CHECK(rig.After(10s, unknown, 20 * GiB).level == PressureLevel::Shed);
     }
 }
@@ -403,7 +413,7 @@ TEST_CASE("An own-stall sample restarts the foreign stall's escalation clock", "
     // Foreign from 0 s to 9 s, the compiles' own at 9 s, foreign again from 10 s: the 2 x dwell runs from
     // 10 s, so the shed comes at 30 s and not at 20 s.
     Rig rig;
-    auto const ownStall = Script { .some = 20.0, .full = 0.0, .compiles = 19.0 };
+    auto const ownStall = Script { .some = 20.0, .full = 0.0, .compiles = 19.0, .atLimit = true };
     REQUIRE(rig.After(0s, GameStall, 30 * GiB).level == PressureLevel::Yield);
     REQUIRE(rig.After(9s, ownStall, 30 * GiB).level == PressureLevel::Yield);
     CHECK(rig.After(1s, GameStall, 30 * GiB).level == PressureLevel::Yield);
@@ -425,7 +435,7 @@ TEST_CASE("A level whose threshold is disabled is never entered, escalation incl
         core::platform::ManualClock clock;
         auto thresholds = PressureThresholds {};
         thresholds.yieldEnter = Node::DisabledPressureThreshold;
-        PressureGovernor governor { thresholds, Configured, clock };
+        PressureGovernor governor { thresholds, Configured, Floor, clock };
         CHECK(governor.Step(SampleOf(Script { .some = 60.0, .full = 0.0, .compiles = 0.0 }), 8 * GiB).level
               == PressureLevel::Calm);
         CHECK(governor.Step(SampleOf(DeepFreeze), 8 * GiB).level == PressureLevel::Shed);
@@ -435,7 +445,7 @@ TEST_CASE("A level whose threshold is disabled is never entered, escalation incl
         core::platform::ManualClock clock;
         auto thresholds = PressureThresholds {};
         thresholds.shedEnter = Node::DisabledPressureThreshold;
-        PressureGovernor governor { thresholds, Configured, clock };
+        PressureGovernor governor { thresholds, Configured, Floor, clock };
         CHECK(governor.Step(SampleOf(DeepFreeze), 8 * GiB).level == PressureLevel::Yield);
         for ([[maybe_unused]] auto const tick: std::views::iota(0, 6))
         {
@@ -457,4 +467,81 @@ TEST_CASE("Retune moves the thresholds of a running governor", "[node][pressure]
     lower.yieldExit = 3.0;
     rig.governor.Retune(lower);
     CHECK(rig.After(1s, Mild, 8 * GiB).level == PressureLevel::Yield);
+}
+
+TEST_CASE("The allowance floor is never above the configured bytes", "[node][pressure]")
+{
+    SECTION("A configuration below the floor holds the allowance to it, not to the floor")
+    {
+        core::platform::ManualClock clock;
+        PressureGovernor governor { PressureThresholds {}, 1 * GiB, Floor, clock };
+        CHECK(governor.Step(SampleOf(GameStall), 0).allowanceBytes == 1 * GiB);
+    }
+    SECTION("Reconfigured below the floor, a lowered allowance is clamped to the new configured bytes")
+    {
+        Rig rig;
+        REQUIRE(rig.After(0s, GameStall, 0).allowanceBytes == Floor);
+        rig.governor.Reconfigure(1 * GiB, Floor);
+        CHECK(rig.governor.AllowanceBytes() == 1 * GiB);
+    }
+}
+
+TEST_CASE("A stall the compiles carry far below their ceiling is a yield", "[node][pressure]")
+{
+    // Compiles in direct reclaim stall with everything else when a game takes the machine's memory: their share of the
+    // stall is no evidence the stall is theirs unless they stand at their own ceiling.
+    SECTION("Compiles' some close to the system's, far below their limit: yield")
+    {
+        Rig rig;
+        auto const decision = rig.After(0s, { .some = 20.0, .full = 0.0, .compiles = 19.5, .atLimit = false }, 30 * GiB);
+        CHECK(decision.level == PressureLevel::Yield);
+        CHECK(decision.allowanceBytes == 30 * GiB);
+    }
+    SECTION("Control: the same stall at their limit is the ceiling working")
+    {
+        Rig rig;
+        CHECK(rig.After(0s, { .some = 20.0, .full = 0.0, .compiles = 19.5, .atLimit = true }, 30 * GiB).level
+              == PressureLevel::Calm);
+    }
+    SECTION("A full stall they carry below their limit holds a shed")
+    {
+        Rig rig;
+        REQUIRE(rig.After(0s, Freezing, 30 * GiB).level == PressureLevel::Shed);
+        auto const below = Script { .some = 3.0, .full = 3.0, .compiles = 0.0, .compilesFull = 2.9, .atLimit = false };
+        CHECK(rig.After(10s, below, 20 * GiB).level == PressureLevel::Shed);
+    }
+}
+
+TEST_CASE("A shed left on the compiles' own full stall is not re-entered on it", "[node][pressure]")
+{
+    // An own full stall at or above the shed threshold, held for a minute: entering sheds (full is "regardless"),
+    // leaving at the dwell counts it as eased -- and it must stay left, not flap back each dwell and kill again.
+    auto const own = Script { .some = 8.0, .full = 6.0, .compiles = 7.9, .compilesFull = 5.9, .atLimit = true };
+    Rig rig;
+    auto kills = 0;
+    auto changes = 0;
+    auto const tally = [&](GovernorDecision const& decision) {
+        kills += decision.killYoungest ? 1 : 0;
+        changes += decision.levelChanged ? 1 : 0;
+        return decision;
+    };
+    REQUIRE(tally(rig.After(0s, own, 30 * GiB)).level == PressureLevel::Shed);
+    for ([[maybe_unused]] auto const second: std::views::iota(0, 60))
+        static_cast<void>(tally(rig.After(1s, own, 30 * GiB)));
+    CHECK(kills <= 1);
+    CHECK(changes == 2); // into Shed, and out of it once
+    CHECK(rig.After(1s, own, 30 * GiB).level == PressureLevel::Calm);
+
+    SECTION("The latch lifts once the full stall turns foreign: that sheds again")
+    {
+        auto const foreign = Script { .some = 8.0, .full = 6.0, .compiles = 1.0, .compilesFull = 0.5, .atLimit = true };
+        auto const decision = rig.After(1s, foreign, 30 * GiB);
+        CHECK(decision.level == PressureLevel::Shed);
+        CHECK(decision.killYoungest);
+    }
+    SECTION("The latch lifts once the full stall falls below the exit: the next own freeze sheds again")
+    {
+        REQUIRE(rig.After(1s, Quiet, 30 * GiB).level == PressureLevel::Calm);
+        CHECK(rig.After(1s, own, 30 * GiB).level == PressureLevel::Shed);
+    }
 }

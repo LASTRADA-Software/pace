@@ -23,6 +23,11 @@ inline constexpr std::string_view PsiSystemPath = "/proc/pressure/memory";
 /// The per-cgroup PSI file, relative to a cgroup directory.
 inline constexpr std::string_view PsiCgroupFileName = "memory.pressure";
 
+/// How close to its `memory.max` a cgroup's `memory.current` counts as AT it, as a divisor of the ceiling: within a
+/// twentieth (5%). A cgroup reclaiming against its ceiling hovers just under it; one well below it is not stalling
+/// against it, whatever its stall says.
+inline constexpr std::uint64_t CeilingNearDivisor = 20;
+
 /// One `some`/`full` line of a PSI file.
 struct PsiLine
 {
@@ -52,6 +57,15 @@ struct PressureSample
     /// Why `compiles` is absent although a compiles cgroup was configured. Disengaged when no compiles
     /// path was configured or the read succeeded, so "not configured" and "unreadable" stay distinct.
     std::optional<std::string> compilesFault {};
+
+    /// Whether the compiles' cgroup is at its own ceiling now: its `memory.events` `max` count rose since the
+    /// previous sample, or its `memory.current` stands within `1 / CeilingNearDivisor` of a numeric `memory.max`.
+    ///
+    /// The evidence that a stall the compiles carry is the CEILING working rather than the machine running short:
+    /// compiles far below their limit stall only because the machine reclaims from everything, a game's shortage
+    /// included. False where no compiles cgroup is configured, where none of it can be read, and where no ceiling
+    /// is set (`max`) -- each of which counts the compiles' stall as nobody's own, the safe direction (a yield).
+    bool compilesAtLimit { false };
 };
 
 /// Where pressure samples come from.
@@ -70,7 +84,8 @@ class IMemoryPressureSource
     [[nodiscard]] virtual std::expected<PressureSample, std::string> Sample() = 0;
 };
 
-/// A source reading `/proc/pressure/memory` and `<compiles>/memory.pressure`.
+/// A source reading `/proc/pressure/memory` and `<compiles>/memory.pressure`, and whether the compiles stand at
+/// their ceiling from `<compiles>/memory.events`, `memory.current` and `memory.max`.
 class PsiPressureSource final: public IMemoryPressureSource
 {
   public:
@@ -81,8 +96,15 @@ class PsiPressureSource final: public IMemoryPressureSource
     [[nodiscard]] std::expected<PressureSample, std::string> Sample() override;
 
   private:
+    /// @param compiles The compiles' cgroup directory.
+    /// @return Whether the compiles stand at their ceiling now; updates the `max` count seen.
+    [[nodiscard]] bool CompilesAtLimit(std::filesystem::path const& compiles);
+
     std::shared_ptr<ICgroupHost const> _host;
     std::optional<std::filesystem::path> _compiles;
+    /// The compiles' `memory.events` `max` count at the previous sample; disengaged until one was read, so the
+    /// first sample never reads as a rise.
+    std::optional<std::uint64_t> _maxEventsSeen {};
 };
 
 } // namespace Pace::Platform

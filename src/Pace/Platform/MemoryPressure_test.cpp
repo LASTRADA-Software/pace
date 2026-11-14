@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -82,6 +83,59 @@ TEST_CASE("PsiPressureSource samples the system file and the compiles cgroup", "
         CHECK(sample.system.some.avg10 == 12.5);
         CHECK_FALSE(sample.compiles.has_value());
         CHECK(Unwrap(sample.compilesFault).find("/sys/fs/cgroup/x/compiles") != std::string::npos);
+    }
+}
+
+TEST_CASE("PsiPressureSource says whether the compiles stand at their own ceiling", "[platform][psi]")
+{
+    auto host = std::make_shared<FakeCgroupHost>();
+    host->files[std::string { PsiSystemPath }] = std::string { Full };
+    auto const compiles = std::filesystem::path { "/sys/fs/cgroup/x/compiles" };
+    host->files["/sys/fs/cgroup/x/compiles/memory.pressure"] = std::string { SomeOnly };
+    auto const events = [](int max) {
+        return "low 0\nhigh 0\nmax " + std::to_string(max) + "\noom 0\noom_kill 0\noom_group_kill 0\n";
+    };
+
+    SECTION("far below a numeric ceiling, with no max event: not at it")
+    {
+        host->files["/sys/fs/cgroup/x/compiles/memory.current"] = "1073741824\n";
+        host->files["/sys/fs/cgroup/x/compiles/memory.max"] = "8589934592\n";
+        host->files["/sys/fs/cgroup/x/compiles/memory.events"] = events(0);
+        PsiPressureSource source { host, compiles };
+        CHECK_FALSE(Unwrap(source.Sample()).compilesAtLimit);
+        CHECK_FALSE(Unwrap(source.Sample()).compilesAtLimit);
+    }
+    SECTION("within a twentieth of the ceiling: at it")
+    {
+        host->files["/sys/fs/cgroup/x/compiles/memory.current"] = "8200000000\n";
+        host->files["/sys/fs/cgroup/x/compiles/memory.max"] = "8589934592\n";
+        PsiPressureSource source { host, compiles };
+        CHECK(Unwrap(source.Sample()).compilesAtLimit);
+    }
+    SECTION("no ceiling (max) is never near, however much they hold")
+    {
+        host->files["/sys/fs/cgroup/x/compiles/memory.current"] = "8589934592\n";
+        host->files["/sys/fs/cgroup/x/compiles/memory.max"] = "max\n";
+        PsiPressureSource source { host, compiles };
+        CHECK_FALSE(Unwrap(source.Sample()).compilesAtLimit);
+    }
+    SECTION("a max count that rose since the previous sample: at it, though below now")
+    {
+        host->files["/sys/fs/cgroup/x/compiles/memory.current"] = "1073741824\n";
+        host->files["/sys/fs/cgroup/x/compiles/memory.max"] = "8589934592\n";
+        host->files["/sys/fs/cgroup/x/compiles/memory.events"] = events(7);
+        PsiPressureSource source { host, compiles };
+        // The first sample has nothing to compare with: a count already standing is no rise.
+        CHECK_FALSE(Unwrap(source.Sample()).compilesAtLimit);
+        host->files["/sys/fs/cgroup/x/compiles/memory.events"] = events(9);
+        CHECK(Unwrap(source.Sample()).compilesAtLimit);
+        // Standing still again is no rise.
+        CHECK_FALSE(Unwrap(source.Sample()).compilesAtLimit);
+    }
+    SECTION("nothing readable: not at it, which counts every stall as foreign")
+    {
+        PsiPressureSource source { host, compiles };
+        CHECK_FALSE(Unwrap(source.Sample()).compilesAtLimit);
     }
 }
 

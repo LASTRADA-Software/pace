@@ -3522,11 +3522,16 @@ oscillate:
 | `shed` | PSI `full` `avg10` at or above `--memory-pressure-shed` (the desktop freezing, whoever causes it), or a foreign stall that has held a `yield` for twenty seconds | admits nothing, and kills the **youngest** running compile, one per ten seconds, until the level drops |
 
 - **A stall that is the compiles' own is not a yield.** When the `compiles/` cgroup carries at least
-  80% of the machine's `some` stall, the stall is the ceiling working, and the level stays calm; a
-  yield caused by something else is not held by the compiles then stalling against the allowance it
-  set. Leaving a `shed` treats a `full` stall the compiles carry the same way. Without a readable
-  compiles reading every stall counts as foreign, and the node says so once at Warn (and once at
-  Info when it is readable again).
+  80% of the machine's `some` stall **and stands at its own ceiling** — its `memory.events` `max`
+  count rose since the last sample, or `memory.current` is within 5% of `memory.max` — the stall is
+  the ceiling working, and the level stays calm; a yield caused by something else is not held by the
+  compiles then stalling against the allowance it set. Compiles far below their ceiling that stall
+  with the machine are stalling because the kernel reclaims from everyone, a game's shortage
+  included, so that yields. Leaving a `shed` treats a `full` stall the compiles carry the same way,
+  and a `shed` left that way is not re-entered on the same stall: it takes the `full` stall turning
+  foreign, or falling below a fifth of `--memory-pressure-shed`, before a freeze sheds again.
+  Without a readable compiles reading every stall counts as foreign, and the node says so once at
+  Warn (and once at Info when it is readable again).
 - **The youngest** because it has made the least progress, so its client loses the least by
   compiling it again. It is marked *shed* before its `cgroup.kill` is written, so the worker answers
   `worker-compile-killed` with that cause and counts it in `pace_worker_compiles_killed_shed_total`;
@@ -3534,7 +3539,8 @@ oscillate:
 - **The allowance.** Entering `yield` or `shed` sets the compiles' allowance to what they hold at that
   moment — the larger of what `compiles/` is resident in (`compiles/memory.current`) and what the
   machine's compiles are charged, local leases included — the work that demonstrably fits beside
-  whatever else runs. It becomes both the ceiling written on `compiles/memory.max` and the budget the
+  whatever else runs, but never less than one default compile estimate (`--compile-estimate-default`),
+  so a machine whose compiles held next to nothing still reports a budget one compile fits. It becomes both the ceiling written on `compiles/memory.max` and the budget the
   machine reports, so the fleet's queue and the kernel agree. **A running compile that grows past it is
   killed by the ceiling** (`worker-compile-killed`, counted in `pace_worker_compiles_killed_ceiling_total`)
   and its client compiles it locally: a yield stops new work *and* caps the work already running. While

@@ -42,6 +42,35 @@ namespace
         return parsed;
     }
 
+    /// A whole control file holding one decimal number, as `memory.current` and `memory.max` do.
+    /// @param text The file's text.
+    /// @return The number; disengaged for anything else, `max` included.
+    [[nodiscard]] std::optional<std::uint64_t> DecimalOf(std::string_view text)
+    {
+        while (!text.empty() && (text.back() == '\n' || text.back() == ' '))
+            text.remove_suffix(1);
+        auto value = std::uint64_t { 0 };
+        auto const [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+        if (text.empty() || error != std::errc {} || end != text.data() + text.size())
+            return std::nullopt;
+        return value;
+    }
+
+    /// The value of the `<key> <number>` line of a flat-keyed control file such as `memory.events`.
+    /// @param document The file's text.
+    /// @param key The line's key.
+    /// @return The number; disengaged when the line is absent or unreadable.
+    [[nodiscard]] std::optional<std::uint64_t> KeyedOf(std::string_view document, std::string_view key)
+    {
+        for (auto const lineRange: std::views::split(document, '\n'))
+        {
+            auto const line = std::string_view { lineRange.begin(), lineRange.end() };
+            if (line.size() > key.size() && line.starts_with(key) && line[key.size()] == ' ')
+                return DecimalOf(line.substr(key.size() + 1));
+        }
+        return std::nullopt;
+    }
+
 } // namespace
 
 std::expected<PsiReading, std::string> ParsePsi(std::string_view document)
@@ -100,8 +129,29 @@ std::expected<PressureSample, std::string> PsiPressureSource::Sample()
             sample.compiles = *compiles;
         else
             sample.compilesFault = std::move(compiles.error());
+        sample.compilesAtLimit = CompilesAtLimit(*_compiles);
     }
     return sample;
+}
+
+bool PsiPressureSource::CompilesAtLimit(std::filesystem::path const& compiles)
+{
+    auto const readNumber = [&](std::string_view name) -> std::optional<std::uint64_t> {
+        auto const text = _host->ReadFile(compiles / name);
+        return text ? DecimalOf(*text) : std::nullopt;
+    };
+
+    // Rising since the previous sample: the kernel counted the compiles reaching their ceiling in between.
+    auto const events = _host->ReadFile(compiles / "memory.events");
+    auto const maxEvents = events ? KeyedOf(*events, "max") : std::nullopt;
+    auto const rose = maxEvents && _maxEventsSeen && *maxEvents > *_maxEventsSeen;
+    _maxEventsSeen = maxEvents;
+
+    // Standing just under a numeric ceiling now; `max` (no ceiling) is never near.
+    auto const current = readNumber("memory.current");
+    auto const ceiling = readNumber("memory.max");
+    auto const near = current && ceiling && *current >= *ceiling - (*ceiling / CeilingNearDivisor);
+    return rose || near;
 }
 
 } // namespace Pace::Platform

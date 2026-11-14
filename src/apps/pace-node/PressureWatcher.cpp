@@ -7,6 +7,7 @@
 #include <Pace/Core/EnumTable.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <condition_variable>
 #include <format>
 #include <mutex>
@@ -54,6 +55,15 @@ namespace
         return PressureLevelTable[static_cast<std::size_t>(level)];
     }
 
+    /// How a threshold is said: a disabled one is "never", not the `inf%` its value would print as.
+    /// @param relation How the figure relates to the threshold ("above", "at").
+    /// @param threshold The threshold.
+    /// @return The phrase.
+    [[nodiscard]] std::string ThresholdText(std::string_view relation, double threshold)
+    {
+        return std::isinf(threshold) ? std::string { "never" } : std::format("{} {}%", relation, threshold);
+    }
+
     /// A configured percentage as a threshold: zero turns the level off.
     /// @param percent The flag's value.
     /// @return The threshold.
@@ -83,7 +93,8 @@ PressureSettings LivePressureSettings::Current() const
 {
     auto const cfg = _inForce.Current();
     return PressureSettings { .thresholds = MemoryPressureThresholdsOf(cfg),
-                              .configuredBytes = CompileCeilingOf(cfg, _capacity.Current()) };
+                              .configuredBytes = CompileCeilingOf(cfg, _capacity.Current()),
+                              .floorBytes = CompileEstimateDefaultOf(cfg) };
 }
 
 PressureWatcher::PressureWatcher(PressureWatcherParts parts):
@@ -101,7 +112,7 @@ PressureWatcher::PressureWatcher(PressureWatcherParts parts):
     _poll { parts.poll },
     _platformHasPsi { parts.platformHasPsi },
     _applied { _settings.Current() },
-    _governor { _applied.thresholds, _applied.configuredBytes, _clock },
+    _governor { _applied.thresholds, _applied.configuredBytes, _applied.floorBytes, _clock },
     _counted { _clock.now() }
 {
 }
@@ -131,9 +142,9 @@ std::expected<void, std::string> PressureWatcher::Start(bool launch)
     _conditions.Clear(NodeCondition::MemoryPressureShedding);
     _published.Publish(MachinePressure { .level = PressureLevel::Calm, .allowanceBytes = std::nullopt });
     _logger.Logf(LogLevel::Info,
-                 "memory pressure watched: yields above {}% (PSI some), sheds at {}% (PSI full); {}",
-                 _applied.thresholds.yieldEnter,
-                 _applied.thresholds.shedEnter,
+                 "memory pressure watched: yields {} (PSI some), sheds {} (PSI full); {}",
+                 ThresholdText("above", _applied.thresholds.yieldEnter),
+                 ThresholdText("at", _applied.thresholds.shedEnter),
                  _ceiling != nullptr
                      ? "a yield holds compiles under what they held, and a shed kills the youngest"
                      : "compiles run in no cgroup of this node's own, so it changes only what this machine reports -- "
@@ -175,9 +186,10 @@ void PressureWatcher::StepOnce()
     {
         if (settings.thresholds != _applied.thresholds)
             _governor.Retune(settings.thresholds);
+        if (settings.configuredBytes != _applied.configuredBytes || settings.floorBytes != _applied.floorBytes)
+            _governor.Reconfigure(settings.configuredBytes, settings.floorBytes);
         if (settings.configuredBytes != _applied.configuredBytes)
         {
-            _governor.Reconfigure(settings.configuredBytes);
             // A raise an allowance that pressure lowered does not follow at once: say so, since the ceiling and the
             // budget now sit below what the operator just configured for up to ten minutes.
             if (settings.configuredBytes > _applied.configuredBytes && _governor.AllowanceBytes() < settings.configuredBytes)

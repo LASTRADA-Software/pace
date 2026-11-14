@@ -30,9 +30,10 @@ inline constexpr double DisabledPressureThreshold = std::numeric_limits<double>:
 /// line. Each level has an exit threshold below its entry one, and a minimum `dwell` before it may be
 /// left, so a figure hovering at a threshold cannot make the level oscillate.
 ///
-/// **Why the defaults sit so far below systemd-oomd's.** oomd (Fedora's default) kills a whole user
-/// slice once its memory pressure has stayed above 50-80% for 20 s -- and that slice is the desktop, the
-/// game and the editor, not merely the compiles. The node must act FIRST: a 10% `some` stall over 10 s is
+/// **Why the defaults sit so far below systemd-oomd's.** oomd (Fedora's default) kills a whole cgroup of
+/// `system.slice` or a user slice once its memory pressure has stayed above 80% for 20 s (Fedora 44's
+/// per-slice defaults) -- and under the user unit that slice is the desktop, the game and the editor, not
+/// merely the compiles. The node must act FIRST: a 10% `some` stall over 10 s is
 /// already a desktop that stutters, and 5% `full` (every non-idle task stalled at once) is one that
 /// freezes. Yielding at those levels costs only admissions the fleet can place elsewhere; acting at
 /// oomd's figures would mean acting after oomd has already chosen a victim. The 10 s dwell matches PSI's
@@ -69,8 +70,10 @@ struct GovernorDecision
 /// The pressure state machine: Calm, Yield, Shed, with hysteresis, dwell and an adaptive allowance.
 ///
 /// - **A stall that is the compiles' own is not a yield.** System `some` above `yieldEnter` counts only
-///   when the compiles' cgroup's `some` is below `ownShare` of it, or there is no compiles reading.
-///   Otherwise it is the ceiling working, and the level stays `Calm`.
+///   when the compiles' cgroup's `some` is below `ownShare` of it, or there is no compiles reading, or the
+///   compiles do not stand at their own ceiling (`PressureSample::compilesAtLimit`). Otherwise it is the
+///   ceiling working, and the level stays `Calm`. Compiles far below their limit that stall with the
+///   machine are stalling on someone else's shortage -- the machine reclaims from everyone -- so that yields.
 /// - **Shed** on system `full` at or above `shedEnter`, whoever stalls, or from `Yield` once a FOREIGN
 ///   stall (above) has held for twice `dwell` without a break: its clock restarts whenever it drops, so a
 ///   yield that eased and then returns is not shed at once. While shedding, `killYoungest` is true at most
@@ -79,11 +82,18 @@ struct GovernorDecision
 ///   own stall counts as below: compiles stalling against the ceiling a yield just set hold the node in
 ///   no level. That holds for `full` too: entering `Shed` on `full` asks nobody whose stall it is, but
 ///   leaving it counts `full` as eased below `shedExit` OR when the compiles' own `full` is at least
-///   `ownShare` of the system's -- never when the compiles' reading or its `full` line is absent. Leaving
-///   `Shed` also needs no foreign stall above `yieldEnter`, and lands in `Yield` unless the stall has
-///   already eased below `yieldExit` or is the compiles' own.
-/// - **The allowance**: entering `Yield` or `Shed` sets it to what compiles hold (never raising it); while
-///   `Calm` it grows by `rampPercent` of the configured bytes per `rampInterval`, never past them.
+///   `ownShare` of the system's (and they stand at their ceiling) -- never when the compiles' reading or its
+///   `full` line is absent. Leaving `Shed` also needs no foreign stall above `yieldEnter`, and lands in `Yield`
+///   unless the stall has already eased below `yieldExit` or is the compiles' own.
+/// - **A shed left on an own full stall LATCHES**: while that stall persists, `full` at or above `shedEnter`
+///   does not re-enter `Shed`. The latch lifts once the full stall turns foreign or falls below `shedExit`,
+///   and entry is "regardless of whose" again from then -- otherwise one own stall flaps `Shed` and `Calm`
+///   every dwell and kills a compile at each entry.
+/// - **The allowance**: entering `Yield` or `Shed` sets it to what compiles hold (never raising it), but never
+///   below the floor -- one default compile estimate, itself never above the configured bytes. A machine whose
+///   compiles held next to nothing when pressure began would otherwise report a budget no compile fits, and the
+///   queue would refuse everything for the whole ramp. While `Calm` it grows by `rampPercent` of the configured
+///   bytes per `rampInterval`, never past them.
 ///
 /// Lives in the node process only: never replicated, never persisted, so a restart starts calm at the
 /// configured allowance. Not thread-safe; one watcher thread steps it.
@@ -92,8 +102,13 @@ class PressureGovernor
   public:
     /// @param thresholds The levels' thresholds, dwell and ramp.
     /// @param configuredBytes The configured compile allowance, the ceiling the allowance never exceeds.
+    /// @param floorBytes The least a yield or shed lowers the allowance to (one default compile estimate); taken
+    ///                   as the configured bytes where it is above them.
     /// @param clock The time source for dwell and ramp.
-    PressureGovernor(PressureThresholds thresholds, std::uint64_t configuredBytes, core::platform::IClock const& clock);
+    PressureGovernor(PressureThresholds thresholds,
+                     std::uint64_t configuredBytes,
+                     std::uint64_t floorBytes,
+                     core::platform::IClock const& clock);
 
     /// Read one sample.
     /// @param sample The machine's pressure, and the compiles' when there is a compiles cgroup.
@@ -101,11 +116,13 @@ class PressureGovernor
     /// @return The level, the allowance, and whether to kill the youngest compile.
     [[nodiscard]] GovernorDecision Step(Platform::PressureSample const& sample, std::uint64_t compilesHoldBytes);
 
-    /// Change the configured allowance. Lowering it clamps the allowance. Raising it raises an allowance that
-    /// stands AT the old configured value -- never lowered by pressure, or fully ramped back -- at once; one a
-    /// yield or shed lowered stays where it stands and ramps toward the new value.
+    /// Change the configured allowance and its floor. Lowering the configured bytes clamps the allowance. Raising
+    /// them raises an allowance that stands AT the old configured value -- never lowered by pressure, or fully
+    /// ramped back -- at once; one a yield or shed lowered stays where it stands (lifted to a raised floor) and
+    /// ramps toward the new value.
     /// @param configuredBytes The new configured allowance.
-    void Reconfigure(std::uint64_t configuredBytes);
+    /// @param floorBytes The new floor; taken as the configured bytes where it is above them.
+    void Reconfigure(std::uint64_t configuredBytes, std::uint64_t floorBytes);
 
     /// Change the thresholds, dwell and ramp from the next sample on. The level held and its clocks stay: a
     /// reload moves where the next change happens, never the state the machine is in.
@@ -125,8 +142,12 @@ class PressureGovernor
     /// @return One ramp step: `rampPercent` of the configured bytes, without overflowing.
     [[nodiscard]] std::uint64_t RampStepBytes() const noexcept;
 
+    /// @return The floor in force: the configured one, never above the configured bytes.
+    [[nodiscard]] std::uint64_t FloorBytes() const noexcept;
+
     PressureThresholds _thresholds;
     std::uint64_t _configuredBytes;
+    std::uint64_t _floorBytes; ///< As configured; `FloorBytes()` caps it at `_configuredBytes`.
     core::platform::IClock const& _clock;
     PressureLevel _level = PressureLevel::Calm;
     std::uint64_t _allowanceBytes;
@@ -134,6 +155,7 @@ class PressureGovernor
     core::platform::SteadyTimePoint _rampAnchor;
     std::optional<core::platform::SteadyTimePoint> _lastKill;
     std::optional<core::platform::SteadyTimePoint> _foreignStallSince; ///< Since when the foreign stall has held.
+    bool _ownFreezeLatched { false }; ///< A shed was left on the compiles' own full stall, which has not lifted since.
 };
 
 } // namespace Pace::Node

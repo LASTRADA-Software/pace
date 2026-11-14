@@ -39,6 +39,7 @@ struct PressureSettings
 {
     PressureThresholds thresholds {}; ///< Where the levels change.
     std::uint64_t configuredBytes {}; ///< The compile ceiling in force; the allowance is never above it.
+    std::uint64_t floorBytes {};      ///< The least pressure lowers the allowance to: one default compile estimate.
 
     [[nodiscard]] bool operator==(PressureSettings const&) const = default;
 };

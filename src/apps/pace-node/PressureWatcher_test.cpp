@@ -70,7 +70,7 @@ class ScriptedPressure final: public Platform::IMemoryPressureSource
 class FixedSettings final: public IPressureSettings
 {
   public:
-    PressureSettings settings { .thresholds = PressureThresholds {}, .configuredBytes = Configured };
+    PressureSettings settings { .thresholds = PressureThresholds {}, .configuredBytes = Configured, .floorBytes = 0 };
 
     [[nodiscard]] PressureSettings Current() const override
     {
@@ -628,4 +628,66 @@ TEST_CASE("A capacity that moves re-applies the derived ceiling with the pressur
     rig.Step(GameStall);
     auto const pressed = CeilingsWritten(*rig.host);
     CHECK(pressed == std::vector<std::uint64_t> { 24 * GiB, 18 * GiB, 24 * GiB, 12 * GiB });
+}
+
+TEST_CASE("A disabled threshold is said as never, not as an infinite percentage", "[node][pressure]")
+{
+    Rig rig;
+    rig.settings.settings.thresholds.yieldEnter = Node::DisabledPressureThreshold;
+    rig.settings.settings.thresholds.shedEnter = Node::DisabledPressureThreshold;
+    Rig enabled;
+    // The watcher reads its settings at construction, so the disabled one is built after the change.
+    auto scripted = std::make_unique<ScriptedPressure>();
+    rig.watcher = std::make_unique<PressureWatcher>(PressureWatcherParts { .source = std::move(scripted),
+                                                                           .settings = rig.settings,
+                                                                           .ceiling = &rig.ceiling,
+                                                                           .killer = &rig.killer,
+                                                                           .held = rig.held,
+                                                                           .published = rig.published,
+                                                                           .wake = rig.wake,
+                                                                           .conditions = rig.conditions,
+                                                                           .metrics = rig.metrics,
+                                                                           .logger = rig.logger,
+                                                                           .clock = rig.clock,
+                                                                           .poll = 1s,
+                                                                           .platformHasPsi = true });
+    rig.Started();
+    enabled.Started();
+    auto const startLine = [](CapturingLogger const& logger) {
+        auto const records = logger.Snapshot();
+        auto const found = std::ranges::find_if(records, [](CapturingLogger::Record const& record) {
+            return record.message.starts_with("memory pressure watched");
+        });
+        REQUIRE(found != records.end());
+        return found->message;
+    };
+    auto const disabled = startLine(rig.logger);
+    CHECK(disabled.contains("yields never"));
+    CHECK(disabled.contains("sheds never"));
+    CHECK_FALSE(disabled.contains("inf"));
+    // Control: an enabled threshold still names its figure.
+    auto const figures = startLine(enabled.logger);
+    CHECK(figures.contains("yields above 10%"));
+    CHECK(figures.contains("sheds at 5%"));
+}
+
+TEST_CASE("The allowance floor reaches the governor from the configuration", "[node][pressure]")
+{
+    // F2: production's settings carry one default compile estimate as the floor, and a yield over a machine whose
+    // compiles hold nothing lowers the allowance to it, never to zero.
+    InForce inForce;
+    inForce.cfg.compileEstimateDefaultBytes = 3 * GiB;
+    Machine machine;
+    LivePressureSettings const live { inForce, machine };
+    CHECK(live.Current().floorBytes == 3 * GiB);
+
+    Rig rig;
+    rig.settings.settings.floorBytes = 3 * GiB;
+    rig.held.held.bytes = 0;
+    rig.ceiling.held = 0;
+    rig.Started();
+    rig.Step(1s, GameStall);
+    CHECK(rig.Published().level == Wire::PressureLevel::Yield);
+    CHECK(rig.Published().allowanceBytes == 3 * GiB);
+    CHECK(rig.ceiling.applied.back() == 3 * GiB);
 }
