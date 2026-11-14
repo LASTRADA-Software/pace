@@ -277,8 +277,9 @@ inline constexpr std::string_view CompilesCgroupName = "compiles";
 /// Written on the node's own leaf (`node/`), never on `compiles/`: oomd kills a whole cgroup, and the node holding
 /// the cache tier is the one cgroup here it must not choose -- the compiles are the ones the node sheds itself.
 /// oomd honours a `user.` attribute only on a cgroup owned by the user its manager runs as, so it takes effect under
-/// the shipped USER unit; under the system unit the node's account owns `node/` and root's oomd ignores it, so a
-/// system-unit node stays oomd-eligible (a `pace.slice` for it is follow-up work). The unit's own
+/// the shipped USER unit; under the system unit the node's account owns `node/` and root's oomd ignores it. What
+/// takes a system-unit node out instead is where its cgroup sits: that unit names `Slice=pace.slice`, a sibling of
+/// the `system.slice` oomd monitors, which no default monitors (#1773, `packaging/linux/pace.slice`). The unit's own
 /// `ManagedOOMPreference=omit` reaches neither, since oomd reads the attribute on the cgroup it would kill and does not
 /// inherit it down a delegated subtree.
 inline constexpr std::string_view OomdOmitAttribute = "user.oomd_omit";

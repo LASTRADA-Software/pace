@@ -3455,9 +3455,12 @@ sets `Delegate=memory`, `ProtectControlGroups=private` and `RestrictNamespaces=n
 - `RestrictNamespaces=no` because starting a process inside a cgroup is `clone3`, which a seccomp
   filter cannot inspect: systemd refuses it outright whenever any namespace is restricted
   (measured on systemd 259: `ENOTSUP`). `SystemCallFilter=@system-service` permits `clone3` itself.
+- `Slice=pace.slice` (system unit only) runs the node in a slice of its own, a sibling of
+  `system.slice`, which is what keeps a system-unit node out of systemd-oomd's choice of victim
+  (#1773). The package ships the slice; it limits nothing.
 - `ManagedOOMPreference=omit` states the intent to keep the node out of systemd-oomd's choice of
-  victim; what actually takes it out is the node's own mark on its `node/` cgroup, and only under the
-  user unit (see layer A below).
+  victim; what actually takes it out is the node's own mark on its `node/` cgroup under the user
+  unit, and the slice above under the system unit (see layer A below).
 
 A node started by hand from a terminal is not delegated — the terminal's scope holds the shell — and
 runs unmeasured and uncapped; so does a node on a kernel older than 5.19, which has no `memory.peak`,
@@ -3620,9 +3623,19 @@ set far below oomd's (above) so that it acts before oomd chooses a victim. The u
 
 **Where the mark is honoured.** oomd honours a `user.` attribute only on a cgroup owned by the user its
 manager runs as. Under the shipped **user** unit the node's `node/` cgroup is the user's own, so the
-mark takes effect. Under the **system** unit `node/` is owned by the service account while root's oomd
-monitors `system.slice`, so the mark is ignored and a system-unit node stays oomd-eligible, as it was
-before; a dedicated slice for the system unit is follow-up work. When the mark cannot be set at all
+mark takes effect. Under the **system** unit `node/` is owned by the service account, so root's oomd
+ignores the mark; what takes that node out instead is where its cgroup sits (#1773). oomd only chooses
+a cgroup below one it monitors, and Fedora's defaults monitor `system.slice` and the user managers'
+slices (`/usr/lib/systemd/{system/system.slice.d,user/slice.d}/10-oomd-per-slice-defaults.conf`, 80%
+pressure held for 20 s) and nothing else -- measured on Fedora 44 with systemd 259, where `oomctl` lists
+exactly those. A service with no `Slice=` lands in `system.slice`; the system unit names
+`Slice=pace.slice`, which the package ships as a sibling of `system.slice` under the root slice, so
+the node is outside every cgroup oomd monitors there. The slice sets nothing: the node holds its
+compiles under its own ceiling, and a limit on the slice would put the cache tier under it too. A
+distribution that also monitors the root slice includes the node again, and `oomctl` on the host says
+which cgroups are monitored; `systemctl show -p ControlGroup pace-node` should read
+`/pace.slice/pace-node.service`. A node that was running when the package was upgraded moves at its
+next restart. When the mark cannot be set at all
 (a kernel without user extended attributes on cgroupfs) the node says so once at Warn, naming the
 cgroup, and runs as before.
 

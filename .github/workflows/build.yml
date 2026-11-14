@@ -2674,7 +2674,8 @@ jobs:
           # it, and the pipeline then reports "no finding" exactly when there was
           # one (build-and-toolchain.md).
           for unit in packaging/linux/pace-kv.service packaging/linux/pace-kv-user.service \
-                      packaging/linux/pace-node.service packaging/linux/pace-node.socket; do
+                      packaging/linux/pace-node.service packaging/linux/pace-node.socket \
+                      packaging/linux/pace.slice; do
             echo "== $unit"
             out=$(systemd-analyze verify "$unit" 2>&1 || true)
             echo "$out"
@@ -2708,6 +2709,7 @@ jobs:
                       ./usr/lib/tmpfiles.d/pace-kv.conf \
                       ./usr/lib/systemd/system/pace-node.service \
                       ./usr/lib/systemd/system/pace-node.socket \
+                      ./usr/lib/systemd/system/pace.slice \
                       ./usr/lib/sysusers.d/pace-node.conf \
                       ./etc/pace/pace-node.yaml \
                       ./etc/pace/pace-kv.yaml; do
@@ -2747,6 +2749,7 @@ jobs:
                       /usr/lib/tmpfiles.d/pace-kv.conf \
                       /usr/lib/systemd/system/pace-node.service \
                       /usr/lib/systemd/system/pace-node.socket \
+                      /usr/lib/systemd/system/pace.slice \
                       /usr/lib/sysusers.d/pace-node.conf \
                       /etc/pace/pace-node.yaml \
                       /etc/pace/pace-kv.yaml; do
@@ -2986,6 +2989,12 @@ jobs:
 
           test "$(systemctl show -p User --value pace-node)" = pace-node
 
+          # Out of systemd-oomd's choice: the unit names the slice the package ships, a
+          # sibling of system.slice, and the cgroup is where it says (#1773). The
+          # ControlGroup is the fact; the Slice property is only the unit's claim.
+          test "$(systemctl show -p ControlGroup --value pace-node)" = /pace.slice/pace-node.service \
+            || { echo "::error::the worker is not in pace.slice: $(systemctl show -p ControlGroup --value pace-node)"; exit 1; }
+
           # The stop path, on real systemd and on an ADOPTED descriptor. This is
           # the assertion that matters most here: POSIX does not unblock a parked
           # accept() when the listener is closed, so a worker without a receive
@@ -3016,6 +3025,7 @@ jobs:
           test ! -e /usr/lib/systemd/system/pace-kv.service
           test ! -e /usr/lib/systemd/system/pace-node.service
           test ! -e /usr/lib/systemd/system/pace-node.socket
+          test ! -e /usr/lib/systemd/system/pace.slice
           # A leftover wants-symlink makes systemd log a failure on every boot.
           test ! -e /etc/systemd/system/multi-user.target.wants/pace-kv.service
           # The socket is the unit that gets enabled, so it is the one that

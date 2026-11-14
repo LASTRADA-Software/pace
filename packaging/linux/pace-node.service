@@ -206,15 +206,21 @@ ProtectControlGroups=private
 Delegate=memory
 # systemd-oomd kills a whole cgroup: left in its choice, a memory squeeze would kill the node
 # together with its cache tier, where the node's own ceiling and shedding kill one compile and
-# the client recompiles it. This line marks the UNIT's cgroup, and is NOT what protects the node
-# here: with `Delegate=` the unit is no leaf, oomd ranks the cgroups below it, and the mark is
-# not inherited by them. The node marks its own `node/` cgroup itself (`user.oomd_omit`), but
-# oomd honours a `user.` mark only on a cgroup owned by the user its manager runs as, and
-# under this SYSTEM unit `node/` belongs to the service account while root's oomd monitors
-# system.slice -- so a node started by this unit stays oomd-eligible, as it was before. Fedora
-# 44's per-slice default kills in system.slice at 80% pressure held for 20 s; the node sheds its
-# own compiles far below that. Kept as the unit's statement of intent; a dedicated slice for
-# the system unit is follow-up work. Known since systemd 248.
+# the client recompiles it. What keeps a node started by this unit out of that choice is the
+# slice it runs in (#1773). oomd only picks a cgroup BELOW one it monitors, and Fedora 44's
+# defaults monitor `system.slice` (and the user managers' slices) -- killing there at 80%
+# pressure held for 20 s -- where a unit with no `Slice=` lands. `pace.slice` is a sibling of
+# `system.slice`, under the root slice, which no default monitors; it limits nothing, the node
+# caps its own compiles. See packaging/linux/pace.slice for the measurement, and `oomctl` for
+# what a given host monitors. A running node moves at its next restart, not at the upgrade.
+#
+# Neither of the other two marks does this here. The node marks its own `node/` cgroup
+# `user.oomd_omit=1`, but oomd honours a `user.` mark only on a cgroup owned by the user its
+# manager runs as, and under this SYSTEM unit `node/` belongs to the service account while
+# root's oomd is the one watching. `ManagedOOMPreference=omit` marks the UNIT's cgroup, which
+# with `Delegate=` is no leaf, and oomd reads the mark on the cgroup it would kill rather than
+# inheriting it. The line is kept as the unit's statement of intent. Known since systemd 248.
+Slice=pace.slice
 ManagedOOMPreference=omit
 ProtectKernelLogs=yes
 ProtectKernelModules=yes

@@ -53,7 +53,9 @@ below).
   the unit; a unit copied or overridden by hand keeps the old lines, and the node then runs as before,
   uncapped, raising `compile-memory-uncapped` -- remove the override, or add those lines to it, and
   restart. Under the user unit the node also takes its own cgroup out of systemd-oomd's choice of
-  victim; under the system unit it cannot (see
+  victim. Under the system unit it cannot mark itself, so the unit runs it in `pace.slice`, a slice
+  the package now ships beside `system.slice`, outside the slices oomd monitors by default (#1773);
+  a node running at the upgrade moves there at its next restart (see
   [layer A](../tools/pace-node.md#layer-a-compilers-are-the-kernels-first-victims)).
 - **`0xFC` 17:**
   - FLEET-TEXT carries a trailing format field, so it can return the fleet JSON `/fleet.json` serves

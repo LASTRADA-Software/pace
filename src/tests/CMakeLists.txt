@@ -4357,6 +4357,13 @@ set_tests_properties("service-accounts" PROPERTIES
 # cache_dir, so following the docs gave no disk tier and the obvious workaround gave
 # no node.
 #
+# And the SLICE the system unit runs the node in (#1773): it names `Slice=pace.slice`,
+# the slice ships in packaging/linux/ and is installed by one row of the packaging asset
+# table, it lies under no slice systemd-oomd monitors by default (system.slice,
+# user.slice), and its [Slice] section sets nothing. Without it the node lands in
+# system.slice, inside oomd's choice of victim, and dies with its cache tier -- while
+# everything still starts, which is why only a scan sees it.
+#
 # `docs-subject` as well as `hygiene`, because half of what it judges is prose: a
 # page that starts citing a path the unit does not create is a docs-only change,
 # which the code-gated jobs skip -- so `doc-subject-checks.sh` runs it from the
