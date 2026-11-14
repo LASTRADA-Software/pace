@@ -986,6 +986,57 @@ run_case() {
         esac
         ;;
 
+    # --- the node-state seam (#1774) ------------------------------------------
+    #
+    # Through the REAL seam: `e2e_node_state_enter` writes the shim over a stand-in node, so the
+    # writer and the control are judged together. The stand-in does what a worker does to the
+    # state directory -- caches a fingerprint where the launcher's `StateDirectoryImpl` puts it,
+    # `XDG_STATE_HOME` winning, else `$HOME/.local/state` -- when asked to (`--walk`).
+    node-state-*)
+        mkdir -p "${scratch}/real"
+        printf '#!/bin/sh\nif [ "${1-}" = --walk ]; then base="${XDG_STATE_HOME:-$HOME/.local/state}"; mkdir -p "$base/pace-cc/toolchains" && : > "$base/pace-cc/toolchains/stand-in.fingerprint"; fi\n' \
+            > "${scratch}/real/pace-node"
+        chmod +x "${scratch}/real/pace-node"
+        standIn="${scratch}/real/pace-node"
+        e2e_node_state_enter standIn
+        case "$standIn" in
+            "${scratch}/real/pace-node") echo "BUG: the node variable still names the real node" ;;
+            *) echo "the node variable names the shim" ;;
+        esac
+        case "$name" in
+            node-state-walked)
+                "$standIn" --walk
+                e2e_node_state_assert_used --fingerprinted
+                ;;
+            node-state-ran)
+                "$standIn"
+                e2e_node_state_assert_used
+                ;;
+            node-state-foreign-root)
+                # One run redirected, then one that was NOT: a single foreign value is the verdict.
+                "$standIn" --walk
+                printf 'run\nXDG_STATE_HOME=/somebody/elses/state\n' >> "${_e2e_node_state_root}/shim-runs"
+                e2e_node_state_assert_used --fingerprinted
+                echo "BUG: a run with a foreign state root passed the control"
+                ;;
+            node-state-zero-runs)
+                e2e_node_state_assert_used
+                echo "BUG: a fixture whose node never ran passed the control"
+                ;;
+            node-state-empty-runs)
+                : > "${_e2e_node_state_root}/shim-runs"
+                e2e_node_state_assert_used
+                echo "BUG: an empty shim record passed the control"
+                ;;
+            node-state-not-walked)
+                "$standIn"
+                e2e_node_state_assert_used --fingerprinted
+                echo "BUG: a node that cached nothing here passed --fingerprinted"
+                ;;
+            *) echo "BUG: no such node-state case: ${name}" ;;
+        esac
+        ;;
+
     # --- the wait loop -------------------------------------------------------
     #
     # Driven through `wait_until` rather than through `wait_for_port`,
@@ -3407,6 +3458,14 @@ cases=(
     "starvation-witness-open|0|ended by its bound: status 142|never closed: closed 0|kept ticking|!BUG:"
     "launcher-damage-unread|0|the control found this run's record|a failed count is reported, not clean|!BUG:"
     "launcher-damage-unread-tail|0|the control found this run's record|a failed count is reported, not clean|!BUG:"
+    # The node-state control: both passing rows first, since a control refusing everything would
+    # satisfy every refusing row. Each refusal asserts WHICH refusal, and that no other did.
+    "node-state-walked|0|the node variable names the shim|1 node run(s) kept their state in this run's root; 1 toolchain fingerprint(s) cached there|!FAILED|!BUG:"
+    "node-state-ran|0|the node variable names the shim|1 node run(s) kept their state in this run's root|!FAILED|!BUG:"
+    "node-state-foreign-root|1|did not have its state redirected to this run's root|XDG_STATE_HOME=/somebody/elses/state|!went through the node-state shim|!cached a toolchain fingerprint|!BUG:"
+    "node-state-zero-runs|1|no node of this fixture went through the node-state shim|!redirected to this run's root|!BUG:"
+    "node-state-empty-runs|1|no node of this fixture went through the node-state shim|!redirected to this run's root|!BUG:"
+    "node-state-not-walked|1|no node cached a toolchain fingerprint under this run's root|!redirected to this run's root|!went through the node-state shim|!BUG:"
     # Both accepting rows first: a helper refusing everything would satisfy every
     # refusing row while failing each clean stop. 143 is refused by DEFAULT -- a TERM
     # that killed a process skipped its teardown -- and accepted only when opted into.

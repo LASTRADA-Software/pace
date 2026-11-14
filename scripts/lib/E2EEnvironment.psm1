@@ -910,8 +910,63 @@ Use-E2ELauncherState $h { & $Launcher -z }'
     return $failures
 }
 
+# ---------------------------------------------------------------------------
+# A fixture's NODES keep their state in a directory of the run's own
+# ---------------------------------------------------------------------------
+#
+# A node running a worker fingerprints its toolchains through the launcher's own code and
+# keeps the answer in the launcher's machine-wide cache, `<state>\pace-cc\toolchains\
+# *.fingerprint` (`CacheFilePath` in src/apps/pace-cc/ToolchainProbe.cpp), `<state>` being
+# resolved from the same variables as the launcher's statistics. A worker started against
+# the developer's LOCALAPPDATA therefore serves whatever that cache holds and writes into
+# it -- which is how `dist-compile-e2e` failed run after run on machine state (#1774).
+#
+# So a node is started inside `Use-E2ENodeState`, the launcher's wrapper over a root of its
+# own: the same rows, the same scoping to ONE child, the caller's values put back. The
+# root is NOT the launcher's, deliberately: one root would let the launcher read the
+# worker's entry rather than walk for itself, and a fixture asserting that the two AGREE
+# on a fingerprint would then compare one answer with itself. The run's nodes share it, as
+# the nodes on one machine share one cache. The POSIX twin is `e2e_node_state_enter`.
+
+<#
+.SYNOPSIS
+    Make the state root every node of this run is started with, under @RunRoot. Returns the
+    handle `Use-E2ENodeState` and `Get-E2ENodeFingerprintCount` take.
+.PARAMETER RunRoot
+    A directory of this run's own, removed with it.
+#>
+function New-E2ENodeState([Parameter(Mandatory)][string]$RunRoot) {
+    $rows = @(Get-E2ELauncherStateRows)
+    $root = Join-Path $RunRoot "node-state"
+    New-Item -ItemType Directory -Force $root | Out-Null
+    return [pscustomobject]@{ Rows = $rows; Variables = @($rows | ForEach-Object Name); Root = $root }
+}
+
+<#
+.SYNOPSIS
+    Run @Run -- which STARTS a node -- with every state variable pointing at @Handle.Root,
+    and put the caller's values back however it ends. What @Run returns is returned.
+.DESCRIPTION
+    A started process takes its environment when it starts, so the redirect outlives this
+    call in the node and in nothing else.
+#>
+function Use-E2ENodeState([Parameter(Mandatory)]$Handle, [Parameter(Mandatory)][scriptblock]$Run) {
+    return Use-E2ELauncherState $Handle $Run
+}
+
+<#
+.SYNOPSIS
+    The positive control: how many toolchain fingerprints the run's nodes cached under
+    @Handle.Root. The layout `CacheFilePath` writes is restated here, so a move fails CLOSED,
+    as a count of zero.
+#>
+function Get-E2ENodeFingerprintCount([Parameter(Mandatory)]$Handle) {
+    $cache = Join-Path (Join-Path $Handle.Root "pace-cc") "toolchains"
+    return @(Get-ChildItem -LiteralPath $cache -Filter "*.fingerprint" -File -ErrorAction SilentlyContinue).Count
+}
+
 Export-ModuleMember -Function Clear-PaceEnvironment, Get-E2ELauncherStatePlatform, Get-E2ELauncherStateRows,
     Get-E2EUnwrappedLauncherUse, Test-E2EUnwrappedLauncherScan, Assert-E2ELauncherFixture, Enter-E2ELauncherState,
     Use-E2ELauncherState, Get-E2ELauncherStateRecordCount, Get-E2ELauncherCallerSnapshot, Get-E2ELauncherCallerDamage,
     Exit-E2ELauncherState, Test-E2ELauncherStateSeam, Get-E2ELauncherLogLayout, Get-E2ELauncherLogField,
-    Read-E2ELauncherLogLine, New-E2ELauncherLogLine
+    Read-E2ELauncherLogLine, New-E2ELauncherLogLine, New-E2ENodeState, Use-E2ENodeState, Get-E2ENodeFingerprintCount

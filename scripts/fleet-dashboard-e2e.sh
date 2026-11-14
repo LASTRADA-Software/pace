@@ -100,6 +100,9 @@ trap cleanup EXIT
 # with the server.
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/e2e-common.sh"
 e2e_begin "fleet dashboard E2E" "$workdir"
+# The worker fingerprints its toolchain into a state directory of the run's own, never the
+# developer's machine-wide cache, which would otherwise decide what it serves (#1774).
+e2e_node_state_enter node
 
 # Every failure dumps the node's log first; cleanup takes it away.
 dump_node_log() {
@@ -457,6 +460,8 @@ wait_until worker_is_registered "the worker's toolchain to reach the registry" \
 # and every total on the page would count this host twice.
 [[ "$json" != *'"toolchains":0'* ]] \
     || fail "/fleet.json lists a machine serving no toolchains: the presence row was not folded into the worker's"
+# The toolchain it registered was walked into this run's own cache, not the caller's.
+e2e_node_state_assert_used --fingerprinted
 
 # The version travelled from the node's own binary, through the REGISTER capacity
 # record, to the leader's report. Asserted end to end because every seam in that

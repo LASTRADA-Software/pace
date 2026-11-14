@@ -3086,6 +3086,28 @@ append to the real log — and a sentinel that always holds a record cannot see 
 fresh-machine case, which is how the silent exit above survived a verification that
 passed.
 
+**A NODE a fixture starts keeps its state in the run's own directory too, and a root apart
+from the launcher's** (#1774). A worker fingerprints its toolchains through the launcher's
+code into the launcher's machine-wide cache (`<state>/pace-cc/toolchains/*.fingerprint`),
+so a worker started against the developer's state serves whatever that cache holds and
+writes into it: `dist-compile-e2e` failed run after run on one truncated entry there, read
+as a branch regression, and re-poisoned it by tearing its own worker down mid-walk. The
+seam is `e2e_node_state_enter` (the launcher's shim writer and rows, over `<workdir>/node-state`)
+and `New-E2ENodeState` / `Use-E2ENodeState` in PowerShell; the positive control is the
+node's walk caching HERE (`e2e_node_state_assert_used --fingerprinted`,
+`Get-E2ENodeFingerprintCount`). Like the launcher's, it redirects every variable the rows
+name — `HOME` too, and `LOCALAPPDATA` on Windows — for the node AND every compiler it runs,
+which reaches further than the cache: their home is the run's root. The root is NOT the launcher's because one root lets the
+launcher READ the worker's entry instead of walking, and a fixture asserting the two agree
+would compare one answer with itself — #1774's mismatch is what that passes over. A node
+with `--slots=0` runs no survey and needs no seam. **The enforcement is `ctest -R
+node-fixture-starts`**: a start it classifies `runs`, naming no `--slots=0` and no inline
+`XDG_STATE_HOME=`, is refused `unisolated-node <file>:<line>` unless the `.sh` entered
+`e2e_node_state_enter` above it or the `.ps1` start sits inside `Use-E2ENodeState`. It fails
+OPEN on a start whose `--slots=0` arrives through a variable the statement text does not
+carry, and on a `.sh` start reached through a node variable OTHER than the one the seam
+rewrote.
+
 ## Open work
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues; AGENT.md tripwires rules, not residuals -->

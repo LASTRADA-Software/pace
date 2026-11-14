@@ -16,3 +16,5 @@ helper	scripts/node-scratch-isolation-e2e.ps1	Start-NodeIn	its body runs the arg
 exempt	scripts/exit-codes-e2e.sh	"$NODE" --no-such-flag	refused while its command line is parsed, before any state directory is named or any port is opened
 exempt	scripts/node-config-file-e2e.sh	"$NODE" --no-such-flag	refused while its command line is parsed, before any state directory is named or any port is opened
 census	scripts/check-cli-node-flags.sh	"$exe" --help, through a function parameter	it reads the node's --help and nothing else: a one-shot verb, which binds nothing and writes no state
+exempt	scripts/exit-codes-e2e.sh	"${NODE_BAIT[@]}"	NODE_BAIT is a typed --discovery on a node with consensus off, which the startup rules refuse (78) before any tier is built, so no worker runs and no toolchain survey can reach the state directory
+exempt	scripts/node-config-file-e2e.sh	"${STOPS_AT_THE_RULES[@]}"	STOPS_AT_THE_RULES is a typed --discovery on a node with consensus off, which the startup rules refuse (78) before any tier is built, so no worker runs and no toolchain survey can reach the state directory

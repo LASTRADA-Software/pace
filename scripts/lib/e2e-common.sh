@@ -3729,6 +3729,41 @@ _e2e_launcher_state_on_exit() {
     exit "$rc"
 }
 
+# Write the shim that runs @p 3 with every state variable in @p 5 pointing at @p 4, and
+# print its path. ONE writer for both seams that use it -- the launcher's and the node's --
+# so the two cannot disagree about which variables a redirect covers.
+#
+# Each run appends `run` and then `NAME=value` for every variable to `<root>/shim-runs`, so
+# a positive control proves the runs were redirected rather than only that they passed
+# through here. `exec`, so the shim's pid IS the program's: `$!`, `kill`, and a supervisor
+# handing over `LISTEN_PID` all name the process they meant.
+#
+# @param 1 the seam writing it, named in the shim's header
+# @param 2 what it runs, for the header: `launcher` or `node`
+# @param 3 the real executable, absolute
+# @param 4 the state root every variable is pointed at
+# @param 5 the state-variable rows, `e2e_launcher_state_rows`' answer
+_e2e_state_shim_write() {
+    local seam="$1" what="$2" real="$3" root="$4" rows="$5" shim name suffix
+    mkdir -p "${root}/bin" || fail "cannot create ${root}/bin"
+    shim="${root}/bin/${real##*/}"
+    {
+        e2e_bash_shebang
+        printf '# Written by %s (scripts/lib/e2e-common.sh): this run'"'"'s\n' "$seam"
+        printf '# %s keeps its state in a directory of its own, and nothing else is re-homed.\n' "$what"
+        while IFS='|' read -r name suffix; do
+            printf 'export %s=%q\n' "$name" "$root"
+        done < <(printf '%s\n' "$rows")
+        printf 'echo run >> %q\n' "${root}/shim-runs"
+        while IFS='|' read -r name suffix; do
+            printf 'printf "%%s=%%s\\n" %s "${%s-}" >> %q\n' "$name" "$name" "${root}/shim-runs"
+        done < <(printf '%s\n' "$rows")
+        printf 'exec %q "$@"\n' "$real"
+    } > "$shim" || fail "cannot write ${shim}"
+    chmod +x "$shim" || fail "cannot make ${shim} executable"
+    printf '%s\n' "$shim"
+}
+
 # Give the fixture's launcher a state directory of the run's own, and point the fixture's
 # launcher variable at the shim that keeps it there. Call once, after `e2e_begin` and
 # BEFORE any line that runs the launcher -- `launcher-state-isolation` refuses a fixture
@@ -3744,7 +3779,7 @@ _e2e_launcher_state_on_exit() {
 # @param 1 the NAME of the variable holding the launcher's path; rewritten to the shim
 # @param ... directories this run's sources live under, beyond its workdir
 e2e_launcher_state_enter() {
-    local var="$1" real rows root shim shown path rel name suffix prev line
+    local var="$1" real rows root shim shown path rel prev line
     shift
     [ -n "$_e2e_workdir" ] || fail "e2e_launcher_state_enter before e2e_begin: there is no workdir to keep the launcher's state in"
     case "$_e2e_launcher_state_caller" in
@@ -3765,24 +3800,8 @@ e2e_launcher_state_enter() {
     [ -n "$rows" ] \
         || fail "cannot read the launcher's state-directory variables from ${_e2e_launcher_state_source}; refusing to run a launcher unisolated"
     root="${_e2e_workdir}/launcher-state"
-    mkdir -p "${root}/bin" || fail "cannot create ${root}/bin"
-    shim="${root}/bin/${real##*/}"
-    {
-        e2e_bash_shebang
-        printf '# Written by e2e_launcher_state_enter (scripts/lib/e2e-common.sh): this run'"'"'s\n'
-        printf '# launcher records into its own state directory, and nothing else is re-homed.\n'
-        while IFS='|' read -r name suffix; do
-            printf 'export %s=%q\n' "$name" "$root"
-        done < <(printf '%s\n' "$rows")
-        # Every run, and the value each variable HAD when it ran, so the positive control
-        # proves the runs were redirected rather than only that they passed through here.
-        printf 'echo run >> %q\n' "${root}/shim-runs"
-        while IFS='|' read -r name suffix; do
-            printf 'printf "%%s=%%s\\n" %s "${%s-}" >> %q\n' "$name" "$name" "${root}/shim-runs"
-        done < <(printf '%s\n' "$rows")
-        printf 'exec %q "$@"\n' "$real"
-    } > "$shim" || fail "cannot write ${shim}"
-    chmod +x "$shim" || fail "cannot make ${shim} executable"
+    shim="$(_e2e_state_shim_write e2e_launcher_state_enter launcher "$real" "$root" "$rows")" \
+        || fail "cannot write the launcher shim under ${root}"
 
     shown="$("$shim" --show-stats 2>&1)" || true
     # The first line naming it, read by the shell rather than `sed | head`: the LAST
@@ -3993,4 +4012,107 @@ e2e_launcher_state_assert_caller_untouched() {
         _e2e_launcher_state_reported=1
         fail "$(printf '%s' "$damage" | tr '\n' ';')"
     fi
+}
+
+# ---------------------------------------------------------------------------
+# A fixture's nodes keep their state in a directory of the run's own
+# ---------------------------------------------------------------------------
+#
+# A node running a worker fingerprints its toolchains through the launcher's own code, and
+# keeps the answer in the launcher's machine-wide cache: `<state>/pace-cc/toolchains/
+# *.fingerprint` (`CacheFilePath` in src/apps/pace-cc/ToolchainProbe.cpp), `<state>` being
+# the same variables the launcher's statistics are resolved from. A fixture that starts a
+# worker against the developer's state therefore serves whatever that cache holds -- and
+# writes into it. Both happened in `dist-compile-e2e` (#1774): a node stopped mid-walk had
+# cached a truncated fingerprint there, the fixture's worker served it, failed against the
+# launcher that walked for itself in ITS isolated root, and by tearing its own worker down
+# mid-walk wrote the same truncation back for the next run.
+#
+# So the node gets the launcher's seam: a shim exporting every state variable the launcher
+# reads -- read out of `StateDirectoryImpl` by the same rows, written by the same
+# `_e2e_state_shim_write` -- and the fixture's node variable pointed at it. Every start the
+# fixture spells reaches the node through it without one of them being edited, and the
+# shim's `exec` keeps the pid the fixture captured, and `LISTEN_PID`, the node's own.
+#
+# It reaches further than the fingerprint cache, and that is stated rather than discovered:
+# the shim sets EVERY variable a row names -- `XDG_STATE_HOME` and `HOME` here, `LOCALAPPDATA`
+# on Windows -- for the node AND every process it runs, its compilers included. So a node
+# under this seam has the run's root as its home: anything it or a compiler reads from
+# `$HOME` (a dotfile, a default config) is not the developer's. That is wanted isolation for a
+# fixture, and the reason it is scoped to the node rather than exported to the fixture.
+#
+# Its root is NOT the launcher's, deliberately. One root would let the launcher read the
+# worker's entry rather than walk for itself, and a fixture asserting that the two AGREE
+# on a fingerprint would then be comparing one answer with itself -- #1774's mismatch is
+# exactly what that would have passed over. The run's nodes share one root, as the nodes
+# on one machine share one cache.
+#
+# What it does NOT do, and the direction it fails in: it takes no snapshot of the caller's
+# fingerprint cache to compare at the end. Every launcher and node on the machine writes
+# that directory, an entry names no run, and a check that cannot say whose a change is
+# would either refuse every busy machine or excuse every change. The positive control is
+# the half that can be asserted: the node's walk wrote HERE (`--fingerprinted`).
+
+# The run's node state root, once `e2e_node_state_enter` has made it.
+_e2e_node_state_root=""
+
+# Give the fixture's nodes a state directory of the run's own, and point the fixture's
+# node variable at the shim that keeps them there. Call once, after `e2e_begin` and before
+# the first node starts.
+#
+# @param 1 the NAME of the variable holding the node's path; rewritten to the shim
+e2e_node_state_enter() {
+    local var="$1" real rows root shim
+    [ -n "$_e2e_workdir" ] || fail "e2e_node_state_enter before e2e_begin: there is no workdir to keep the node's state in"
+    real="${!var-}"
+    [ -n "$real" ] && [ -x "$real" ] || fail "e2e_node_state_enter: \$${var} is not an executable node: '${real}'"
+    case "$real" in
+        /*) ;;
+        *) real="$(cd "$(dirname "$real")" && pwd)/${real##*/}" || fail "e2e_node_state_enter: cannot resolve '${real}' to an absolute path" ;;
+    esac
+    # The rows `e2e_begin` read: the node resolves its fingerprint cache through the
+    # launcher's `StateDirectory`, so they are the same variables.
+    rows="$_e2e_launcher_state_rows_read"
+    [ -n "$rows" ] \
+        || fail "cannot read the state-directory variables from ${_e2e_launcher_state_source}; refusing to run a node unisolated"
+    root="${_e2e_workdir}/node-state"
+    shim="$(_e2e_state_shim_write e2e_node_state_enter node "$real" "$root" "$rows")" \
+        || fail "cannot write the node shim under ${root}"
+    _e2e_node_state_root="$root"
+    printf -v "$var" '%s' "$shim"
+    e2e_note "node state isolated to ${root}"
+}
+
+# The positive control: at least one node ran through the shim, every run with every state
+# variable at this run's root -- and with `--fingerprinted`, the node's toolchain walk wrote
+# its cache entry HERE. That the caller's cache was spared is no evidence the node used
+# this one: a node caching nowhere spares it too.
+#
+# @param 1 `--fingerprinted`, or nothing
+e2e_node_state_assert_used() {
+    local runs=0 wrong="" line entries=0 entry
+    [ -n "$_e2e_node_state_root" ] || fail "e2e_node_state_assert_used before e2e_node_state_enter"
+    if [ -f "${_e2e_node_state_root}/shim-runs" ]; then
+        while IFS= read -r line; do
+            if [ "$line" = run ]; then
+                runs=$(( runs + 1 ))
+                continue
+            fi
+            [ "${line#*=}" = "$_e2e_node_state_root" ] || wrong="${wrong} ${line}"
+        done < "${_e2e_node_state_root}/shim-runs"
+    fi
+    [ -z "$wrong" ] \
+        || fail "a node run through the shim did not have its state redirected to this run's root (${_e2e_node_state_root}):${wrong}"
+    [ "$runs" -ge 1 ] || fail "no node of this fixture went through the node-state shim, so nothing says its state was redirected"
+    if [ "${1-}" = "--fingerprinted" ]; then
+        # The layout `CacheFilePath` writes, restated: a move fails CLOSED here, as a count of zero.
+        for entry in "${_e2e_node_state_root}"/pace-cc/toolchains/*.fingerprint; do
+            [ -f "$entry" ] && entries=$(( entries + 1 ))
+        done
+        [ "$entries" -ge 1 ] \
+            || fail "no node cached a toolchain fingerprint under this run's root (${_e2e_node_state_root}/pace-cc/toolchains), so nothing says the worker's walk was redirected"
+        e2e_note "${runs} node run(s) kept their state in this run's root; ${entries} toolchain fingerprint(s) cached there"
+        return 0
+    fi
+    e2e_note "${runs} node run(s) kept their state in this run's root"
 }
