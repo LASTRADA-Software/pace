@@ -89,6 +89,8 @@ class PublishedPressure final: public IMachinePressureSource
 ///   too: in `Yield` and `Shed` that is what compiles held when pressure began, and it ramps back while calm.
 /// - Held: passed through as given.
 /// - Pressure: the governor's level, which the queue reads as "admit nothing new here" whenever it is not `Calm`.
+/// - Standing: `HeldByAllowance` whenever the allowance holds the budget below the configured one, `Configured`
+///   otherwise -- the queue's run-alone exception is open only on the latter, at any level.
 /// @param cfg The parsed configuration.
 /// @param capacity What `NodeCapacityOf` made of this machine.
 /// @param held What compiles on this machine hold now.

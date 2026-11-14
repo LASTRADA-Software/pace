@@ -872,6 +872,39 @@ TEST_CASE("AdmissionQueue.pressured-machine-never-runs-oversize-alone", "[distri
     }
 }
 
+TEST_CASE("AdmissionQueue.calm-lowered-budget-oversize-request-idle-machine-admits-nothing", "[distributed][admission]")
+{
+    // A yield ended and the machine is Calm again, but the allowance still holds its budget below the configured one
+    // while it ramps back. A compile larger than that held budget must not run alone: the ceiling holds compiles to
+    // the same allowance and would kill it, the client would re-admit it, and the loop lasts as long as the ramp (C3).
+    SECTION("held by the allowance: the oversize request waits")
+    {
+        Fixture f;
+        auto held = Pressed(2 * GiB, 4, PressureLevel::Calm);
+        held.standing = BudgetStanding::HeldByAllowance;
+        f.queue.ReportMachine("m", held);
+        f.Local(6 * GiB);
+        CHECK(f.queue.Pump().empty());
+        CHECK(f.queue.Depth() == 1);
+
+        // A request that fits the held budget still runs: only the run-alone exception is closed.
+        auto const small = f.Local(1 * GiB);
+        auto const granted = f.queue.Pump();
+        REQUIRE(granted.size() == 1);
+        CHECK(granted[0].ticket == small);
+    }
+    SECTION("ramped back to its configured budget: the same request runs alone (control)")
+    {
+        Fixture f;
+        f.queue.ReportMachine("m", Pressed(2 * GiB, 4, PressureLevel::Calm));
+        auto const big = f.Local(6 * GiB);
+        auto const granted = f.queue.Pump();
+        REQUIRE(granted.size() == 1);
+        CHECK(granted[0].ticket == big);
+        CHECK(granted[0].ranAlone);
+    }
+}
+
 TEST_CASE("AdmissionQueue.shedding-machine-admits-nothing", "[distributed][admission]")
 {
     Fixture f;

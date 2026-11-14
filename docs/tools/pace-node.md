@@ -3550,7 +3550,9 @@ oscillate:
 - **The fleet hears it at once.** A level change sends the machine-budget report immediately rather
   than at the next 20 s round, carrying the level beside the lowered budget, and the leader's queue
   admits nothing new on a machine whose report is not `calm` — the run-alone exception for a compile
-  larger than the whole budget included.
+  larger than the whole budget included. That exception stays closed while the allowance still holds
+  the reported budget below the configured one, `calm` or not: the report says which, and a compile
+  larger than the held budget waits for the ramp rather than run alone into a ceiling that kills it.
 
 Each change is logged once — at Warn entering `shed`, at Info otherwise — naming the level, the
 system's `some` and `full` figures and the allowance. The level is the live condition

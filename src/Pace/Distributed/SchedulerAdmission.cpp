@@ -409,7 +409,8 @@ SchedulerReply SchedulerService::ReportMachineBudget(CallerContext const& caller
                                          .slots = report.slots,
                                          .heldSlots = report.heldSlots,
                                          .heldBytes = report.heldBytes,
-                                         .pressure = report.pressure });
+                                         .pressure = report.pressure,
+                                         .standing = report.standing });
     for (auto const& [key, peak]: report.peaks)
         _estimates.Record(
             EstimateKey { .cacheKey = key.cacheKey, .sourcePath = key.sourcePath, .compilerIdentity = key.compilerIdentity },

@@ -545,3 +545,28 @@ TEST_CASE("MachineBudget.pressure-allowance-lowers-the-budget-and-carries-the-le
     CHECK(wire.memoryBudgetBytes == 30 * GiB);
     CHECK(wire.pressure == Wire::PressureLevel::Yield);
 }
+
+TEST_CASE("MachineBudget.allowance-held-budget-says-so-at-every-level", "[node][machinebudget][pressure]")
+{
+    // F2: a Calm machine whose allowance is still ramping back reports a budget below its configured one, and says
+    // so, so the queue does not let a compile larger than that run alone there and be killed by the ceiling.
+    auto const machine = MachineOf(16, 96 * GiB);
+    auto const derived = MachineBudgetOf(NodeConfig {}, machine, HeldCharges {}).memoryBudgetBytes;
+    REQUIRE(derived > 30 * GiB);
+
+    auto const ramping = MachineBudgetOf(NodeConfig {},
+                                         machine,
+                                         HeldCharges {},
+                                         MachinePressure { .level = Wire::PressureLevel::Calm, .allowanceBytes = 30 * GiB });
+    CHECK(ramping.pressure == Wire::PressureLevel::Calm);
+    CHECK(ramping.standing == Wire::BudgetStanding::HeldByAllowance);
+    CHECK(MachineBudgetToWire(ramping, {}).standing == Wire::BudgetStanding::HeldByAllowance);
+
+    // At or above the configured budget it is the configuration; with no watcher it is too.
+    auto const ramped = MachineBudgetOf(NodeConfig {},
+                                        machine,
+                                        HeldCharges {},
+                                        MachinePressure { .level = Wire::PressureLevel::Calm, .allowanceBytes = derived });
+    CHECK(ramped.standing == Wire::BudgetStanding::Configured);
+    CHECK(MachineBudgetOf(NodeConfig {}, machine, HeldCharges {}).standing == Wire::BudgetStanding::Configured);
+}

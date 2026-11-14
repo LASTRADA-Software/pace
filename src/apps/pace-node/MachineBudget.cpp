@@ -117,15 +117,18 @@ Distributed::MachineReport MachineBudgetOf(NodeConfig const& cfg,
                                            MachinePressure const& pressure) noexcept
 {
     auto const budget = BudgetOf(cfg, capacity);
+    // Never above the configured budget: the allowance only ever lowers it.
+    auto const reported = std::min(budget, pressure.allowanceBytes.value_or(budget));
     return Distributed::MachineReport {
-        // Never above the configured budget: the allowance only ever lowers it.
-        .memoryBudgetBytes = std::min(budget, pressure.allowanceBytes.value_or(budget)),
+        .memoryBudgetBytes = reported,
         // Zero cores is "did not say", and one is the answer `OfferableSlots` gives for it: a machine
         // that reports no slot is one the queue could never run a compile on.
         .slots = cfg.machineSlots.value_or(std::max<std::uint32_t>(capacity.logicalCores, 1)),
         .heldSlots = held.slots,
         .heldBytes = held.bytes,
         .pressure = pressure.level,
+        .standing =
+            reported < budget ? Distributed::BudgetStanding::HeldByAllowance : Distributed::BudgetStanding::Configured,
     };
 }
 
@@ -185,7 +188,8 @@ Wire::MachineBudgetReport MachineBudgetToWire(Distributed::MachineReport const& 
                                        .heldSlots = report.heldSlots,
                                        .heldBytes = report.heldBytes,
                                        .peaks = std::move(peaks),
-                                       .pressure = report.pressure };
+                                       .pressure = report.pressure,
+                                       .standing = report.standing };
 }
 
 bool SendMachineBudgetOnce(MachineBudgetRound const& round, SchedulerLink& link, IEndpointDialer& dialer)

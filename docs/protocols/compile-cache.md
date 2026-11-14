@@ -638,7 +638,8 @@ ADMIT           [0xFC][ver][0x22][u32 len]  payload: [kind][fingerprint][cacheKe
 SETTLE          [0xFC][ver][0x23][u32 len]  payload: [outcome][peakBytes]
   reply Ok:                                         empty
 MACHINE-BUDGET  [0xFC][ver][0x24][u32 len]  payload: [u64 memoryBudget][u32 slots][u32 heldSlots]
-                                                    [u64 heldBytes][peaks]
+                                                    [u64 heldBytes][peaks][u8 pressure]
+                                                    [u8 standing]
   reply Ok:                                         empty
 ```
 
@@ -686,6 +687,18 @@ slots and what is held now, with a bounded sample of measured peaks. It is a mac
 itself, so it requires a proven node identity exactly as `REGISTER` does. `peaks` is one nested
 field list of at most 64 entries, each four fields: cache key, source path, compiler identity and
 the peak as a `u64`.
+
+Version 18 added the last two fields, each exactly one byte; the decoder is exact about the field
+count, so a version-17 report is refused rather than read with defaults. `pressure` is the node's
+memory-pressure level: `0` calm, `1` yield, `2` shed. Anything but calm makes the leader's queue admit
+nothing new on that machine -- its own local compiles and the run-alone exception included -- and it
+reaches requests already waiting at the next pump. `standing` says whether `memoryBudget` is the
+configured budget (`0`) or one the node's pressure allowance holds below it (`1`) while the allowance
+ramps back after a yield or a shed. The queue lets a compile estimated above the whole budget run alone
+on an idle machine only at `0`: on a held budget it would be killed by the compile ceiling, which holds
+compiles to the same allowance, and re-admitted for as long as the ramp takes. A `pressure` of `3` or
+above, or a `standing` of `2` or above, is refused `malformed-frame`, never read as the nearest value
+this build knows.
 
 All three are capped at the control ceiling, 64 KiB.
 

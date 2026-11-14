@@ -6573,14 +6573,54 @@ TEST_CASE("A MACHINE-BUDGET report carries its pressure level, one byte, and ref
     auto frame = EncodeMachineBudget(report);
     auto const fields = WireFields::SplitAll(PayloadOfFrame(frame));
     REQUIRE(fields.has_value());
-    REQUIRE(Unwrap(fields).size() == 6);
+    REQUIRE(Unwrap(fields).size() == 7);
     CHECK(Unwrap(fields)[5].size() == 1);
-    CHECK(frame.back() == std::byte { 0x02 });
+    CHECK(Unwrap(fields)[5][0] == std::byte { 0x02 });
     CHECK(static_cast<std::uint8_t>(PressureLevel::Calm) == 0x00);
     CHECK(static_cast<std::uint8_t>(PressureLevel::Yield) == 0x01);
 
-    // A level this build has no reading for is refused, never read as the nearest one it knows.
-    frame.back() = std::byte { 0x03 };
+    // A level this build has no reading for is refused, never read as the nearest one it knows. The level is no
+    // longer the frame's last byte -- the standing's field follows it -- so it is found through the split fields.
+    auto const levelAt = static_cast<std::size_t>(Unwrap(fields)[5].data() - frame.data());
+    frame[levelAt] = std::byte { 0x03 };
+    CHECK_FALSE(DecodeMachineBudgetPayload(PayloadOfFrame(frame)).has_value());
+}
+
+TEST_CASE("A MACHINE-BUDGET report carries its budget standing, one trailing byte, and refuses one past the last",
+          "[wire][admission][machine-budget]")
+{
+    auto report = MachineBudgetReport { .memoryBudgetBytes = 2ULL << 30,
+                                        .slots = 8,
+                                        .heldSlots = 0,
+                                        .heldBytes = 0,
+                                        .peaks = {},
+                                        .pressure = PressureLevel::Calm,
+                                        .standing = BudgetStanding::Configured };
+    for (auto const standing: { BudgetStanding::Configured, BudgetStanding::HeldByAllowance })
+    {
+        report.standing = standing;
+        auto const back = DecodeMachineBudgetPayload(PayloadOfFrame(EncodeMachineBudget(report)));
+        REQUIRE(back.has_value());
+        CHECK(Unwrap(back).standing == standing);
+    }
+
+    // The byte, not only the name: the standing is the payload's seventh and last field, one byte long, after the
+    // pressure level -- both inside version 18, which was not released before either landed.
+    report.standing = BudgetStanding::HeldByAllowance;
+    auto frame = EncodeMachineBudget(report);
+    auto const fields = WireFields::SplitAll(PayloadOfFrame(frame));
+    REQUIRE(fields.has_value());
+    REQUIRE(Unwrap(fields).size() == 7);
+    CHECK(Unwrap(fields)[6].size() == 1);
+    CHECK(frame.back() == std::byte { 0x01 });
+    CHECK(static_cast<std::uint8_t>(BudgetStanding::Configured) == 0x00);
+    CHECK(static_cast<std::uint8_t>(BudgetStanding::HeldByAllowance) == 0x01);
+    CHECK(static_cast<std::uint8_t>(BudgetStanding::Last) == 0x02);
+    CHECK(OpFieldCount(Op::MachineBudget) == 7);
+    CHECK(CurrentVersion == 18);
+
+    // A standing this build has no reading for is refused, never read as the nearest one it knows.
+    frame.back() = std::byte { 0x02 };
     CHECK_FALSE(DecodeMachineBudgetPayload(PayloadOfFrame(frame)).has_value());
 }
 

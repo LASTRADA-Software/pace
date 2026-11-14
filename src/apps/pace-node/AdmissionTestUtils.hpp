@@ -358,14 +358,18 @@ struct Queue
     }
 
     /// This machine states its budget, as a proven peer would send it. Pumps, so whatever waited is decided.
-    void Report(std::uint64_t budgetBytes, std::uint32_t slots, Wire::PressureLevel pressure = Wire::PressureLevel::Calm)
+    void Report(std::uint64_t budgetBytes,
+                std::uint32_t slots,
+                Wire::PressureLevel pressure = Wire::PressureLevel::Calm,
+                Wire::BudgetStanding standing = Wire::BudgetStanding::Configured)
     {
         auto const frame = Wire::EncodeMachineBudget(Wire::MachineBudgetReport { .memoryBudgetBytes = budgetBytes,
                                                                                  .slots = slots,
                                                                                  .heldSlots = 0,
                                                                                  .heldBytes = 0,
                                                                                  .peaks = {},
-                                                                                 .pressure = pressure });
+                                                                                 .pressure = pressure,
+                                                                                 .standing = standing });
         auto reply = core::async::syncRun(UnwrapMutable(admission).Answer(
             frame,
             PeerIdentity { .host = "10.0.0.2", .proven = ProvenIdentity { .id = "scheduler", .key = signer.PublicKey() } }));

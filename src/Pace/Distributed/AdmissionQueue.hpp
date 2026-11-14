@@ -28,6 +28,7 @@ using MachineId = std::string;
 using Ticket = std::uint64_t;
 
 using CompileCacheWire::AdmitKind;
+using CompileCacheWire::BudgetStanding;
 using CompileCacheWire::GrantKind;
 using CompileCacheWire::PressureLevel;
 using CompileCacheWire::SettleOutcome;
@@ -80,6 +81,9 @@ struct MachineReport
     /// How hard its memory is pressed. Anything but `Calm` admits nothing new on it -- local compiles
     /// included, the run-alone exception included -- and reaches requests already waiting, at the next `Pump()`.
     PressureLevel pressure { PressureLevel::Calm };
+    /// Whether the budget is the configured one or the pressure allowance holds it below that. Held, nothing
+    /// larger than the budget runs here, even alone on an idle machine at `Calm`.
+    BudgetStanding standing { BudgetStanding::Configured };
 };
 
 /// An admission: what to run, and where.
@@ -170,7 +174,9 @@ struct QueueView
 /// been head across a `Pump()` it reserves whatever is free (up to what it needs) on EVERY
 /// reported machine of its target set, so a stream of small requests cannot starve it however
 /// the candidate order changes. A request estimated above the whole budget runs alone: it
-/// waits for an idle machine and reserves all free memory and slots meanwhile.
+/// waits for an idle machine and reserves all free memory and slots meanwhile -- and never on a
+/// machine under pressure, nor on one whose budget the pressure allowance holds below its configured
+/// figure (`BudgetStanding::HeldByAllowance`), where it waits for the ramp instead.
 ///
 /// A storable request whose `estimate.cacheKey` is already in flight from a machine that
 /// shares its cache waits on that compile instead of running: it is never charged and holds no

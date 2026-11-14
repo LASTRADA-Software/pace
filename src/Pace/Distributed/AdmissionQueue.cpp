@@ -354,7 +354,11 @@ std::vector<Decision> AdmissionQueue::Pump()
             if (report.pressure != PressureLevel::Calm)
                 return false;
             if (entry.chargedBytes > report.memoryBudgetBytes)
-                return report.slots > 0 && room.usedBytes == 0 && room.usedSlots == 0 && hold.bytes == 0 && hold.slots == 0;
+                // Run alone only on a budget that is the machine's configured one. One the pressure allowance holds
+                // down is what fit beside something else when pressure ended, and a compile past it is the one the
+                // ceiling kills -- then re-admitted, killed again, for as long as the ramp takes (C3).
+                return report.standing == BudgetStanding::Configured && report.slots > 0 && room.usedBytes == 0
+                       && room.usedSlots == 0 && hold.bytes == 0 && hold.slots == 0;
             return room.freeBytes >= entry.chargedBytes && room.freeSlots >= 1;
         });
 
@@ -396,10 +400,15 @@ std::vector<Decision> AdmissionQueue::Pump()
             heads.insert(entry.ticket);
             if (!wasHead)
                 continue;
+            auto const& ledger = _ledgers.at(target.machine);
+            auto const budget = BudgetOf(ledger);
+            auto const alone = entry.chargedBytes > budget;
+            // Draining a machine for a compile that may not run alone there is no wait at all: its budget is held by
+            // the pressure allowance and only the ramp ends that. Smaller compiles keep the machine until then.
+            if (alone && ledger.report.has_value() && ledger.report->standing == BudgetStanding::HeldByAllowance)
+                continue;
             auto& hold = reserved[target.machine];
             auto const room = RoomOn(target.machine, hold);
-            auto const budget = BudgetOf(_ledgers.at(target.machine));
-            auto const alone = entry.chargedBytes > budget;
             hold.bytes += std::min({ entry.chargedBytes, budget, room.freeBytes });
             hold.slots += alone ? room.freeSlots : std::min<std::uint32_t>(1, room.freeSlots);
         }

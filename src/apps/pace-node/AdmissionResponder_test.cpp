@@ -242,6 +242,26 @@ TEST_CASE("AdmissionResponder.a-shedding-machine-budget-report-holds-a-waiting-t
     CHECK(queue.service.AdmissionSnapshotNow().depth == 0);
 }
 
+TEST_CASE("AdmissionResponder.a-budget-held-by-the-allowance-runs-nothing-alone", "[node][admission][machine-budget]")
+{
+    // The standing byte is applied on receipt, through the real wire path: a Calm machine whose budget the pressure
+    // allowance still holds below its configured one does not let a compile larger than it run alone; the same
+    // machine reporting its configured budget does.
+    Queue queue;
+    auto const port = queue.Serve();
+
+    Client client { port };
+    client.Send(AdmitFrame(Wire::AdmitKind::LocalOnly, "k1"));
+    REQUIRE(Unwrap(client.Read()).status == Wire::Status::Progress);
+
+    queue.Report(1 * MiB, 2, Wire::PressureLevel::Calm, Wire::BudgetStanding::HeldByAllowance);
+    CHECK(queue.service.AdmissionSnapshotNow().depth == 1);
+
+    queue.Report(1 * MiB, 2, Wire::PressureLevel::Calm, Wire::BudgetStanding::Configured);
+    CHECK(GrantOf(Unwrap(client.ReadAnswer())).kind == Wire::GrantKind::Local);
+    CHECK(queue.service.AdmissionSnapshotNow().depth == 0);
+}
+
 TEST_CASE("AdmissionResponder.a-machine-budget-of-another-version-is-refused-by-number", "[node][admission][machine-budget]")
 {
     Queue queue;
