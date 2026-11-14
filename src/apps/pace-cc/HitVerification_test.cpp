@@ -393,3 +393,13 @@ TEST_CASE("A verification put-back keeps the served object aside until it is con
         CHECK(line.contains("replace"));
     }
 }
+
+TEST_CASE("A fresh compile that failed is described as evidence against the entry", "[launcher][verify][1707]")
+{
+    auto const line = DescribeVerdict(
+        { .verdict = HitVerdict::FreshCompileFailed, .comparison = std::nullopt, .detail = "the fresh compile exited 2" },
+        "k");
+    CHECK(line.contains("VERIFY FAILED"));
+    CHECK(line.contains("exited 2"));
+    CHECK_FALSE(line.contains("could not verify"));
+}

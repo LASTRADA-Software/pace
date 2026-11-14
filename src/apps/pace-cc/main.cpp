@@ -1222,7 +1222,15 @@ void AddQueued(std::optional<std::uint64_t>& total, std::optional<std::uint64_t>
         // failed verification never costs the build its object; and the aside, the only
         // good copy, goes only once the put-back is confirmed.
         auto const files = Cc::MakeDiskFiles();
-        return Cc::RestoreServedObject(aside, *served, *files);
+        auto restored = Cc::RestoreServedObject(aside, *served, *files);
+        // Put back cleanly: the compile's failure is the finding, and a source this compiler
+        // rejects did not produce the object served (#1707). A put-back that failed keeps its
+        // own inconclusive answer, which says where the served object went.
+        if (restored.detail.empty())
+            return { .verdict = Cc::HitVerdict::FreshCompileFailed,
+                     .comparison = std::nullopt,
+                     .detail = std::format("the fresh compile exited {}", run.exitCode) };
+        return restored;
     }
 
     auto comparison = Cc::CompareObjectFiles(aside, *served);
@@ -3281,6 +3289,9 @@ struct CachedCompile
     // absent bound copy: one whose bound value is damaged, of another generation or stale reaches the
     // STORE too, and a portable store there would overwrite the marker for every checkout.
     std::optional<Cc::CheckoutParts> metMarker {};
+    // A hit the FETCH found and refused as stale, so the compile that follows is the repair of an
+    // entry rather than a cold miss, and its record says so (#1707).
+    bool staleHit { false };
 
     /// @param result What `RunCached` returns.
     /// @return A step that settled the invocation with @p result.
@@ -3660,6 +3671,7 @@ FetchStep CachedCompile::ServeHit(Cc::CacheOutcome const& outcome)
             return FetchStep { .decided = true,
                                .result = Warn(record, Cc::CacheActionReason(Cc::FetchObservation::HitObjectUnwritable)) };
         }
+        staleHit = materialized.disposition == HitDisposition::Stale;
         // Stale: the object is fine but the dependency record it carries is not
         // true here -- or the depfile this build names could not be written, which
         // says nothing against the entry -- so fall through and compile for real. The STORE that follows
@@ -3705,8 +3717,10 @@ void CachedCompile::TraceMiss()
     {
         // Which parts, from the marker -- and no claim about WHICH of them differs, which
         // this end cannot know: the trace and the tallied reason say the same thing.
-        TraceOutcome(
-            record, Cc::Outcome::Miss, key, boundMiss.has_value() ? Cc::BoundMissQualifier(*boundMiss) : std::string {});
+        TraceOutcome(record,
+                     staleHit ? Cc::Outcome::Stale : Cc::Outcome::Miss,
+                     key,
+                     boundMiss.has_value() ? Cc::BoundMissQualifier(*boundMiss) : std::string {});
         // A miss carrying a reason, as a crossed reply is: the cache answered honestly, and
         // what it holds under this key names paths this compile does not share -- or this
         // compile's own copy was evicted. Worth ranking, because a translation unit that is a
@@ -3893,6 +3907,9 @@ int CachedCompile::FinishMiss(Cc::CompileRun& run, bool& stored)
     }
 
     stored = StoreCompiledObject(std::move(*permit), record, cfg, key, value.objectBlob, encoded, checkout, metMarker);
+    // A compile the cache did not take is not the "compiled and stored" a MISS claims (#1707).
+    if (!stored && (record.outcome == Cc::Outcome::Miss || record.outcome == Cc::Outcome::Stale))
+        record.outcome = Cc::Outcome::StoreFailed;
 
     // Record the direct-mode manifest so the NEXT compile of this TU can reach the
     // object without preprocessing. The include set comes from the /showIncludes

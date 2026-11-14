@@ -72,6 +72,10 @@ enum class HitVerdict : std::uint8_t
     /// that. A false `WRONG OBJECT` is the answer that gets a verifier switched off,
     /// which is why this is its own state rather than `Mismatched`.
     Nondeterministic,
+    /// Sampled, and the fresh compile of the same source FAILED (#1707). The served object is put
+    /// back, but a source this compiler rejects did not produce it, so this is evidence against
+    /// the entry -- never the `Inconclusive` it was folded into, which tallied it as a hit.
+    FreshCompileFailed,
 };
 
 /// Verification is off; no hit is checked.
