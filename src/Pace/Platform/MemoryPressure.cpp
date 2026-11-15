@@ -179,7 +179,11 @@ std::optional<ConfinedStall> ConfinedStallScan::Look(std::filesystem::path const
     if (!psi)
         return std::nullopt;
 
-    auto const events = _host->ReadFile(cgroup / "memory.events");
+    // `memory.events` is hierarchical: a child reaching ITS limit counts there too. The cgroup's own limit is judged by
+    // `memory.events.local` where the kernel offers it (5.8 and later), the hierarchical file only where it does not.
+    auto events = _host->ReadFile(cgroup / "memory.events.local");
+    if (!events)
+        events = _host->ReadFile(cgroup / "memory.events");
     auto const current = _host->ReadFile(cgroup / "memory.current");
     auto const currentBytes = current ? DecimalOf(*current) : std::nullopt;
     auto atLimit = false;

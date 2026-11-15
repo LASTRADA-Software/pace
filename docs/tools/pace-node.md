@@ -3545,8 +3545,8 @@ oscillate:
   service stalling at its own `memory.max` (or throttled at its own `memory.high`) raises it as
   surely as a shortage does — with gigabytes free, and nothing freeing them could relieve it. So a
   cgroup elsewhere that carries at least 80% of the machine's `some` (or `full`) stall while standing
-  at its own limit — its `memory.events` count rose between two samples, or `memory.current` is within
-  5% of the limit, held for two dwells as the compiles' evidence is — neither yields nor sheds, and
+  at its own limit — its own `memory.events.local` count (the hierarchical `memory.events` on a kernel
+  without it) rose between two samples, or `memory.current` is within 5% of the limit, held for two dwells as the compiles' evidence is — neither yields nor sheds, and
   eases a level the way an own stall does. One cgroup must carry the share alone; a real shortage
   stalls the rest of the machine too, so the share drops and the stall counts again. The node's own
   cgroup, its ancestors and the compiles' are never such a cgroup: a stall there is one its own yield

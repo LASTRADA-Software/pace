@@ -288,6 +288,23 @@ TEST_CASE("PsiPressureSource counts a memory.high a cgroup is throttled at, and 
     CHECK_FALSE(still.front().atLimit);
 }
 
+TEST_CASE("PsiPressureSource judges a cgroup's own limit by its local events, not its children's",
+          "[platform][psi][confined]")
+{
+    // A slice with a numeric limit far above what it holds, whose child keeps reaching the child's own limit: the
+    // hierarchical memory.events rises in the slice too, the local one does not. The slice is not at ITS limit.
+    ConfinedTree tree;
+    auto const slice = std::string { "/sys/fs/cgroup/user.slice" };
+    tree.host->files[slice + "/memory.max"] = "60000000000\n";
+    tree.host->files[slice + "/memory.events.local"] = "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\n";
+    tree.host->files["/sys/fs/cgroup/user.slice/thrash.service/memory.current"] = "1000000000\n"; // the child is not near
+    auto source = tree.Source();
+    CHECK(Unwrap(Unwrap(source.Sample()).confined).empty());
+    tree.host->files[slice + "/memory.events"] = "low 0\nhigh 0\nmax 40\noom 0\noom_kill 0\n";
+    tree.clock.advance(std::chrono::seconds { 10 });
+    CHECK(Unwrap(Unwrap(source.Sample()).confined).empty());
+}
+
 TEST_CASE("PsiPressureSource walks the cgroup tree only while the machine stalls, and once per interval",
           "[platform][psi][confined]")
 {

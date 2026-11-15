@@ -59,8 +59,9 @@ struct ConfinedStall
 {
     std::filesystem::path cgroup; ///< Its directory.
     PsiReading psi {};            ///< Its own `memory.pressure`.
-    /// Whether it stands at its own limit now: a limit's `memory.events` count rose since the previous sample, or
-    /// its `memory.current` is within `1 / CeilingNearDivisor` of the limit.
+    /// Whether it stands at its own limit now: a limit's count in its own `memory.events.local` (the hierarchical
+    /// `memory.events` where the kernel has no local file) rose since the previous sample, or its `memory.current` is
+    /// within `1 / CeilingNearDivisor` of the limit.
     bool atLimit {};
 };
 
