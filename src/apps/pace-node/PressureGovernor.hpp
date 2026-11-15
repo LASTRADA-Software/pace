@@ -124,11 +124,13 @@ struct GovernorDecision
 ///   ceiling working, and the level stays `Calm`. Compiles far below their limit that stall with the
 ///   machine are stalling on someone else's shortage -- the machine reclaims from everyone -- so that yields.
 /// - **A stall confined to a cgroup's OWN limit is not the machine's** (`PressureSample::confined`): a cgroup
-///   elsewhere that carries `ownShare` of the system's `some` (or `full`) while standing at its own `memory.max` or
+///   elsewhere that carries `ownShare` of the system's `some` while standing at its own `memory.max` or
 ///   `memory.high` within the evidence window is stalling on a limit freeing machine memory cannot raise. It neither
-///   yields nor sheds, and eases a level as an own stall does. One cgroup must carry the share alone: two that split
-///   it count as the machine's, the safe direction. A genuine shortage stalls the rest of the machine too, so the
-///   share falls below `ownShare` and the stall counts again; an unreadable tree is no confined stall at all.
+///   yields nor sheds, and eases a level as an own stall does. Its `full` is discounted only with that `some` share:
+///   in a machine-wide freeze every busy cgroup's `full` reads about the system's, so `full` names no owner. One cgroup must
+///   carry the share alone: two that split it count as the machine's, the safe direction. A genuine shortage stalls the rest
+///   of the machine too, so the share falls below `ownShare` and the stall counts again; an unreadable tree is no confined
+///   stall at all.
 /// - **Shed** on system `full` at or above `shedEnter`, unless confined (above), or from `Yield` once a FOREIGN
 ///   stall (above) has held for twice `dwell` without a break: its clock restarts whenever it drops, so a
 ///   yield that eased and then returns is not shed at once. While shedding, `killYoungest` is true at most

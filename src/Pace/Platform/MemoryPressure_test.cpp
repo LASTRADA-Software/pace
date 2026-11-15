@@ -260,6 +260,16 @@ TEST_CASE("PsiPressureSource reports no confined stall where no cgroup is at a l
     CHECK(Unwrap(Unwrap(source.Sample()).confined).empty());
 }
 
+TEST_CASE("PsiPressureSource keeps no cgroup that carries only the full share", "[platform][psi][confined]")
+{
+    // In a machine-wide freeze every busy cgroup's `full` reads about the system's: a cgroup at its own limit with
+    // the system's `full` but little of its `some` owns nothing, and is no candidate.
+    ConfinedTree tree;
+    tree.host->files["/sys/fs/cgroup/user.slice/thrash.service/memory.pressure"] = Psi(5.0, 13.5);
+    auto source = tree.Source();
+    CHECK(Unwrap(Unwrap(source.Sample()).confined).empty());
+}
+
 TEST_CASE("PsiPressureSource counts a memory.high a cgroup is throttled at, and an events rise", "[platform][psi][confined]")
 {
     ConfinedTree tree;

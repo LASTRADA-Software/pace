@@ -90,14 +90,13 @@ namespace
     /// The cgroup core's own control files, present in every cgroup whatever its controllers.
     constexpr std::string_view CoreControlPrefix = "cgroup";
 
-    /// Whether @p cgroup carries @p share of @p system's stall, on either line. Compared as a product, never a ratio,
+    /// Whether @p cgroup carries @p share of @p system's `some` stall. Compared as a product, never a ratio,
     /// and only against a stall there is: nothing is carried of none.
     [[nodiscard]] bool Carries(PsiReading const& cgroup, PsiReading const& system, double share) noexcept
     {
-        auto const some = system.some.avg10 > 0.0 && cgroup.some.avg10 >= share * system.some.avg10;
-        auto const full =
-            system.full && cgroup.full && system.full->avg10 > 0.0 && cgroup.full->avg10 >= share * system.full->avg10;
-        return some || full;
+        // `some` alone: in a machine-wide freeze every busy cgroup's `full` reads about the system's, so `full` says
+        // nothing about whose the stall is -- the governor discounts a cgroup's `full` only where it carries `some`.
+        return system.some.avg10 > 0.0 && cgroup.some.avg10 >= share * system.some.avg10;
     }
 
     /// @return Whether @p a is @p b, or an ancestor or descendant of it, component by component.

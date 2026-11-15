@@ -4178,12 +4178,15 @@ Each rule below is a shape a plausible simpler design gets wrong, and none of th
   SPARES the sole compile within the allowance (`ShedKill::SpareSoleWithinAllowance`), or the floor's
   one compile is killed, requeued and finally run outside every ceiling.
 - **A stall confined to another cgroup's OWN memory limit is not the machine's**
-  (`Platform::ConfinedStallScan`): one cgroup carrying `ownShare` of the stall at its own
-  `memory.max`/`memory.high` neither yields nor sheds, the compiles' own rule mirrored. ONE cgroup must
-  carry the share alone, so a real shortage -- which stalls the rest of the machine too -- still sheds;
-  an unreadable tree is NO confined stall (said once); the node's own subtree and ancestors are never
-  one. The walk is bounded (only while stalled, once per 10 s, pruned by share, 64 cgroups, 8 levels)
-  and its staleness errs toward a yield, never toward a missed freeze.
+  (`Platform::ConfinedStallScan`): one cgroup carrying `ownShare` of the `some` stall at its own
+  `memory.max`/`memory.high` neither yields nor sheds, the compiles' own rule mirrored. **`some` decides
+  ownership, never `full`**: in a machine-wide freeze every busy cgroup's `full` reads about the
+  system's, so a `full` share alone discounted a genuine freeze. ONE cgroup must carry the share alone,
+  so a real shortage -- which stalls the rest of the machine too -- still sheds; an unreadable tree is
+  NO confined stall (said once); the node's own subtree and ancestors are never one. The walk is
+  bounded (only while stalled, once per 10 s, pruned by share, 64 cgroups, 8 levels) and its staleness
+  errs toward a yield; a shed is DELAYED by at most two dwells (the held at-limit evidence) after a
+  cgroup leaves its limit.
 - **The compiles `pace-cc` runs itself join the node's ceiling through a RENDEZVOUS, never a guess**:
   the node writes `compiles/`'s path to `$RUNTIME_DIRECTORY/compile-ceiling` while its ceiling holds
   and withdraws it when not; the launcher reads `$XDG_RUNTIME_DIR/pace-node/compile-ceiling`. The two

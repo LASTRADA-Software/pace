@@ -185,8 +185,12 @@ PressureGovernor::Carriers PressureGovernor::ConfinedCarriers(Platform::Pressure
         auto const seen = _confinedSeen.find(stall.cgroup);
         if (seen == _confinedSeen.end() || now - seen->second >= EvidenceDwells * _thresholds.dwell)
             continue;
-        if (systemSome > 0.0 && someOf(stall) >= share * systemSome
-            && someOf(stall) > carriers.some.transform(someOf).value_or(0.0))
+        // `some` decides OWNERSHIP. PSI `full` is "every non-idle task of this cgroup stalled", so in a machine-wide
+        // freeze every busy cgroup reads about the system's figure, one at its own limit included: `full` alone would
+        // discount a genuine freeze. Only a cgroup that carries the `some` share may have its `full` discounted.
+        if (systemSome <= 0.0 || someOf(stall) < share * systemSome)
+            continue;
+        if (someOf(stall) > carriers.some.transform(someOf).value_or(0.0))
             carriers.some = stall;
         if (systemFull > 0.0 && fullOf(stall) >= share * systemFull
             && fullOf(stall) > carriers.full.transform(fullOf).value_or(0.0))

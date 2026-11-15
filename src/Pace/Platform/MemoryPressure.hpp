@@ -111,8 +111,8 @@ struct PressureSample
 /// **Staleness, both directions.** A cgroup that reaches its limit after a walk is found by the next: until then its
 /// stall counts as the machine's, which yields when it need not -- admissions lost, never a freeze missed. A candidate
 /// is re-judged at every sample, at its limit and by its share, so one that leaves its limit, or a shortage the rest
-/// of the machine starts to stall on, counts at once (the governor holds at-limit evidence briefly, as it does the
-/// compiles').
+/// of the machine starts to stall on, counts at once -- except that the governor holds at-limit evidence for two
+/// dwells, as it does the compiles', so a shed after a cgroup leaves its limit can come that much late.
 struct ConfinedScanBounds
 {
     std::filesystem::path root { DefaultCgroupMount }; ///< The cgroup v2 mount.

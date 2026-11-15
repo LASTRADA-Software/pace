@@ -768,6 +768,25 @@ TEST_CASE("A real shortage still sheds beside a cgroup at its own limit", "[node
         CHECK(decision.level == PressureLevel::Shed);
         CHECK_FALSE(decision.discounted.has_value());
     }
+    SECTION("a genuine freeze: the cgroup's full is the system's, as every busy cgroup's is, but not its some")
+    {
+        // PSI `full` is "every non-idle task of THIS cgroup stalled", so in a machine-wide freeze any busy cgroup reads
+        // about the system's figure -- a container at its own limit included. `full` alone cannot say whose the freeze
+        // is; only a cgroup that also carries the `some` share is the stall's owner.
+        Rig rig;
+        auto const decision = rig.governor.Step(WithConfined(Freezing, 20.0, 8.0, true), 0);
+        CHECK(decision.level == PressureLevel::Shed);
+        CHECK_FALSE(decision.discounted.has_value());
+    }
+    SECTION("a shed in force is not left on such a cgroup's full while the freeze continues")
+    {
+        // `some` below the yield threshold, so nothing but the freeze holds the shed: only whose `full` it is decides.
+        constexpr Script QuietSomeFreeze { .some = 9.0, .full = 8.0, .compiles = 0.0 };
+        Rig rig;
+        REQUIRE(rig.After(0s, QuietSomeFreeze, 4 * GiB).level == PressureLevel::Shed);
+        rig.clock.advance(11s);
+        CHECK(rig.governor.Step(WithConfined(QuietSomeFreeze, 4.0, 8.0, true), 4 * GiB).level == PressureLevel::Shed);
+    }
     SECTION("a cgroup carrying the stall but never seen at its limit is the machine's")
     {
         Rig rig;

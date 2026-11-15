@@ -3544,11 +3544,15 @@ oscillate:
 - **A stall confined to another cgroup's own limit is not the machine's.** PSI is the host's, and a
   service stalling at its own `memory.max` (or throttled at its own `memory.high`) raises it as
   surely as a shortage does — with gigabytes free, and nothing freeing them could relieve it. So a
-  cgroup elsewhere that carries at least 80% of the machine's `some` (or `full`) stall while standing
+  cgroup elsewhere that carries at least 80% of the machine's `some` stall while standing
   at its own limit — its own `memory.events.local` count (the hierarchical `memory.events` on a kernel
   without it) rose between two samples, or `memory.current` is within 5% of the limit, held for two dwells as the compiles' evidence is — neither yields nor sheds, and
-  eases a level the way an own stall does. One cgroup must carry the share alone; a real shortage
-  stalls the rest of the machine too, so the share drops and the stall counts again. The node's own
+  eases a level the way an own stall does — its `full` stall too, but only as the owner of the `some`
+  share: in a machine-wide freeze every busy cgroup's `full` reads about the machine's, a cgroup at its
+  own limit included, so `full` alone says nothing about whose a freeze is. One cgroup must carry the
+  share alone; a real shortage stalls the rest of the machine too, so the share drops and the stall
+  counts again. The at-limit evidence is held for two dwells, so a shed can come up to twenty seconds
+  late after such a cgroup leaves its limit while the stall it carried goes on. The node's own
   cgroup, its ancestors and the compiles' are never such a cgroup: a stall there is one its own yield
   relieves. The node names the cgroup at Info when it starts not counting it, and again when it counts
   it once more — never per sample.
