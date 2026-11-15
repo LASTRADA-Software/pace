@@ -49,6 +49,11 @@ struct CompileRun
     /// compiler that failed. `exitCode` stays `128 + 9`. Precedence when several apply: `Shed`, then
     /// `Ceiling`, then `Signal`.
     std::optional<Platform::CompileKill> killed { std::nullopt };
+
+    /// Whether the child was started INSIDE the job cgroup its runner made for it -- and so under whatever
+    /// ceiling that cgroup's parent holds. False for a runner with no cgroup source, one that could not make a
+    /// cgroup, and one the system would not place the child in: each ran it where the spawner is (#1770).
+    bool inCgroup {};
 };
 
 /// One environment variable a spawn ADDS to the environment it inherits.

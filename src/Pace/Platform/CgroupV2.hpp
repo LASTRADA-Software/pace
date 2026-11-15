@@ -272,6 +272,10 @@ inline constexpr std::string_view NodeLeafName = "node";
 /// The name of the intermediate cgroup holding every `job-<n>`; the compile ceiling is set on it.
 inline constexpr std::string_view CompilesCgroupName = "compiles";
 
+/// What a node's own job cgroups are named by: `job-<n>`, and the only children of `compiles/` a node's startup
+/// sweeps as left behind.
+inline constexpr std::string_view NodeJobCgroupPrefix = "job-";
+
 /// The extended attribute that takes a cgroup out of systemd-oomd's choice of victim, and the value that does.
 ///
 /// Written on the node's own leaf (`node/`), never on `compiles/`: oomd kills a whole cgroup, and the node holding
@@ -377,7 +381,13 @@ class CgroupJobSource final: public IJobCgroupSource, public IYoungestKiller
     ///        never reaches a host that is gone.
     /// @param layout What `PrepareJobCgroups` returned.
     /// @param teardown How patiently a finished job's cgroup is removed.
-    CgroupJobSource(std::shared_ptr<ICgroupHost const> host, CgroupLayout layout, CgroupTeardownPolicy teardown = {});
+    /// @param namePrefix What each job's cgroup is named by, before its number: the node's `NodeJobCgroupPrefix`, or a
+    ///        launcher's own per-process prefix, so a launcher placing its compiles in a node's `compiles/` (#1770)
+    ///        never takes a name the node's jobs use, and the node's startup sweep never takes a launcher's.
+    CgroupJobSource(std::shared_ptr<ICgroupHost const> host,
+                    CgroupLayout layout,
+                    CgroupTeardownPolicy teardown = {},
+                    std::string namePrefix = std::string { NodeJobCgroupPrefix });
 
     /// @copydoc IJobCgroupSource::Create
     [[nodiscard]] std::expected<std::unique_ptr<IJobCgroup>, std::error_code> Create() override;
@@ -407,6 +417,7 @@ class CgroupJobSource final: public IJobCgroupSource, public IYoungestKiller
     std::shared_ptr<ICgroupHost const> _host;
     CgroupLayout _layout;
     CgroupTeardownPolicy _teardown;
+    std::string _namePrefix;
     std::atomic<std::uint64_t> _next { 1 };
     std::mutex _jobsMutex;                         ///< Guards `_jobs`.
     std::vector<std::weak_ptr<JobState>> _jobs {}; ///< Every job made, oldest first; expired once finished.

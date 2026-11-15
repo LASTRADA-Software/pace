@@ -35,6 +35,10 @@
 # it is header-only, so the component that replaced a compiled row costs none.
 # The remaining CRC32C users are all daemon-side page and record checksums.
 
+# Platform/CgroupV2.cpp is the node's cgroup facility; the launcher compiles it in to place the compiles it
+# runs itself in a cgroup of its own below the local node's `compiles/` ceiling (#1770, LocalCeiling.cpp). It
+# reaches Core/EnumTable.hpp and the standard library alone, and on a platform with no cgroups every call fails.
+
 set(_pace_cc_core
     "${CMAKE_SOURCE_DIR}/src/Pace/Cli/Duration.cpp"
     "${CMAKE_SOURCE_DIR}/src/Pace/Cli/UsageDoc.cpp"
@@ -47,6 +51,7 @@ set(_pace_cc_core
     "${CMAKE_SOURCE_DIR}/src/Pace/Core/SecureBytes.cpp"
     "${CMAKE_SOURCE_DIR}/src/Pace/Core/Sha256.cpp"
     "${CMAKE_SOURCE_DIR}/src/Pace/Metrics/IMetricsSink.cpp"
+    "${CMAKE_SOURCE_DIR}/src/Pace/Platform/CgroupV2.cpp"
     "${CMAKE_SOURCE_DIR}/src/Pace/Platform/Environment.cpp"
     "${CMAKE_SOURCE_DIR}/src/Pace/Platform/NarrowText.cpp"
     "${CMAKE_SOURCE_DIR}/src/Pace/Platform/Registry.cpp"
@@ -172,10 +177,14 @@ set(_pace_cc_sources
     HitVerification.cpp
     InputFiles.cpp
     InputWitness.cpp
+    LocalCeiling.cpp
     MarkerDiscovery.cpp
     NotePathCollapse.cpp
     ObjectEquivalence.cpp
     ObjectSections.cpp
+    # The OOM-victim shim: the launcher's `main` dispatches to it and spawns the compiles it runs itself through it
+    # (#1770), exactly as `pace-node` does for the compiles it runs.
+    OomVictimExec.cpp
     ParallelFor.cpp
     PathResolve.cpp
     RefusalNotice.cpp
@@ -314,11 +323,8 @@ if(PACE_BUILD_TESTS)
         InputWitness_test.cpp
         ObjectEquivalence_test.cpp
         ObjectSections_test.cpp
-        # The OOM-victim shim is the compile NODE's: `pace-node`'s `main` dispatches to it and the launcher never
-        # spawns through it, so like ToolchainDiscovery.cpp below it is listed here for its tests and in
-        # `_pace_node_shared` for its real consumer, never in `_pace_cc_sources`.
-        OomVictimExec.cpp
         OomVictimExec_test.cpp
+        LocalCeiling_test.cpp
         CompileCorrelation_test.cpp
         AdmitSession_test.cpp
         MissFlow_test.cpp

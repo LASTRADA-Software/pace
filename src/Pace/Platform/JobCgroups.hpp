@@ -13,7 +13,8 @@
 /// **Interfaces only, header-only and standard-library-only, and that is load-bearing**: the runner
 /// that consumes them (`apps/pace-cc/ProcessRunner.cpp`) is compiled into the launcher, which does not
 /// link `Pace`. The Linux implementation, and the startup rules that decide whether one can exist at
-/// all, are `Platform/CgroupV2.hpp` -- linked by the node alone.
+/// all, are `Platform/CgroupV2.hpp` -- the node's, and compiled into the launcher too (it is std-only), which
+/// places the compiles it runs itself below the node's `compiles/` (#1770).
 ///
 /// Why a compile gets a cgroup of its own: on Linux the `ru_maxrss` that `wait4` hands back for a
 /// spawned child INCLUDES the resident set of the process that spawned it, because the kernel folds the

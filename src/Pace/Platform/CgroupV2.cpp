@@ -378,7 +378,7 @@ std::expected<CgroupLayout, CgroupFailure> PrepareJobCgroups(ICgroupHost const& 
             continue;
         for (auto const& name: *entries)
         {
-            if (!name.starts_with("job-"))
+            if (!name.starts_with(NodeJobCgroupPrefix))
                 continue;
             if (auto const removed = RemoveCgroup(host, parent / name, teardown); !removed.has_value())
                 return Failed(CgroupUnavailable::StaleJobCgroups, Because(parent / name, removed.error()));
@@ -398,10 +398,12 @@ std::expected<void, std::error_code> SetCompileCeiling(ICgroupHost const& host,
 
 CgroupJobSource::CgroupJobSource(std::shared_ptr<ICgroupHost const> host,
                                  CgroupLayout layout,
-                                 CgroupTeardownPolicy teardown):
+                                 CgroupTeardownPolicy teardown,
+                                 std::string namePrefix):
     _host { std::move(host) },
     _layout { std::move(layout) },
-    _teardown { teardown }
+    _teardown { teardown },
+    _namePrefix { std::move(namePrefix) }
 {
 }
 
@@ -413,7 +415,8 @@ std::expected<std::unique_ptr<IJobCgroup>, std::error_code> CgroupJobSource::Cre
     auto lastError = std::error_code {};
     for ([[maybe_unused]] auto const attempt: std::views::iota(std::uint32_t { 0 }, Attempts))
     {
-        auto const directory = _layout.compiles / std::format("job-{}", _next.fetch_add(1, std::memory_order_relaxed));
+        auto const directory =
+            _layout.compiles / std::format("{}{}", _namePrefix, _next.fetch_add(1, std::memory_order_relaxed));
         auto const made = _host->MakeDirectory(directory);
         if (!made.has_value())
         {

@@ -907,6 +907,7 @@ namespace
             while (::wait4(pid, &status, 0, &usage) < 0 && errno == EINTR)
                 continue;
             result.peakMemoryBytes = PeakOf(job.get(), usage);
+            result.inCgroup = job != nullptr;
             if (WIFEXITED(status))
                 result.exitCode = WEXITSTATUS(status);
             else if (WIFSIGNALED(status))
