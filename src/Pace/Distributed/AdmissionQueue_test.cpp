@@ -82,6 +82,22 @@ struct Fixture
         return queue.Enqueue(std::move(request));
     }
 
+    /// Enqueues a request for the compile keyed @p cacheKey, asked for with @p origin, and nothing taught: the
+    /// estimate is whatever the queue has learned of that key -- a kill included.
+    Ticket Ask(
+        AdmitKind kind, std::string caller, std::string cacheKey, AskOrigin origin, std::string const& fingerprint = "fp")
+    {
+        QueueRequest request;
+        request.kind = kind;
+        request.caller = std::move(caller);
+        request.fingerprint = fingerprint;
+        request.estimate =
+            EstimateKey { .cacheKey = std::move(cacheKey), .sourcePath = "big.cpp", .compilerIdentity = fingerprint };
+        request.storable = false;
+        request.origin = origin;
+        return queue.Enqueue(std::move(request));
+    }
+
     int serial {}; ///< Numbers the keys `Add` mints.
 };
 
@@ -984,4 +1000,129 @@ TEST_CASE("AdmissionQueue.yielding-worker-takes-no-dispatched-work-that-fits", "
     REQUIRE(granted.size() == 1);
     CHECK(granted[0].ticket == job);
     CHECK(granted[0].kind == Pace::CompileCacheWire::GrantKind::Worker);
+}
+
+// --- a compile killed for memory, asked for again (#1770) -------------------------------------------------------
+
+namespace
+{
+/// A worker on machine @p machine, for the toolchain "fp".
+Placement WorkerOn(std::string const& machine)
+{
+    return Placement { .workerId = "worker-" + machine, .machine = machine, .endpoint = machine + ":6680" };
+}
+} // namespace
+
+TEST_CASE("AdmissionQueue.a-killed-compile-is-charged-what-the-kill-taught-and-only-where-it-fits",
+          "[distributed][admission][oom]")
+{
+    // The kill is learned from the admission ending unsettled: the key's estimate is raised to at least the default,
+    // and the requeue is charged that. A machine whose configured budget is below it is then no target at all --
+    // where the same request asked for the first time runs alone on it, and is the ceiling's next kill.
+    Fixture f;
+    f.placement.byFingerprint["fp"] = { WorkerOn("small") };
+    f.queue.ReportMachine("small", Report(2 * GiB, 4));
+    f.queue.ReportMachine("m", Report(8 * GiB, 4));
+    f.estimates.Record(EstimateKey { .cacheKey = "big", .sourcePath = "big.cpp", .compilerIdentity = "fp" }, 1 * GiB);
+
+    auto const first = f.Ask(AdmitKind::Dispatchable, "m", "big", AskOrigin::First);
+    auto const placed = f.queue.Pump();
+    REQUIRE(placed.size() == 1);
+    REQUIRE(placed[0].placement.has_value());
+    CHECK(Unwrap(placed[0].placement).machine == "small");
+    CHECK(placed[0].chargedBytes == 1 * GiB);
+
+    f.queue.Abandon(first); // the worker's machine killed it: the launcher ends the admission unsettled
+
+    SECTION("asked for again after the kill")
+    {
+        f.Ask(AdmitKind::Dispatchable, "m", "big", AskOrigin::AfterKill);
+        auto const again = f.queue.Pump();
+        REQUIRE(again.size() == 1);
+        CHECK(again[0].chargedBytes == 3 * GiB); // the default the kill raised it to
+        CHECK(again[0].kind == Pace::CompileCacheWire::GrantKind::Local);
+        CHECK_FALSE(again[0].placement.has_value());
+        CHECK_FALSE(again[0].neverFits); // this machine holds it
+    }
+    SECTION("the control: asked for as a first request, it runs alone on the machine that killed it")
+    {
+        f.Ask(AdmitKind::Dispatchable, "m", "big", AskOrigin::First);
+        auto const again = f.queue.Pump();
+        REQUIRE(again.size() == 1);
+        REQUIRE(again[0].placement.has_value());
+        CHECK(Unwrap(again[0].placement).machine == "small");
+        CHECK(again[0].ranAlone);
+    }
+}
+
+TEST_CASE("AdmissionQueue.a-killed-compile-waits-for-room-on-a-machine-that-fits", "[distributed][admission][oom]")
+{
+    // Kill, requeue, admitted LATER: the one machine whose budget can hold it is busy, and the asking machine's is
+    // too small to, so the request waits -- rather than running alone where it would be killed -- until room frees.
+    Fixture f;
+    f.placement.byFingerprint["fp"] = { WorkerOn("big") };
+    f.queue.ReportMachine("big", Report(8 * GiB, 4));
+    f.queue.ReportMachine("m", Report(2 * GiB, 4));
+    auto const other = f.Add(AdmitKind::Dispatchable, "x", 6 * GiB, "fp");
+    REQUIRE(f.queue.Pump().size() == 1);
+
+    f.estimates.RecordKilled(EstimateKey { .cacheKey = "killed", .sourcePath = "big.cpp", .compilerIdentity = "fp" });
+    auto const requeued = f.Ask(AdmitKind::Dispatchable, "m", "killed", AskOrigin::AfterKill);
+    CHECK(f.queue.Pump().empty());
+    CHECK(f.queue.Depth() == 1);
+
+    f.queue.Settle(other, Done);
+    auto const later = f.queue.Pump();
+    REQUIRE(later.size() == 1);
+    CHECK(later[0].ticket == requeued);
+    REQUIRE(later[0].placement.has_value());
+    CHECK(Unwrap(later[0].placement).machine == "big");
+    CHECK_FALSE(later[0].neverFits);
+}
+
+TEST_CASE("AdmissionQueue.a-killed-compile-no-machine-can-hold-never-fits", "[distributed][admission][oom]")
+{
+    Fixture f;
+    f.placement.byFingerprint["fp"] = { WorkerOn("w") };
+    f.queue.ReportMachine("w", Report(2 * GiB, 4));
+    f.queue.ReportMachine("m", Report(2 * GiB, 4));
+    f.estimates.RecordKilled(EstimateKey { .cacheKey = "huge", .sourcePath = "big.cpp", .compilerIdentity = "fp" });
+
+    SECTION("dispatchable")
+    {
+        f.Ask(AdmitKind::Dispatchable, "m", "huge", AskOrigin::AfterKill);
+    }
+    SECTION("local-only, the launcher's own requeue after a kill here")
+    {
+        f.Ask(AdmitKind::LocalOnly, "m", "huge", AskOrigin::AfterKill);
+    }
+
+    auto const decided = f.queue.Pump();
+    REQUIRE(decided.size() == 1);
+    CHECK(decided[0].kind == Pace::CompileCacheWire::GrantKind::Local);
+    CHECK(decided[0].neverFits);
+    // Alone on its own machine, as any compile larger than a whole budget runs.
+    CHECK(decided[0].ranAlone);
+}
+
+TEST_CASE("AdmissionQueue.a-budget-the-allowance-holds-down-is-waited-for-not-never", "[distributed][admission][oom]")
+{
+    // A held budget says nothing of the configured one, so it may yet hold the compile: not `neverFits`.
+    Fixture f;
+    f.placement.byFingerprint["fp"] = { WorkerOn("w") };
+    auto held = Report(2 * GiB, 4);
+    held.standing = BudgetStanding::HeldByAllowance;
+    f.queue.ReportMachine("w", held);
+    f.queue.ReportMachine("m", Report(2 * GiB, 4));
+    f.estimates.RecordKilled(EstimateKey { .cacheKey = "huge", .sourcePath = "big.cpp", .compilerIdentity = "fp" });
+
+    f.Ask(AdmitKind::Dispatchable, "m", "huge", AskOrigin::AfterKill);
+    CHECK(f.queue.Pump().empty());
+
+    f.queue.ReportMachine("w", Report(8 * GiB, 4)); // the allowance ramped back
+    auto const later = f.queue.Pump();
+    REQUIRE(later.size() == 1);
+    REQUIRE(later[0].placement.has_value());
+    CHECK(Unwrap(later[0].placement).machine == "w");
+    CHECK_FALSE(later[0].neverFits);
 }

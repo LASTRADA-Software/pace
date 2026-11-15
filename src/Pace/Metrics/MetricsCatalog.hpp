@@ -1528,6 +1528,16 @@ inline constexpr EnumTable<IMetricsSink::Counter, CounterDescriptor> CounterTabl
       .help = "Grants whose wait pace_admission_wait_milliseconds_total sums: one per grant, a worker refusal's regrant "
               "included. The count of that pair; divide the sum by it for the mean wait.",
       .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionRequeuedAfterKill,
+      .prometheusName = "pace_admission_requeued_after_kill_total",
+      .help = "Compiles asked for again after their compiler was killed for memory, placed only where their estimate "
+              "fits a machine's configured budget.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionNeverFits,
+      .prometheusName = "pace_admission_never_fits_total",
+      .help = "Requeued killed compiles no machine's configured budget can hold, run alone on their own machine "
+              "outside the compile ceiling.",
+      .type = MetricType::Counter },
     { .counter = IMetricsSink::Counter::AdmissionForwarded,
       .prometheusName = "pace_admission_forwarded_total",
       .help = "Queue requests (admit and settle) this node relayed to the leader on behalf of a launcher on this "

@@ -200,7 +200,8 @@ void AdmissionQueue::Settle(Ticket ticket, Settlement const& settlement)
                                                                     .kind = GrantKind::Stored,
                                                                     .placement = std::nullopt,
                                                                     .chargedBytes = 0,
-                                                                    .ranAlone = false },
+                                                                    .ranAlone = false,
+                                                                    .neverFits = false },
                                              .entry = std::move(waiter) });
         }
     else
@@ -337,12 +338,25 @@ std::vector<Decision> AdmissionQueue::Pump()
 
         // Reported candidates in placement order, then the caller: the CPU never idles while the
         // caller has room.
+        //
+        // A compile killed for memory and asked for again (#1770) is no target for a machine whose CONFIGURED budget
+        // is below its estimate: there the compile ceiling is the budget, and running it alone would be the next
+        // kill. When every reported machine it could run on is such a machine, its caller included, none ever will
+        // hold it -- it runs alone on the caller, outside the ceiling (`neverFits`). A budget the pressure allowance
+        // holds down says nothing of the configured one, so it is waited for rather than ruled out.
+        auto const afterKill = request.origin == AskOrigin::AfterKill;
+        auto const neverHolds = [&](MachineId const& machine) {
+            auto const& report = *_ledgers.at(machine).report;
+            return afterKill && report.standing == BudgetStanding::Configured
+                   && entry.chargedBytes > report.memoryBudgetBytes;
+        };
         std::vector<Target> targets;
         if (request.kind == AdmitKind::Dispatchable && entry.refusals < MaxWorkerRefusals)
             for (auto& placement: _placement.Candidates(request.fingerprint, request.excluded))
-                if (reported(placement.machine))
+                if (reported(placement.machine) && !neverHolds(placement.machine))
                     targets.push_back(Target { .machine = placement.machine, .placement = std::move(placement) });
-        if (reported(request.caller))
+        auto const neverFits = afterKill && targets.empty() && reported(request.caller) && neverHolds(request.caller);
+        if (reported(request.caller) && (neverFits || !neverHolds(request.caller)))
             targets.push_back(Target { .machine = request.caller, .placement = std::nullopt });
 
         auto const granted = std::ranges::find_if(targets, [&](Target const& target) {
@@ -388,6 +402,7 @@ std::vector<Decision> AdmissionQueue::Pump()
                 .placement = granted->placement,
                 .chargedBytes = chargedBytes,
                 .ranAlone = chargedBytes > BudgetOf(ledger),
+                .neverFits = neverFits,
             });
             continue;
         }

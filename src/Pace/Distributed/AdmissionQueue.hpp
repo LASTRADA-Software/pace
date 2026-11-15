@@ -28,6 +28,7 @@ using MachineId = std::string;
 using Ticket = std::uint64_t;
 
 using CompileCacheWire::AdmitKind;
+using CompileCacheWire::AskOrigin;
 using CompileCacheWire::BudgetStanding;
 using CompileCacheWire::GrantKind;
 using CompileCacheWire::PressureLevel;
@@ -43,6 +44,10 @@ struct QueueRequest
     bool storable { true }; ///< Joins the dedup in-flight set only when true.
     std::string treeLabel;  ///< Display only.
     std::vector<std::string> excluded;
+    /// Whether this compile was granted before, and was then killed for memory (#1770). `AfterKill` places it
+    /// only on a machine whose CONFIGURED budget can hold its estimate -- running it alone past one would be the
+    /// ceiling's next kill -- and decides `Decision::neverFits` when none of its reported machines can.
+    AskOrigin origin { AskOrigin::First };
 };
 
 /// One candidate worker for a dispatchable request.
@@ -94,6 +99,9 @@ struct Decision
     std::optional<Placement> placement; ///< Engaged for `Worker`.
     std::uint64_t chargedBytes {};
     bool ranAlone {}; ///< Its estimate exceeded the whole budget.
+    /// A compile killed for memory and asked for again (`AskOrigin::AfterKill`) that no reported machine's
+    /// configured budget can hold, its caller's included: granted `Local`, alone, on the caller (#1770).
+    bool neverFits {};
 };
 
 /// How a granted compile ended.
@@ -182,6 +190,12 @@ struct QueueView
 /// waits for an idle machine and reserves all free memory and slots meanwhile -- and never on a
 /// machine under pressure, nor on one whose budget the pressure allowance holds below its configured
 /// figure (`BudgetStanding::HeldByAllowance`), where it waits for the ramp instead.
+///
+/// A request asked for again after its compile was killed for memory (`AskOrigin::AfterKill`, #1770) never runs
+/// alone on a machine whose configured budget is below its estimate: that machine's compile ceiling is its
+/// budget, so the run would be the next kill. Such machines are no target at all for it. When EVERY reported
+/// machine it could run on is one -- its caller included -- nothing can ever hold it, and it runs alone on its
+/// caller as `Decision::neverFits`, which the client runs outside the ceiling.
 ///
 /// A storable request whose `estimate.cacheKey` is already in flight from a machine that
 /// shares its cache waits on that compile instead of running: it is never charged and holds no

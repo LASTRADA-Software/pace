@@ -1583,6 +1583,12 @@ class IMetricsSink
         AdmissionWorkerRefused,
         AdmissionWaitMillisTotal,
         AdmissionWaitCount,
+        /// A compile asked for again after its compiler was killed for memory (`AskOrigin::AfterKill`, #1770): one
+        /// per requeue, at most one per kill, which the client bounds at one requeue per compile.
+        AdmissionRequeuedAfterKill,
+        /// A requeued killed compile no reported machine's configured budget can hold, granted to run alone on its
+        /// own machine outside the compile ceiling (`LocalGrantReason::NeverFits`, #1770).
+        AdmissionNeverFits,
 
         /// Admission forwarding (#1728): what a node that does not lead did with the queue exchanges a
         /// launcher on its machine sent it. Written by the FORWARDING node's surface, never the leader's.

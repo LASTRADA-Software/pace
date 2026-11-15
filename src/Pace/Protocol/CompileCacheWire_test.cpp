@@ -6241,11 +6241,12 @@ TEST_CASE("ADMIT and LEASE carry the ask origin as their last byte, pinned", "[w
     // The VALUES travel: a leader that read another byte as `AfterGrant` would stop counting first asks.
     CHECK(static_cast<std::uint8_t>(AskOrigin::First) == 0);
     CHECK(static_cast<std::uint8_t>(AskOrigin::AfterGrant) == 1);
-    CHECK(static_cast<std::uint8_t>(AskOrigin::Last) == 2);
+    CHECK(static_cast<std::uint8_t>(AskOrigin::AfterKill) == 2);
+    CHECK(static_cast<std::uint8_t>(AskOrigin::Last) == 3);
     CHECK(OpFieldCount(Op::Admit) == 10);
     CHECK(OpFieldCount(Op::Lease) == 6);
 
-    for (auto const origin: { AskOrigin::First, AskOrigin::AfterGrant })
+    for (auto const origin: { AskOrigin::First, AskOrigin::AfterGrant, AskOrigin::AfterKill })
     {
         INFO("origin " << static_cast<int>(origin));
         auto admit = SampleAdmit({});
@@ -6280,11 +6281,12 @@ TEST_CASE("ADMIT and LEASE carry the ask origin as their last byte, pinned", "[w
     for (auto const op: { Op::Admit, Op::Lease })
     {
         auto const& frame = op == Op::Admit ? admitFrame : leaseFrame;
-        CHECK(refuses(frame, op, Bytes({ 2 })));
+        CHECK(refuses(frame, op, Bytes({ 3 })));
         CHECK(refuses(frame, op, Bytes({ 0, 0 })));
         CHECK(refuses(frame, op, {}));
         // The control: a known byte is read.
         CHECK_FALSE(refuses(frame, op, Bytes({ 1 })));
+        CHECK_FALSE(refuses(frame, op, Bytes({ 2 })));
     }
 }
 
@@ -6422,7 +6424,10 @@ TEST_CASE("An ADMIT grant round-trips what the leader decided", "[wire][admissio
     }
     SECTION("a local grant says why a dispatchable request did not go to a worker")
     {
-        for (auto const reason: { LocalGrantReason::NoWorker, LocalGrantReason::AllExcluded, LocalGrantReason::NoRoom })
+        for (auto const reason: { LocalGrantReason::NoWorker,
+                                  LocalGrantReason::AllExcluded,
+                                  LocalGrantReason::NoRoom,
+                                  LocalGrantReason::NeverFits })
         {
             auto const local = DecodeAdmitGrant(EncodeAdmitGrant(AdmitGrant { .kind = GrantKind::Local,
                                                                               .endpoint = {},
@@ -6758,7 +6763,8 @@ TEST_CASE("The admission enums have their specified bytes", "[wire][admission]")
     CHECK(static_cast<std::uint8_t>(LocalGrantReason::NoWorker) == 1);
     CHECK(static_cast<std::uint8_t>(LocalGrantReason::AllExcluded) == 2);
     CHECK(static_cast<std::uint8_t>(LocalGrantReason::NoRoom) == 3);
-    CHECK(static_cast<std::uint8_t>(LocalGrantReason::Last) == 4);
+    CHECK(static_cast<std::uint8_t>(LocalGrantReason::NeverFits) == 4);
+    CHECK(static_cast<std::uint8_t>(LocalGrantReason::Last) == 5);
 }
 
 TEST_CASE("The wire is at version 18 at both ends of its range", "[wire][admission][machine-budget]")

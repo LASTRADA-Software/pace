@@ -64,6 +64,9 @@ namespace
         // compile locally, which is what a queue is for, and not a refusal. Counted as `NoCapacity` it
         // would read as "buy more machines" on every build that merely filled its fleet.
         { .reason = Wire::LocalGrantReason::NoRoom, .counter = std::nullopt, .unservedToolchain = false },
+        // Counted where the grant is answered (`AdmissionNeverFits`), beside `AdmissionRanAlone`, which it also is:
+        // a compile no machine can hold is a fact about the compile, not a toolchain nobody serves.
+        { .reason = Wire::LocalGrantReason::NeverFits, .counter = std::nullopt, .unservedToolchain = false },
     } };
 
     static_assert(RowsInEnumeratorOrder(LocalGrantSignals, &LocalGrantSignalRow::reason),
@@ -136,7 +139,8 @@ std::expected<Ticket, SchedulerReply> SchedulerService::Admit(CallerContext cons
                                                                                 .compilerIdentity = request.fingerprint },
                                                       .storable = request.storable,
                                                       .treeLabel = request.treeLabel,
-                                                      .excluded = request.excluded });
+                                                      .excluded = request.excluded,
+                                                      .origin = request.origin });
     _admissionTickets.emplace(ticket,
                               AdmissionTicket { .regate = std::move(regate),
                                                 .fingerprint = request.fingerprint,
@@ -151,7 +155,8 @@ std::expected<Ticket, SchedulerReply> SchedulerService::Admit(CallerContext cons
                                                 // A re-admission of a compile this leader already granted (the
                                                 // launcher's local retry after the granted worker failed it) is the
                                                 // SAME compile: reported as already counted, so it never is twice.
-                                                .demandReported = request.origin == Wire::AskOrigin::AfterGrant });
+                                                // A requeue after a kill is the same compile asked for a third way.
+                                                .demandReported = request.origin != Wire::AskOrigin::First });
     return ticket;
 }
 
@@ -195,6 +200,7 @@ std::optional<AdmissionVerdict> SchedulerService::GrantFor(Decision const& decis
                            .grant = {},
                            .chargedBytes = decision.chargedBytes,
                            .ranAlone = decision.ranAlone,
+                           .neverFits = decision.neverFits,
                            .queued = std::chrono::duration_cast<std::chrono::milliseconds>(_clock.now() - held.enqueuedAt),
                            .waited = std::chrono::duration_cast<std::chrono::milliseconds>(_clock.now() - held.parkedAt) };
 
@@ -268,9 +274,14 @@ std::optional<AdmissionVerdict> SchedulerService::GrantFor(Decision const& decis
             // A dispatchable request kept here says why, so the launcher records a fleet that placed it
             // nowhere as it records a lease the scheduler refused -- a fleet that distributes nothing must
             // not go green in silence.
-            auto const reason = decision.kind == Wire::GrantKind::Local && held.kind == Wire::AdmitKind::Dispatchable
-                                    ? LocalGrantReasonOf(_workers.LiveWorkers(), held.fingerprint, held.excluded)
-                                    : Wire::LocalGrantReason::Asked;
+            //
+            // A killed compile no machine can hold says so whatever it asked for (#1770): its client runs it
+            // outside the compile ceiling, which would only kill it again.
+            auto reason = Wire::LocalGrantReason::Asked;
+            if (decision.kind == Wire::GrantKind::Local && decision.neverFits)
+                reason = Wire::LocalGrantReason::NeverFits;
+            else if (decision.kind == Wire::GrantKind::Local && held.kind == Wire::AdmitKind::Dispatchable)
+                reason = LocalGrantReasonOf(_workers.LiveWorkers(), held.fingerprint, held.excluded);
             // Under `_admissionMutex`: the counter is an atomic, and `_unserved` takes only its own lock
             // and calls nothing back, so nothing can take these two in the other order.
             auto const& signal = LocalGrantSignals[static_cast<std::size_t>(reason)];

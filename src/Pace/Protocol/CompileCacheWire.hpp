@@ -247,6 +247,11 @@ using WireVersion = std::uint8_t;
 /// version-17 leader would refuse every version-18 report as a malformed frame, and a version-18
 /// leader would refuse every version-17 one the same way -- a machine whose reports are refused is
 /// one the queue admits nothing on, and nothing would say why.
+///
+/// Also in 18, for the same reason (#1770, before 18 was released): `AskOrigin::AfterKill`, a compile asked
+/// for again after its compiler was killed for memory, and `LocalGrantReason::NeverFits`, the leader's answer
+/// when no machine's budget can hold it. Each is an enumerator past a version-17 decoder's `Last`, which that
+/// decoder refuses as a malformed frame rather than misreads.
 inline constexpr WireVersion CurrentVersion = 18;
 
 /// The oldest version this build still accepts. Equal to `CurrentVersion` while
@@ -5057,7 +5062,12 @@ enum class AskOrigin : std::uint8_t
     First = 0,
     /// The leader already granted this compile once in this invocation; this asks again for the same compile.
     AfterGrant = 1,
-    Last = 2
+    /// The leader granted this compile once already and its compiler was KILLED for memory -- a worker's
+    /// `worker-compile-killed`, or this machine's own compile ceiling (#1770). Counted as `AfterGrant` is, and
+    /// besides: the queue places it only on a machine whose configured budget can hold its estimate, and grants it
+    /// `Local` with `LocalGrantReason::NeverFits` when no reported machine's can.
+    AfterKill = 2,
+    Last = 3
 };
 
 /// A client asking the scheduler where to compile.
@@ -10244,7 +10254,12 @@ enum class LocalGrantReason : std::uint8_t
     /// Workers serve it and none had room for it when the queue reached it -- full, unreported, or
     /// refused it as often as the queue allows.
     NoRoom = 3,
-    Last = 4
+    /// A compile asked for again after it was killed for memory (`AskOrigin::AfterKill`) whose estimate is above
+    /// the configured budget of every reported machine it could run on, this one included (#1770): no machine can
+    /// ever hold it, so it runs here, alone, OUTSIDE the compile ceiling that would only kill it again. Answers a
+    /// `LocalOnly` request too, which no other reason does.
+    NeverFits = 4,
+    Last = 5
 };
 
 /// How a granted compile ended, as the admission queue is told. Explicit values: transmitted.

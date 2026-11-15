@@ -423,6 +423,8 @@ namespace
         }
         if (verdict.ranAlone)
             metrics.Increment(IMetricsSink::Counter::AdmissionRanAlone);
+        if (verdict.neverFits)
+            metrics.Increment(IMetricsSink::Counter::AdmissionNeverFits);
         // A `_sum`/`_count` pair, moved together: the wait since this request was last parked, so a
         // worker refusal's regrant does not add the wait before the refusal a second time.
         metrics.Increment(IMetricsSink::Counter::AdmissionWaitMillisTotal,
@@ -746,6 +748,8 @@ core::async::Task<FrameReply> AdmissionResponder::Answer(std::span<std::byte con
             core->waiters.emplace(ticket, waiter);
         }
         core->metrics->Increment(IMetricsSink::Counter::AdmissionQueued);
+        if (request->origin == Wire::AskOrigin::AfterKill)
+            core->metrics->Increment(IMetricsSink::Counter::AdmissionRequeuedAfterKill);
     }
     Registration registration { core, ticket };
 
