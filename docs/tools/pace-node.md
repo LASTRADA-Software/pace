@@ -3546,7 +3546,8 @@ oscillate:
   surely as a shortage does — with gigabytes free, and nothing freeing them could relieve it. So a
   cgroup elsewhere that carries at least 80% of the machine's `some` stall while standing
   at its own limit — its own `memory.events.local` count (the hierarchical `memory.events` on a kernel
-  without it) rose between two samples, or `memory.current` is within 5% of the limit, held for two dwells as the compiles' evidence is — neither yields nor sheds, and
+  without it) rose between two samples, held for two dwells as the compiles' evidence is; standing
+  near a limit it never reaches, as page cache filling up to it does, is not enough — neither yields nor sheds, and
   eases a level the way an own stall does — its `full` stall too, but only as the owner of the `some`
   share: in a machine-wide freeze every busy cgroup's `full` reads about the machine's, a cgroup at its
   own limit included, so `full` alone says nothing about whose a freeze is. One cgroup must carry the
@@ -3558,7 +3559,7 @@ oscillate:
   it once more — never per sample.
   - **What it reads, and how often.** It walks the cgroup tree under `/sys/fs/cgroup` only while the
     machine stalls at all, at most once every ten seconds: one listing and one `memory.pressure` per
-    child, descending only into a cgroup that carries 80% of the stall (a cgroup's PSI covers its
+    child, descending only into a cgroup that carries 80% of the `some` stall (a cgroup's PSI covers its
     subtree, so nothing below one that does not can), at most 64 cgroups and 8 levels. Between walks
     each second re-reads only the up to four cgroups the last walk kept. A cgroup that reaches its limit
     after a walk is found by the next: until then its stall counts as the machine's, which yields when it

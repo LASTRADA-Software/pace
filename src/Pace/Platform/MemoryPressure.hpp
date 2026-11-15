@@ -59,9 +59,10 @@ struct ConfinedStall
 {
     std::filesystem::path cgroup; ///< Its directory.
     PsiReading psi {};            ///< Its own `memory.pressure`.
+    bool limited {};              ///< Whether it sets a numeric `memory.max` or `memory.high` of its own.
     /// Whether it stands at its own limit now: a limit's count in its own `memory.events.local` (the hierarchical
-    /// `memory.events` where the kernel has no local file) rose since the previous sample, or its `memory.current` is
-    /// within `1 / CeilingNearDivisor` of the limit.
+    /// `memory.events` where the kernel has no local file) rose since the previous look. Standing NEAR a limit is not
+    /// enough: a cgroup whose page cache fills up to its limit and stops there stalls on nothing of its own.
     bool atLimit {};
 };
 
@@ -105,8 +106,8 @@ struct PressureSample
 /// **Cost.** A walk lists a cgroup directory and reads one `memory.pressure` per child cgroup, and it descends only
 /// into a child that carries at least `share` of the machine's stall -- a cgroup's PSI covers its whole subtree, so
 /// no cgroup below one that does not can either. It runs only while the machine stalls at all, at most once per
-/// `walkInterval`, and stops at `maxVisited` cgroups and `maxDepth` levels. Between walks a sample re-reads only the
-/// candidates the last walk kept, at most `maxCandidates`: five small files each.
+/// `walkInterval`, and stops at `maxVisited` cgroups and `maxDepth` levels. A walk keeps the carriers that set a limit
+/// of their own, at most `maxCandidates`; between walks a sample re-reads only those: four small files each.
 ///
 /// **Staleness, both directions.** A cgroup that reaches its limit after a walk is found by the next: until then its
 /// stall counts as the machine's, which yields when it need not -- admissions lost, never a freeze missed. A candidate

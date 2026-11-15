@@ -3,11 +3,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <format>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -235,29 +237,42 @@ TEST_CASE("PsiPressureSource finds the cgroup stalling at its own limit, and non
 {
     ConfinedTree tree;
     auto source = tree.Source();
-    auto const sample = Unwrap(source.Sample());
-    auto const& confined = Unwrap(sample.confined);
-    REQUIRE(confined.size() == 1);
-    CHECK(confined.front().cgroup == "/sys/fs/cgroup/user.slice/thrash.service");
-    CHECK(confined.front().atLimit);
-    CHECK(confined.front().psi.some.avg10 == 14.2);
-    CHECK_FALSE(sample.confinedFault.has_value());
+    // The walk keeps it by its limit; a first look has no count to compare with, so it is not AT it yet.
+    auto const first = Unwrap(source.Sample());
+    auto const& kept = Unwrap(first.confined);
+    REQUIRE(kept.size() == 1);
+    CHECK(kept.front().cgroup == "/sys/fs/cgroup/user.slice/thrash.service");
+    CHECK(kept.front().limited);
+    CHECK_FALSE(kept.front().atLimit);
+    CHECK_FALSE(first.confinedFault.has_value());
+
+    // The kernel counts it reaching its memory.max: at it now.
+    tree.host->files["/sys/fs/cgroup/user.slice/thrash.service/memory.events"] = "low 0\nhigh 0\nmax 9\noom 0\noom_kill 0\n";
+    auto const rose = Unwrap(Unwrap(source.Sample()).confined);
+    REQUIRE(rose.size() == 1);
+    CHECK(rose.front().atLimit);
+    CHECK(rose.front().psi.some.avg10 == 14.2);
 }
 
-TEST_CASE("PsiPressureSource reports no confined stall where no cgroup is at a limit of its own",
+TEST_CASE("PsiPressureSource reports no cgroup at its limit without the kernel counting it there",
           "[platform][psi][confined]")
 {
     ConfinedTree tree;
-    SECTION("far below its limit")
+    SECTION("within a twentieth of its limit, with no event rising: it stalls on nothing of its own")
     {
-        tree.host->files["/sys/fs/cgroup/user.slice/thrash.service/memory.current"] = "1000000000\n";
+        auto source = tree.Source();
+        for ([[maybe_unused]] auto const sample: std::views::iota(0, 3))
+        {
+            auto const confined = Unwrap(Unwrap(source.Sample()).confined);
+            CHECK(std::ranges::none_of(confined, &ConfinedStall::atLimit));
+        }
     }
-    SECTION("no limit at all")
+    SECTION("no limit at all: not even a candidate")
     {
         tree.host->files["/sys/fs/cgroup/user.slice/thrash.service/memory.max"] = "max\n";
+        auto source = tree.Source();
+        CHECK(Unwrap(Unwrap(source.Sample()).confined).empty());
     }
-    auto source = tree.Source();
-    CHECK(Unwrap(Unwrap(source.Sample()).confined).empty());
 }
 
 TEST_CASE("PsiPressureSource keeps no cgroup that carries only the full share", "[platform][psi][confined]")
@@ -270,25 +285,18 @@ TEST_CASE("PsiPressureSource keeps no cgroup that carries only the full share", 
     CHECK(Unwrap(Unwrap(source.Sample()).confined).empty());
 }
 
-TEST_CASE("PsiPressureSource counts a memory.high a cgroup is throttled at, and an events rise", "[platform][psi][confined]")
+TEST_CASE("PsiPressureSource counts a memory.high a cgroup is throttled at, by its events", "[platform][psi][confined]")
 {
     ConfinedTree tree;
     auto const base = std::string { "/sys/fs/cgroup/user.slice/thrash.service" };
     tree.host->files[base + "/memory.max"] = "max\n";
-    tree.host->files[base + "/memory.current"] = "1000000000\n";
     tree.host->files[base + "/memory.high"] = "2000000000\n";
     auto source = tree.Source();
-    // Far below its high limit, and the count has nothing to rise from yet: a candidate is kept only AT a limit.
-    CHECK(Unwrap(Unwrap(source.Sample()).confined).empty());
+    auto const kept = Unwrap(Unwrap(source.Sample()).confined);
+    REQUIRE(kept.size() == 1);
+    CHECK_FALSE(kept.front().atLimit);
 
-    tree.host->files[base + "/memory.current"] = "1990000000\n";
-    tree.clock.advance(std::chrono::seconds { 10 });
-    auto const near = Unwrap(Unwrap(source.Sample()).confined);
-    REQUIRE(near.size() == 1);
-    CHECK(near.front().atLimit);
-
-    // Below again, but the kernel counted it reaching memory.high since: still at it.
-    tree.host->files[base + "/memory.current"] = "1000000000\n";
+    // The kernel counted it throttled at memory.high since: at it. Standing still again: not.
     tree.host->files[base + "/memory.events"] = "low 0\nhigh 7\nmax 0\noom 0\noom_kill 0\n";
     auto const rose = Unwrap(Unwrap(source.Sample()).confined);
     REQUIRE(rose.size() == 1);
@@ -301,18 +309,22 @@ TEST_CASE("PsiPressureSource counts a memory.high a cgroup is throttled at, and 
 TEST_CASE("PsiPressureSource judges a cgroup's own limit by its local events, not its children's",
           "[platform][psi][confined]")
 {
-    // A slice with a numeric limit far above what it holds, whose child keeps reaching the child's own limit: the
-    // hierarchical memory.events rises in the slice too, the local one does not. The slice is not at ITS limit.
+    // A slice with a numeric limit, whose child keeps reaching the child's own limit: the hierarchical memory.events
+    // rises in the slice too, the local one does not. The slice is not at ITS limit.
     ConfinedTree tree;
     auto const slice = std::string { "/sys/fs/cgroup/user.slice" };
     tree.host->files[slice + "/memory.max"] = "60000000000\n";
     tree.host->files[slice + "/memory.events.local"] = "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\n";
-    tree.host->files["/sys/fs/cgroup/user.slice/thrash.service/memory.current"] = "1000000000\n"; // the child is not near
     auto source = tree.Source();
-    CHECK(Unwrap(Unwrap(source.Sample()).confined).empty());
+    auto const atSlice = [&] {
+        auto const confined = Unwrap(Unwrap(source.Sample()).confined);
+        auto const found = std::ranges::find(confined, std::filesystem::path { slice }, &ConfinedStall::cgroup);
+        REQUIRE(found != confined.end());
+        return found->atLimit;
+    };
+    CHECK_FALSE(atSlice());
     tree.host->files[slice + "/memory.events"] = "low 0\nhigh 0\nmax 40\noom 0\noom_kill 0\n";
-    tree.clock.advance(std::chrono::seconds { 10 });
-    CHECK(Unwrap(Unwrap(source.Sample()).confined).empty());
+    CHECK_FALSE(atSlice());
 }
 
 TEST_CASE("PsiPressureSource walks the cgroup tree only while the machine stalls, and once per interval",

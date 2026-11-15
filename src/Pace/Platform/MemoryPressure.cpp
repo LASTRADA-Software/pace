@@ -183,13 +183,11 @@ std::optional<ConfinedStall> ConfinedStallScan::Look(std::filesystem::path const
     auto events = _host->ReadFile(cgroup / "memory.events.local");
     if (!events)
         events = _host->ReadFile(cgroup / "memory.events");
-    auto const current = _host->ReadFile(cgroup / "memory.current");
-    auto const currentBytes = current ? DecimalOf(*current) : std::nullopt;
+    auto limited = false;
     auto atLimit = false;
     for (auto const& row: OwnLimitTable)
     {
         auto const limit = _host->ReadFile(cgroup / row.file);
-        auto const limitBytes = limit ? DecimalOf(*limit) : std::nullopt;
         auto const count = events ? KeyedOf(*events, row.eventsKey) : std::nullopt;
         auto const key = std::format("{}|{}", cgroup.generic_string(), row.eventsKey);
         auto const seen = _eventsSeen.find(key);
@@ -197,12 +195,14 @@ std::optional<ConfinedStall> ConfinedStallScan::Look(std::filesystem::path const
         if (count)
             _eventsSeen[key] = *count;
         // No limit of this kind (`max`) is never AT it, whatever the count says.
-        if (!limitBytes)
+        if (!(limit && DecimalOf(*limit)))
             continue;
-        auto const near = currentBytes && *currentBytes >= *limitBytes - (*limitBytes / CeilingNearDivisor);
-        atLimit = atLimit || rose || near;
+        limited = true;
+        // Only the kernel counting the cgroup reaching its limit says it stalls ON it: standing near a limit it never
+        // reaches -- page cache filling up to it, then nothing -- is no stall of its own.
+        atLimit = atLimit || rose;
     }
-    return ConfinedStall { .cgroup = cgroup, .psi = *psi, .atLimit = atLimit };
+    return ConfinedStall { .cgroup = cgroup, .psi = *psi, .limited = limited, .atLimit = atLimit };
 }
 
 std::expected<void, std::string> ConfinedStallScan::Walk(PsiReading const& system)
@@ -246,7 +246,9 @@ std::expected<void, std::string> ConfinedStallScan::Walk(PsiReading const& syste
             // A cgroup's PSI covers its subtree: none below one that carries too little can carry enough.
             if (!Carries(look->psi, system, _bounds.share))
                 continue;
-            if (!Excluded(child) && look->atLimit)
+            // Kept by its LIMIT, not by being at it: a rise is seen only between two looks, so a cgroup the walk first
+            // meets cannot show one yet. Each sample after re-judges it.
+            if (!Excluded(child) && look->limited)
                 found.push_back(std::move(*look));
             // Never into this node's own subtree; through its ancestors, whose other children may be confined.
             if (!InsideExcluded(child))
