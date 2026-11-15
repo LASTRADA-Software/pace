@@ -206,6 +206,18 @@ approved_body="$(call_tool "$leader_mcp_port" enrollment_approve "{\"node_id\":\
 json_check "enrollment_approve" "$approved_body" \
     "${OK} and ${SC}['node_id'] == '${approved_id}' and ${SC}['decision'] == 'approved' and ${SC}['enrollment'] == 'manual' and 'the leader\\'s row now reads approved' in d['result']['content'][0]['text']"
 wait_for_log "it is a learner" "$approved_pid" "the approved joiner" "${workdir}/approved.log"
+# Admission CHANGES THE JOINER'S SHAPE, and a shape change stops every body and starts them again
+# from the record -- its MCP surface included. "it is a learner" is logged by the restarted
+# consensus tier BEFORE that surface is back, so section 4 dialling the learner's MCP port on the
+# strength of it raced the restart and lost under ASan: `curl could not complete`. The restarted
+# body announces readiness again once its surfaces are up, and the first start already wrote one
+# marker, so the fact is the SECOND marker. Counted rather than matched: a match would find the
+# first start's line at once.
+learner_ready_again() {
+    [ "$(grep -c "$E2eNodeReadyMarker" "${workdir}/approved.log" || true)" -ge 2 ]
+}
+wait_until learner_ready_again "the approved joiner's restarted body to log a second ${E2eNodeReadyMarker}" \
+    "$approved_pid" "${workdir}/approved.log" 120
 e2e_note "enrollment_approve answered decision approved, and the joiner counts itself a learner"
 
 # ------------------------------------------------------------------- 3. reject
