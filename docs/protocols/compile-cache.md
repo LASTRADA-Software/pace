@@ -450,12 +450,23 @@ over anything.
 ```
 REGISTER   [fingerprint][endpoint][slots][codecs][capacity] -> [workerId]
 HEARTBEAT  [workerId][inFlight][load]                       -> Ok
-LEASE      [fingerprint][objectKey][codecs]                 -> [endpoint][leaseToken][workerCodecs][leaseLifetime]
+LEASE      [fingerprint][objectKey][codecs][exclusions][toolchainLabel][origin]
+                                                            -> [endpoint][leaseToken][workerCodecs][leaseLifetime]
                                                                [dialHint][workerKey]
 COMPILE    [leaseToken][fingerprint][args][source][codecs][sourceName]
                                               -> [exitCode][object][stdout][stderr][correlation][signature]
 RELEASE    [leaseToken][objectKey]                          -> Ok
 ```
+
+`LEASE` is exactly six fields, in that order (`EncodeLease`): `fingerprint` and `objectKey`
+are the toolchain fingerprint and the cache key as text; `codecs` is the client's accepted
+codecs, one byte per codec id, most preferred first; `exclusions` is a **nested** field list
+of the worker endpoints this client has already seen fail for this compile, newest first, at
+most 16 entries (`MaxLeaseExclusions`) of 1 to 261 bytes each -- the encoder sends the newest
+16, and a decoder refuses a longer list, an empty entry or an over-long one as malformed rather
+than truncating it -- and is an empty field for none; `toolchainLabel` is what a person calls
+the toolchain, UTF-8, possibly empty; and `origin` is the one-byte ask origin `ADMIT` also
+carries (`0` first, `1` after a grant), any other value being malformed.
 
 `capacity` and `load` are **nested** records rather than fields of their own, and
 that is a compatibility property rather than tidiness: the top-level field count
