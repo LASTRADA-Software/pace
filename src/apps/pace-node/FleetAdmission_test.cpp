@@ -712,7 +712,9 @@ TEST_CASE("FleetAdmission.a-killed-compile-no-machine-can-hold-runs-outside-the-
     CHECK(launched.placements
           == std::vector<Cc::LocalPlacement> { Cc::LocalPlacement::UnderCeiling, Cc::LocalPlacement::OutsideCeiling });
     REQUIRE(launched.grants.size() == 2);
-    CHECK(launched.grants.front().localReason == Wire::LocalGrantReason::Asked);
+    // Larger than the whole budget on its first ask too: alone, said as such -- and still in the ceiling, since no
+    // kill had taught it yet.
+    CHECK(launched.grants.front().localReason == Wire::LocalGrantReason::RunsAlone);
     CHECK(launched.grants.back().localReason == Wire::LocalGrantReason::NeverFits);
     CHECK(launched.steps == std::vector<Cc::KillStep> { Cc::KillStep::LocalRequeued });
     CHECK(Count(queue, IMetricsSink::Counter::AdmissionRequeuedAfterKill) == 1);
@@ -770,7 +772,15 @@ namespace
         .compileLocal =
             [&](Cc::LocalPlacement placement) {
                 out.placements.push_back(placement);
-                return Cc::CompileRun { .exitCode = 0, .out = {}, .err = {} };
+                // This laptop's ceiling is its 6 GiB budget, which the compile is known to exceed: joined, it is killed.
+                auto run = Cc::CompileRun { .exitCode = 0, .out = {}, .err = {} };
+                if (placement == Cc::LocalPlacement::UnderCeiling)
+                {
+                    run.exitCode = 137;
+                    run.killed = Platform::CompileKill::Ceiling;
+                    run.inCgroup = true;
+                }
+                return run;
             },
         .finish = [](Cc::CompileRun& run, bool&) { return run.exitCode; },
         .failedOpen = {},
@@ -787,8 +797,9 @@ TEST_CASE("FleetAdmission.a-worker-kill-requeues-at-what-it-held-and-killed-twic
 {
     // A 6 GiB laptop asks; a 32 GiB worker serves the toolchain. Charged 2 GiB, the compile is killed holding 8 GiB:
     // its requeue is charged THAT, which only the worker holds, so it runs there -- and is killed again, holding 9.
-    // The one requeue spent, it compiles on the laptop, alone, as any compile larger than its budget runs. Two
-    // workers held it, so it is a compile killed twice, never one no machine can hold.
+    // The one requeue spent, it compiles on the laptop, alone, as any compile larger than its budget runs -- and
+    // outside the laptop's ceiling, which is that budget. Two workers held it, so it is a compile killed twice, never
+    // one no machine can hold.
     Queue queue;
     auto const port = queue.Serve();
     queue.Report(6 * GiB, 8);
@@ -805,15 +816,16 @@ TEST_CASE("FleetAdmission.a-worker-kill-requeues-at-what-it-held-and-killed-twic
     // The requeue: charged at least what the kill held, and placed on the one machine whose budget holds that.
     CHECK(launched.grants[1].kind == Wire::GrantKind::Worker);
     CHECK(launched.grants[1].chargedBytes == 8 * GiB);
-    // The fallback: here, charged what the second kill held, and NOT answered never-fits.
+    // The fallback: here, alone, charged what the second kill held -- answered `RunsAlone`, NOT never-fits.
     CHECK(launched.grants[2].kind == Wire::GrantKind::Local);
     CHECK(launched.grants[2].chargedBytes == 9 * GiB);
-    CHECK(launched.grants[2].localReason == Wire::LocalGrantReason::Asked);
+    CHECK(launched.grants[2].localReason == Wire::LocalGrantReason::RunsAlone);
     CHECK(
         launched.origins
         == std::vector<Wire::AskOrigin> { Wire::AskOrigin::First, Wire::AskOrigin::AfterKill, Wire::AskOrigin::AfterGrant });
     CHECK(launched.steps == std::vector<Cc::KillStep> { Cc::KillStep::WorkerRequeued, Cc::KillStep::WorkerKilledTwice });
-    CHECK(launched.placements == std::vector<Cc::LocalPlacement> { Cc::LocalPlacement::UnderCeiling });
+    // And it runs OUTSIDE this laptop's ceiling at once, which would only kill it a third time: one local run.
+    CHECK(launched.placements == std::vector<Cc::LocalPlacement> { Cc::LocalPlacement::OutsideCeiling });
     CHECK(Count(queue, IMetricsSink::Counter::AdmissionRequeuedAfterKill) == 1);
     CHECK(Count(queue, IMetricsSink::Counter::AdmissionNeverFits) == 0);
     CHECK(WaitFor([&] { return queue.service.AdmissionSnapshotNow().chargedBytes.empty(); }));

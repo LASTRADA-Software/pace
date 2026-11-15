@@ -6427,7 +6427,8 @@ TEST_CASE("An ADMIT grant round-trips what the leader decided", "[wire][admissio
         for (auto const reason: { LocalGrantReason::NoWorker,
                                   LocalGrantReason::AllExcluded,
                                   LocalGrantReason::NoRoom,
-                                  LocalGrantReason::NeverFits })
+                                  LocalGrantReason::NeverFits,
+                                  LocalGrantReason::RunsAlone })
         {
             auto const local = DecodeAdmitGrant(EncodeAdmitGrant(AdmitGrant { .kind = GrantKind::Local,
                                                                               .endpoint = {},
@@ -6765,7 +6766,8 @@ TEST_CASE("The admission enums have their specified bytes", "[wire][admission]")
     CHECK(static_cast<std::uint8_t>(LocalGrantReason::AllExcluded) == 2);
     CHECK(static_cast<std::uint8_t>(LocalGrantReason::NoRoom) == 3);
     CHECK(static_cast<std::uint8_t>(LocalGrantReason::NeverFits) == 4);
-    CHECK(static_cast<std::uint8_t>(LocalGrantReason::Last) == 5);
+    CHECK(static_cast<std::uint8_t>(LocalGrantReason::RunsAlone) == 5);
+    CHECK(static_cast<std::uint8_t>(LocalGrantReason::Last) == 6);
 }
 
 TEST_CASE("The wire is at version 18 at both ends of its range", "[wire][admission][machine-budget]")

@@ -155,7 +155,9 @@ struct Harness
     };
     std::deque<LocalScript> localRuns;      ///< Per compile run here; past the script, a clean run in the ceiling.
     std::vector<LocalPlacement> placements; ///< Where each compile run here was asked to run.
-    std::vector<KillStep> killSteps;        ///< Every step a kill made the flow take, in order.
+    /// A ceiling too small for this compile: every run asked to join it is killed there, whatever `localRuns` says.
+    bool ceilingKills {};
+    std::vector<KillStep> killSteps; ///< Every step a kill made the flow take, in order.
     std::optional<std::uint64_t> peak { 4'096 };
     bool stores { true };             ///< Whether the object reaches the cache.
     int compileExit { 0 };            ///< What the compiler said.
@@ -233,6 +235,8 @@ struct Harness
                         script = localRuns.front();
                         localRuns.pop_front();
                     }
+                    if (ceilingKills && placement == LocalPlacement::UnderCeiling)
+                        script = LocalScript { .killed = true, .inCgroup = true };
                     CompileRun run { .exitCode = script.killed ? 137 : compileExit, .out = {}, .err = {} };
                     run.peakMemoryBytes = peak;
                     if (script.killed)
@@ -657,6 +661,8 @@ TEST_CASE("Launcher.a-local-grant-reads-as-the-refusal-the-lease-path-records", 
 
     // A request that asked to run here was refused nothing.
     CHECK_FALSE(ExplainLocalGrant(Wire::LocalGrantReason::Asked, "gcc").has_value());
+    // Running alone here is a queue decision, recorded as nothing.
+    CHECK_FALSE(ExplainLocalGrant(Wire::LocalGrantReason::RunsAlone, "gcc").has_value());
     CHECK_FALSE(ExplainLocalGrant(Wire::LocalGrantReason::Last, "gcc").has_value());
 }
 
@@ -1132,4 +1138,42 @@ TEST_CASE("Launcher.an-unadmitted-local-kill-runs-once-more-outside-the-ceiling"
     CHECK(harness.placements
           == std::vector<LocalPlacement> { LocalPlacement::UnderCeiling, LocalPlacement::OutsideCeiling });
     CHECK(harness.killSteps == std::vector<KillStep> { KillStep::LocalOutsideCeiling });
+}
+
+TEST_CASE("Launcher.killed-twice-and-running-alone-here-runs-outside-the-ceiling-at-once", "[launcher][admission][oom]")
+{
+    // The fallback after a second kill is granted here ALONE: the estimate the kills taught exceeds this machine's
+    // budget, which is its ceiling. Joining that ceiling would be a third kill and a wasted compile, so it runs
+    // outside it at once -- one local run, and no `LocalOutsideCeiling` step.
+    Harness harness;
+    harness.Open({ Grant(Wire::GrantKind::Worker) });
+    harness.Open({ Grant(Wire::GrantKind::Worker) });
+    harness.Open({ Grant(Wire::GrantKind::Local, 0, Wire::LocalGrantReason::RunsAlone) });
+    harness.workerKills = { true, true };
+    harness.ceilingKills = true;
+
+    auto const report = RunMiss(harness.Seams());
+
+    CHECK(report.code == 0);
+    CHECK(harness.placements == std::vector<LocalPlacement> { LocalPlacement::OutsideCeiling });
+    CHECK(harness.killSteps == std::vector<KillStep> { KillStep::WorkerRequeued, KillStep::WorkerKilledTwice });
+    REQUIRE(harness.events.settles.size() == 3);
+    CHECK(harness.events.settles[2].outcome == Wire::SettleOutcome::Stored);
+}
+
+TEST_CASE("Launcher.running-alone-before-any-kill-keeps-the-ceiling", "[launcher][admission][oom]")
+{
+    // The control: an estimate no kill taught is a guess, so a compile running alone on a first grant joins the
+    // ceiling as any other does.
+    Harness harness;
+    harness.Open({ Grant(Wire::GrantKind::Local, 0, Wire::LocalGrantReason::RunsAlone) });
+
+    auto const report = RunMiss(harness.Seams());
+
+    CHECK(report.code == 0);
+    CHECK(harness.placements == std::vector<LocalPlacement> { LocalPlacement::UnderCeiling });
+    CHECK(PlacementForGrant(Wire::LocalGrantReason::RunsAlone, false) == LocalPlacement::UnderCeiling);
+    CHECK(PlacementForGrant(Wire::LocalGrantReason::RunsAlone, true) == LocalPlacement::OutsideCeiling);
+    CHECK(PlacementForGrant(Wire::LocalGrantReason::NeverFits, false) == LocalPlacement::OutsideCeiling);
+    CHECK(PlacementForGrant(Wire::LocalGrantReason::NoRoom, true) == LocalPlacement::UnderCeiling);
 }

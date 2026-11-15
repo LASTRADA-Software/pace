@@ -56,14 +56,15 @@ struct AdmittedDispatch
 /// One step the miss path took because a compiler was killed for memory (#1770). Private: never stored or sent;
 /// `Last` is the count.
 ///
-/// **One requeue per compile, whoever killed it.** The first kill, on a worker or here, abandons the admission and
-/// asks once more (`AskOrigin::AfterKill`); a second worker kill compiles here; a second kill here, inside the
-/// ceiling, compiles once more OUTSIDE it; a kill outside every ceiling ends the compile. Nothing loops.
+/// **One requeue per compile, whoever killed it.** The first kill, on a worker or here, settles the admission
+/// `Killed` with what the compile held and asks once more (`AskOrigin::AfterKill`); a second worker kill compiles here; a
+/// second kill here, inside the ceiling, compiles once more OUTSIDE it; a kill outside every ceiling ends the compile.
+/// Nothing loops.
 enum class KillStep : std::uint8_t
 {
     WorkerRequeued,      ///< A worker's machine killed it; asked for once more.
     WorkerKilledTwice,   ///< A worker killed the requeued compile too: it compiles here.
-    LocalRequeued,       ///< Killed here; the admission abandoned and asked for once more, to wait for room.
+    LocalRequeued,       ///< Killed here; the admission settled `Killed` and asked for once more, to wait for room.
     LocalOutsideCeiling, ///< Killed inside this machine's ceiling after its requeue: it runs once more outside it.
     LocalKilledOutside,  ///< Killed outside any ceiling: the compile ends killed, never retried.
     Last
@@ -305,6 +306,11 @@ struct LocalGrantRow
     DeclineCause cause;               ///< The decline the lease path records for the same refusal.
     CompileCacheWire::ErrorCode code; ///< The refusal it reads as, named in the line.
     std::string_view sentence;        ///< What the line says, `{}` standing for the toolchain.
+    /// Where the compile runs here (#1770): before any kill of it, and once one has been. A kill teaches a LOWER bound,
+    /// so a grant the leader says runs alone because the estimate exceeds this machine's budget -- its ceiling -- runs
+    /// outside that ceiling once the estimate is one a kill taught; before, it is a guess and the ceiling stands.
+    LocalPlacement placement { LocalPlacement::UnderCeiling };
+    LocalPlacement placementAfterKill { LocalPlacement::UnderCeiling }; ///< The same, once a kill taught the estimate.
 };
 
 /// One row per `LocalGrantReason`.
@@ -313,34 +319,64 @@ inline constexpr EnumTable<CompileCacheWire::LocalGrantReason, LocalGrantRow> Lo
       .records = false,
       .cause = DeclineCause::NoToolchain,
       .code = CompileCacheWire::ErrorCode::NoWorker,
-      .sentence = {} },
+      .sentence = {},
+      .placement = LocalPlacement::UnderCeiling,
+      .placementAfterKill = LocalPlacement::UnderCeiling },
     { .reason = CompileCacheWire::LocalGrantReason::NoWorker,
       .records = true,
       .cause = DeclineCause::NoToolchain,
       .code = CompileCacheWire::ErrorCode::NoWorker,
-      .sentence = "no worker serves {}" },
+      .sentence = "no worker serves {}",
+      .placement = LocalPlacement::UnderCeiling,
+      .placementAfterKill = LocalPlacement::UnderCeiling },
     // The lease path's `Excluded` row: the same code as `NoWorker`, its own sentence.
     { .reason = CompileCacheWire::LocalGrantReason::AllExcluded,
       .records = true,
       .cause = DeclineCause::NoToolchain,
       .code = CompileCacheWire::ErrorCode::NoWorker,
-      .sentence = "every worker serving {} is on this client's exclusion list" },
+      .sentence = "every worker serving {} is on this client's exclusion list",
+      .placement = LocalPlacement::UnderCeiling,
+      .placementAfterKill = LocalPlacement::UnderCeiling },
     { .reason = CompileCacheWire::LocalGrantReason::NoRoom,
       .records = true,
       .cause = DeclineCause::NoCapacity,
       .code = CompileCacheWire::ErrorCode::NoCapacity,
-      .sentence = "no worker serving {} had room for it, so the queue ran it here" },
+      .sentence = "no worker serving {} had room for it, so the queue ran it here",
+      .placement = LocalPlacement::UnderCeiling,
+      .placementAfterKill = LocalPlacement::UnderCeiling },
     // A compile killed for memory that no machine can hold (#1770). The kill is the refusal it reads as.
     { .reason = CompileCacheWire::LocalGrantReason::NeverFits,
       .records = true,
       .cause = DeclineCause::NeverFits,
       .code = CompileCacheWire::ErrorCode::WorkerCompileKilled,
       .sentence = "no machine's memory budget can hold this {} compile, so the queue ran it here, alone and "
-                  "outside the compile ceiling" },
+                  "outside the compile ceiling",
+      .placement = LocalPlacement::OutsideCeiling,
+      .placementAfterKill = LocalPlacement::OutsideCeiling },
+    // Alone here because the estimate exceeds this machine's budget, and some other machine's holds it: a queue
+    // decision, recorded as nothing. Its placement is the point (#1770): after a kill, the ceiling is known too small.
+    { .reason = CompileCacheWire::LocalGrantReason::RunsAlone,
+      .records = false,
+      .cause = DeclineCause::NoCapacity,
+      .code = CompileCacheWire::ErrorCode::NoCapacity,
+      .sentence = {},
+      .placement = LocalPlacement::UnderCeiling,
+      .placementAfterKill = LocalPlacement::OutsideCeiling },
 } };
 
 static_assert(RowsInEnumeratorOrder(LocalGrantTable, &LocalGrantRow::reason),
               "LocalGrantTable must hold one row per LocalGrantReason, in enumerator order");
+
+/// Where a compile a `Local` grant placed here runs, by the grant's reason (`LocalGrantTable`).
+/// @param reason Why the leader placed it here. @param killed Whether a kill already taught its estimate.
+/// @return The placement; `UnderCeiling` for a reason past the table.
+[[nodiscard]] constexpr LocalPlacement PlacementForGrant(CompileCacheWire::LocalGrantReason reason, bool killed) noexcept
+{
+    auto const index = static_cast<std::size_t>(reason);
+    if (index >= LocalGrantTable.size())
+        return LocalPlacement::UnderCeiling;
+    return killed ? LocalGrantTable[index].placementAfterKill : LocalGrantTable[index].placement;
+}
 
 /// What to record for a `Local` grant, and the line to say.
 struct LocalGrantNote
@@ -386,9 +422,9 @@ inline constexpr std::string_view UnnamedTreeLabel = "(unnamed tree)";
 ///   dispatch preprocess, a result discarded), closes that admission -- the leader abandons it and the
 ///   worker's charge is freed -- and asks again `LocalOnly` with that worker excluded, so the compile
 ///   runs here under a grant of its own; only when none can be had does it compile here unadmitted;
-/// - when a compiler is killed for memory -- on the granted worker, or here -- ends that admission UNSETTLED and
-///   asks once more as `AskOrigin::AfterKill`; a second kill compiles here (a worker's) or once more outside the
-///   ceiling (this machine's), and a kill outside every ceiling ends the compile killed (`KillStep`, #1770);
+/// - when a compiler is killed for memory -- on the granted worker, or here -- settles that admission `Killed` with
+///   what it held and asks once more as `AskOrigin::AfterKill`; a second kill compiles here (a worker's) or once more
+///   outside the ceiling (this machine's), and a kill outside every ceiling ends the compile killed (`KillStep`, #1770);
 /// - holds the admission connection from the grant until the compile AND its STORE are done -- the
 ///   connection is the lease -- and then sends `SETTLE`, so the STORE is always visible before the
 ///   queue wakes the compiles waiting on it (R1).

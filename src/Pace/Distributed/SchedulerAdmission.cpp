@@ -67,6 +67,8 @@ namespace
         // Counted where the grant is answered (`AdmissionNeverFits`), beside `AdmissionRanAlone`, which it also is:
         // a compile no machine can hold is a fact about the compile, not a toolchain nobody serves.
         { .reason = Wire::LocalGrantReason::NeverFits, .counter = std::nullopt, .unservedToolchain = false },
+        // Counted as what it also is, `AdmissionRanAlone`, where the grant is answered: a decision, not a refusal.
+        { .reason = Wire::LocalGrantReason::RunsAlone, .counter = std::nullopt, .unservedToolchain = false },
     } };
 
     static_assert(RowsInEnumeratorOrder(LocalGrantSignals, &LocalGrantSignalRow::reason),
@@ -282,6 +284,10 @@ std::optional<AdmissionVerdict> SchedulerService::GrantFor(Decision const& decis
                 reason = Wire::LocalGrantReason::NeverFits;
             else if (decision.kind == Wire::GrantKind::Local && held.kind == Wire::AdmitKind::Dispatchable)
                 reason = LocalGrantReasonOf(_workers.LiveWorkers(), held.fingerprint, held.excluded);
+            // Alone because nothing smaller fits here: said, so a client whose compile was killed runs it outside a
+            // ceiling it already knows is too small (#1770).
+            else if (decision.kind == Wire::GrantKind::Local && decision.ranAlone)
+                reason = Wire::LocalGrantReason::RunsAlone;
             // Under `_admissionMutex`: the counter is an atomic, and `_unserved` takes only its own lock
             // and calls nothing back, so nothing can take these two in the other order.
             auto const& signal = LocalGrantSignals[static_cast<std::size_t>(reason)];

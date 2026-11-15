@@ -35,8 +35,8 @@ namespace
     };
 
     /// The compiler was killed for memory while this invocation's one requeue was unspent, or a worker killed the
-    /// requeued one (#1770). The admission that held it has ENDED unsettled: the leader reads that as a kill and
-    /// raises the compile's estimate, which is what the next ask is charged.
+    /// requeued one (#1770). The admission that held it was settled `Killed` with what the compile held: the leader
+    /// raises the compile's estimate to at least that, which is what the next ask is charged.
     struct Killed
     {
         /// The worker whose machine killed it, by the endpoint it advertises; disengaged when it was killed here.
@@ -190,13 +190,12 @@ namespace
         return MissReport { .code = code, .queuedMs = std::nullopt, .peakMemoryBytes = std::nullopt };
     }
 
-    /// Where a grant runs its compile here: outside the ceiling only when the leader said nothing can hold it.
-    /// @param ticket The grant.
+    /// Where a grant runs its compile here: the grant reason's row, before or after a kill taught its estimate.
+    /// @param ticket The grant. @param waits Whether a kill already happened.
     /// @return The placement to ask for.
-    [[nodiscard]] LocalPlacement PlacementFor(AdmitTicket const& ticket) noexcept
+    [[nodiscard]] LocalPlacement PlacementFor(AdmitTicket const& ticket, Waits const& waits) noexcept
     {
-        return ticket.localReason == Wire::LocalGrantReason::NeverFits ? LocalPlacement::OutsideCeiling
-                                                                       : LocalPlacement::UnderCeiling;
+        return PlacementForGrant(ticket.localReason, waits.RequeueSpent());
     }
 
     /// Run the compiler here under @p session, which a grant placed here.
@@ -272,7 +271,7 @@ namespace
                     // connection ends with the session.
                     return AfterStored(seams.serveStored());
                 case Wire::GrantKind::Local:
-                    return RunHeld(seams, waits, *session, PlacementFor(*ticket));
+                    return RunHeld(seams, waits, *session, PlacementFor(*ticket, waits));
                 case Wire::GrantKind::Worker: {
                     auto attempt = seams.dispatchAdmitted(*ticket);
                     if (attempt.run.has_value())
@@ -362,7 +361,7 @@ namespace
         switch (ticket->kind)
         {
             case Wire::GrantKind::Local:
-                return RunHeld(seams, waits, *session, PlacementFor(*ticket));
+                return RunHeld(seams, waits, *session, PlacementFor(*ticket, waits));
             case Wire::GrantKind::Stored: {
                 // Another compile of this key stored it meanwhile. A miss is not asked about again: the
                 // compile runs here, after this session has ended.

@@ -252,8 +252,8 @@ using WireVersion = std::uint8_t;
 /// for again after its compiler was killed for memory, and `LocalGrantReason::NeverFits`, the leader's answer
 /// when no machine's budget can hold it. Each is an enumerator past a version-17 decoder's `Last`, which that
 /// decoder refuses as a malformed frame rather than misreads. And `SettleOutcome::Killed`, with the peak the killed
-/// compile held; a `worker-compile-killed` reply carries that peak as an error TRAILER after a `0x00` separator,
-/// which a version-17 reader would show as part of the message -- nothing it decides on.
+/// compile held, and `LocalGrantReason::RunsAlone`; a `worker-compile-killed` reply carries that peak as an error TRAILER
+/// after a `0x00` separator, which a version-17 reader would show as part of the message -- nothing it decides on.
 inline constexpr WireVersion CurrentVersion = 18;
 
 /// The oldest version this build still accepts. Equal to `CurrentVersion` while
@@ -3966,13 +3966,17 @@ inline constexpr CacheVerbs FleetSharedCacheVerbs { Op::SharedFetch, Op::SharedS
     return EncodeReply(Status::Progress, {});
 }
 
-/// Frame an `Error` reply carrying a code and a message.
-/// @param code The refusal reason.
-/// @param message Detail for a human; falls back to the table's default when empty.
-/// @return The framed reply.
 /// What separates an `Error` reply's message from its TRAILER: structured facts a code carries beside the words
 /// (#1770: the peak a killed compile held). A message is text for a person and never holds this byte.
 inline constexpr std::byte ErrorTrailerSeparator { 0x00 };
+
+/// Frame an `Error` reply carrying a code, a message and, optionally, a trailer.
+/// @param code The refusal reason.
+/// @param message Detail for a human; falls back to the table's default when empty. Cut at any
+///        `ErrorTrailerSeparator`, so a message can never forge a trailer.
+/// @param trailer Structured facts the code carries beside the words; empty for none, which frames the
+///        reply byte for byte as it was before trailers existed.
+/// @return The framed reply.
 
 [[nodiscard]] inline std::vector<std::byte> EncodeErrorReply(ErrorCode code,
                                                              std::string_view message = {},
@@ -10313,7 +10317,12 @@ enum class LocalGrantReason : std::uint8_t
     /// ever hold it, so it runs here, alone, OUTSIDE the compile ceiling that would only kill it again. Answers a
     /// `LocalOnly` request too, which no other reason does.
     NeverFits = 4,
-    Last = 5
+    /// Granted here, ALONE, because its estimate exceeds this machine's whole budget -- and some other machine's
+    /// could hold it, so it is no `NeverFits` and counts as none (#1770). Answers a `LocalOnly` request too. A compile
+    /// that has been killed for memory runs it OUTSIDE the ceiling: the estimate a kill taught is a lower bound, and
+    /// this machine's ceiling, its budget, is below it.
+    RunsAlone = 5,
+    Last = 6
 };
 
 /// How a granted compile ended, as the admission queue is told. Explicit values: transmitted.
