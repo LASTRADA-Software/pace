@@ -705,8 +705,10 @@ the peak as a `u64`.
 Version 18 added the last two fields, each exactly one byte; the decoder is exact about the field
 count, so a version-17 report is refused rather than read with defaults. `pressure` is the node's
 memory-pressure level: `0` calm, `1` yield, `2` shed. Anything but calm makes the leader's queue admit
-nothing new on that machine -- its own local compiles and the run-alone exception included -- and it
-reaches requests already waiting at the next pump. `standing` says whether `memoryBudget` is the
+nothing new on that machine while any compile runs or is reserved there -- its own local compiles and
+the run-alone exception included -- and it reaches requests already waiting at the next pump. Once
+nothing runs there, the machine's own next compile that fits `memoryBudget` runs, one at a time; no
+other machine's compile is placed there. `standing` says whether `memoryBudget` is the
 configured budget (`0`) or one the node's pressure allowance holds below it (`1`) while the allowance
 ramps back after a yield or a shed. The queue lets a compile estimated above the whole budget run alone
 on an idle machine only at `0`: on a held budget it would be killed by the compile ceiling, which holds

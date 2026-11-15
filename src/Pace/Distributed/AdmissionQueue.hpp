@@ -83,8 +83,9 @@ struct MachineReport
     std::uint32_t slots {};
     std::uint32_t heldSlots {}; ///< Every compile running on the machine (local leases + worker jobs).
     std::uint64_t heldBytes {}; ///< Their charged bytes. The ledger uses max(charged, held), never the sum.
-    /// How hard its memory is pressed. Anything but `Calm` admits nothing new on it -- local compiles
-    /// included, the run-alone exception included -- and reaches requests already waiting, at the next `Pump()`.
+    /// How hard its memory is pressed. Anything but `Calm` admits nothing new on it while a compile runs or is
+    /// reserved there -- local compiles included, the run-alone exception included -- and reaches requests already
+    /// waiting, at the next `Pump()`. Idle, it runs its OWN compiles that fit the budget, one at a time.
     PressureLevel pressure { PressureLevel::Calm };
     /// Whether the budget is the configured one or the pressure allowance holds it below that. Held, nothing
     /// larger than the budget runs here, even alone on an idle machine at `Calm`.
@@ -189,7 +190,9 @@ struct QueueView
 /// the candidate order changes. A request estimated above the whole budget runs alone: it
 /// waits for an idle machine and reserves all free memory and slots meanwhile -- and never on a
 /// machine under pressure, nor on one whose budget the pressure allowance holds below its configured
-/// figure (`BudgetStanding::HeldByAllowance`), where it waits for the ramp instead.
+/// figure (`BudgetStanding::HeldByAllowance`), where it waits for the ramp instead. A machine under pressure
+/// takes no other machine's work and nothing beside a running compile; idle, it runs its own requests that
+/// fit its reported budget one at a time, since the host's pressure need not be the fleet's to relieve.
 ///
 /// A request asked for again after its compile was killed for memory (`AskOrigin::AfterKill`, #1770) never runs
 /// alone on a machine whose configured budget is below its estimate: that machine's compile ceiling is its

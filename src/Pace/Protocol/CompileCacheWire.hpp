@@ -10507,7 +10507,8 @@ struct MachineBudgetReport
     /// A bounded sample of measured peaks, newest meaning most useful to the leader's estimates.
     std::vector<std::pair<EstimateKeyFields, std::uint64_t>> peaks;
     /// How hard the machine's memory is pressed now. Anything but `Calm` makes the leader's queue admit
-    /// nothing new there -- the machine's own local compiles included.
+    /// nothing new there while a compile runs there -- the machine's own local compiles included -- and,
+    /// once none does, only the machine's own next compile that fits `memoryBudgetBytes`.
     PressureLevel pressure { PressureLevel::Calm };
     /// Whether `memoryBudgetBytes` is the configured budget or one the pressure allowance holds below it; the
     /// latter closes the queue's run-alone exception on this machine.

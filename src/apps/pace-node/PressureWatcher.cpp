@@ -302,11 +302,12 @@ void PressureWatcher::OnLevelChanged(GovernorDecision const& decision, Platform:
             case PressureLevel::Calm:
                 return "compiles are admitted again, and their allowance grows back toward the configured ceiling";
             case PressureLevel::Yield:
-                return "no new compile is admitted on this machine, its own local ones included";
+                return "no new compile is admitted on this machine beside a running one, its own local ones included";
             case PressureLevel::Shed:
-                return _killer != nullptr ? "nothing is admitted, and the youngest compile is killed once per dwell"
-                                          : "nothing is admitted; no compile can be killed without a cgroup of the "
-                                            "node's own";
+                return _killer != nullptr ? "nothing is admitted beside a running compile, and the youngest compile is "
+                                            "killed once per dwell"
+                                          : "nothing is admitted beside a running compile; no compile can be killed "
+                                            "without a cgroup of the node's own";
             case PressureLevel::Last:
                 break;
         }

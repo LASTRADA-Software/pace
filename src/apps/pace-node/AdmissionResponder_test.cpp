@@ -226,7 +226,7 @@ TEST_CASE("AdmissionResponder.machine-budget-report-enables-admission", "[node][
 TEST_CASE("AdmissionResponder.a-shedding-machine-budget-report-holds-a-waiting-ticket", "[node][admission][machine-budget]")
 {
     // The level is applied on receipt, through the real wire path, to a ticket already parked: a shedding
-    // report keeps it waiting, and the calm one after it is what lets it run.
+    // report from a machine with a compile running keeps it waiting, and the calm one after it is what lets it run.
     Queue queue;
     auto const port = queue.Serve();
 
@@ -234,10 +234,26 @@ TEST_CASE("AdmissionResponder.a-shedding-machine-budget-report-holds-a-waiting-t
     client.Send(AdmitFrame(Wire::AdmitKind::LocalOnly, "k1"));
     REQUIRE(Unwrap(client.Read()).status == Wire::Status::Progress);
 
-    queue.Report(1024 * MiB, 2, Wire::PressureLevel::Shed);
+    queue.Report(1024 * MiB, 2, Wire::PressureLevel::Shed, Wire::BudgetStanding::HeldByAllowance, 1);
     CHECK(queue.service.AdmissionSnapshotNow().depth == 1);
 
     queue.Report(1024 * MiB, 2, Wire::PressureLevel::Calm);
+    CHECK(GrantOf(Unwrap(client.ReadAnswer())).kind == Wire::GrantKind::Local);
+    CHECK(queue.service.AdmissionSnapshotNow().depth == 0);
+}
+
+TEST_CASE("AdmissionResponder.a-shedding-idle-machine-runs-its-own-waiting-ticket", "[node][admission][machine-budget]")
+{
+    // dist-compile-e2e's case 9, at the wire: a machine whose PSI says shed while none of the fleet's compiles runs
+    // there gains nothing from holding its own launcher's compile, so the ticket parked before the report runs here.
+    Queue queue;
+    auto const port = queue.Serve();
+
+    Client client { port };
+    client.Send(AdmitFrame(Wire::AdmitKind::LocalOnly, "k1"));
+    REQUIRE(Unwrap(client.Read()).status == Wire::Status::Progress);
+
+    queue.Report(1024 * MiB, 2, Wire::PressureLevel::Shed, Wire::BudgetStanding::HeldByAllowance);
     CHECK(GrantOf(Unwrap(client.ReadAnswer())).kind == Wire::GrantKind::Local);
     CHECK(queue.service.AdmissionSnapshotNow().depth == 0);
 }

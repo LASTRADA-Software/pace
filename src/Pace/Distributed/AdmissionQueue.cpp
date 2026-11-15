@@ -384,18 +384,27 @@ std::vector<Decision> AdmissionQueue::Pump()
             auto const& report = *_ledgers.at(target.machine).report;
             auto const& hold = reserved[target.machine];
             auto const room = RoomOn(target.machine, hold);
-            // A machine under memory pressure takes nothing new, its own local compiles included (the owner's
-            // decision). Yield and Shed are one answer here -- only the node's governor tells them apart, by
-            // killing under Shed. The room such a machine reports is what its compiles gave back as they
-            // finished, and admitting into it would refill exactly what the governor is yielding.
+            // Nothing of the fleet runs on it, and nothing older is reserved there.
+            auto const idle = room.usedBytes == 0 && room.usedSlots == 0 && hold.bytes == 0 && hold.slots == 0;
+            // A machine under memory pressure takes nothing new while any compile of the fleet runs or is reserved
+            // there, its own local compiles included (the owner's decision). Yield and Shed are one answer here --
+            // only the node's governor tells them apart, by killing under Shed. The room such a machine reports is
+            // what its compiles gave back as they finished, and admitting into it would refill exactly what the
+            // governor is yielding.
+            //
+            // Idle, it still runs its OWN compiles, one at a time and only within the budget it reports (under
+            // pressure its allowance, floored at one default estimate for exactly this compile). The fleet then holds
+            // nothing there to give back, and PSI is the host's -- another cgroup stalling at its own `memory.max`
+            // raises it as surely as a shortage does -- so waiting relieves nothing and lasts as long as the pressure
+            // does: a build on that machine never ended (dist-compile-e2e's case 9). No other machine's work goes there.
             if (report.pressure != PressureLevel::Calm)
-                return false;
+                return idle && !target.placement.has_value() && report.slots > 0
+                       && entry.chargedBytes <= report.memoryBudgetBytes;
             if (entry.chargedBytes > report.memoryBudgetBytes)
                 // Run alone only on a budget that is the machine's configured one. One the pressure allowance holds
                 // down is what fit beside something else when pressure ended, and a compile past it is the one the
                 // ceiling kills -- then re-admitted, killed again, for as long as the ramp takes (C3).
-                return report.standing == BudgetStanding::Configured && report.slots > 0 && room.usedBytes == 0
-                       && room.usedSlots == 0 && hold.bytes == 0 && hold.slots == 0;
+                return report.standing == BudgetStanding::Configured && report.slots > 0 && idle;
             return room.freeBytes >= entry.chargedBytes && room.freeSlots >= 1;
         });
 

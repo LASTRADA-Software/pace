@@ -921,9 +921,13 @@ TEST_CASE("AdmissionQueue.calm-lowered-budget-oversize-request-idle-machine-admi
     }
 }
 
-TEST_CASE("AdmissionQueue.shedding-machine-admits-nothing", "[distributed][admission]")
+TEST_CASE("AdmissionQueue.shedding-machine-admits-nothing-beside-a-running-compile", "[distributed][admission]")
 {
     Fixture f;
+    f.queue.ReportMachine("m", Pressed(8 * GiB, 4, PressureLevel::Calm));
+    auto const running = f.Local(1 * GiB);
+    REQUIRE(Tickets(f.queue.Pump()) == std::vector<Ticket> { running });
+
     f.queue.ReportMachine("m", Pressed(8 * GiB, 4, PressureLevel::Shed));
     auto const small = f.Local(1 * GiB);
     CHECK(f.queue.Pump().empty());
@@ -932,6 +936,61 @@ TEST_CASE("AdmissionQueue.shedding-machine-admits-nothing", "[distributed][admis
     // The level is applied on receipt, to a ticket already waiting: calm again, it runs.
     f.queue.ReportMachine("m", Pressed(8 * GiB, 4, PressureLevel::Calm));
     CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { small });
+}
+
+TEST_CASE("AdmissionQueue.pressed-idle-machine-still-runs-its-own-compiles-one-at-a-time", "[distributed][admission]")
+{
+    // dist-compile-e2e's case 9 hung here: a cache-only node (`--slots=0`), the leader of its own one-machine fleet,
+    // reported `shed` because the HOST's PSI was high -- another cgroup thrashing at its own `memory.max` -- and the
+    // queue held its launcher's compile for as long as that lasted, which nothing this fleet does can end. A machine
+    // running none of the fleet's compiles gains nothing from waiting, so its OWN compile that fits the budget it
+    // reports runs, one at a time; anything beside it waits for calm, and no other machine's work is placed there.
+    for (auto const level: { PressureLevel::Yield, PressureLevel::Shed })
+    {
+        CAPTURE(static_cast<int>(level));
+        Fixture f;
+        // What a node reports under pressure: its allowance, floored at one default estimate, held below its budget.
+        auto pressed = Pressed(2 * GiB, 4, level);
+        pressed.standing = BudgetStanding::HeldByAllowance;
+        f.queue.ReportMachine("m", pressed);
+
+        auto const first = f.Add(AdmitKind::LocalOnly, "m", 2 * GiB);
+        auto const second = f.Add(AdmitKind::LocalOnly, "m", 1 * GiB);
+        auto const granted = f.queue.Pump();
+        REQUIRE(Tickets(granted) == std::vector<Ticket> { first });
+        CHECK(granted[0].kind == Pace::CompileCacheWire::GrantKind::Local);
+        CHECK_FALSE(granted[0].ranAlone);
+        CHECK(f.queue.Depth() == 1);
+
+        // The first still running, the second waits; once it has settled, the second runs.
+        CHECK(f.queue.Pump().empty());
+        f.queue.Settle(first, Done);
+        CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { second });
+    }
+}
+
+TEST_CASE("AdmissionQueue.pressed-idle-machine-takes-no-other-machines-work", "[distributed][admission]")
+{
+    // The floor above is the caller's own: an idle pressed WORKER is still no target, so with the caller full the
+    // dispatched request waits rather than landing where the governor is yielding.
+    Fixture f;
+    f.placement.byFingerprint["fp"] = { Placement { .workerId = "worker-1", .machine = "w", .endpoint = "10.0.0.2:6680" } };
+    f.queue.ReportMachine("c", Report(8 * GiB, 4, 4, 8 * GiB)); // the caller has no room
+    f.queue.ReportMachine("w", Pressed(8 * GiB, 4, PressureLevel::Shed));
+    f.Add(AdmitKind::Dispatchable, "c", 1 * GiB, "fp");
+    CHECK(f.queue.Pump().empty());
+    CHECK(f.queue.Depth() == 1);
+}
+
+TEST_CASE("AdmissionQueue.pressed-idle-machine-runs-no-oversize-compile", "[distributed][admission]")
+{
+    // The floor admits what fits the budget the machine reports -- under pressure, its allowance. Larger stays the
+    // run-alone exception, which pressure closes (`pressured-machine-never-runs-oversize-alone`).
+    Fixture f;
+    f.queue.ReportMachine("m", Pressed(2 * GiB, 4, PressureLevel::Shed));
+    f.Add(AdmitKind::LocalOnly, "m", 3 * GiB);
+    CHECK(f.queue.Pump().empty());
+    CHECK(f.queue.Depth() == 1);
 }
 
 TEST_CASE("AdmissionQueue.shedding-machine-takes-no-dispatched-work-and-it-runs-elsewhere", "[distributed][admission]")

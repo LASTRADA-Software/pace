@@ -3523,8 +3523,8 @@ oscillate:
 | Level | Entered when | What the node does |
 | --- | --- | --- |
 | `calm` | — | nothing; compiles are admitted up to their allowance |
-| `yielding` | PSI `some` `avg10` above `--memory-pressure-yield`, and the stall is **not the compiles' own** | admits no new compile on this machine — fleet ones **and its own local ones** — and holds the running ones at what they hold now (the allowance below): one that grows past it is killed by the ceiling and its client asks the queue for it once more |
-| `shedding` | PSI `full` `avg10` at or above `--memory-pressure-shed` (the desktop freezing, whoever causes it), or a foreign stall that has held `yielding` for twenty seconds | admits nothing, and kills the **youngest** running compile, one per ten seconds, until the level drops |
+| `yielding` | PSI `some` `avg10` above `--memory-pressure-yield`, and the stall is **not the compiles' own** | admits no new compile on this machine while any compile runs there — fleet ones **and its own local ones** — and holds the running ones at what they hold now (the allowance below): one that grows past it is killed by the ceiling and its client asks the queue for it once more |
+| `shedding` | PSI `full` `avg10` at or above `--memory-pressure-shed` (the desktop freezing, whoever causes it), or a foreign stall that has held `yielding` for twenty seconds | admits nothing while any compile runs there, and kills the **youngest** running compile, one per ten seconds, until the level drops |
 
 - **A stall that is the compiles' own is not a yield.** When the `compiles/` cgroup carries at least
   80% of the machine's `some` stall **and has stood at its own ceiling within the last twenty seconds**
@@ -3541,6 +3541,12 @@ oscillate:
   foreign, or falling below a fifth of `--memory-pressure-shed`, before a freeze sheds again.
   Without a readable compiles reading every stall counts as foreign, and the node says so once at
   Warn (and once at Info when it is readable again).
+- **An idle machine still runs its own compiles, one at a time.** Once none of the fleet's compiles
+  runs or is reserved on it, the queue admits this machine's OWN next compile that fits the budget
+  it reports (under pressure, the allowance below), and nothing beside it. PSI is the host's, so
+  another cgroup stalling at its own `memory.max` raises it as surely as a shortage does, and
+  nothing a build does can end that: holding every compile until it ends stalled a build on that
+  machine for as long as it lasted. Another machine's compile is never placed on a pressed machine.
 - **The youngest** because it has made the least progress, so its client loses the least by
   compiling it again. It is marked *shed* before its `cgroup.kill` is written, so the worker answers
   `worker-compile-killed` with that cause and counts it in `pace_worker_compiles_killed_shed_total`;
