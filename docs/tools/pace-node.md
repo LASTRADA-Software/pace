@@ -3644,14 +3644,17 @@ cgroup, and runs as before.
 
 A compile a worker's machine killed for memory goes back into the fleet's admission queue, asked for
 **once more** (`AskOrigin::AfterKill` on the `ADMIT`), instead of compiling on the client's machine at
-once, outside every layer above. The client ends the killed compile's admission without a `SETTLE`,
-which the leader reads as a kill and raises that compile's estimate to at least
-`--compile-estimate-default` (never lowers it); the requeue is charged that. The queue then places it
+once, outside every layer above. The worker's refusal carries what the compile held when it died, and the
+client settles the admission `Killed` with it; the leader raises that compile's estimate to at least that
+and to `--compile-estimate-default` (never lowers it), and the requeue is charged that -- what the compile
+is now known to need at least, not what it was charged the first time. The queue then places it
 only on a machine whose **configured** budget can hold that estimate -- never alone on a smaller one,
 where its ceiling would kill it again -- and it waits there, as any admission waits, until one has room:
 on another worker, on the asking machine, now or later.
 
-It compiles on the client's machine instead in exactly two cases, each named and counted:
+It compiles on the client's machine instead in exactly two cases, each named and counted (the second is
+never counted as the first: the local fallback after a second kill asks as an ordinary re-ask, so this
+machine's budget alone never answers *never fits* for a compile the workers held):
 
 - **No machine can hold it**: the estimate is above the configured budget of every machine the queue
   could run it on, the asking one included. The queue grants it `Local` with the reason `never-fits`,
@@ -3689,12 +3692,14 @@ node is). Which of the two applied is named for every such compile in the invoca
 by `pace-cc --show-stats` under *local compiles by memory defense* (`ceiling`, or `shim:` and why), and
 said on the verbose line.
 
-A compile the ceiling kills there is no compiler error either: the client ends its admission
-unsettled and waits in the queue for room **once**, exactly as a worker's kill does; killed in the
-ceiling a second time, it runs once more **outside** the ceiling, under the same admission. A compile
-killed outside every ceiling is not retried: it ends with the kill's status, and `pace-cc` says so on
-stderr whatever the verbosity, naming it as no compiler error. With no queue to wait in, a compile the
-ceiling killed runs once more outside it at once.
+A compile killed there is no compiler error either. Its first kill -- inside the ceiling or outside it --
+settles the admission `Killed` with what it held and waits in the queue for room **once**, exactly as a
+worker's kill does. Killed a second time inside the ceiling, it runs once more **outside** the ceiling,
+under the same admission. Killed a second time outside every ceiling, it is not retried again: it ends with
+the kill's status, and `pace-cc` says so on stderr whatever the verbosity, naming it as no compiler error.
+With no queue to wait in, a compile the ceiling killed runs once more outside it at once, and one killed
+outside every ceiling ends there. Where the ceiling cannot be joined, the compile's peak is still measured
+the way the launcher always measured its own (`ru_maxrss`), so the queue keeps learning.
 
 #### The machine's compile budget
 

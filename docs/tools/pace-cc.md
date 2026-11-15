@@ -896,8 +896,8 @@ waited, in which case the launcher fetches it.
 - **A worker that declines keeps your place.** A refused dispatch goes back to the front of the
   queue on the same connection and is counted; after three refusals the compile runs locally.
 - **A compile killed for memory waits for memory** (#1770). A worker's `worker-compile-killed`, or
-  this machine's own compile ceiling killing a local compile, ends the admission without a `SETTLE`
-  -- the leader reads that as a kill and raises the compile's estimate -- and the compile is asked
+  this machine's own compile ceiling killing a local compile, settles the admission `Killed` with
+  what the compile held -- the leader raises the compile's estimate to at least that -- and it is asked
   for **once more**, which the queue places only where its configured budget can hold it, waiting
   for room as any request waits. Killed again, it compiles here (from a worker) or once more outside
   the ceiling (from this machine); one no machine can hold runs here, alone, outside the ceiling.

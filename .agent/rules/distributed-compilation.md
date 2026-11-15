@@ -4155,10 +4155,12 @@ Each rule below is a shape a plausible simpler design gets wrong, and none of th
     is the proven-leader forwarding case, whose ledger sits UNDER it.
 
 - **A compile killed for memory waits for memory, ONCE** (#1770). A worker's `worker-compile-killed`,
-  or a kill of a compile the launcher ran itself inside the local node's ceiling, ends the admission
-  UNSETTLED -- the abandon is how the leader learns a kill (`PeakEstimates::RecordKilled`), so a
-  `SETTLE` there would teach a killed run's LOWER-BOUND peak as the compile's measure -- and asks again
-  as `AskOrigin::AfterKill`. The queue places such a request only on a machine whose CONFIGURED budget
+  or a kill of a compile the launcher ran itself, settles the admission `SettleOutcome::Killed` with
+  what it HELD (the worker's in the 0x35 reply's trailer) -- a LOWER bound the leader folds in as one
+  (`PeakEstimates::RecordKilled`: raise, never replace), never as a measure -- and asks again as
+  `AskOrigin::AfterKill`, so the requeue is charged at least what it held. The local-only fallback after
+  a SECOND kill asks `AfterGrant`, never `AfterKill`: judged against this machine alone, a compile two
+  workers held would otherwise be counted never-fits. The queue places such a request only on a machine whose CONFIGURED budget
   holds its estimate, never alone on a smaller one (that machine's ceiling is its budget: the run
   would be the next kill); a held-down budget is waited for, never ruled out. When every reported
   machine it could run on is too small, its caller included, it is `LocalGrantReason::NeverFits`,
