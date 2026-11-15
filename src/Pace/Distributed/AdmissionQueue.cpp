@@ -48,6 +48,7 @@ void AdmissionQueue::ReportMachine(MachineId const& machine, MachineReport const
 {
     auto& ledger = _ledgers[machine];
     ledger.report = report;
+    ++ledger.reports;
     ledger.refused = false;
 }
 
@@ -146,6 +147,21 @@ std::optional<AdmissionQueue::Charge> AdmissionQueue::Free(Ticket ticket)
     auto& ledger = _ledgers[charge.machine];
     ledger.chargedBytes = Saturating(ledger.chargedBytes, charge.bytes);
     ledger.chargedSlots = Saturating<std::uint32_t>(ledger.chargedSlots, 1);
+    // A report that arrived after the grant counted this compile as held, and max(charged, held) would keep reading
+    // it as running until the next one -- under pressure, one compile per report period. Give that back too.
+    //
+    // The give-back can take a count that was never this compile's, whenever the report arriving after the grant did
+    // not yet hold it: one taken before the node RECORDED it (between the grant and the lease being recorded, or the job
+    // reaching the worker -- its second preprocess included), or a compile that never started at all (a worker that
+    // refused it, which re-parks it at the front through this same free). Then another compile's count is lost. It
+    // matters only while the reported held figure EXCEEDS what this ledger charged -- compiles surviving a failover,
+    // which the queue never granted -- since otherwise max(charged, held) reads the charge anyway, and it lasts until
+    // the next report: fail-open for one report period at most, against fail-closed for every one.
+    if (ledger.report.has_value() && charge.reportsAtGrant < ledger.reports)
+    {
+        ledger.report->heldSlots = Saturating<std::uint32_t>(ledger.report->heldSlots, 1);
+        ledger.report->heldBytes = Saturating(ledger.report->heldBytes, charge.bytes);
+    }
     return charge;
 }
 
@@ -316,6 +332,13 @@ AdmissionQueue::Room AdmissionQueue::RoomOn(MachineId const& machine, Reserved c
     return room;
 }
 
+bool AdmissionQueue::BarredWhilePressed(MachineId const& machine, bool placed, std::uint64_t chargedBytes) const
+{
+    auto const& report = _ledgers.at(machine).report;
+    return report.has_value() && report->pressure != PressureLevel::Calm
+           && (placed || chargedBytes > report->memoryBudgetBytes);
+}
+
 std::vector<Decision> AdmissionQueue::Pump()
 {
     /// A machine an entry may run on; `placement` is engaged for a worker.
@@ -398,8 +421,8 @@ std::vector<Decision> AdmissionQueue::Pump()
             // raises it as surely as a shortage does -- so waiting relieves nothing and lasts as long as the pressure
             // does: a build on that machine never ended (dist-compile-e2e's case 9). No other machine's work goes there.
             if (report.pressure != PressureLevel::Calm)
-                return idle && !target.placement.has_value() && report.slots > 0
-                       && entry.chargedBytes <= report.memoryBudgetBytes;
+                return idle && report.slots > 0
+                       && !BarredWhilePressed(target.machine, target.placement.has_value(), entry.chargedBytes);
             if (entry.chargedBytes > report.memoryBudgetBytes)
                 // Run alone only on a budget that is the machine's configured one. One the pressure allowance holds
                 // down is what fit beside something else when pressure ended, and a compile past it is the one the
@@ -425,7 +448,8 @@ std::vector<Decision> AdmissionQueue::Pump()
                              Charge { .machine = granted->machine,
                                       .bytes = chargedBytes,
                                       .entry = std::move(entry),
-                                      .placement = granted->placement });
+                                      .placement = granted->placement,
+                                      .reportsAtGrant = ledger.reports });
             decisions.push_back(Decision {
                 .ticket = ticket,
                 .kind = granted->placement.has_value() ? GrantKind::Worker : GrantKind::Local,
@@ -442,6 +466,11 @@ std::vector<Decision> AdmissionQueue::Pump()
         auto const wasHead = _headTickets.contains(entry.ticket);
         for (auto const& target: targets)
         {
+            // What can never run on a pressed machine -- another machine's work, or a compile larger than its budget --
+            // is never its head and reserves nothing there: that hold would keep the machine from ever being idle, so
+            // the one compile it may still run, its own, would wait for as long as this one stays blocked.
+            if (BarredWhilePressed(target.machine, target.placement.has_value(), entry.chargedBytes))
+                continue;
             if (!claimed.insert(target.machine).second)
                 continue;
             heads.insert(entry.ticket);

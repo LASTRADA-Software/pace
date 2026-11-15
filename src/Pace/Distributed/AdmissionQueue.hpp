@@ -297,7 +297,8 @@ class AdmissionQueue
         std::optional<MachineReport> report;
         std::uint64_t chargedBytes {};
         std::uint32_t chargedSlots {};
-        bool refused {}; ///< A worker here declined a job; admits nothing until the next report.
+        std::uint64_t reports {}; ///< Reports received, so a charge knows whether one arrived after its grant.
+        bool refused {};          ///< A worker here declined a job; admits nothing until the next report.
     };
 
     /// A granted entry and what it charged, to give back on `Settle`/`Abandon`.
@@ -307,6 +308,7 @@ class AdmissionQueue
         std::uint64_t bytes {};
         Entry entry;
         std::optional<Placement> placement; ///< The worker it was granted on; nothing when granted on its caller.
+        std::uint64_t reportsAtGrant {};    ///< The machine's `Ledger::reports` when it was granted.
     };
 
     /// A waiter its owner's store woke, held with its request until the next `Pump()` answers it.
@@ -362,6 +364,14 @@ class AdmissionQueue
     /// @param hold What earlier entries of this pump reserved there.
     /// @return Its in-use and free figures.
     [[nodiscard]] Room RoomOn(MachineId const& machine, Reserved const& hold) const;
+
+    /// Whether a request can never run on @p machine while it is under memory pressure: another machine's work there,
+    /// or one larger than the budget it reports. Such a request is never that machine's head and reserves nothing.
+    /// @param machine A target of the request.
+    /// @param placed Whether the target is a worker placement (another machine's work) rather than the caller.
+    /// @param chargedBytes What the request is charged.
+    /// @return True when the machine is pressed and the request could not run there even were it idle.
+    [[nodiscard]] bool BarredWhilePressed(MachineId const& machine, bool placed, std::uint64_t chargedBytes) const;
 
     /// Frees a granted ticket's charge.
     /// @return What it held, or nothing when the ticket holds no charge.
