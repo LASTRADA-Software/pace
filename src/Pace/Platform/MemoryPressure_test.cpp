@@ -340,6 +340,25 @@ TEST_CASE("PsiPressureSource reads a candidate once on the sample that walks", "
     CHECK(tree.host->reads[pressure] == 2);
 }
 
+TEST_CASE("PsiPressureSource forgets the event counts of cgroups a walk no longer meets", "[platform][psi][confined]")
+{
+    // A machine starts and stops services all day: what a walk remembers is bounded by what it looked at, never by
+    // every cgroup that ever existed.
+    ConfinedTree tree;
+    auto scan = std::make_unique<ConfinedStallScan>(tree.host, ConfinedTree::Bounds(), tree.clock);
+    auto const* counts = scan.get();
+    PsiPressureSource source { tree.host, std::nullopt, std::move(scan) };
+    static_cast<void>(Unwrap(source.Sample()));
+    auto const before = counts->RememberedCounts();
+    REQUIRE(before > 0);
+
+    // The service is gone: its directory with it.
+    tree.host->directories.erase("/sys/fs/cgroup/user.slice/thrash.service");
+    tree.clock.advance(std::chrono::seconds { 10 });
+    static_cast<void>(Unwrap(source.Sample()));
+    CHECK(counts->RememberedCounts() == before - 2); // its max and high counts
+}
+
 TEST_CASE("PsiPressureSource walks the cgroup tree only while the machine stalls, and once per interval",
           "[platform][psi][confined]")
 {

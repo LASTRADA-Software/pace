@@ -157,6 +157,11 @@ std::uint32_t ConfinedStallScan::Walks() const noexcept
     return _walks;
 }
 
+std::size_t ConfinedStallScan::RememberedCounts() const noexcept
+{
+    return _eventsSeen.size();
+}
+
 bool ConfinedStallScan::Excluded(std::filesystem::path const& cgroup) const
 {
     return std::ranges::any_of(_bounds.excluded, [&](auto const& excluded) { return Related(cgroup, excluded); });
@@ -222,6 +227,7 @@ std::expected<std::vector<ConfinedStall>, std::string> ConfinedStallScan::Walk(P
         std::uint32_t depth;
     };
     auto found = std::vector<ConfinedStall> {};
+    auto looked = std::set<std::string, std::less<>> {};
     auto pending = std::deque<Pending> { Pending { .cgroup = _bounds.root, .depth = 0 } };
     auto visited = std::uint32_t { 0 };
     while (!pending.empty() && visited < _bounds.maxVisited)
@@ -242,6 +248,7 @@ std::expected<std::vector<ConfinedStall>, std::string> ConfinedStallScan::Walk(P
             auto look = Look(child);
             if (!look)
                 continue;
+            looked.insert(child.generic_string());
             ++visited;
             // A cgroup's PSI covers its subtree: none below one that carries too little can carry enough.
             if (!Carries(look->psi, system, _bounds.share))
@@ -255,6 +262,12 @@ std::expected<std::vector<ConfinedStall>, std::string> ConfinedStallScan::Walk(P
                 pending.push_back(Pending { .cgroup = child, .depth = depth + 1 });
         }
     }
+
+    // Remember only what this walk met: a machine starts and stops services all day, and a count of one that is gone
+    // is never compared again. Every candidate is among them, since the walk keeps only what it looked at.
+    std::erase_if(_eventsSeen, [&](auto const& entry) {
+        return !looked.contains(std::string_view { entry.first }.substr(0, entry.first.rfind('|')));
+    });
 
     std::ranges::sort(found, std::ranges::greater {}, [](ConfinedStall const& stall) { return stall.psi.some.avg10; });
     if (found.size() > _bounds.maxCandidates)

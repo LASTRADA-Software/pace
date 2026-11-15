@@ -159,6 +159,9 @@ class ConfinedStallScan
     /// @return How many walks it has made; a case asserts the bound with it.
     [[nodiscard]] std::uint32_t Walks() const noexcept;
 
+    /// @return How many event counts it remembers; bounded by what the last walk looked at.
+    [[nodiscard]] std::size_t RememberedCounts() const noexcept;
+
   private:
     /// Walk the tree from the root, keeping the cgroups that carry @p system's stall under a limit of their own.
     /// @return What it kept, as it looked at them -- this sample's reading -- or why the root cannot be listed.
