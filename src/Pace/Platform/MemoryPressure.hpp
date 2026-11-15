@@ -160,9 +160,9 @@ class ConfinedStallScan
     [[nodiscard]] std::uint32_t Walks() const noexcept;
 
   private:
-    /// Walk the tree from the root, keeping the cgroups that carry @p system's stall at a limit of their own.
-    /// @return Nothing, or why the root cannot be listed.
-    [[nodiscard]] std::expected<void, std::string> Walk(PsiReading const& system);
+    /// Walk the tree from the root, keeping the cgroups that carry @p system's stall under a limit of their own.
+    /// @return What it kept, as it looked at them -- this sample's reading -- or why the root cannot be listed.
+    [[nodiscard]] std::expected<std::vector<ConfinedStall>, std::string> Walk(PsiReading const& system);
 
     /// @return @p cgroup's reading, when it is a cgroup with a memory controller; refreshes its event counts.
     [[nodiscard]] std::optional<ConfinedStall> Look(std::filesystem::path const& cgroup);

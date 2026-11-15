@@ -205,7 +205,7 @@ std::optional<ConfinedStall> ConfinedStallScan::Look(std::filesystem::path const
     return ConfinedStall { .cgroup = cgroup, .psi = *psi, .limited = limited, .atLimit = atLimit };
 }
 
-std::expected<void, std::string> ConfinedStallScan::Walk(PsiReading const& system)
+std::expected<std::vector<ConfinedStall>, std::string> ConfinedStallScan::Walk(PsiReading const& system)
 {
     ++_walks;
     auto const rootEntries = _host->ListDirectory(_bounds.root);
@@ -262,7 +262,7 @@ std::expected<void, std::string> ConfinedStallScan::Walk(PsiReading const& syste
     _candidates.clear();
     for (auto const& stall: found)
         _candidates.push_back(stall.cgroup);
-    return {};
+    return found;
 }
 
 std::expected<std::vector<ConfinedStall>, std::string> ConfinedStallScan::Read(PsiReading const& system)
@@ -273,8 +273,9 @@ std::expected<std::vector<ConfinedStall>, std::string> ConfinedStallScan::Read(P
     if (stalled && (!_walkedAt || now - *_walkedAt >= _bounds.walkInterval))
     {
         _walkedAt = now;
-        if (auto walked = Walk(system); !walked)
-            return std::unexpected(std::move(walked.error()));
+        // The walk has just looked at every candidate it kept: its looks ARE this sample's. Looking again a moment
+        // later would read the same files, and could see no event rise in between.
+        return Walk(system);
     }
     auto stalls = std::vector<ConfinedStall> {};
     for (auto const& cgroup: _candidates)

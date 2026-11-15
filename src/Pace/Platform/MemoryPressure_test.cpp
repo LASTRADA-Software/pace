@@ -327,6 +327,19 @@ TEST_CASE("PsiPressureSource judges a cgroup's own limit by its local events, no
     CHECK_FALSE(atSlice());
 }
 
+TEST_CASE("PsiPressureSource reads a candidate once on the sample that walks", "[platform][psi][confined]")
+{
+    // The walk has just looked at every candidate it keeps; looking again a moment later reads the same files and can
+    // see no event rise in between. Each sample reads each candidate's pressure once, walking or not.
+    ConfinedTree tree;
+    auto source = tree.Source();
+    auto const pressure = std::string { "/sys/fs/cgroup/user.slice/thrash.service/memory.pressure" };
+    static_cast<void>(Unwrap(source.Sample()));
+    CHECK(tree.host->reads[pressure] == 1);
+    static_cast<void>(Unwrap(source.Sample()));
+    CHECK(tree.host->reads[pressure] == 2);
+}
+
 TEST_CASE("PsiPressureSource walks the cgroup tree only while the machine stalls, and once per interval",
           "[platform][psi][confined]")
 {

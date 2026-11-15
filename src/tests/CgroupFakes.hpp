@@ -34,14 +34,16 @@ class FakeCgroupHost final: public Platform::ICgroupHost
     std::uint32_t busyFor { 0 };                    ///< How many `rmdir`s of a busy directory fail.
     /// What probing a spawn into a cgroup answers: `no_such_file_or_directory` is success (see the real probe).
     std::errc spawnProbe { std::errc::no_such_file_or_directory };
-    mutable std::vector<std::string> trail;      ///< Every mutation,
-    mutable std::uint32_t pauses { 0 };          ///< `Pause` calls.
-    mutable std::uint32_t removalAttempts { 0 }; ///< `RemoveCgroupDirectory` calls.
-    mutable int nextDescriptor { 1000 };         ///< The next descriptor `OpenDirectory` hands out.
-    mutable std::vector<int> closed;             ///< Descriptors closed,
+    mutable std::vector<std::string> trail;             ///< Every mutation,
+    mutable std::uint32_t pauses { 0 };                 ///< `Pause` calls.
+    mutable std::uint32_t removalAttempts { 0 };        ///< `RemoveCgroupDirectory` calls.
+    mutable int nextDescriptor { 1000 };                ///< The next descriptor `OpenDirectory` hands out.
+    mutable std::vector<int> closed;                    ///< Descriptors closed,
+    mutable std::map<std::string, std::uint32_t> reads; ///< How often each path was read.
 
     [[nodiscard]] std::expected<std::string, std::error_code> ReadFile(std::filesystem::path const& path) const override
     {
+        ++reads[path.generic_string()];
         if (auto const found = files.find(path.generic_string()); found != files.end())
             return found->second;
         return std::unexpected { std::make_error_code(std::errc::no_such_file_or_directory) };
