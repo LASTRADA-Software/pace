@@ -153,6 +153,9 @@ e2e_wait_seconds 120
 
 [[ -n "$launcher" && -x "$launcher" ]] || { echo "SKIP: pace-cc not found: '$launcher'"; exit "$SKIP"; }
 e2e_launcher_state_enter launcher
+# And the node keeps its state -- the fingerprint cache its worker walks into -- in a root of the run's
+# own, never the caller's (#1774), as every fixture starting a worker does (`node-fixture-starts`).
+e2e_node_state_enter node
 export PACE_VERBOSE=1
 
 e2e_note "mode: REAL delegated cgroup via ${systemd_run} --user --scope -p Delegate=memory"
