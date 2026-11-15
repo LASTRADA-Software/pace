@@ -73,11 +73,18 @@ namespace
 
 CompileMemoryMeter::CompileMemoryMeter(std::shared_ptr<Platform::ICgroupHost const> host,
                                        MeterPlatform platform,
-                                       std::optional<Cc::OomVictim> oomVictim):
+                                       std::optional<Cc::OomVictim> oomVictim,
+                                       std::unique_ptr<Cc::ICeilingRendezvous> rendezvous):
     _host { std::move(host) },
     _platform { platform },
-    _oomVictim { std::move(oomVictim) }
+    _oomVictim { std::move(oomVictim) },
+    _rendezvous { std::move(rendezvous) }
 {
+}
+
+Cc::ICeilingRendezvous* CompileMemoryMeter::Rendezvous() const noexcept
+{
+    return _rendezvous.get();
 }
 
 void CompileMemoryMeter::Prepare()
@@ -227,7 +234,8 @@ void PutCompileCeilingInForce(CompileMemoryMeter& meter,
                               Distributed::NodeCapacity const& capacity,
                               NodeConditions& conditions,
                               ILogger& logger,
-                              std::optional<std::uint64_t> allowanceBytes)
+                              std::optional<std::uint64_t> allowanceBytes,
+                              Cc::ICeilingRendezvous* rendezvous)
 {
     auto const configured = CompileCeilingOf(cfg, capacity);
     auto const bytes = std::min(configured, allowanceBytes.value_or(configured));
@@ -247,8 +255,14 @@ void PutCompileCeilingInForce(CompileMemoryMeter& meter,
                             bytes,
                             cfg.compileMemoryLimitBytes.has_value() ? "typed" : "derived");
             conditions.Clear(NodeCondition::CompileMemoryUncapped);
+            // Named for this machine's launchers, so the compiles they run themselves join it (#1770).
+            if (auto const compiles = meter.CompilesCgroup(); rendezvous != nullptr && compiles.has_value())
+                if (auto const published = rendezvous->Publish(*compiles); !published.has_value())
+                    logger.Logf(LogLevel::Info, "compile memory ceiling: {}", published.error());
             return;
         case CeilingState::Uncapped:
+            if (rendezvous != nullptr)
+                rendezvous->Withdraw();
             logger.Logf(LogLevel::Warn,
                         "compiles run with no memory ceiling over them, so one that grows can take memory from "
                         "everything else on this machine: {}",
@@ -256,6 +270,8 @@ void PutCompileCeilingInForce(CompileMemoryMeter& meter,
             conditions.Raise(NodeCondition::CompileMemoryUncapped, applied.reason);
             return;
         case CeilingState::NotApplicable:
+            if (rendezvous != nullptr)
+                rendezvous->Withdraw();
             conditions.NotEvaluated(NodeCondition::CompileMemoryUncapped, applied.reason);
             return;
     }
@@ -265,12 +281,14 @@ CompileCeilingKeeper::CompileCeilingKeeper(CompileMemoryMeter& meter,
                                            INodeConfigSource const& inForce,
                                            INodeCapacitySource const& capacity,
                                            NodeConditions& conditions,
-                                           ILogger& logger) noexcept:
+                                           ILogger& logger,
+                                           Cc::ICeilingRendezvous* rendezvous) noexcept:
     _meter { meter },
     _inForce { inForce },
     _capacity { capacity },
     _conditions { conditions },
-    _logger { logger }
+    _logger { logger },
+    _rendezvous { rendezvous }
 {
 }
 
@@ -302,7 +320,7 @@ CeilingBasis CompileCeilingKeeper::KeepLocked(CeilingWrite when)
     if (when == CeilingWrite::OnChange && _written == bytes)
         return basis;
     _written = bytes;
-    PutCompileCeilingInForce(_meter, basis.cfg, basis.capacity, _conditions, _logger, _allowance);
+    PutCompileCeilingInForce(_meter, basis.cfg, basis.capacity, _conditions, _logger, _allowance, _rendezvous);
     return basis;
 }
 

@@ -19,6 +19,7 @@
 #include <vector>
 
 #include <IProcessRunner.hpp>
+#include <LocalCeiling.hpp>
 
 /// @file CompileMemoryMeter.hpp
 /// How a node measures the peak memory of the compiles it runs -- and says so when it cannot.
@@ -141,9 +142,12 @@ class CompileMemoryMeter
     /// @param platform What to measure like; the build's own except in a test.
     /// @param oomVictim The shim every runner spawns its compilers through, so each starts as the kernel's first
     ///        OOM victim (`Cc::ThisProcessOomVictim`, resolved once by `main`); disengaged to spawn them directly.
+    /// @param rendezvous Where `compiles/` is named for the compiles `pace-cc` runs itself on this machine, so they
+    ///        join the ceiling too (#1770); null names it nowhere. Process-lifetime, as the meter is.
     explicit CompileMemoryMeter(std::shared_ptr<Platform::ICgroupHost const> host,
                                 MeterPlatform platform = ThisMeterPlatform,
-                                std::optional<Cc::OomVictim> oomVictim = std::nullopt);
+                                std::optional<Cc::OomVictim> oomVictim = std::nullopt,
+                                std::unique_ptr<Cc::ICeilingRendezvous> rendezvous = nullptr);
 
     /// A runner over this process's meter, preparing it on the first call.
     /// @param metrics Where compiles that go unmeasured at run time are counted; outlives the runner.
@@ -176,6 +180,10 @@ class CompileMemoryMeter
     /// @return The process's job source; null before a worker prepared it, or where compiles get no cgroup.
     [[nodiscard]] Platform::IYoungestKiller* YoungestKiller() const noexcept;
 
+    /// Where this meter's `compiles/` is named for this machine's launchers (#1770).
+    /// @return The rendezvous; null when the meter names it nowhere.
+    [[nodiscard]] Cc::ICeilingRendezvous* Rendezvous() const noexcept;
+
   private:
     /// Decide the meter, and publish that it has; runs once.
     void Prepare();
@@ -185,7 +193,8 @@ class CompileMemoryMeter
 
     std::shared_ptr<Platform::ICgroupHost const> _host;
     MeterPlatform _platform;
-    std::optional<Cc::OomVictim> _oomVictim; ///< Handed to every runner this meter makes.
+    std::optional<Cc::OomVictim> _oomVictim;             ///< Handed to every runner this meter makes.
+    std::unique_ptr<Cc::ICeilingRendezvous> _rendezvous; ///< Names `compiles/` for launchers; may be null.
     std::once_flag _prepared;
     /// Set, with release, once `Prepare` has decided: `ApplyCeiling` reads `_layout` and `_report` only after.
     std::atomic<bool> _decided { false };
@@ -216,12 +225,15 @@ void ReportCompileMemoryMeter(MeterReport const& report, NodeConditions& conditi
 /// @param allowanceBytes The pressure governor's allowance, which lowers the ceiling when it is below the configured
 ///        figure (said at Debug then: the governor's own line names the allowance when its level changes, and a
 ///        ramp moves it every interval); disengaged for none.
+/// @param rendezvous Where the ceiling is named for the compiles `pace-cc` runs itself on this machine (#1770):
+///        published while it holds, withdrawn while it does not, a failure said at Info. Null names it nowhere.
 void PutCompileCeilingInForce(CompileMemoryMeter& meter,
                               NodeConfig const& cfg,
                               Distributed::NodeCapacity const& capacity,
                               NodeConditions& conditions,
                               ILogger& logger,
-                              std::optional<std::uint64_t> allowanceBytes = std::nullopt);
+                              std::optional<std::uint64_t> allowanceBytes = std::nullopt,
+                              Cc::ICeilingRendezvous* rendezvous = nullptr);
 
 /// The configuration and capacity one write of the ceiling was derived from, read together: the budget a presence
 /// round reports is taken from the same pair, so the two describe one moment.
@@ -290,11 +302,13 @@ class CompileCeilingKeeper final: public ICompileCeiling
     /// @param capacity What this machine is, read at every write; outlives this.
     /// @param conditions Where `compile-memory-uncapped` is answered; outlives this.
     /// @param logger Where the ceiling is said; outlives this.
+    /// @param rendezvous Where the ceiling is named for this machine's launchers (#1770); null for nowhere. Outlives this.
     CompileCeilingKeeper(CompileMemoryMeter& meter,
                          INodeConfigSource const& inForce,
                          INodeCapacitySource const& capacity,
                          NodeConditions& conditions,
-                         ILogger& logger) noexcept;
+                         ILogger& logger,
+                         Cc::ICeilingRendezvous* rendezvous = nullptr) noexcept;
 
     /// Put the ceiling the configuration in force and the capacity derive in force (`PutCompileCeilingInForce`),
     /// lowered to the allowance last applied, when @p when says so. A figure that was attempted and refused is not
@@ -320,6 +334,7 @@ class CompileCeilingKeeper final: public ICompileCeiling
     INodeCapacitySource const& _capacity;
     NodeConditions& _conditions;
     ILogger& _logger;
+    Cc::ICeilingRendezvous* _rendezvous;
     std::mutex _mutex;                          ///< Serialises writes and guards the two below.
     std::optional<std::uint64_t> _written {};   ///< The figure last attempted.
     std::optional<std::uint64_t> _allowance {}; ///< The governor's lowered allowance; disengaged when none binds.

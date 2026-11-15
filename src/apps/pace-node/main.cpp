@@ -143,9 +143,11 @@
 #include <utility>
 #include <vector>
 
+#include <AtomicFile.hpp>
 #include <CompileJob.hpp>
 #include <Dispatch.hpp>
 #include <EndpointDial.hpp>
+#include <LocalCeiling.hpp>
 #include <OomVictimExec.hpp>
 #include <ToolchainDiscovery.hpp>
 #include <ToolchainHost.hpp>
@@ -886,7 +888,8 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
 {
     if (worker == nullptr)
         return nullptr;
-    auto keeper = std::make_unique<Node::CompileCeilingKeeper>(meter, inForce, capacity, conditions, logger);
+    auto keeper =
+        std::make_unique<Node::CompileCeilingKeeper>(meter, inForce, capacity, conditions, logger, meter.Rendezvous());
     static_cast<void>(keeper->Keep(Node::CeilingWrite::Always));
     return keeper;
 }
@@ -3511,9 +3514,16 @@ int main(int argc, char** argv)
     // Built here, once: preparing the meter moves this process into a cgroup of its own, which must
     // not happen again when a reform rebuilds the worker (`Node::CompileMemoryMeter`).
     // Every runner it makes spawns compilers through this binary as the OOM-victim shim, named once here.
+    // And names its `compiles/` in the unit's runtime directory, where the compiles `pace-cc` runs itself on this
+    // machine find it and join the ceiling (#1770); a node with no runtime directory names it nowhere.
+    auto const rendezvousFiles = Cc::MakeDiskFiles();
     Node::CompileMemoryMeter memoryMeter { std::make_shared<Platform::SystemCgroupHost>(),
                                            Node::ThisMeterPlatform,
-                                           CompileOomVictim(logger) };
+                                           CompileOomVictim(logger),
+                                           std::make_unique<Cc::RendezvousFile>(
+                                               Cc::RendezvousPublishPath(ReadEnvironmentVariable("RUNTIME_DIRECTORY")),
+                                               *rendezvousFiles,
+                                               Cc::CurrentProcessId()) };
     auto const parts = ServingParts { .store = *formationStore,
                                       .endpoints = *endpointsFile,
                                       .archiver = archiver,

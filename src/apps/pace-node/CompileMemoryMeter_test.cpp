@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <filesystem>
 #include <format>
 #include <memory>
@@ -451,6 +452,65 @@ TEST_CASE("CompileMemoryMeter.ceiling-in-force-is-said-and-clears-the-row", "[no
         CHECK(conditions.StateOf(NodeCondition::CompileMemoryUncapped) == Wire::ConditionState::Clear);
         CHECK(RowFor(NodeCondition::CompileMemoryUncapped).persistence == Wire::ConditionPersistence::Live);
     }
+}
+
+namespace
+{
+/// Where the ceiling is named for launchers, recorded: what was published, and how often it was withdrawn.
+struct RecordingRendezvous final: Cc::ICeilingRendezvous
+{
+    std::vector<std::filesystem::path>* published;
+    int* withdrawn;
+
+    RecordingRendezvous(std::vector<std::filesystem::path>& into, int& withdraws):
+        published { &into },
+        withdrawn { &withdraws }
+    {
+    }
+    [[nodiscard]] std::expected<void, std::string> Publish(std::filesystem::path const& compiles) override
+    {
+        published->push_back(compiles);
+        return {};
+    }
+    void Withdraw() noexcept override
+    {
+        ++*withdrawn;
+    }
+};
+} // namespace
+
+TEST_CASE("CompileMemoryMeter.a-ceiling-in-force-is-named-for-launchers-and-withdrawn-when-not",
+          "[node][meter][memory-meter][local-ceiling]")
+{
+    // #1770: the compiles `pace-cc` runs itself join `compiles/` only while a ceiling holds there, and find it only
+    // through what the node names -- through the keeper, which is how production reaches it.
+    if (!Cc::CanSpawnIntoCgroups())
+        SKIP("this build cannot spawn into a cgroup, so the meter never prepares compiles/");
+    auto const host = DelegatedHost();
+    AtomicMetricsSink metrics;
+    CapturingLogger logger;
+    NodeConditions conditions;
+    std::vector<std::filesystem::path> published;
+    int withdrawn = 0;
+    CompileMemoryMeter meter {
+        host, MeterPlatform::Linux, std::nullopt, std::make_unique<RecordingRendezvous>(published, withdrawn)
+    };
+    REQUIRE(meter.MakeRunner(metrics, logger).report.state == MeterState::Measured);
+    InForceConfig const inForce;
+    MovableMachine const capacity { CeilingMachine() };
+    CompileCeilingKeeper keeper { meter, inForce, capacity, conditions, logger, meter.Rendezvous() };
+
+    static_cast<void>(keeper.Keep(CeilingWrite::Always));
+    CHECK(published
+          == std::vector<std::filesystem::path> {
+              std::filesystem::path { "/sys/fs/cgroup/system.slice/pace-node.service/compiles" } });
+    CHECK(withdrawn == 0);
+
+    // A ceiling the kernel refuses holds nothing: the name is withdrawn, so no launcher joins an uncapped cgroup.
+    host->writeRefusals["/sys/fs/cgroup/system.slice/pace-node.service/compiles/memory.max"] = std::errc::permission_denied;
+    static_cast<void>(keeper.Keep(CeilingWrite::Always));
+    CHECK(withdrawn == 1);
+    CHECK(published.size() == 1);
 }
 
 TEST_CASE("CompileMemoryMeter.ceiling-not-evaluated-off-linux", "[node][meter][memory-meter]")
