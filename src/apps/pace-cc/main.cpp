@@ -1115,8 +1115,9 @@ using Cc::CompileRun;
         },
         [](std::shared_ptr<Platform::IJobCgroupSource> cgroups) {
             auto shim = victim.has_value() ? std::optional<Cc::OomVictim> { *victim } : std::nullopt;
-            return cgroups != nullptr ? Cc::MakeProcessRunner(std::move(cgroups), std::move(shim))
-                                      : Cc::MakeProcessRunner(Cc::PeakSource::ResourceUsage, std::move(shim));
+            return cgroups != nullptr
+                       ? Cc::MakeProcessRunner(std::move(cgroups), std::move(shim), Cc::PeakSource::ResourceUsage)
+                       : Cc::MakeProcessRunner(Cc::PeakSource::ResourceUsage, std::move(shim));
         },
         victim.has_value() ? Cc::ShimState::Shimmed : Cc::ShimState::NoShim,
         Cc::CanSpawnIntoCgroups(),

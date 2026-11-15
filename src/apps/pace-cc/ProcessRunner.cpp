@@ -986,13 +986,14 @@ namespace
         /// @return The peak in bytes; disengaged when this runner does not measure, or the cgroup would not say.
         [[nodiscard]] std::optional<std::uint64_t> PeakOf(Platform::IJobCgroup const* job, ::rusage const& usage) const
         {
-            // A runner handed a cgroup source answers from the cgroup or not at all. Falling back to
-            // `ru_maxrss` here would resurrect, for exactly the spawns the cgroup failed on, the figure
-            // that charges every compile with the spawner's resident set.
-            if (_cgroups != nullptr)
+            // A child that ran in its cgroup is measured there, and only there. One that ran OUTSIDE it -- no
+            // cgroup could be made, or the system would not start the child in one -- falls back to the
+            // runner's own `peakSource`: `Unmeasured` for a node, where `ru_maxrss` would resurrect, for
+            // exactly the spawns the cgroup failed on, the figure that charges every compile with the spawner's
+            // resident set; `ResourceUsage` for the launcher, which is small, so its compiles outside the node's
+            // ceiling are measured as they always were (#1770).
+            if (_cgroups != nullptr && job != nullptr)
             {
-                if (job == nullptr)
-                    return std::nullopt;
                 auto const peak = job->PeakBytes();
                 if (!peak.has_value())
                     _cgroups->NoteUnmeasured(Platform::IJobCgroupSource::Unmeasured::PeakUnreadable);
@@ -1100,7 +1101,8 @@ std::unique_ptr<IProcessRunner> MakeProcessRunner([[maybe_unused]] PeakSource pe
 }
 
 std::unique_ptr<IProcessRunner> MakeProcessRunner([[maybe_unused]] std::shared_ptr<Platform::IJobCgroupSource> cgroups,
-                                                  [[maybe_unused]] std::optional<OomVictim> oomVictim)
+                                                  [[maybe_unused]] std::optional<OomVictim> oomVictim,
+                                                  [[maybe_unused]] PeakSource outsideCgroup)
 {
 #if defined(_WIN32)
     return std::make_unique<WindowsProcessRunner>();
@@ -1108,8 +1110,8 @@ std::unique_ptr<IProcessRunner> MakeProcessRunner([[maybe_unused]] std::shared_p
     // Decided here, once, rather than at every spawn: a build that cannot place a child in a cgroup gets a
     // runner that holds no source, so it never makes a cgroup it cannot use and never reads one's peak.
     if (!CanSpawnIntoCgroups())
-        return std::make_unique<PosixProcessRunner>(PeakSource::Unmeasured, nullptr, std::move(oomVictim));
-    return std::make_unique<PosixProcessRunner>(PeakSource::Unmeasured, std::move(cgroups), std::move(oomVictim));
+        return std::make_unique<PosixProcessRunner>(outsideCgroup, nullptr, std::move(oomVictim));
+    return std::make_unique<PosixProcessRunner>(outsideCgroup, std::move(cgroups), std::move(oomVictim));
 #endif
 }
 

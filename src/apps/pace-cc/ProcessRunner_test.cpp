@@ -503,6 +503,34 @@ TEST_CASE("ProcessRunner.cgroup-runner-runs-the-compile-when-the-system-refuses-
     CHECK(source->Refusals() == 1);
 }
 
+TEST_CASE("ProcessRunner.a-launcher-compile-outside-its-cgroup-is-still-measured", "[pace-cc][process][local-ceiling]")
+{
+    // #1770: the launcher places its own compiles in the node's ceiling where it can; where it cannot -- no cgroup
+    // could be made, or the system would not start the child in one (an ssh session's scope) -- the compile ran
+    // where the small launcher is, and `ru_maxrss` is its own peak, as it was before the ceiling existed. A node's
+    // runner keeps answering nothing there (the two cases above): its `ru_maxrss` is its own resident set.
+    if (!CanSpawnIntoCgroups())
+        SKIP("this build cannot spawn into a cgroup, so its runner never asks for one");
+    auto answer = ScriptedJobSource::Answer::RefuseToCreate;
+    SECTION("no cgroup could be made")
+    {
+        answer = ScriptedJobSource::Answer::RefuseToCreate;
+    }
+    SECTION("the system would not start the child in its cgroup")
+    {
+        answer = ScriptedJobSource::Answer::CreateUnusableJob;
+    }
+    auto source = std::make_shared<ScriptedJobSource>(answer);
+    auto const runner = MakeProcessRunner(source, std::nullopt, PeakSource::ResourceUsage);
+
+    auto const run = runner->RunCaptureSplit(ShellCommand("echo hi"));
+
+    REQUIRE(run.exitCode == 0);
+    CHECK_FALSE(run.inCgroup);
+    REQUIRE(run.peakMemoryBytes.has_value());
+    CHECK(Unwrap(run.peakMemoryBytes) > 0);
+}
+
 TEST_CASE("ProcessRunner.cgroup-runner-still-reports-an-unspawnable-program", "[pace-cc][process]")
 {
     if (!CanSpawnIntoCgroups())

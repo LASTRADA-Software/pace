@@ -223,8 +223,12 @@ enum class PeakSource : std::uint8_t
 /// @param cgroups Makes the per-job cgroups; shared so it outlives every spawn.
 /// @param oomVictim The shim each child is spawned through, so it starts as the kernel's first OOM victim
 ///        (`OomVictimExec.hpp`); disengaged to spawn each child directly. Ignored on Windows.
+/// @param outsideCgroup Where the peak of a child that ran OUTSIDE a cgroup comes from -- none could be made,
+///        the system refused, or the build cannot place one. `Unmeasured` for a node, whose `ru_maxrss` includes its
+///        own resident set; `ResourceUsage` for the launcher, which is small (#1770).
 /// @return A runner spawning real child processes.
 [[nodiscard]] std::unique_ptr<IProcessRunner> MakeProcessRunner(std::shared_ptr<Platform::IJobCgroupSource> cgroups,
-                                                                std::optional<OomVictim> oomVictim);
+                                                                std::optional<OomVictim> oomVictim,
+                                                                PeakSource outsideCgroup = PeakSource::Unmeasured);
 
 } // namespace Pace::Cc
