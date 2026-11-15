@@ -349,6 +349,12 @@ class AdmissionQueue
     /// @return Its reported budget, or zero while it has reported none.
     [[nodiscard]] static std::uint64_t BudgetOf(Ledger const& ledger) noexcept;
 
+    /// What a killed compile held, bounded by the budget the machine it ran on last reported (#1770).
+    /// @param machine Where it ran. @param heldBytes What its settle says it held.
+    /// @return The bound figure; @p heldBytes as given when it is absent or the machine never reported.
+    [[nodiscard]] std::optional<std::uint64_t> HeldBound(MachineId const& machine,
+                                                         std::optional<std::uint64_t> heldBytes) const;
+
     /// @param machine A machine that has reported.
     /// @param hold What earlier entries of this pump reserved there.
     /// @return Its in-use and free figures.

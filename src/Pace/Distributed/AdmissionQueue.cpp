@@ -191,7 +191,7 @@ void AdmissionQueue::Settle(Ticket ticket, Settlement const& settlement)
     // A killed compile's peak is what it held when it died: a lower bound, folded in as one, so the requeue it is
     // about to make is charged at least that (#1770). Every other outcome's peak is a measurement.
     if (settlement.outcome == SettleOutcome::Killed)
-        _estimates.RecordKilled(charge->entry.request.estimate, settlement.peakBytes);
+        _estimates.RecordKilled(charge->entry.request.estimate, HeldBound(charge->machine, settlement.peakBytes));
     else if (settlement.peakBytes)
         _estimates.Record(charge->entry.request.estimate, *settlement.peakBytes);
 
@@ -210,6 +210,23 @@ void AdmissionQueue::Settle(Ticket ticket, Settlement const& settlement)
         }
     else
         Requeue(std::move(waiters));
+}
+
+std::optional<std::uint64_t> AdmissionQueue::HeldBound(MachineId const& machine,
+                                                       std::optional<std::uint64_t> heldBytes) const
+{
+    // What a killed compile held is a figure a PEER states, and it raises the key's estimate and its source shape's
+    // maximum for good. A compile cannot hold more than the machine it ran on lets its compiles hold -- its ceiling is
+    // that budget -- so the figure is bounded by the budget that machine last reported: a forged or mistaken trailer can
+    // teach at most "as much as that machine could give", which a compile that truly needed more is then killed at
+    // again, and compiles here as one killed twice.
+    auto const found = _ledgers.find(machine);
+    if (found == _ledgers.end())
+        return heldBytes;
+    auto const budget = found->second.report.transform([](MachineReport const& report) { return report.memoryBudgetBytes; });
+    if (!budget.has_value())
+        return heldBytes;
+    return heldBytes.transform([limit = *budget](std::uint64_t held) { return std::min(held, limit); });
 }
 
 void AdmissionQueue::ReturnToFront(Ticket ticket)
