@@ -3425,7 +3425,7 @@ later compiles of the same kind by it. The figure the kernel offers every proces
 folded into the child's high-water mark when it executes, so a node holding a 13 GB cache tier
 would report 13 GB for every compile — and a budget charged by it admits four jobs on a machine
 with thirty slots. (`pace-cc` is small, so its own local compiles are measured that way
-correctly.)
+correctly; the ones it can place in this node's ceiling are measured there instead.)
 
 So a Linux node measures each compile in **a cgroup of its own** (cgroup v2): the compiler is
 started directly inside a fresh `job-<n>` cgroup under the node's, the cgroup's `memory.peak`
@@ -3503,7 +3503,8 @@ A compile the ceiling killed is **never a compiler failure**. It is classified *
 cgroup's `memory.events` shows `oom_kill` above zero, when the node's own shedding killed it, or when
 the compiler ended by `SIGKILL` for any other reason — a compiler never sends itself `SIGKILL`, so
 this also covers systemd-oomd or the global OOM killer. The worker answers `worker-compile-killed`
-(`0x35`), the client treats it as a miss and compiles locally, and the kill is counted by cause in
+(`0x35`), and the client treats it as a miss that **waits for memory** rather than compiling locally at
+once (see *A killed compile waits for memory* below); the kill is counted by cause in
 `pace_worker_compiles_killed_ceiling_total`, `..._shed_total` and `..._signal_total` and logged once
 per kill at Info, naming the cause and the source file's name as the worker gave it in scratch (its base
 name) -- not its cache key, which the worker does not hold, and not its full path.
@@ -3543,7 +3544,7 @@ oscillate:
 - **The youngest** because it has made the least progress, so its client loses the least by
   compiling it again. It is marked *shed* before its `cgroup.kill` is written, so the worker answers
   `worker-compile-killed` with that cause and counts it in `pace_worker_compiles_killed_shed_total`;
-  its client compiles it locally, as for a ceiling kill.
+  its client asks the queue for it once more, as for a ceiling kill.
 - **The allowance.** Entering `yielding` or `shedding` sets the compiles' allowance to what they hold at that
   moment — the larger of what `compiles/` is resident in (`compiles/memory.current`) and what the
   machine's compiles are charged, local leases included — the work that demonstrably fits beside
@@ -3551,7 +3552,7 @@ oscillate:
   so a machine whose compiles held next to nothing still reports a budget one compile fits. It becomes both the ceiling written on `compiles/memory.max` and the budget the
   machine reports, so the fleet's queue and the kernel agree. **A running compile that grows past it is
   killed by the ceiling** (`worker-compile-killed`, counted in `pace_worker_compiles_killed_ceiling_total`)
-  and its client compiles it locally: a yield stops new work *and* caps the work already running. While
+  and its client asks the queue for it once more: a yield stops new work *and* caps the work already running. While
   `calm` it grows back by 5% of the configured ceiling every 30 s, so it reaches the configured value in
   ten minutes; a new yield resets it. It is never above the configured ceiling — `--compile-memory-limit`,
   or the machine budget — and it lives in the node process only: a restart starts calm, at the
@@ -3639,6 +3640,62 @@ next restart. When the mark cannot be set at all
 (a kernel without user extended attributes on cgroupfs) the node says so once at Warn, naming the
 cgroup, and runs as before.
 
+##### A killed compile waits for memory
+
+A compile a worker's machine killed for memory goes back into the fleet's admission queue, asked for
+**once more** (`AskOrigin::AfterKill` on the `ADMIT`), instead of compiling on the client's machine at
+once, outside every layer above. The client ends the killed compile's admission without a `SETTLE`,
+which the leader reads as a kill and raises that compile's estimate to at least
+`--compile-estimate-default` (never lowers it); the requeue is charged that. The queue then places it
+only on a machine whose **configured** budget can hold that estimate -- never alone on a smaller one,
+where its ceiling would kill it again -- and it waits there, as any admission waits, until one has room:
+on another worker, on the asking machine, now or later.
+
+It compiles on the client's machine instead in exactly two cases, each named and counted:
+
+- **No machine can hold it**: the estimate is above the configured budget of every machine the queue
+  could run it on, the asking one included. The queue grants it `Local` with the reason `never-fits`,
+  alone on the asking machine (as any compile larger than a whole budget runs), and the client runs it
+  **outside** that machine's compile ceiling, which would only kill it again -- still as the kernel's
+  first OOM victim. The leader counts it in `pace_admission_never_fits_total`; the client tallies it in
+  `pace-cc --show-stats` as *no machine's memory budget fits it*. A budget the pressure allowance holds
+  down is waited for, never ruled out.
+- **Killed twice**: the requeued compile is killed again. The one requeue is spent, so it compiles on
+  the client's machine, charged there -- never a third trip through the fleet, which is how a kill
+  cannot loop. Tallied by the client as *killed for memory twice*.
+
+Every requeue is counted by the leader in `pace_admission_requeued_after_kill_total`. Waiting is
+bounded as every admission wait is: the queue pulses while it holds the request, and the client gives
+up as it would on any admission, compiling as it did before a queue existed.
+
+##### The compiles `pace-cc` runs itself
+
+A compile `pace-cc` runs on its own machine -- no fleet, a miss that is not dispatched, either fallback
+above -- joins **this node's** `compiles/` ceiling when it can. A node whose ceiling holds names its
+`compiles/` cgroup in the file `compile-ceiling` in its runtime directory (`$RUNTIME_DIRECTORY`, which the
+shipped units set); `pace-cc` reads `$XDG_RUNTIME_DIR/pace-node/compile-ceiling`, makes a
+`pace-cc-<pid>-<n>` cgroup of its own below that, and starts the compiler inside it, so the ceiling,
+the pressure governor's allowance and the kernel's OOM grouping hold it exactly as they hold the
+node's own compiles. Those two paths meet under the **user** unit, whose node and the user's builds
+share an owner. Under the system unit the runtime directory is `/run/pace-node`, readable only by the
+`pace` account, and its cgroup is not the user's to write, so the user's compiles do not join it; a
+node started by hand has no runtime directory and names nothing. A node whose ceiling does not hold
+withdraws the file; systemd removes the directory when the unit stops.
+
+Where a compile cannot join -- no node, the system unit's node, a build whose cgroup shares no writable
+ancestor with the node's (an `ssh` session's scope, say), a host with no cgroups -- `pace-cc` still starts
+the compiler as the kernel's first OOM victim (`pace-cc` is its own `pace-oom-victim-exec` shim, as the
+node is). Which of the two applied is named for every such compile in the invocation log and counted
+by `pace-cc --show-stats` under *local compiles by memory defense* (`ceiling`, or `shim:` and why), and
+said on the verbose line.
+
+A compile the ceiling kills there is no compiler error either: the client ends its admission
+unsettled and waits in the queue for room **once**, exactly as a worker's kill does; killed in the
+ceiling a second time, it runs once more **outside** the ceiling, under the same admission. A compile
+killed outside every ceiling is not retried: it ends with the kill's status, and `pace-cc` says so on
+stderr whatever the verbosity, naming it as no compiler error. With no queue to wait in, a compile the
+ceiling killed runs once more outside it at once.
+
 #### The machine's compile budget
 
 Separate from the worker's in-flight bytes above, every node also states what its
@@ -3650,7 +3707,7 @@ started with `--slots=0` runs no worker and still has a machine.
 | --- | --- | --- |
 | `--machine-slots` (`machine_slots`) | the machine's logical cores | Compiles the machine runs at once, every one on it counted, local ones included. Not `--slots`, which sizes the worker and is `0` on a node with none. `0` is refused. |
 | `--machine-memory-budget` (`machine_memory_budget`) | 75% of RAM, less this node's cache tier, never below `--compile-estimate-default` | The memory those compiles may hold at once. `k`/`m`/`g` or `N%` of host RAM. A typed figure is used as given. `0` is refused. |
-| `--compile-memory-limit` (`compile_memory_limit`) | the machine budget | The memory every compile this worker runs may hold **together**, enforced by the kernel on the `compiles/` cgroup (Linux, with a cgroup of the node's own): past it, one compile is killed and its client compiles it locally. Typed below the machine budget, it lowers the budget this machine reports too, so the queue never admits what the ceiling would kill. `k`/`m`/`g` or `N%` of host RAM. `0` is refused. **Reloadable.** |
+| `--compile-memory-limit` (`compile_memory_limit`) | the machine budget | The memory every compile this worker runs may hold **together**, enforced by the kernel on the `compiles/` cgroup (Linux, with a cgroup of the node's own) -- and, under the user unit, on the compiles `pace-cc` runs itself on this machine: past it, one compile is killed and its client asks the queue for it once more. Typed below the machine budget, it lowers the budget this machine reports too, so the queue never admits what the ceiling would kill. `k`/`m`/`g` or `N%` of host RAM. `0` is refused. **Reloadable.** |
 | `--compile-estimate-default` (`compile_estimate_default`) | `2g` | What a translation unit nobody has measured is assumed to need. Too low is the out-of-memory kill the queue exists to prevent. `0` is refused. |
 
 All but `--compile-memory-limit` are **restart-only**, and a service registration replays only the ones typed.

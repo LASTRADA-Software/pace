@@ -4154,6 +4154,25 @@ Each rule below is a shape a plausible simpler design gets wrong, and none of th
     production wrappers each have a case asserting the request reaches the socket under them; the fake's
     is the proven-leader forwarding case, whose ledger sits UNDER it.
 
+- **A compile killed for memory waits for memory, ONCE** (#1770). A worker's `worker-compile-killed`,
+  or a kill of a compile the launcher ran itself inside the local node's ceiling, ends the admission
+  UNSETTLED -- the abandon is how the leader learns a kill (`PeakEstimates::RecordKilled`), so a
+  `SETTLE` there would teach a killed run's LOWER-BOUND peak as the compile's measure -- and asks again
+  as `AskOrigin::AfterKill`. The queue places such a request only on a machine whose CONFIGURED budget
+  holds its estimate, never alone on a smaller one (that machine's ceiling is its budget: the run
+  would be the next kill); a held-down budget is waited for, never ruled out. When every reported
+  machine it could run on is too small, its caller included, it is `LocalGrantReason::NeverFits`,
+  alone on the caller, OUTSIDE the ceiling. A second kill anywhere spends the one requeue: from a
+  worker it compiles here (`KillStep::WorkerKilledTwice`), inside this machine's ceiling it runs once
+  more outside it, and outside every ceiling it ends killed -- nothing loops (`Cc::RunMiss`).
+- **The compiles `pace-cc` runs itself join the node's ceiling through a RENDEZVOUS, never a guess**:
+  the node writes `compiles/`'s path to `$RUNTIME_DIRECTORY/compile-ceiling` while its ceiling holds
+  and withdraws it when not; the launcher reads `$XDG_RUNTIME_DIR/pace-node/compile-ceiling`. The two
+  meet only under the USER unit, which is the design: the system unit's node is another account's.
+  A node with no `RUNTIME_DIRECTORY` (started by hand, a fixture) names NOTHING, so it can never
+  overwrite or withdraw the rendezvous of the node the user runs. Which defense applied is named per
+  compile (`Cc::LocalDefense` + `Cc::CeilingMiss`), in the log and in `-s`: silence is the anti-goal.
+
 ## Fingerprint inputs: captured, never re-gathered
 
 <!-- agent-tripwire: Fingerprint inputs are CAPTURED, never re-gathered -->
@@ -4261,12 +4280,6 @@ translation unit and every test green.
 ## Open work
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues; AGENT.md tripwires rules, not residuals -->
-- **[#1770](https://github.com/LASTRADA-Software/pace/issues/1770)** — the compile-OOM
-  defense reaches only the compiles `pace-node` runs. A compile `pace-cc` runs LOCALLY from the
-  owner's own build, and the local rebuild a killed compile falls back to, stand outside the
-  `compiles/` ceiling, the pressure governor and the OOM-victim shim. The open question is
-  whether a killed compile waits in the leader's admission queue under its learned peak rather
-  than rebuilding locally, and whether local compiles join the node's ceiling.
 - **[#661](https://github.com/LASTRADA-Software/pace/issues/661)** — `IProcessRunner`
   has no cancellable seam, so a compile whose client has GONE runs to completion and this
   machine pays for an object nobody will read. The departure is already detected and
