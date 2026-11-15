@@ -3,12 +3,16 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <filesystem>
+#include <format>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
+#include <core/platform/Clock.hpp>
 #include <tests/CgroupFakes.hpp>
 #include <tests/Unwrap.hpp>
 
@@ -164,4 +168,185 @@ TEST_CASE("PsiPressureSource reports a kernel without PSI", "[platform][psi]")
     auto host = std::make_shared<FakeCgroupHost>();
     PsiPressureSource source { host, std::nullopt };
     CHECK_FALSE(source.Sample().has_value());
+}
+
+namespace
+{
+
+/// A PSI document stalled @p some / @p full percent over ten seconds.
+std::string Psi(double some, double full)
+{
+    return std::format(
+        "some avg10={:.2f} avg60=0.00 avg300=0.00 total=1\nfull avg10={:.2f} avg60=0.00 avg300=0.00 total=1\n", some, full);
+}
+
+/// A machine whose stall (some 15, full 14) is almost all one user service thrashing at its own 4 GiB memory.max, under
+/// a slice with no limit; this node runs in system.slice/pace-node.service; and a quiet sibling with a limit too.
+struct ConfinedTree
+{
+    std::shared_ptr<FakeCgroupHost> host = std::make_shared<FakeCgroupHost>();
+    core::platform::ManualClock clock;
+
+    ConfinedTree()
+    {
+        auto& files = host->files;
+        files[std::string { PsiSystemPath }] = Psi(15.0, 14.0);
+        for (auto const* directory: { "/sys/fs/cgroup",
+                                      "/sys/fs/cgroup/user.slice",
+                                      "/sys/fs/cgroup/user.slice/thrash.service",
+                                      "/sys/fs/cgroup/user.slice/quiet.service",
+                                      "/sys/fs/cgroup/system.slice",
+                                      "/sys/fs/cgroup/system.slice/pace-node.service" })
+            host->directories.insert(directory);
+        Cgroup("user.slice", Psi(14.5, 13.8), "max", "9000000000");
+        Cgroup("user.slice/thrash.service", Psi(14.2, 13.5), "4294967296", "4290000000");
+        Cgroup("user.slice/quiet.service", Psi(0.0, 0.0), "4294967296", "100000000");
+        Cgroup("system.slice", Psi(14.0, 13.0), "max", "2000000000");
+        Cgroup("system.slice/pace-node.service", Psi(14.0, 13.0), "4294967296", "4290000000");
+    }
+
+    void Cgroup(std::string const& relative, std::string psi, std::string max, std::string current)
+    {
+        auto const base = "/sys/fs/cgroup/" + relative;
+        host->files[base + "/memory.pressure"] = std::move(psi);
+        host->files[base + "/memory.max"] = std::move(max) + "\n";
+        host->files[base + "/memory.high"] = "max\n";
+        host->files[base + "/memory.current"] = std::move(current) + "\n";
+        host->files[base + "/memory.events"] = "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\n";
+    }
+
+    [[nodiscard]] PsiPressureSource Source(ConfinedScanBounds bounds = Bounds())
+    {
+        return PsiPressureSource { host, std::nullopt, std::make_unique<ConfinedStallScan>(host, std::move(bounds), clock) };
+    }
+
+    [[nodiscard]] static ConfinedScanBounds Bounds()
+    {
+        auto bounds = ConfinedScanBounds {};
+        bounds.excluded = { "/sys/fs/cgroup/system.slice/pace-node.service" };
+        return bounds;
+    }
+};
+
+} // namespace
+
+TEST_CASE("PsiPressureSource finds the cgroup stalling at its own limit, and none of this node's",
+          "[platform][psi][confined]")
+{
+    ConfinedTree tree;
+    auto source = tree.Source();
+    auto const sample = Unwrap(source.Sample());
+    auto const& confined = Unwrap(sample.confined);
+    REQUIRE(confined.size() == 1);
+    CHECK(confined.front().cgroup == "/sys/fs/cgroup/user.slice/thrash.service");
+    CHECK(confined.front().atLimit);
+    CHECK(confined.front().psi.some.avg10 == 14.2);
+    CHECK_FALSE(sample.confinedFault.has_value());
+}
+
+TEST_CASE("PsiPressureSource reports no confined stall where no cgroup is at a limit of its own",
+          "[platform][psi][confined]")
+{
+    ConfinedTree tree;
+    SECTION("far below its limit")
+    {
+        tree.host->files["/sys/fs/cgroup/user.slice/thrash.service/memory.current"] = "1000000000\n";
+    }
+    SECTION("no limit at all")
+    {
+        tree.host->files["/sys/fs/cgroup/user.slice/thrash.service/memory.max"] = "max\n";
+    }
+    auto source = tree.Source();
+    CHECK(Unwrap(Unwrap(source.Sample()).confined).empty());
+}
+
+TEST_CASE("PsiPressureSource counts a memory.high a cgroup is throttled at, and an events rise", "[platform][psi][confined]")
+{
+    ConfinedTree tree;
+    auto const base = std::string { "/sys/fs/cgroup/user.slice/thrash.service" };
+    tree.host->files[base + "/memory.max"] = "max\n";
+    tree.host->files[base + "/memory.current"] = "1000000000\n";
+    tree.host->files[base + "/memory.high"] = "2000000000\n";
+    auto source = tree.Source();
+    // Far below its high limit, and the count has nothing to rise from yet: a candidate is kept only AT a limit.
+    CHECK(Unwrap(Unwrap(source.Sample()).confined).empty());
+
+    tree.host->files[base + "/memory.current"] = "1990000000\n";
+    tree.clock.advance(std::chrono::seconds { 10 });
+    auto const near = Unwrap(Unwrap(source.Sample()).confined);
+    REQUIRE(near.size() == 1);
+    CHECK(near.front().atLimit);
+
+    // Below again, but the kernel counted it reaching memory.high since: still at it.
+    tree.host->files[base + "/memory.current"] = "1000000000\n";
+    tree.host->files[base + "/memory.events"] = "low 0\nhigh 7\nmax 0\noom 0\noom_kill 0\n";
+    auto const rose = Unwrap(Unwrap(source.Sample()).confined);
+    REQUIRE(rose.size() == 1);
+    CHECK(rose.front().atLimit);
+    auto const still = Unwrap(Unwrap(source.Sample()).confined);
+    REQUIRE(still.size() == 1);
+    CHECK_FALSE(still.front().atLimit);
+}
+
+TEST_CASE("PsiPressureSource walks the cgroup tree only while the machine stalls, and once per interval",
+          "[platform][psi][confined]")
+{
+    ConfinedTree tree;
+    auto bounds = ConfinedTree::Bounds();
+    auto scan = std::make_unique<ConfinedStallScan>(tree.host, bounds, tree.clock);
+    auto const* walks = scan.get();
+    PsiPressureSource source { tree.host, std::nullopt, std::move(scan) };
+
+    static_cast<void>(Unwrap(source.Sample()));
+    static_cast<void>(Unwrap(source.Sample()));
+    CHECK(walks->Walks() == 1);
+    tree.clock.advance(std::chrono::seconds { 10 });
+    static_cast<void>(Unwrap(source.Sample()));
+    CHECK(walks->Walks() == 2);
+
+    // A calm machine: nothing to attribute, so no walk however long it has been.
+    tree.host->files[std::string { PsiSystemPath }] = Psi(0.0, 0.0);
+    tree.clock.advance(std::chrono::seconds { 60 });
+    static_cast<void>(Unwrap(source.Sample()));
+    CHECK(walks->Walks() == 2);
+}
+
+TEST_CASE("PsiPressureSource prunes a subtree that carries too little, and stops at its bound", "[platform][psi][confined]")
+{
+    ConfinedTree tree;
+    SECTION("a slice carrying little hides nothing below it")
+    {
+        tree.host->files["/sys/fs/cgroup/user.slice/memory.pressure"] = Psi(1.0, 1.0);
+        auto source = tree.Source();
+        CHECK(Unwrap(Unwrap(source.Sample()).confined).empty());
+    }
+    SECTION("a bound of one level sees only the slices")
+    {
+        auto bounds = ConfinedTree::Bounds();
+        bounds.maxDepth = 1;
+        auto source = tree.Source(bounds);
+        CHECK(Unwrap(Unwrap(source.Sample()).confined).empty());
+    }
+}
+
+TEST_CASE("PsiPressureSource says why the cgroup tree cannot be read", "[platform][psi][confined]")
+{
+    ConfinedTree tree;
+    tree.host->listRefusals["/sys/fs/cgroup"] = std::errc::permission_denied;
+    auto source = tree.Source();
+    auto const sample = Unwrap(source.Sample());
+    CHECK(sample.system.some.avg10 == 15.0);
+    CHECK_FALSE(sample.confined.has_value());
+    CHECK(Unwrap(sample.confinedFault).contains("/sys/fs/cgroup"));
+}
+
+TEST_CASE("ConfinedScanBoundsFor leaves out this process's own cgroup and the compiles'", "[platform][psi][confined]")
+{
+    FakeCgroupHost host;
+    host.files["/proc/self/cgroup"] = "0::/system.slice/pace-node.service/node\n";
+    auto const bounds = ConfinedScanBoundsFor(host, std::filesystem::path { "/sys/fs/cgroup/x/compiles" }, 0.8);
+    CHECK(bounds.excluded
+          == std::vector<std::filesystem::path> { "/sys/fs/cgroup/system.slice/pace-node.service/node",
+                                                  "/sys/fs/cgroup/x/compiles" });
+    CHECK(bounds.share == 0.8);
 }

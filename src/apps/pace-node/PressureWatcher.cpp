@@ -222,8 +222,10 @@ void PressureWatcher::StepOnce()
         _logger.Log(LogLevel::Info, "memory pressure can be read again");
     NoteCompilesFault(sample->compilesFault);
     NoteLimitFault(sample->compilesLimitFault);
+    NoteConfinedFault(sample->confinedFault);
 
     auto const decision = _governor.Step(*sample, HoldingBytes());
+    NoteDiscounted(decision.discounted);
     // Only an allowance pressure LOWERED binds anything; one at the configured value is the configuration, so it is
     // handed on as none and a reload moves the ceiling and the budget at once.
     auto const lowered =
@@ -275,6 +277,43 @@ void PressureWatcher::NoteLimitFault(std::optional<std::string> const& fault)
         _limitFaultSaid = false;
         _logger.Log(LogLevel::Info, "whether the compiles stand at their own memory ceiling can be read again");
     }
+}
+
+void PressureWatcher::NoteConfinedFault(std::optional<std::string> const& fault)
+{
+    if (fault.has_value() && !_confinedFaultSaid)
+    {
+        _confinedFaultSaid = true;
+        _logger.Logf(LogLevel::Warn,
+                     "the machine's other cgroups cannot be read ({}), so a stall a cgroup has at its own memory limit "
+                     "cannot be told from a shortage: every stall counts as the machine's until they can",
+                     *fault);
+    }
+    else if (!fault.has_value() && _confinedFaultSaid)
+    {
+        _confinedFaultSaid = false;
+        _logger.Log(LogLevel::Info, "the machine's other cgroups can be read again");
+    }
+}
+
+void PressureWatcher::NoteDiscounted(std::optional<Platform::ConfinedStall> const& discounted)
+{
+    auto const cgroup = discounted ? std::optional { discounted->cgroup } : std::nullopt;
+    if (cgroup == _discountedSaid)
+        return;
+    if (discounted)
+        _logger.Logf(LogLevel::Info,
+                     "memory pressure: not counting the stall in {} (some {:.1f}%, full {:.1f}%): it stands at its own "
+                     "memory limit, which freeing this machine's memory cannot relieve",
+                     discounted->cgroup.generic_string(),
+                     discounted->psi.some.avg10,
+                     discounted->psi.full ? discounted->psi.full->avg10 : 0.0);
+    else
+        _logger.Logf(LogLevel::Info,
+                     "memory pressure: the stall in {} is counted again: it no longer carries the machine's stall at "
+                     "its own memory limit",
+                     _discountedSaid->generic_string());
+    _discountedSaid = cgroup;
 }
 
 void PressureWatcher::CountTime(core::platform::SteadyTimePoint now)

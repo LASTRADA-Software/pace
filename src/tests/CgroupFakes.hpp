@@ -29,6 +29,7 @@ class FakeCgroupHost final: public Platform::ICgroupHost
     std::set<std::string> unwritable;               ///< Files `IsWritable` denies.
     std::map<std::string, std::errc> writeRefusals; ///< Files whose write is refused.
     std::map<std::string, std::errc> xattrRefusals; ///< Directories whose `setxattr` is refused.
+    std::map<std::string, std::errc> listRefusals;  ///< Directories whose listing is refused.
     std::set<std::string> busyRemovals;             ///< Directories `rmdir` answers busy for, this many times.
     std::uint32_t busyFor { 0 };                    ///< How many `rmdir`s of a busy directory fail.
     /// What probing a spawn into a cgroup answers: `no_such_file_or_directory` is success (see the real probe).
@@ -80,6 +81,8 @@ class FakeCgroupHost final: public Platform::ICgroupHost
     [[nodiscard]] std::expected<std::vector<std::string>, std::error_code> ListDirectory(
         std::filesystem::path const& path) const override
     {
+        if (auto const refused = listRefusals.find(path.generic_string()); refused != listRefusals.end())
+            return std::unexpected { std::make_error_code(refused->second) };
         auto names = std::vector<std::string> {};
         for (auto const& directory: directories)
             if (std::filesystem::path { directory }.parent_path() == path)

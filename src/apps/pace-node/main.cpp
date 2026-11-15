@@ -907,8 +907,14 @@ void StartAdmissionQueue(std::optional<Node::AdmissionResponder>& responder,
                                                                           Node::CompileCeilingKeeper* keeper,
                                                                           Node::PressureWatcherParts parts)
 {
-    parts.source = std::make_unique<Platform::PsiPressureSource>(std::make_shared<Platform::SystemCgroupHost>(),
-                                                                 meter.CompilesCgroup());
+    auto host = std::make_shared<Platform::SystemCgroupHost>();
+    // The same share the governor weighs a stall's owner by, so the walk never prunes a cgroup it would count.
+    auto confined = std::make_unique<Platform::ConfinedStallScan>(
+        host,
+        Platform::ConfinedScanBoundsFor(*host, meter.CompilesCgroup(), Node::PressureThresholds {}.ownShare),
+        parts.clock);
+    parts.source =
+        std::make_unique<Platform::PsiPressureSource>(std::move(host), meter.CompilesCgroup(), std::move(confined));
     // Only where `compiles/` exists: a worker whose cgroup preparation failed still has a keeper, and every allowance
     // written through it would be refused and said again -- the uncapped row already says it once.
     auto const capped = keeper != nullptr && meter.CompilesCgroup().has_value();

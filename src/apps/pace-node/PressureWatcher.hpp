@@ -16,6 +16,7 @@
 #include <chrono>
 #include <cstdint>
 #include <expected>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <stop_token>
@@ -176,6 +177,14 @@ class PressureWatcher
     /// @param fault The sample's `compilesLimitFault`.
     void NoteLimitFault(std::optional<std::string> const& fault);
 
+    /// Say the other cgroups' tree going unreadable, or readable again -- on the transition only.
+    /// @param fault The sample's `confinedFault`.
+    void NoteConfinedFault(std::optional<std::string> const& fault);
+
+    /// Say a confined stall starting, changing cgroup or ending being discounted -- on the transition only.
+    /// @param discounted The decision's `discounted`.
+    void NoteDiscounted(std::optional<Platform::ConfinedStall> const& discounted);
+
     /// Count the time since the previous step against the level held through it.
     /// @param now This step's time.
     void CountTime(core::platform::SteadyTimePoint now);
@@ -217,6 +226,9 @@ class PressureWatcher
     bool _compilesFaultSaid { false };        ///< The compiles' reading is said to be unreadable.
     bool _limitFaultSaid { false };           ///< Whether they stand at their ceiling is said to be unreadable.
     bool _sampleFaultSaid { false };          ///< A failed system sample is said.
+    bool _confinedFaultSaid { false };        ///< The other cgroups' tree is said to be unreadable.
+    /// The cgroup whose confined stall was last said to be discounted; disengaged when none is.
+    std::optional<std::filesystem::path> _discountedSaid {};
 
     /// **Declared LAST**: the body touches every member above, so they are built before it starts and destroyed
     /// only after it has been stopped and joined.

@@ -771,3 +771,57 @@ TEST_CASE("Whether the compiles stand at their ceiling going unreadable is said 
     rig.watcher->StepOnce();
     CHECK(limitWarns() == 2);
 }
+
+TEST_CASE("A discounted confined stall is named on its transitions, never per sample", "[node][pressure][confined]")
+{
+    Rig rig;
+    rig.Started();
+    auto confined = SampleOf(Freeze);
+    auto psi = Platform::PsiReading {};
+    psi.some.avg10 = 55.0;
+    psi.full = Platform::PsiLine { .avg10 = 19.0, .avg60 = 0.0, .totalMicros = 0 };
+    confined.confined = std::vector { Platform::ConfinedStall {
+        .cgroup = "/sys/fs/cgroup/user.slice/thrash.service", .psi = psi, .atLimit = true } };
+    auto const naming = [&rig] {
+        return static_cast<std::size_t>(std::ranges::count_if(rig.logger.Snapshot(), [](auto const& record) {
+            return record.message.contains("/sys/fs/cgroup/user.slice/thrash.service");
+        }));
+    };
+    for ([[maybe_unused]] auto const sample: std::views::iota(0, 3))
+    {
+        rig.clock.advance(1s);
+        rig.source->next = confined;
+        rig.watcher->StepOnce();
+    }
+    CHECK(naming() == 1);
+    CHECK(rig.Published().level == PressureLevel::Calm);
+
+    // It stops being discounted: said once more, and the freeze is the machine's again.
+    rig.Step(1s, Freeze);
+    rig.Step(1s, Freeze);
+    CHECK(naming() == 2);
+    CHECK(rig.Published().level == PressureLevel::Shed);
+}
+
+TEST_CASE("The other cgroups going unreadable is said on its transitions, never per sample", "[node][pressure][confined]")
+{
+    Rig rig;
+    rig.Started();
+    auto faulted = SampleOf(Quiet);
+    faulted.confinedFault = "cannot list the cgroup tree at /sys/fs/cgroup: Permission denied";
+    auto const said = [&rig] {
+        return static_cast<std::size_t>(std::ranges::count_if(
+            rig.logger.Snapshot(), [](auto const& record) { return record.message.contains("other cgroups"); }));
+    };
+    for ([[maybe_unused]] auto const sample: std::views::iota(0, 3))
+    {
+        rig.clock.advance(1s);
+        rig.source->next = faulted;
+        rig.watcher->StepOnce();
+    }
+    CHECK(said() == 1);
+    CHECK(rig.Lines(LogLevel::Warn) == 1);
+    rig.Step(1s, Quiet);
+    rig.Step(1s, Quiet);
+    CHECK(said() == 2);
+}

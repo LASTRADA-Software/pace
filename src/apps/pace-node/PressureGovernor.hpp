@@ -6,7 +6,9 @@
 
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <limits>
+#include <map>
 #include <optional>
 
 #include <core/platform/Clock.hpp>
@@ -61,10 +63,13 @@ struct PressureThresholds
 /// What the governor decided on one sample.
 struct GovernorDecision
 {
-    PressureLevel level;          ///< The level after this sample.
-    std::uint64_t allowanceBytes; ///< What compiles may hold at once now; never above the configured bytes.
-    bool killYoungest;            ///< Kill the youngest running compile now.
-    bool levelChanged;            ///< This sample moved the level.
+    PressureLevel level { PressureLevel::Calm }; ///< The level after this sample.
+    std::uint64_t allowanceBytes {};             ///< What compiles may hold at once now; never above the configured bytes.
+    bool killYoungest {};                        ///< Kill the youngest running compile now.
+    bool levelChanged {};                        ///< This sample moved the level.
+    /// The cgroup whose stall at its own memory limit was NOT counted this sample, where counting it would have
+    /// yielded or shed; disengaged otherwise. The watcher says a change of it, never each sample.
+    std::optional<Platform::ConfinedStall> discounted {};
 };
 
 /// The pressure state machine: Calm, Yield, Shed, with hysteresis, dwell and an adaptive allowance.
@@ -76,7 +81,13 @@ struct GovernorDecision
 ///   the shed's exit horizon, so the exit check always sees it. Otherwise it is the
 ///   ceiling working, and the level stays `Calm`. Compiles far below their limit that stall with the
 ///   machine are stalling on someone else's shortage -- the machine reclaims from everyone -- so that yields.
-/// - **Shed** on system `full` at or above `shedEnter`, whoever stalls, or from `Yield` once a FOREIGN
+/// - **A stall confined to a cgroup's OWN limit is not the machine's** (`PressureSample::confined`): a cgroup
+///   elsewhere that carries `ownShare` of the system's `some` (or `full`) while standing at its own `memory.max` or
+///   `memory.high` within the evidence window is stalling on a limit freeing machine memory cannot raise. It neither
+///   yields nor sheds, and eases a level as an own stall does. One cgroup must carry the share alone: two that split
+///   it count as the machine's, the safe direction. A genuine shortage stalls the rest of the machine too, so the
+///   share falls below `ownShare` and the stall counts again; an unreadable tree is no confined stall at all.
+/// - **Shed** on system `full` at or above `shedEnter`, unless confined (above), or from `Yield` once a FOREIGN
 ///   stall (above) has held for twice `dwell` without a break: its clock restarts whenever it drops, so a
 ///   yield that eased and then returns is not shed at once. While shedding, `killYoungest` is true at most
 ///   once per `dwell` -- and never when compiles hold nothing, since there is nothing to kill.
@@ -136,6 +147,24 @@ class PressureGovernor
     [[nodiscard]] std::uint64_t AllowanceBytes() const noexcept;
 
   private:
+    /// The confined cgroups that carry the machine's stall alone, per PSI line.
+    struct Carriers
+    {
+        std::optional<Platform::ConfinedStall> some; ///< Carries `ownShare` of the system's `some`.
+        std::optional<Platform::ConfinedStall> full; ///< Carries `ownShare` of the system's `full`.
+    };
+
+    /// Refresh the confined evidence from @p sample and find what carries the stall.
+    /// @param sample This sample.
+    /// @param now Its time.
+    /// @param systemSome The system's `some` avg10.
+    /// @param systemFull The system's `full` avg10, zero where absent.
+    /// @return The carriers.
+    [[nodiscard]] Carriers ConfinedCarriers(Platform::PressureSample const& sample,
+                                            core::platform::SteadyTimePoint now,
+                                            double systemSome,
+                                            double systemFull);
+
     /// Move to @p level at @p now, setting the allowance from what compiles hold.
     void Enter(PressureLevel level, core::platform::SteadyTimePoint now, std::uint64_t compilesHoldBytes);
 
@@ -161,6 +190,9 @@ class PressureGovernor
     bool _ownFreezeLatched { false }; ///< A shed was left on the compiles' own full stall, which has not lifted since.
     /// When the compiles were last seen at their own ceiling; counts as evidence for `EvidenceDwells` (two) dwells after.
     std::optional<core::platform::SteadyTimePoint> _atLimitSeen;
+    /// When each confined candidate was last seen at its own limit, held as `_atLimitSeen` is; a cgroup the source no
+    /// longer reports is forgotten.
+    std::map<std::filesystem::path, core::platform::SteadyTimePoint> _confinedSeen;
 };
 
 } // namespace Pace::Node

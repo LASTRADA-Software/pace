@@ -15,6 +15,7 @@
 #include <optional>
 #include <ranges>
 #include <utility>
+#include <vector>
 
 #include <core/platform/Clock.hpp>
 #include <tests/Unwrap.hpp>
@@ -724,4 +725,80 @@ TEST_CASE("At-limit evidence outlives the shed's first exit check at a real loop
         CHECK(steps == 10); // the first sample at least one dwell after entering
         CHECK(Unwrap(left).level == PressureLevel::Calm);
     }
+}
+
+namespace
+{
+
+/// @return @p script's sample with one cgroup elsewhere carrying @p some / @p full of its own, at its own limit or not.
+Platform::PressureSample WithConfined(Script const& script, double some, double full, bool atLimit)
+{
+    auto sample = SampleOf(script);
+    auto psi = Platform::PsiReading {};
+    psi.some.avg10 = some;
+    psi.full = Platform::PsiLine { .avg10 = full, .avg60 = 0.0, .totalMicros = 0 };
+    sample.confined = std::vector { Platform::ConfinedStall {
+        .cgroup = "/sys/fs/cgroup/user.slice/app.slice/thrash.service", .psi = psi, .atLimit = atLimit } };
+    return sample;
+}
+
+} // namespace
+
+TEST_CASE("A stall a cgroup has at its own memory limit is not the machine's", "[node][pressure][confined]")
+{
+    // The host dist-compile-e2e hung on: system full 14.8% and some 15.2%, nearly all of it one user service stalling
+    // at its own memory.max with GiBs free. Freeing memory cannot relieve that, so neither a yield nor a shed is due.
+    Rig rig;
+    auto const decision = rig.governor.Step(WithConfined(Freezing, 38.0, 7.5, true), 0);
+    CHECK(decision.level == PressureLevel::Calm);
+    REQUIRE(decision.discounted.has_value());
+    CHECK(Unwrap(decision.discounted).cgroup == "/sys/fs/cgroup/user.slice/app.slice/thrash.service");
+
+    // Some alone, too: a stall above the yield threshold the cgroup carries is no yield.
+    Rig some;
+    CHECK(some.governor.Step(WithConfined(GameStall, 19.0, 0.0, true), 0).level == PressureLevel::Calm);
+}
+
+TEST_CASE("A real shortage still sheds beside a cgroup at its own limit", "[node][pressure][confined]")
+{
+    SECTION("the rest of the machine stalls too: the cgroup carries too little of it")
+    {
+        Rig rig;
+        auto const decision = rig.governor.Step(WithConfined(Freezing, 10.0, 2.0, true), 0);
+        CHECK(decision.level == PressureLevel::Shed);
+        CHECK_FALSE(decision.discounted.has_value());
+    }
+    SECTION("a cgroup carrying the stall but never seen at its limit is the machine's")
+    {
+        Rig rig;
+        CHECK(rig.governor.Step(WithConfined(Freezing, 38.0, 7.5, false), 0).level == PressureLevel::Shed);
+    }
+    SECTION("an unreadable tree is no confined stall: a freeze sheds")
+    {
+        Rig rig;
+        auto sample = SampleOf(Freezing);
+        sample.confinedFault = "cannot list the cgroup tree at /sys/fs/cgroup: Permission denied";
+        CHECK(rig.governor.Step(sample, 0).level == PressureLevel::Shed);
+    }
+    SECTION("evidence lapses: a cgroup that left its limit two dwells ago counts again")
+    {
+        Rig rig;
+        CHECK(rig.After(0s, Quiet, 0).level == PressureLevel::Calm);
+        CHECK(rig.governor.Step(WithConfined(Freezing, 38.0, 7.5, true), 0).level == PressureLevel::Calm);
+        rig.clock.advance(10s);
+        CHECK(rig.governor.Step(WithConfined(Freezing, 38.0, 7.5, false), 0).level == PressureLevel::Calm);
+        rig.clock.advance(11s);
+        CHECK(rig.governor.Step(WithConfined(Freezing, 38.0, 7.5, false), 0).level == PressureLevel::Shed);
+    }
+}
+
+TEST_CASE("A confined stall ends a shed it did not cause the way an own stall does", "[node][pressure][confined]")
+{
+    Rig rig;
+    REQUIRE(rig.After(0s, Freezing, 4 * GiB).level == PressureLevel::Shed);
+    // The machine's own freeze is over; what is left is one cgroup's stall at its own limit.
+    auto const decision = rig.governor.Step(WithConfined(Freezing, 38.0, 7.5, true), 4 * GiB);
+    CHECK(decision.level == PressureLevel::Shed); // the dwell is not spent
+    rig.clock.advance(11s);
+    CHECK(rig.governor.Step(WithConfined(Freezing, 38.0, 7.5, true), 4 * GiB).level == PressureLevel::Calm);
 }

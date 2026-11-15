@@ -3541,6 +3541,27 @@ oscillate:
   foreign, or falling below a fifth of `--memory-pressure-shed`, before a freeze sheds again.
   Without a readable compiles reading every stall counts as foreign, and the node says so once at
   Warn (and once at Info when it is readable again).
+- **A stall confined to another cgroup's own limit is not the machine's.** PSI is the host's, and a
+  service stalling at its own `memory.max` (or throttled at its own `memory.high`) raises it as
+  surely as a shortage does — with gigabytes free, and nothing freeing them could relieve it. So a
+  cgroup elsewhere that carries at least 80% of the machine's `some` (or `full`) stall while standing
+  at its own limit — its `memory.events` count rose between two samples, or `memory.current` is within
+  5% of the limit, held for two dwells as the compiles' evidence is — neither yields nor sheds, and
+  eases a level the way an own stall does. One cgroup must carry the share alone; a real shortage
+  stalls the rest of the machine too, so the share drops and the stall counts again. The node's own
+  cgroup, its ancestors and the compiles' are never such a cgroup: a stall there is one its own yield
+  relieves. The node names the cgroup at Info when it starts not counting it, and again when it counts
+  it once more — never per sample.
+  - **What it reads, and how often.** It walks the cgroup tree under `/sys/fs/cgroup` only while the
+    machine stalls at all, at most once every ten seconds: one listing and one `memory.pressure` per
+    child, descending only into a cgroup that carries 80% of the stall (a cgroup's PSI covers its
+    subtree, so nothing below one that does not can), at most 64 cgroups and 8 levels. Between walks
+    each second re-reads only the up to four cgroups the last walk kept. A cgroup that reaches its limit
+    after a walk is found by the next: until then its stall counts as the machine's, which yields when it
+    need not — admissions lost, never a freeze missed.
+  - **A tree it cannot list** is no confined stall at all: every stall counts as the machine's, and the
+    node says so once at Warn (and once at Info when it can read the tree again). A subtree it may not
+    read counts the same way, silently.
 - **An idle machine still runs its own compiles, one at a time.** Once none of the fleet's compiles
   runs or is reserved on it, the queue admits this machine's OWN next compile that fits the budget
   it reports (under pressure, the allowance below), and nothing beside it. PSI is the host's, so
