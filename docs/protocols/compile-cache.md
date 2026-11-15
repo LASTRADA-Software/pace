@@ -130,7 +130,7 @@ diagnostic — the build merely got slower, forever, with nothing to show for it
 | `0x32` | roster-not-yet-applied | A node proof the answering node cannot judge **yet**: its consensus has not applied the log it recovered when it started -- a lone voter before its election commits, a follower before its leader first speaks -- so the key roster it judges by may lack a key its cluster holds. Answered instead of `node-key-unknown`, which would tell an operator to admit a machine the cluster already holds. A statement about the answering node: the proving node asks again on a short backoff, and nobody needs to act. A launcher never meets it -- it proves no identity. |
 | `0x33` | operator-standing-required | An operator's **control** verb -- `CLUSTER-ADMIT` in every form, `CLUSTER-FORGET`, `CLUSTER-SET`, `ENROLL-CONTROL` -- from a caller that IS identified, by a proven node key or a verified machine ticket, whose machine holds no **voter's** seat in the state the asked node applied. A ticket proves a fleet machine, never an operator: any process on an admitted laptop can have its node mint one. These verbs are answered to the asked node's own machine and to a voter's identity alone; run the verb on a voter, or promote this machine. A caller `--fleet-open` alone admitted is still told `identified-caller-required`. |
 | `0x34` | fingerprint-inputs-unrecorded | `FINGERPRINT-INPUTS` about a fingerprint the node serves and holds no inputs for, and will not hold on an immediate retry: an operator's `--toolchain=<fingerprint>=<compiler>` pin, which is never probed, or a fingerprint the process's one capture walk did not reproduce -- recorded later only when a re-survey walks that toolchain again (its stamp moved, say) or the node restarts. Not `no-worker`, which is retriable. While the capture walk is still running the answer is `worker-toolchain-survey-in-flight` instead, and asking again shortly does help. |
-| `0x35` | worker-compile-killed | The worker's compiler was **killed** before it answered, and the message names the cause and the source: `ceiling` (the kernel killed it inside the node's compile memory ceiling), `shed` (the node killed it to give memory back to the machine) or `killed` (some other `SIGKILL` -- a global OOM kill, systemd-oomd, a person). A refusal rather than a compile result, because a killed compiler answered nothing about the code: delivered as a result, its exit status 137 would read as a compiler failure in a translation unit that compiles. The client compiles locally, which is also where that unit's true peak memory is measured; the worker reports no peak for a killed compile. Counted per cause in `pace_worker_compiles_killed_{ceiling,shed,signal}_total`. Retrying may help (`RetryMayHelp`): it is a statement about the worker's memory at that moment, which passes. A new byte with no version bump, since the reply grammar is unchanged; a launcher that predates it reads a refusal it does not know and still compiles locally. |
+| `0x35` | worker-compile-killed | The worker's compiler was **killed** before it answered, and the message names the cause and the source: `ceiling` (the kernel killed it inside the node's compile memory ceiling), `shed` (the node killed it to give memory back to the machine) or `killed` (some other `SIGKILL` -- a global OOM kill, systemd-oomd, a person). A refusal rather than a compile result, because a killed compiler answered nothing about the code: delivered as a result, its exit status 137 would read as a compiler failure in a translation unit that compiles. When the worker's cgroup measured it, the reply carries what the compile **held** when it died as a **trailer** after the message: the message, then one `0x00` separator byte, then that peak as an 8-byte big-endian `u64` (`EncodeKilledPeakTrailer`). Every reader of the message stops at the separator, so the words are unchanged; a reply with no trailer is byte for byte the old one, and a trailer of any length but 8 names no peak. The figure is a LOWER bound and never a measurement: the worker reports it nowhere else. An admitted client does not compile locally at once: it settles its admission `SETTLE` outcome `4` (killed) with that peak, so the leader raises the compile's estimate to at least it (bounded by the killing machine's budget), and asks the queue once more with ask origin `2` (after a kill). It compiles locally only when that ask is answered *never fits* (grant reason `4`) or the requeued compile is killed again. Counted per cause in `pace_worker_compiles_killed_{ceiling,shed,signal}_total`. Retrying may help (`RetryMayHelp`): it is a statement about the worker's memory at that moment, which passes. The trailer, the killed outcome, the ask origin and the grant reasons below all land in version 18 (#1770). |
 
 Every one of these is a **refusal the client answers by compiling locally**,
 never by failing. They are distinct codes rather than one "no" because they mean
@@ -467,7 +467,7 @@ most 16 entries (`MaxLeaseExclusions`) of 1 to 261 bytes each -- the encoder sen
 16, and a decoder refuses a longer list, an empty entry or an over-long one as malformed rather
 than truncating it -- and is an empty field for none; `toolchainLabel` is what a person calls
 the toolchain, UTF-8, possibly empty; and `origin` is the one-byte ask origin `ADMIT` also
-carries (`0` first, `1` after a grant), any other value being malformed.
+carries (`0` first, `1` after a grant, `2` after a kill), any other value being malformed.
 
 `capacity` and `load` are **nested** records rather than fields of their own, and
 that is a compatibility property rather than tidiness: the top-level field count
@@ -631,7 +631,7 @@ reason it refuses `LEASE`, and a node that runs no consensus the same.
 ```
 ADMIT           [0xFC][ver][0x22][u32 len]  payload: [kind][fingerprint][cacheKey][sourcePath]
                                                     [treeLabel][storable][codecs][exclusions]
-                                                    [toolchainLabel]
+                                                    [toolchainLabel][origin]
   reply Ok:                                         [kind][endpoint][leaseToken][codecs]
                                                     [u64 chargedBytes][u64 queuedMs]
                                                     [u32 lifetime][workerKey][reason][dialHint]
@@ -653,7 +653,13 @@ that asked); `storable` is `0` or `1`; `codecs` and `exclusions` are the lists `
 and `treeLabel` at most 256; a field over its cap is refused `malformed-frame`, never truncated.
 `toolchainLabel` is what a person calls the toolchain (`cl 19.44.35207`), as `LEASE` carries it:
 display only, empty when the client did not say, and -- like `treeLabel` -- refused unless it is
-UTF-8, because the leader keeps it and the fleet page renders it.
+UTF-8, because the leader keeps it and the fleet page renders it. `origin` is one byte, as `LEASE`
+also carries it last: `0` the first ask for this compile, `1` asked again after the leader granted it
+once in this invocation (counted once in the leader's demand history), or `2` asked again after the
+compile was **killed for memory** (#1770). A `2` is placed only on a machine whose configured budget
+holds its estimate -- never alone on a smaller one, whose ceiling would kill it again -- and is answered
+reason `4` when no reported machine's can, the asking one included. A client sends `2` once per
+compile; the local-only fallback after a second kill asks `1`.
 
 The grant is exactly ten fields. Its `kind` is `0` a worker (`endpoint` and `leaseToken` name
 it), `1` the machine that asked, or `2` stored -- another compile of the same key finished and
@@ -665,9 +671,14 @@ worker grant's, empty or zero otherwise, and are what a `LEASE` grant carries fo
 reply must be sealed under; and `dialHint` where the worker was last seen, at most as long as an
 endpoint, dialled before `endpoint` and never signed -- the token signs `endpoint`, so a stale hint
 is refused `lease-endpoint-mismatch` by whatever answers there. `reason` is one byte saying why a
-dispatchable request was granted the machine that asked: `0` it asked to (every other grant
-says this), `1` no worker serves its toolchain, `2` every worker that does was excluded, `3` none
-had room. Every byte is pinned: an `AdmitKind`, `GrantKind`, `LocalGrantReason` or `SettleOutcome`
+request was granted the machine that asked: `0` it asked to (every other grant says this), `1` no
+worker serves its toolchain, `2` every worker that does was excluded, `3` none had room -- those
+three for a dispatchable request only -- and, for any request, local-only included, `4` *never fits*:
+a compile asked for after a kill whose estimate exceeds every reported machine's configured budget,
+run alone here and outside the compile ceiling; and `5` *runs alone*: its estimate exceeds this
+machine's whole budget, which some other machine's holds, so it runs here alone -- outside the
+ceiling once a kill taught that estimate. Neither `5` nor any reason but `4` moves
+`pace_admission_never_fits_total`. Every byte is pinned: an `AdmitKind`, `GrantKind`, `LocalGrantReason` or `SettleOutcome`
 past its last value is refused.
 
 Two machines that missed the same key are each granted a worker: the leader files a worker
@@ -679,8 +690,11 @@ answered `2` stored.
 `SETTLE` tells the leader how an admitted compile ended, **on the connection that admitted it** --
 the charge is scoped to the connection, so it carries no lease token, and the leader releases
 whatever a connection still holds when it closes. `outcome` is `0` stored, `1` not stored, `2`
-failed or `3` the worker refused the job. `peakBytes` is the measured peak as a big-endian `u64`,
-or an **empty** field when none was measured: absent is not zero.
+failed, `3` the worker refused the job, or `4` killed for memory (#1770). `peakBytes` is the measured
+peak as a big-endian `u64`, or an **empty** field when none was measured: absent is not zero. For a
+`4` it is what the compile HELD when it died -- the worker's trailer, or the client's own cgroup peak
+-- which the leader folds in as a lower bound (raise, never replace) after bounding it by the budget
+of the machine it was granted on, so the compile's next ask is charged at least that.
 
 `MACHINE-BUDGET` is a node reporting its own ledger -- the memory it will let compiles hold, its
 slots and what is held now, with a bounded sample of measured peaks. It is a machine speaking for
