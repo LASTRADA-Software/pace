@@ -3522,8 +3522,8 @@ oscillate:
 | Level | Entered when | What the node does |
 | --- | --- | --- |
 | `calm` | — | nothing; compiles are admitted up to their allowance |
-| `yield` | PSI `some` `avg10` above `--memory-pressure-yield`, and the stall is **not the compiles' own** | admits no new compile on this machine — fleet ones **and its own local ones** — and holds the running ones at what they hold now (the allowance below): one that grows past it is killed by the ceiling and its client compiles it locally |
-| `shed` | PSI `full` `avg10` at or above `--memory-pressure-shed` (the desktop freezing, whoever causes it), or a foreign stall that has held a `yield` for twenty seconds | admits nothing, and kills the **youngest** running compile, one per ten seconds, until the level drops |
+| `yielding` | PSI `some` `avg10` above `--memory-pressure-yield`, and the stall is **not the compiles' own** | admits no new compile on this machine — fleet ones **and its own local ones** — and holds the running ones at what they hold now (the allowance below): one that grows past it is killed by the ceiling and its client compiles it locally |
+| `shedding` | PSI `full` `avg10` at or above `--memory-pressure-shed` (the desktop freezing, whoever causes it), or a foreign stall that has held `yielding` for twenty seconds | admits nothing, and kills the **youngest** running compile, one per ten seconds, until the level drops |
 
 - **A stall that is the compiles' own is not a yield.** When the `compiles/` cgroup carries at least
   80% of the machine's `some` stall **and has stood at its own ceiling within the last twenty seconds**
@@ -3535,8 +3535,8 @@ oscillate:
   keeps the level calm; a yield caused by something else is not held by the
   compiles then stalling against the allowance it set. Compiles far below their ceiling that stall
   with the machine are stalling because the kernel reclaims from everyone, a game's shortage
-  included, so that yields. Leaving a `shed` treats a `full` stall the compiles carry the same way,
-  and a `shed` left that way is not re-entered on the same stall: it takes the `full` stall turning
+  included, so that yields. Leaving `shedding` treats a `full` stall the compiles carry the same way,
+  and `shedding` left that way is not re-entered on the same stall: it takes the `full` stall turning
   foreign, or falling below a fifth of `--memory-pressure-shed`, before a freeze sheds again.
   Without a readable compiles reading every stall counts as foreign, and the node says so once at
   Warn (and once at Info when it is readable again).
@@ -3544,7 +3544,7 @@ oscillate:
   compiling it again. It is marked *shed* before its `cgroup.kill` is written, so the worker answers
   `worker-compile-killed` with that cause and counts it in `pace_worker_compiles_killed_shed_total`;
   its client compiles it locally, as for a ceiling kill.
-- **The allowance.** Entering `yield` or `shed` sets the compiles' allowance to what they hold at that
+- **The allowance.** Entering `yielding` or `shedding` sets the compiles' allowance to what they hold at that
   moment — the larger of what `compiles/` is resident in (`compiles/memory.current`) and what the
   machine's compiles are charged, local leases included — the work that demonstrably fits beside
   whatever else runs, but never less than one default compile estimate (`--compile-estimate-default`),
@@ -3568,10 +3568,10 @@ oscillate:
   the reported budget below the configured one, `calm` or not: the report says which, and a compile
   larger than the held budget waits for the ramp rather than run alone into a ceiling that kills it.
 
-Each change is logged once — at Warn entering `shed`, at Info otherwise — naming the level, the
+Each change is logged once — at Warn entering `shedding`, at Info otherwise — naming the level, the
 system's `some` and `full` figures and the allowance. The level is the live condition
 `memory-pressure-shedding` (raised while not `calm`; the detail names the level and the allowance),
-the gauge `pace_node_memory_pressure` (0 calm, 1 yield, 2 shed; absent where no watcher runs), the counters
+the gauge `pace_node_memory_pressure` (0 calm, 1 yielding, 2 shedding; absent where no watcher runs), the counters
 `pace_node_memory_pressure_{yield,shed}_seconds_total` and `..._{yield,shed}_entries_total`, and the
 binding limit `memory-pressure` in `pacectl node`'s slot ceilings and the dashboard's node panel.
 
@@ -3654,7 +3654,7 @@ started with `--slots=0` runs no worker and still has a machine.
 | `--compile-estimate-default` (`compile_estimate_default`) | `2g` | What a translation unit nobody has measured is assumed to need. Too low is the out-of-memory kill the queue exists to prevent. `0` is refused. |
 
 All but `--compile-memory-limit` are **restart-only**, and a service registration replays only the ones typed.
-In `yield` and `shed` the memory budget reported is the pressure governor's allowance where that is lower
+In `yielding` and `shedding` the memory budget reported is the pressure governor's allowance where that is lower
 (see [layer C](#layer-c-the-pressure-governor)).
 Beside the figures, the report carries what the machine's compiles hold now and a
 bounded sample of the peaks its compiler processes measured, so the leader's estimates
@@ -4050,7 +4050,7 @@ fact about it. These are gauges, not counters, except the two CPU tick series.
 | `pace_node_slots_configured` | Concurrent compiles this node advertises to the scheduler. |
 | `pace_node_slots_busy` | Compiles running right now — **sampled**, so it is a reading and not a difference of two counters. |
 | `pace_node_cordoned` | 1 while an operator has cordoned this node's worker, 0 otherwise. Read beside `pace_node_slots_busy`: cordoned with compiles running is draining, cordoned with none is safe to stop. A restart clears it, so `== 1` for a day is a machine somebody forgot. |
-| `pace_node_memory_pressure` | This machine's memory-pressure level as the node's watcher reads it: 0 calm, 1 yield (no new compile admitted on it), 2 shed (that, and its youngest compile killed). **Absent** where no watcher runs (no PSI, or a platform other than Linux): absent is not calm. |
+| `pace_node_memory_pressure` | This machine's memory-pressure level as the node's watcher reads it: 0 calm, 1 yielding (no new compile admitted on it), 2 shedding (that, and its youngest compile killed). **Absent** where no watcher runs (no PSI, or a platform other than Linux): absent is not calm. |
 | `pace_node_cpu_busy_ticks_total` | Host-wide CPU ticks spent doing anything but idling, this node's own compiles included. A **counter** in platform ticks, whose length differs per platform, so it means nothing alone: `rate(pace_node_cpu_busy_ticks_total[1m]) / rate(pace_node_cpu_ticks_total[1m])` is the machine's busy share. Absent when the platform would not report its CPU. |
 | `pace_node_cpu_ticks_total` | Host-wide CPU ticks accounted for at all: the denominator of the row above. |
 | `pace_node_memory_available_bytes` | Memory a new process could actually obtain: *available*, not free, so the page cache the kernel hands back on demand counts. Absent when the platform would not say. |

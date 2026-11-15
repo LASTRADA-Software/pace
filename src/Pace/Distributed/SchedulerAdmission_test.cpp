@@ -695,6 +695,7 @@ TEST_CASE("SchedulerAdmission.fleet-reads-a-machine's-pressure-from-its-budget-r
     fleet.service.SetRole(SchedulerRole::Follower, "10.9.9.9:7100", 1);
     auto const follower = collect();
     CHECK_FALSE(follower.admission.has_value());
+    REQUIRE_FALSE(follower.nodes.empty());
     for (auto const& node: follower.nodes)
         CHECK_FALSE(node.load.pressure.has_value());
 }

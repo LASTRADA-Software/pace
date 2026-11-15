@@ -212,8 +212,8 @@ static void AppendHostLoadMetrics(std::string& out, HostLoadReading const& load)
     if (load.memoryPressure.has_value())
         Append(out,
                Metric { .name = "pace_node_memory_pressure",
-                        .help = "This machine's memory-pressure level as the node's watcher reads it: 0 calm, 1 yield "
-                                "(no new compile admitted on it), 2 shed (that, and its youngest compile killed). "
+                        .help = "This machine's memory-pressure level as the node's watcher reads it: 0 calm, 1 yielding "
+                                "(no new compile admitted on it), 2 shedding (that, and its youngest compile killed). "
                                 "Absent where no watcher runs.",
                         .type = MetricType::Gauge,
                         .value = *load.memoryPressure });

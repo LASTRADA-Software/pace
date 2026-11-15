@@ -602,6 +602,12 @@ namespace
         "(it takes nothing new) or shedding (it also stops its youngest compile). Absent when it has not reported, "
         "which is not calm.";
 
+    /// True when `PressureHelp` names every level the way `PressureLevelTable` spells it, so the help cannot drift
+    /// from the cell it explains (#1771).
+    constexpr bool PressureHelpNamesEveryLevel = std::ranges::all_of(
+        PressureLevelTable, [](PressureLevelTraits const& row) { return PressureHelp.contains(row.name); });
+    static_assert(PressureHelpNamesEveryLevel, "PressureHelp must name every PressureLevelTable row by its spelling");
+
     /// The `budget-limit` column's help, composed from `BudgetLimitTable`'s rows so a standing's word and its remedy
     /// are written in one place: a row added there is explained here without an edit (#1771).
     constexpr auto BudgetLimitHelpText = [] {

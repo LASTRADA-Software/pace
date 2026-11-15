@@ -102,7 +102,7 @@ struct HostLoadReading
     /// Memory a new process could actually obtain, or absent when the platform would not say.
     std::optional<std::uint64_t> availableMemoryBytes {};
     /// How hard this machine's memory is pressed, as the node's pressure watcher reads it from PSI:
-    /// `CompileCacheWire::PressureLevel`'s byte -- 0 calm, 1 yield, 2 shed -- or ABSENT where no watcher runs (no
+    /// `CompileCacheWire::PressureLevel`'s byte -- 0 calm, 1 yielding, 2 shedding -- or ABSENT where no watcher runs (no
     /// PSI, another platform, a daemon): absent is not calm. Anything but calm withdraws every slot (the scheduler
     /// hears it in the machine-budget report), and a dashboard that did not know would show the free slots as
     /// capacity the fleet has.
