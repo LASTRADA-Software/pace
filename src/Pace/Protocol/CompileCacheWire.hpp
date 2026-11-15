@@ -3977,7 +3977,6 @@ inline constexpr std::byte ErrorTrailerSeparator { 0x00 };
 /// @param trailer Structured facts the code carries beside the words; empty for none, which frames the
 ///        reply byte for byte as it was before trailers existed.
 /// @return The framed reply.
-
 [[nodiscard]] inline std::vector<std::byte> EncodeErrorReply(ErrorCode code,
                                                              std::string_view message = {},
                                                              std::span<std::byte const> trailer = {})
@@ -10424,7 +10423,8 @@ struct AdmitGrant
     /// The identity key of the worker a `Worker` grant names, `IdentityPublicKeyBytes` of it; empty
     /// otherwise. What the client authenticates the COMPILE reply against, as `LeaseGrant::workerKey`.
     std::span<std::byte const> workerKey;
-    /// Why a dispatchable request was granted `Local`; `Asked` for every other grant.
+    /// Why a request was granted `Local`: a dispatchable one's decline reason, or -- for any request, `LocalOnly`
+    /// included -- `NeverFits` or `RunsAlone` (#1770); `Asked` for every other grant.
     LocalGrantReason reason;
     /// Where a `Worker` grant's worker was last SEEN, when that differs from `endpoint` and the worker
     /// reports the address as its own -- `LeaseGrant::dialHint`, minted by the same `DialHintFor`. The

@@ -81,8 +81,10 @@ enum class LocalPlacement : std::uint8_t
     /// Inside the local node's compile ceiling where this launcher can place it there, and under the OOM-victim
     /// shim alone where it cannot -- `CompileRun::inCgroup` says which happened.
     UnderCeiling,
-    /// Under the OOM-victim shim alone, never the ceiling: the compile was killed there once already, or no
-    /// machine's budget can hold it (`LocalGrantReason::NeverFits`), so the ceiling would only kill it again.
+    /// Under the OOM-victim shim alone, never the ceiling: the compile was killed there once already, no machine's
+    /// budget can hold it (`LocalGrantReason::NeverFits`), or -- after a kill taught its estimate -- it runs alone
+    /// here because that estimate exceeds this machine's budget (`LocalGrantReason::RunsAlone`). The ceiling would
+    /// only kill it again.
     OutsideCeiling,
 };
 
