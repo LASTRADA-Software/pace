@@ -10470,16 +10470,17 @@ struct EstimateKeyFields
 };
 
 /// How hard this machine's memory is pressed, as the node's pressure governor reads it from PSI: `Calm`
-/// lets compiles grow back toward their configured allowance, `Yield` admits no new compile here, `Shed`
-/// additionally kills the youngest running one, one per dwell period. Declared here rather than in the
+/// lets compiles grow back toward their configured allowance, `Yield` admits nothing here beside a running compile
+/// and no other machine's, `Shed` additionally kills the youngest running one, one per dwell period, sparing a sole one
+/// within the allowance. Declared here rather than in the
 /// node because the machine-budget report carries it to the leader's queue.
 ///
 /// Explicit values because these bytes are transmitted. `Last` is the count, never a value.
 enum class PressureLevel : std::uint8_t
 {
     Calm = 0,  ///< Nothing to yield; the allowance ramps back toward its configured value.
-    Yield = 1, ///< Something other than the compiles needs memory: admit nothing new here.
-    Shed = 2,  ///< The machine is freezing: admit nothing and kill the youngest compile.
+    Yield = 1, ///< Something other than the compiles needs memory: admit nothing here beside a running compile.
+    Shed = 2,  ///< The machine is freezing: that, and kill the youngest compile but a sole one within the allowance.
     Last = 3
 };
 

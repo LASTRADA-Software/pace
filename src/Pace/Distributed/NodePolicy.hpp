@@ -470,8 +470,9 @@ enum class SlotLimit : std::uint8_t
     /// An operator cordoned it (#1303): it takes nothing new until the cordon is lifted
     /// or the node restarts.
     Cordoned,
-    /// Its memory is under pressure: the node's governor yields or sheds, and it takes nothing new
-    /// until the pressure eases. Applied BEFORE the cordon, which still wins a tie.
+    /// Its memory is under pressure: the node's governor yields or sheds, and it takes no fleet work
+    /// until the pressure eases (idle, it still runs its own compiles, one at a time). Applied BEFORE the cordon, which
+    /// still wins a tie.
     MemoryPressure,
     Last, ///< Not a limit, and has no row: `SlotLimitTable`'s length.
 };

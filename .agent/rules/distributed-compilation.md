@@ -4167,6 +4167,23 @@ Each rule below is a shape a plausible simpler design gets wrong, and none of th
   alone on the caller, OUTSIDE the ceiling. A second kill anywhere spends the one requeue: from a
   worker it compiles here (`KillStep::WorkerKilledTwice`), inside this machine's ceiling it runs once
   more outside it, and outside every ceiling it ends killed -- nothing loops (`Cc::RunMiss`).
+- **A pressed machine is never STARVED of its own compiles** (`AdmissionQueue::Pump`): under `yield` or
+  `shed` it takes nothing while any compile of the fleet runs or is reserved there and no other
+  machine's work at all (`BarredWhilePressed`), but IDLE it runs its own next compile that fits the
+  budget it reports, one at a time. PSI is the HOST's, so a pressure the fleet did not cause and cannot
+  end held every launcher on that machine for as long as it lasted (dist-compile-e2e case 9). Three
+  shapes reopen it, each a test: work that can never run there must not become its HEAD or RESERVE
+  there (the hold keeps it from ever being idle); a settle gives back what a report taken AFTER its
+  grant counted (`Charge::reportsAtGrant`), or the floor runs one compile per 20 s report; and a shed
+  SPARES the sole compile within the allowance (`ShedKill::SpareSoleWithinAllowance`), or the floor's
+  one compile is killed, requeued and finally run outside every ceiling.
+- **A stall confined to another cgroup's OWN memory limit is not the machine's**
+  (`Platform::ConfinedStallScan`): one cgroup carrying `ownShare` of the stall at its own
+  `memory.max`/`memory.high` neither yields nor sheds, the compiles' own rule mirrored. ONE cgroup must
+  carry the share alone, so a real shortage -- which stalls the rest of the machine too -- still sheds;
+  an unreadable tree is NO confined stall (said once); the node's own subtree and ancestors are never
+  one. The walk is bounded (only while stalled, once per 10 s, pruned by share, 64 cgroups, 8 levels)
+  and its staleness errs toward a yield, never toward a missed freeze.
 - **The compiles `pace-cc` runs itself join the node's ceiling through a RENDEZVOUS, never a guess**:
   the node writes `compiles/`'s path to `$RUNTIME_DIRECTORY/compile-ceiling` while its ceiling holds
   and withdraws it when not; the launcher reads `$XDG_RUNTIME_DIR/pace-node/compile-ceiling`. The two

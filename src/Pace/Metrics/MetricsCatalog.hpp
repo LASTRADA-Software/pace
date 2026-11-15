@@ -1594,12 +1594,13 @@ inline constexpr EnumTable<IMetricsSink::Counter, CounterDescriptor> CounterTabl
     { .counter = IMetricsSink::Counter::NodeMemoryPressureYieldSeconds,
       .prometheusName = "pace_node_memory_pressure_yield_seconds_total",
       .help = "Seconds this node held the yield level: the machine stalled on memory for something other than its "
-              "compiles, so no new compile was admitted on it, local ones included.",
+              "compiles, so nothing was admitted on it beside a running compile, local ones included -- idle, only its "
+              "own, one at a time.",
       .type = MetricType::Counter },
     { .counter = IMetricsSink::Counter::NodeMemoryPressureShedSeconds,
       .prometheusName = "pace_node_memory_pressure_shed_seconds_total",
-      .help = "Seconds this node held the shed level: the machine froze on memory, so it admitted nothing and "
-              "killed its youngest compile once per dwell.",
+      .help = "Seconds this node held the shed level: the machine froze on memory, so it admitted nothing beside a "
+              "running compile and killed its youngest once per dwell, sparing a sole one within the allowance.",
       .type = MetricType::Counter },
     { .counter = IMetricsSink::Counter::NodeMemoryPressureYieldEntries,
       .prometheusName = "pace_node_memory_pressure_yield_entries_total",

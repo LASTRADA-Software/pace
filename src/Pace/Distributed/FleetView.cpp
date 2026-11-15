@@ -599,7 +599,8 @@ namespace
     /// What the column naming a machine's memory-pressure level says it is, on every table that carries it.
     constexpr std::string_view PressureHelp =
         "How hard the machine's memory is pressed, as its node last reported to this leader's queue: calm, yielding "
-        "(it takes nothing new) or shedding (it also stops its youngest compile). Absent when it has not reported, "
+        "(it takes nothing beside a running compile) or shedding (it also stops its youngest). Absent when it has not "
+        "reported, "
         "which is not calm.";
 
     /// True when `PressureHelp` names every level the way `PressureLevelTable` spells it, so the help cannot drift
@@ -1501,8 +1502,8 @@ FleetTotals TotalsFor(FleetSnapshot const& snapshot) noexcept
         // Subtracting before calling anything free is what `WorkerRegistry::FreeSlots`
         // does too. But the load here carries the machine's reported pressure level
         // (`JoinReportedPressure`, #1771), so a yielding or shedding machine offers
-        // nothing -- which matches the admission queue, which admits nothing new on it
-        // (`AdmissionQueue`'s `report.pressure != PressureLevel::Calm`), and NOT the
+        // nothing to the fleet -- which matches the admission queue, which places no other machine's work on it
+        // (`AdmissionQueue::BarredWhilePressed`), and NOT the
         // registry: `FreeSlots` and the `Withdrawn` refusal read the registry's own
         // heartbeat load, which carries no level, so a lease picked outside the queue
         // can still land on a pressed machine that this total calls withheld. Two
@@ -1625,7 +1626,7 @@ namespace
     /// The level reaches the leader in the machine's budget report to its queue and in no heartbeat, so the
     /// registry's loads never carry it. Joined by the identity key both hold -- the one fact a machine PROVED --
     /// onto the machine row and every registry entry of it, so `SlotCeilingsFor` names `memory-pressure` where the
-    /// queue admits nothing, and the fleet totals withhold what the queue will not grant. A machine with no report
+    /// queue places no fleet work, and the fleet totals withhold what the queue will not grant. A machine with no report
     /// keeps the absence it arrived with.
     /// @param snapshot The rows to fill.
     /// @param view The queue, or none where this node leads none.

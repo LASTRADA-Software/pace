@@ -210,13 +210,15 @@ static void AppendHostLoadMetrics(std::string& out, HostLoadReading const& load)
                         .value = *load.availableMemoryBytes });
     // Absent, never 0, where no pressure watcher runs: 0 is the claim that the machine is calm.
     if (load.memoryPressure.has_value())
-        Append(out,
-               Metric { .name = "pace_node_memory_pressure",
-                        .help = "This machine's memory-pressure level as the node's watcher reads it: 0 calm, 1 yielding "
-                                "(no new compile admitted on it), 2 shedding (that, and its youngest compile killed). "
-                                "Absent where no watcher runs.",
-                        .type = MetricType::Gauge,
-                        .value = *load.memoryPressure });
+        Append(
+            out,
+            Metric { .name = "pace_node_memory_pressure",
+                     .help =
+                         "This machine's memory-pressure level as the node's watcher reads it: 0 calm, 1 yielding "
+                         "(nothing admitted beside a running compile), 2 shedding (that, and its youngest compile killed). "
+                         "Absent where no watcher runs.",
+                     .type = MetricType::Gauge,
+                     .value = *load.memoryPressure });
 }
 
 /// Render the metrics a cache's own statistics carry.

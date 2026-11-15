@@ -422,11 +422,12 @@ inline constexpr EnumTable<NodeCondition, NodeConditionRow> NodeConditionTable {
       .persistence = CompileCacheWire::ConditionPersistence::Live,
       .severity = CompileCacheWire::ConditionSeverity::Notice,
       .scope = ConditionScope::Process,
-      .remedy = "Nothing, usually: this machine stalls waiting for memory, so it takes no new compile -- the fleet's or "
-                "its own -- and, when the whole machine freezes, kills its youngest compile, which its client compiles "
-                "locally. It ends by itself once the stall eases, and compiles return gradually. If it is raised "
-                "while nothing else runs, the compiles alone outgrow the machine: lower --compile-memory-limit. "
-                "--memory-pressure-yield and --memory-pressure-shed move where it acts (0 turns each off)." },
+      .remedy =
+          "Nothing, usually: this machine stalls on memory, so it takes no compile beside a running one, the fleet's or "
+          "its own, and when the machine freezes kills its youngest (never a sole one within the allowance), which "
+          "its client compiles locally. It ends once the stall eases. Raised while nothing else runs, the compiles "
+          "outgrow the machine: lower --compile-memory-limit. --memory-pressure-yield and --memory-pressure-shed "
+          "move where it acts (0 turns each off)." },
 } };
 static_assert(RowsInEnumeratorOrder(NodeConditionTable, &NodeConditionRow::condition),
               "NodeConditionTable must hold one row per NodeCondition, in enumerator order");

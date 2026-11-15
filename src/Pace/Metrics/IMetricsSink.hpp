@@ -1634,10 +1634,9 @@ class IMetricsSink
         WorkerCompilesKilledSignal,
 
         /// Whole seconds this node's pressure watcher held each acting level (layer C of the compile memory
-        /// defence): `Yield` (no new compile admitted on this machine) and `Shed` (that, and its youngest compile
-        /// killed once per dwell). Their rate over a window is the share of it spent there; calm is the rest, so
-        /// it has no row. Counted only where the watcher
-        /// runs -- Linux with PSI -- so both stand still on a node without it.
+        /// defence): `Yield` (nothing admitted on this machine beside a running compile) and `Shed` (that, and its youngest
+        /// compile killed once per dwell). Their rate over a window is the share of it spent there; calm is the rest, so it
+        /// has no row. Counted only where the watcher runs -- Linux with PSI -- so both stand still on a node without it.
         NodeMemoryPressureYieldSeconds,
         /// See `NodeMemoryPressureYieldSeconds`.
         NodeMemoryPressureShedSeconds,

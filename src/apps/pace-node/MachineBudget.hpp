@@ -89,7 +89,8 @@ class PublishedPressure final: public IMachinePressureSource
 ///   Lowered again to the pressure governor's allowance, which is what the compile ceiling holds compiles under
 ///   too: in `Yield` and `Shed` that is what compiles held when pressure began, and it ramps back while calm.
 /// - Held: passed through as given.
-/// - Pressure: the governor's level, which the queue reads as "admit nothing new here" whenever it is not `Calm`.
+/// - Pressure: the governor's level, which the queue reads as "nothing here beside a running compile, and no other
+///   machine's" whenever it is not `Calm`.
 /// - Standing: `HeldByAllowance` whenever there is an allowance at all -- the compile ceiling stands below its
 ///   configured value, even where the reported budget does not (a typed `--compile-memory-limit` above the budget)
 ///   -- and `Configured` only once the ceiling is back at its configured value. The queue's run-alone exception is
