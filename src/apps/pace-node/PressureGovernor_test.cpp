@@ -802,3 +802,42 @@ TEST_CASE("A confined stall ends a shed it did not cause the way an own stall do
     rig.clock.advance(11s);
     CHECK(rig.governor.Step(WithConfined(Freezing, 38.0, 7.5, true), 4 * GiB).level == PressureLevel::Calm);
 }
+
+TEST_CASE("A shed spares the sole compile within the allowance, and kills one past it or beside another",
+          "[node][pressure][shed-kill]")
+{
+    // The admission floor lets a pressed machine run its own compiles one at a time. Killing that one would only send
+    // it back to the queue, admit it, kill it again, and run it outside every ceiling after the second: three compiles
+    // and no bound. The ceiling already holds it to the allowance, so it is spared there.
+    SECTION("one compile, within the allowance: spared, dwell after dwell")
+    {
+        Rig rig;
+        auto const entered = rig.governor.Step(SampleOf(Freezing), 1 * GiB, 1U);
+        REQUIRE(entered.level == PressureLevel::Shed);
+        CHECK(entered.shedKill == Node::ShedKill::SpareSoleWithinAllowance);
+        CHECK_FALSE(entered.killYoungest);
+        rig.clock.advance(11s);
+        CHECK_FALSE(rig.governor.Step(SampleOf(Freezing), 1 * GiB, 1U).killYoungest);
+    }
+    SECTION("one compile past the allowance: killed")
+    {
+        Rig rig;
+        REQUIRE(rig.governor.Step(SampleOf(Freezing), 1 * GiB, 1U).level == PressureLevel::Shed);
+        rig.clock.advance(11s);
+        auto const grown = rig.governor.Step(SampleOf(Freezing), 3 * GiB, 1U); // the allowance is the 2 GiB floor
+        CHECK(grown.shedKill == Node::ShedKill::KillYoungest);
+        CHECK(grown.killYoungest);
+    }
+    SECTION("two compiles: the youngest is killed")
+    {
+        Rig rig;
+        auto const entered = rig.governor.Step(SampleOf(Freezing), 1 * GiB, 2U);
+        CHECK(entered.shedKill == Node::ShedKill::KillYoungest);
+        CHECK(entered.killYoungest);
+    }
+    SECTION("a count nobody knows spares nothing")
+    {
+        Rig rig;
+        CHECK(rig.governor.Step(SampleOf(Freezing), 1 * GiB).killYoungest);
+    }
+}

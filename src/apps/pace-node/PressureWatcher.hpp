@@ -221,12 +221,13 @@ class PressureWatcher
     PressureLevel _level { PressureLevel::Calm }; ///< The level held since the last step.
     /// The lowered allowance last handed to the ceiling; disengaged for none, which is what the keeper starts with.
     std::optional<std::uint64_t> _allowanceWritten {};
-    core::platform::SteadyTimePoint _counted; ///< Up to when the time per level has been counted.
-    std::chrono::nanoseconds _uncounted {};   ///< The part of a second not yet counted; carried across a change.
-    bool _compilesFaultSaid { false };        ///< The compiles' reading is said to be unreadable.
-    bool _limitFaultSaid { false };           ///< Whether they stand at their ceiling is said to be unreadable.
-    bool _sampleFaultSaid { false };          ///< A failed system sample is said.
-    bool _confinedFaultSaid { false };        ///< The other cgroups' tree is said to be unreadable.
+    core::platform::SteadyTimePoint _counted;     ///< Up to when the time per level has been counted.
+    std::chrono::nanoseconds _uncounted {};       ///< The part of a second not yet counted; carried across a change.
+    bool _compilesFaultSaid { false };            ///< The compiles' reading is said to be unreadable.
+    bool _limitFaultSaid { false };               ///< Whether they stand at their ceiling is said to be unreadable.
+    bool _sampleFaultSaid { false };              ///< A failed system sample is said.
+    bool _confinedFaultSaid { false };            ///< The other cgroups' tree is said to be unreadable.
+    ShedKill _shedKill { ShedKill::NotShedding }; ///< The shed verdict of the previous step, to say a change of it once.
     /// The cgroup whose confined stall was last said to be discounted; disengaged when none is.
     std::optional<std::filesystem::path> _discountedSaid {};
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <Pace/Core/EnumTable.hpp>
 #include <Pace/Platform/MemoryPressure.hpp>
 #include <Pace/Protocol/CompileCacheWire.hpp>
 
@@ -60,12 +61,53 @@ struct PressureThresholds
     [[nodiscard]] bool operator==(PressureThresholds const&) const = default;
 };
 
+/// What a shedding governor does about the running compiles this sample, and why. PRIVATE to the node: never
+/// transmitted or persisted, so it carries no explicit values. `Last` is the count.
+enum class ShedKill : std::uint8_t
+{
+    NotShedding,              ///< The level is not `Shed`.
+    NothingRuns,              ///< Compiles hold nothing: there is no victim, and no period is spent.
+    SpareSoleWithinAllowance, ///< One compile runs and holds no more than the allowance, which already bounds it.
+    NotDue,                   ///< A compile was killed less than one dwell ago.
+    KillYoungest,             ///< Kill the youngest running compile now.
+    Last
+};
+
+/// One `ShedKill` verdict: whether it kills, and how the watcher says it the first time it holds.
+struct ShedKillRow
+{
+    ShedKill verdict;      ///< The enumerator this row describes.
+    bool kills;            ///< Whether the youngest compile is killed.
+    std::string_view said; ///< What a transition into it says; empty for nothing.
+};
+
+/// Every verdict, in enumerator order.
+inline constexpr EnumTable<ShedKill, ShedKillRow> ShedKillTable { {
+    { .verdict = ShedKill::NotShedding, .kills = false, .said = "" },
+    { .verdict = ShedKill::NothingRuns, .kills = false, .said = "" },
+    { .verdict = ShedKill::SpareSoleWithinAllowance,
+      .kills = false,
+      .said = "shedding: sparing the sole compile, within the allowance -- the ceiling already bounds it, and killing it "
+              "would only run it again" },
+    { .verdict = ShedKill::NotDue, .kills = false, .said = "" },
+    { .verdict = ShedKill::KillYoungest, .kills = true, .said = "" },
+} };
+static_assert(RowsInEnumeratorOrder(ShedKillTable, &ShedKillRow::verdict),
+              "ShedKillTable must hold one row per ShedKill, in enumerator order");
+
+/// @return @p verdict's row.
+[[nodiscard]] constexpr ShedKillRow const& RowOf(ShedKill verdict) noexcept
+{
+    return ShedKillTable[static_cast<std::size_t>(verdict)];
+}
+
 /// What the governor decided on one sample.
 struct GovernorDecision
 {
     PressureLevel level { PressureLevel::Calm }; ///< The level after this sample.
     std::uint64_t allowanceBytes {};             ///< What compiles may hold at once now; never above the configured bytes.
-    bool killYoungest {};                        ///< Kill the youngest running compile now.
+    bool killYoungest {};                        ///< Kill the youngest running compile now (`shedKill`'s row).
+    ShedKill shedKill { ShedKill::NotShedding }; ///< What a shed does about the running compiles, and why.
     bool levelChanged {};                        ///< This sample moved the level.
     /// The cgroup whose stall at its own memory limit was NOT counted this sample, where counting it would have
     /// yielded or shed; disengaged otherwise. The watcher says a change of it, never each sample.
@@ -90,7 +132,10 @@ struct GovernorDecision
 /// - **Shed** on system `full` at or above `shedEnter`, unless confined (above), or from `Yield` once a FOREIGN
 ///   stall (above) has held for twice `dwell` without a break: its clock restarts whenever it drops, so a
 ///   yield that eased and then returns is not shed at once. While shedding, `killYoungest` is true at most
-///   once per `dwell` -- and never when compiles hold nothing, since there is nothing to kill.
+///   once per `dwell` -- and never when compiles hold nothing, since there is nothing to kill, nor when ONE compile
+///   runs and holds no more than the allowance: the ceiling already bounds it there, and a kill only runs it again,
+///   outside every ceiling after the second (`ShedKill::SpareSoleWithinAllowance`). Two or more, or one past the
+///   allowance, are killed youngest first, as before. An unknown count spares nothing.
 /// - **Leaving a level** needs its figure below the exit threshold AND `dwell` since entering it, and an
 ///   own stall counts as below: compiles stalling against the ceiling a yield just set hold the node in
 ///   no level. That holds for `full` too: entering `Shed` on `full` asks nobody whose stall it is, but
@@ -127,8 +172,11 @@ class PressureGovernor
     /// Read one sample.
     /// @param sample The machine's pressure, and the compiles' when there is a compiles cgroup.
     /// @param compilesHoldBytes What the running compiles hold now.
+    /// @param runningCompiles How many compiles run on the machine now; disengaged when unknown, which spares none.
     /// @return The level, the allowance, and whether to kill the youngest compile.
-    [[nodiscard]] GovernorDecision Step(Platform::PressureSample const& sample, std::uint64_t compilesHoldBytes);
+    [[nodiscard]] GovernorDecision Step(Platform::PressureSample const& sample,
+                                        std::uint64_t compilesHoldBytes,
+                                        std::optional<std::uint32_t> runningCompiles = std::nullopt);
 
     /// Change the configured allowance and its floor. Lowering the configured bytes clamps the allowance. Raising
     /// them raises an allowance that stands AT the old configured value -- never lowered by pressure, or fully

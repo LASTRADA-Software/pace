@@ -224,8 +224,16 @@ void PressureWatcher::StepOnce()
     NoteLimitFault(sample->compilesLimitFault);
     NoteConfinedFault(sample->confinedFault);
 
-    auto const decision = _governor.Step(*sample, HoldingBytes());
+    auto const decision = _governor.Step(*sample, HoldingBytes(), _held.Held().slots);
     NoteDiscounted(decision.discounted);
+    // Said once, as the verdict turns to one with words: a shed sparing its sole compile is not news each dwell.
+    if (decision.shedKill != std::exchange(_shedKill, decision.shedKill))
+        if (auto const said = RowOf(decision.shedKill).said; !said.empty())
+            _logger.Logf(LogLevel::Info,
+                         "memory pressure: {} ({} bytes held, {} allowed)",
+                         said,
+                         HoldingBytes(),
+                         decision.allowanceBytes);
     // Only an allowance pressure LOWERED binds anything; one at the configured value is the configuration, so it is
     // handed on as none and a reload moves the ceiling and the budget at once.
     auto const lowered =
@@ -344,7 +352,7 @@ void PressureWatcher::OnLevelChanged(GovernorDecision const& decision, Platform:
                 return "no new compile is admitted on this machine beside a running one, its own local ones included";
             case PressureLevel::Shed:
                 return _killer != nullptr ? "nothing is admitted beside a running compile, and the youngest compile is "
-                                            "killed once per dwell"
+                                            "killed once per dwell, but never a sole one within the allowance"
                                           : "nothing is admitted beside a running compile; no compile can be killed "
                                             "without a cgroup of the node's own";
             case PressureLevel::Last:

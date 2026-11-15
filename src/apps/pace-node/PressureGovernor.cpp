@@ -40,7 +40,9 @@ PressureGovernor::PressureGovernor(PressureThresholds thresholds,
 {
 }
 
-GovernorDecision PressureGovernor::Step(Platform::PressureSample const& sample, std::uint64_t compilesHoldBytes)
+GovernorDecision PressureGovernor::Step(Platform::PressureSample const& sample,
+                                        std::uint64_t compilesHoldBytes,
+                                        std::optional<std::uint32_t> runningCompiles)
 {
     auto const now = _clock.now();
     auto const previous = _level;
@@ -119,9 +121,19 @@ GovernorDecision PressureGovernor::Step(Platform::PressureSample const& sample, 
     if (_level == PressureLevel::Calm)
         Ramp(now);
 
-    // One kill per dwell, and none while compiles hold nothing: a kill with no victim spends no period.
+    // One kill per dwell, and none while compiles hold nothing: a kill with no victim spends no period. Nor of the sole
+    // compile within the allowance: the ceiling bounds it, and its requeue would be admitted, killed and run again.
     auto const killDue = !_lastKill || now - *_lastKill >= thresholds.dwell;
-    auto const killYoungest = _level == PressureLevel::Shed && compilesHoldBytes > 0 && killDue;
+    auto const shedKill = [&] {
+        if (_level != PressureLevel::Shed)
+            return ShedKill::NotShedding;
+        if (compilesHoldBytes == 0)
+            return ShedKill::NothingRuns;
+        if (runningCompiles == 1U && compilesHoldBytes <= _allowanceBytes)
+            return ShedKill::SpareSoleWithinAllowance;
+        return killDue ? ShedKill::KillYoungest : ShedKill::NotDue;
+    }();
+    auto const killYoungest = RowOf(shedKill).kills;
     if (killYoungest)
         _lastKill = now;
 
@@ -135,6 +147,7 @@ GovernorDecision PressureGovernor::Step(Platform::PressureSample const& sample, 
     return { .level = _level,
              .allowanceBytes = _allowanceBytes,
              .killYoungest = killYoungest,
+             .shedKill = shedKill,
              .levelChanged = _level != previous,
              .discounted = std::move(discounted) };
 }

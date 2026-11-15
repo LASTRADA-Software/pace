@@ -825,3 +825,26 @@ TEST_CASE("The other cgroups going unreadable is said on its transitions, never 
     rig.Step(1s, Quiet);
     CHECK(said() == 2);
 }
+
+TEST_CASE("A shed spares the sole compile within the allowance and says so once", "[node][pressure][shed-kill]")
+{
+    Rig rig;
+    rig.held.held = HeldCharges { .slots = 1, .bytes = 1 * GiB };
+    rig.Started();
+    auto const sparing = [&rig] {
+        return static_cast<std::size_t>(std::ranges::count_if(
+            rig.logger.Snapshot(), [](auto const& record) { return record.message.contains("sparing the sole compile"); }));
+    };
+    rig.Step(1s, Freeze);
+    REQUIRE(rig.Published().level == Wire::PressureLevel::Shed);
+    rig.Step(11s, Freeze);
+    rig.Step(11s, Freeze);
+    CHECK(rig.killer.asked == 0);
+    CHECK(sparing() == 1);
+
+    // A second compile joins: the youngest is killed again.
+    rig.held.held = HeldCharges { .slots = 2, .bytes = 2 * GiB };
+    rig.Step(11s, Freeze);
+    CHECK(rig.killer.asked == 1);
+    CHECK(sparing() == 1);
+}
