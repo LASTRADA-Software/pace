@@ -358,8 +358,8 @@ TEST_CASE("mcp-action: explain_admission asks this node, with the machine as the
         CHECK(*At(result, "standing").AsString() == "learner");
         auto const& routes = *At(result, "decided_by").AsArray();
         REQUIRE(routes.size() == 2);
-        CHECK(*routes[0].AsString() == "proven-key");
-        CHECK(*routes[1].AsString() == "ticket");
+        CHECK(Unwrap(routes[0].AsString()) == "proven-key");
+        CHECK(Unwrap(routes[1].AsString()) == "ticket");
     }
 
     SECTION("about the caller's own connection")
