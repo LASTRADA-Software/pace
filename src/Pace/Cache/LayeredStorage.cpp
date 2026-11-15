@@ -52,8 +52,15 @@ std::expected<CasToken, StorageError> LayeredStorage::MirrorL2WriteResult(std::s
     // read, so it must not stamp lastAccess (Get would overwrite it to the
     // sentinel `now` passed here) or inflate hit stats. L2 is canonical.
     auto fetched = _l2->Peek(key, now);
+    // The write itself SUCCEEDED; only the read-back for the mirror did not (#1705). Returning the
+    // error told the client a write failed that L2 holds, and left L1 serving the old value until it
+    // was evicted. L2 is canonical, so L1 forgets the key -- the next read goes to L2 -- and the
+    // write reports what happened to it.
     if (!fetched.has_value())
-        return std::unexpected(fetched.error());
+    {
+        DropFromL1(key);
+        return l2Cas;
+    }
     if (fetched->found)
         MirrorIntoL1(key, fetched->entry);
     else

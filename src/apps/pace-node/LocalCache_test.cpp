@@ -10,11 +10,13 @@
 
 #include <cstddef>
 #include <format>
+#include <functional>
 #include <map>
 #include <ranges>
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include <core/async/SyncRun.hpp>
@@ -48,10 +50,15 @@ class ScriptedUpstream final: public ICacheUpstream
     std::size_t fetches { 0 };
     std::size_t stores { 0 };
     bool reachable { true };
+    /// Runs inside the fetch, where the real upstream is suspended on the network: whatever it
+    /// does to the local tier happens while the fetch is outstanding.
+    std::function<void()> duringFetch;
 
     [[nodiscard]] core::async::Task<std::optional<std::vector<std::byte>>> Fetch(std::string_view key) override
     {
         ++fetches;
+        if (duringFetch)
+            std::exchange(duringFetch, {})();
         if (!reachable)
             co_return std::nullopt;
         auto const it = entries.find(std::string { key });
@@ -416,4 +423,28 @@ TEST_CASE("A tier built from a profile that leaves a column unstated is refused,
     CHECK_THROWS_AS((LocalCache { local, nothing, clock, metrics, forgotDrop }), std::invalid_argument);
     CHECK_NOTHROW((LocalCache { local, upstream, clock, metrics, PrivateTierProfile }));
     CHECK_NOTHROW((LocalCache { local, nothing, clock, metrics, SharedTierProfile }));
+}
+
+TEST_CASE("A store made while a fetch was outstanding is not overwritten by its write-back", "[node][cache][1706]")
+{
+    // #1706: the fetch misses locally and suspends on the upstream; a STORE writes the key
+    // locally; the fetch resumes. Writing the upstream's older value back restored exactly what
+    // that store replaced -- the launcher's corrective re-store after a STALE HIT, undone.
+    Fixture fix;
+    fix.upstream.entries["k"] = Bytes("older");
+    fix.upstream.duringFetch = [&fix] {
+        REQUIRE(fix.local.Set("k", Bytes("newer"), 0, core::platform::SteadyTimePoint::max()).has_value());
+    };
+
+    auto const fetched = core::async::syncRun(fix.cache.Fetch("k"));
+    REQUIRE(fetched.has_value());
+    CHECK(Unwrap(fetched) == Bytes("older")); // the caller is owed what it fetched
+
+    auto const local = fix.local.Get("k", fix.clock.now());
+    REQUIRE(local.has_value());
+    REQUIRE(local->found);
+    auto const bytes = local->entry.ValueBytes();
+    CHECK(std::vector<std::byte> { bytes.begin(), bytes.end() } == Bytes("newer"));
+    // The newer value winning is not a failed fill.
+    CHECK(fix.Count(IMetricsSink::Counter::NodeCacheFillFailures) == 0);
 }

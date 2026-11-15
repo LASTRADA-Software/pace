@@ -100,9 +100,23 @@ bool IsArchiveDirectoryName(std::string_view name) noexcept
     return IsArchivableClusterId(name.substr(0, dot)) && IsArchiveSuffix(name.substr(dot + 1));
 }
 
-RaftStoreArchiver::RaftStoreArchiver(std::filesystem::path directory):
-    _directory { std::move(directory) }
+RaftStoreArchiver::RaftStoreArchiver(std::filesystem::path directory, Consensus::IDurableFiles& files):
+    _directory { std::move(directory) },
+    _files { files }
 {
+}
+
+std::expected<void, std::string> RaftStoreArchiver::SyncDirectory(std::filesystem::path const& directory,
+                                                                  std::string_view clusterId) const
+{
+    auto const synced = _files.SyncDirectory(directory);
+    if (synced.has_value() || Consensus::MeansDirectorySyncUnsupported(synced.error()))
+        return {};
+    return std::unexpected { std::format("moved the consensus store of cluster {}, but could not make {} durable: {}; "
+                                         "a power loss could still undo the move, and the next start finishes it",
+                                         clusterId,
+                                         directory.string(),
+                                         synced.error().code.message()) };
 }
 
 std::expected<void, std::string> RaftStoreArchiver::Archive(std::string_view clusterId)
@@ -161,6 +175,11 @@ std::expected<void, std::string> RaftStoreArchiver::Archive(std::string_view clu
                                                  clusterId,
                                                  failure.message()) };
     }
+    // Both directories the moves wrote, before the rename that completes the archive (#1608): the
+    // root lost the files and the staging directory gained them.
+    for (auto const& directory: { _directory, staging })
+        if (auto const synced = SyncDirectory(directory, clusterId); !synced.has_value())
+            return synced;
 
     // Complete: into the first name no earlier archive of this cluster holds, never over one.
     for (auto const ordinal: std::views::iota(0U, MaxArchivesPerCluster))
@@ -179,7 +198,8 @@ std::expected<void, std::string> RaftStoreArchiver::Archive(std::string_view clu
                                                  into.string(),
                                                  clusterId,
                                                  failure.message()) };
-        return {};
+        // The archive directory holds both names of that rename.
+        return SyncDirectory(archive, clusterId);
     }
     return std::unexpected { std::format("{} already holds {} archives of cluster {}, so this one is left in {}; "
                                          "remove the ones nobody needs and start again",

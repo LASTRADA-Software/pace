@@ -104,6 +104,26 @@ ports.ubuntu.com
 apt.llvm.org
 "
 
+# DOMAINS whose every subdomain is a host this repository installs from -- a name matches
+# when it ENDS in `.<suffix>`, so `archive.ubuntu.com.example.invalid` and
+# `evilarchive.ubuntu.com` do not.
+#
+# The Ubuntu archive's regional mirrors are named under it, and which one a runner reaches
+# is decided by WHERE the runner is, not by anything this repository chose: an image on
+# Azure names `azure.archive.ubuntu.com`, while the same image version provisioned on AWS
+# (run 43695459864, image ubuntu-24.04 20261111.127.1, 2026-11-15) names
+# `us-east-2.ec2.archive.ubuntu.com` in its mirrorlist. That host was on no row above, so
+# the sweep removed `ubuntu.sources`, guard two refused, and every Linux job on that runner
+# died at `Install build tools` while a runner of the same image elsewhere went green. A
+# list of regions is an exclusion list in disguise; the domain is Canonical's and states
+# our claim -- "the Ubuntu archive" -- at the granularity it is actually true.
+#
+# Kept apart from `AllowedHosts` rather than written as `*.archive.ubuntu.com` there:
+# that list is walked unquoted, and a `*` in it is a glob over the working directory.
+AllowedDomainSuffixes="
+archive.ubuntu.com
+"
+
 AptRoot=/etc/apt
 Sudo=sudo
 SelfTest=0
@@ -206,6 +226,12 @@ IsAllowed() {
         if [ "$1" = "$candidate" ]; then
             return 0
         fi
+    done
+    for candidate in $AllowedDomainSuffixes; do
+        # The quoted expansion is matched LITERALLY; only the leading `*.` is a pattern.
+        case "$1" in
+            *."$candidate") return 0 ;;
+        esac
     done
     return 1
 }
@@ -514,6 +540,40 @@ RunSelfTest() {
         Ok "case 12: a mirrorlist that cannot be read names no host, so its source is removed"
     else
         Bad "case 12: rc=$rc" "$out"
+    fi
+
+    # Case 13 -- the archive reached through a REGIONAL mirror the allowlist does not name
+    # host by host: the layout of a GitHub runner provisioned on AWS, which removed
+    # `ubuntu.sources` and failed every Linux job on that runner. Without
+    # `AllowedDomainSuffixes` this case FAILS at guard two.
+    mkdir -p "$tmp/m/sources.list.d"
+    printf 'http://us-east-2.ec2.archive.ubuntu.com/ubuntu/\tpriority:1\nhttp://archive.ubuntu.com/ubuntu/\n' \
+        > "$tmp/m/apt-mirrors.txt"
+    printf 'Types: deb\nURIs: mirror+file:%s/apt-mirrors.txt\nSuites: noble\nComponents: main\n' \
+        "$tmp/m" > "$tmp/m/sources.list.d/ubuntu.sources"
+    out=$(bash "$0" --apt-root "$tmp/m" --sweep-only 2>&1) && rc=0 || rc=$?
+    if [ "$rc" -eq 0 ] && [ -e "$tmp/m/sources.list.d/ubuntu.sources" ]; then
+        Ok "case 13: an archive behind a regional mirror of archive.ubuntu.com is kept"
+    else
+        Bad "case 13: rc=$rc" "$out"
+    fi
+
+    # Case 14 -- the suffix is a DOMAIN, not a substring. A host that merely ends in the
+    # same characters, or carries the archive's name as a prefix of someone else's domain,
+    # is a vendor like any other. A suffix match written without the dot, or as a
+    # substring, passes case 13 and fails here.
+    mkdir -p "$tmp/n/sources.list.d"
+    printf 'deb http://azure.archive.ubuntu.com/ubuntu noble main\n' > "$tmp/n/sources.list"
+    printf 'deb http://evilarchive.ubuntu.com/ubuntu noble main\n' \
+        > "$tmp/n/sources.list.d/lookalike.list"
+    printf 'deb http://archive.ubuntu.com.example.invalid/ubuntu noble main\n' \
+        > "$tmp/n/sources.list.d/prefixed.list"
+    out=$(bash "$0" --apt-root "$tmp/n" --sweep-only 2>&1) && rc=0 || rc=$?
+    if [ "$rc" -eq 0 ] && [ ! -e "$tmp/n/sources.list.d/lookalike.list" ] \
+        && [ ! -e "$tmp/n/sources.list.d/prefixed.list" ]; then
+        Ok "case 14: a look-alike of the archive's domain is swept, not admitted by the suffix"
+    else
+        Bad "case 14: rc=$rc" "$out"
     fi
 
     if [ "$SelfTestUnarrangeable" -gt 0 ]; then

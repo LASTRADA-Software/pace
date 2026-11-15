@@ -289,7 +289,8 @@ TEST_CASE("A cluster left twice keeps both of its stores, each in an archive of 
     // meet the first archive as a conflict -- which would strand the node -- nor write into it.
     ScratchDirectory const scratch { "archive-twice" };
     Testing::InMemoryFormationStore store;
-    RaftStoreArchiver archiver { scratch.Path() };
+    Consensus::SystemDurableFiles durableFiles;
+    RaftStoreArchiver archiver { scratch.Path(), durableFiles };
     Cluster::FleetEndpointsFile endpoints { scratch.Path() };
     CapturingLogger logger;
     auto random = Testing::ScriptedSecureRandom { Testing::ScriptedSecureRandom::Ascending(2 * Cluster::ClusterIdBytes) };
@@ -336,7 +337,8 @@ TEST_CASE("A leave a crash interrupted part-way is finished into its own archive
     // THAT archive -- every file of the second store together, apart from the first leave's.
     ScratchDirectory const scratch { "archive-resume" };
     Testing::InMemoryFormationStore store;
-    RaftStoreArchiver archiver { scratch.Path() };
+    Consensus::SystemDurableFiles durableFiles;
+    RaftStoreArchiver archiver { scratch.Path(), durableFiles };
     auto const archive = scratch.Path() / ArchiveDirectoryName;
     auto const names = Consensus::FileRaftStorage::StoreFileNames();
     std::filesystem::create_directories(archive / "c-office");
@@ -444,7 +446,8 @@ TEST_CASE("A store its tier is still writing is moved only at the next start, wi
     // The tier goes on writing until the reform stops it.
     WriteStore(scratch.Path(), "after");
 
-    RaftStoreArchiver archiver { scratch.Path() };
+    Consensus::SystemDurableFiles durableFiles;
+    RaftStoreArchiver archiver { scratch.Path(), durableFiles };
     auto const resumed = ResumeFormation(Unwrap(dissolved), store, archiver);
     REQUIRE(resumed.has_value());
     CHECK_FALSE(Unwrap(resumed).archivePending.has_value());

@@ -9,12 +9,15 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <filesystem>
 #include <fstream>
 #include <ios>
+#include <memory>
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 #include <tests/ScratchPath.hpp>
@@ -73,7 +76,8 @@ TEST_CASE("Archiving moves every store file under archive and a second run is a 
     WriteText(scratch / "node-key", "kept");
     WriteText(scratch / "formation", "kept");
 
-    RaftStoreArchiver archiver { scratch.Path() };
+    Consensus::SystemDurableFiles durableFiles;
+    RaftStoreArchiver archiver { scratch.Path(), durableFiles };
     REQUIRE(archiver.Archive("c-laptop").has_value());
     for (auto const name: Consensus::FileRaftStorage::StoreFileNames())
     {
@@ -100,7 +104,8 @@ TEST_CASE("An archive a crash interrupted halfway is finished", "[node][formatio
     for (auto const name: names.subspan(1))
         WriteText(scratch / name, name);
 
-    RaftStoreArchiver archiver { scratch.Path() };
+    Consensus::SystemDurableFiles durableFiles;
+    RaftStoreArchiver archiver { scratch.Path(), durableFiles };
     REQUIRE(archiver.Archive("c-laptop").has_value());
     CHECK(ReadText(ArchivedAt(scratch.Path(), "c-laptop", names[0])) == "moved already");
     for (auto const name: names.subspan(1))
@@ -121,7 +126,8 @@ TEST_CASE("An archive a crash interrupted after the last move is renamed into pl
     for (auto const name: Consensus::FileRaftStorage::StoreFileNames())
         WriteText(ArchivedAt(scratch.Path(), "c-laptop.partial", name), name);
 
-    RaftStoreArchiver archiver { scratch.Path() };
+    Consensus::SystemDurableFiles durableFiles;
+    RaftStoreArchiver archiver { scratch.Path(), durableFiles };
     REQUIRE(archiver.Archive("c-laptop").has_value());
     for (auto const name: Consensus::FileRaftStorage::StoreFileNames())
         CHECK(ReadText(ArchivedAt(scratch.Path(), "c-laptop", name)) == name);
@@ -132,7 +138,8 @@ TEST_CASE("A cluster left twice is archived beside its first archive, never over
           "[node][formation][archive]")
 {
     ScratchDirectory const scratch { "archiver-twice" };
-    RaftStoreArchiver archiver { scratch.Path() };
+    Consensus::SystemDurableFiles durableFiles;
+    RaftStoreArchiver archiver { scratch.Path(), durableFiles };
     for (auto const name: Consensus::FileRaftStorage::StoreFileNames())
         WriteText(scratch / name, "first");
     REQUIRE(archiver.Archive("c-office").has_value());
@@ -163,7 +170,8 @@ TEST_CASE("A store file present in the root and in its archive is refused, and n
     WriteText(ArchivedAt(scratch.Path(), "c-laptop.partial", name), "the archived one");
     WriteText(scratch / name, "the root one");
 
-    RaftStoreArchiver archiver { scratch.Path() };
+    Consensus::SystemDurableFiles durableFiles;
+    RaftStoreArchiver archiver { scratch.Path(), durableFiles };
     auto const archived = archiver.Archive("c-laptop");
     REQUIRE_FALSE(archived.has_value());
     CHECK(archived.error().contains(std::string { name }));
@@ -215,7 +223,8 @@ TEST_CASE("An archive is named only by an id that is one safe path component", "
     ScratchDirectory const scratch { "archiver-escape" };
     auto const name = Consensus::FileRaftStorage::StoreFileNames()[0];
     WriteText(scratch / name, "kept");
-    RaftStoreArchiver archiver { scratch.Path() };
+    Consensus::SystemDurableFiles durableFiles;
+    RaftStoreArchiver archiver { scratch.Path(), durableFiles };
     REQUIRE_FALSE(archiver.Archive("../escape").has_value());
     CHECK(ReadText(scratch / name) == "kept");
     CHECK_FALSE(std::filesystem::exists(scratch / ArchiveDirectoryName));
@@ -240,4 +249,83 @@ TEST_CASE("Every cluster id the minter can draw is one an archive can be named b
         ++minted;
     }
     CHECK(minted == 256 / static_cast<int>(Cluster::ClusterIdBytes)); // every byte value was drawn
+}
+
+namespace
+{
+/// This machine's files, recording every directory sync and answering each with @p answer.
+class RecordingDirectorySyncs final: public Consensus::IDurableFiles
+{
+  public:
+    explicit RecordingDirectorySyncs(std::error_code answer = {}) noexcept:
+        _answer { answer }
+    {
+    }
+
+    [[nodiscard]] std::expected<std::unique_ptr<Consensus::IDurableSink>, std::error_code> Create(
+        std::filesystem::path const& path, StateFile which) override
+    {
+        return _system.Create(path, which);
+    }
+
+    [[nodiscard]] std::expected<void, Consensus::DirectorySyncFailure> SyncDirectory(
+        std::filesystem::path const& directory) override
+    {
+        _synced.push_back(directory.lexically_normal());
+        if (_answer)
+            return std::unexpected { Consensus::DirectorySyncFailure { .step = Consensus::DirectorySyncStep::Flush,
+                                                                       .code = _answer } };
+        return {};
+    }
+
+    /// @return Every directory asked, in order.
+    [[nodiscard]] std::vector<std::filesystem::path> const& Synced() const noexcept
+    {
+        return _synced;
+    }
+
+  private:
+    std::vector<std::filesystem::path> _synced;
+    std::error_code _answer;
+    Consensus::SystemDurableFiles _system;
+};
+} // namespace
+
+TEST_CASE("An archive syncs every directory its renames wrote, in order", "[node][formation][archive][1608]")
+{
+    // #1608: a rename reported before its directory reached the disk is one a power loss can take
+    // back, and the archive is what a dissolve or a forget leaves. The root lost the files and the
+    // staging directory gained them, BEFORE the rename that completes the archive; the archive
+    // directory holds both names of that last rename.
+    ScratchDirectory const scratch { "archiver-sync" };
+    for (auto const name: Consensus::FileRaftStorage::StoreFileNames())
+        WriteText(scratch / name, name);
+    RecordingDirectorySyncs files;
+    RaftStoreArchiver archiver { scratch.Path(), files };
+    REQUIRE(archiver.Archive("c-laptop").has_value());
+
+    auto const archive = (scratch / ArchiveDirectoryName).lexically_normal();
+    CHECK(files.Synced()
+          == std::vector<std::filesystem::path> {
+              scratch.Path().lexically_normal(), (archive / "c-laptop.partial").lexically_normal(), archive });
+}
+
+TEST_CASE("A directory sync that fails is a refusal, and one the volume cannot do is not",
+          "[node][formation][archive][1608]")
+{
+    ScratchDirectory const scratch { "archiver-sync-fails" };
+    for (auto const name: Consensus::FileRaftStorage::StoreFileNames())
+        WriteText(scratch / name, name);
+    RecordingDirectorySyncs failing { std::make_error_code(std::errc::io_error) };
+    auto const refused = RaftStoreArchiver { scratch.Path(), failing }.Archive("c-laptop");
+    REQUIRE_FALSE(refused.has_value());
+    CHECK(refused.error().contains("durable"));
+
+    // The control: a volume that cannot sync a directory at all is degraded, as every state file's
+    // replace is, and the archive completes.
+    ScratchDirectory const other { "archiver-sync-unsupported" };
+    for (auto const name: Consensus::FileRaftStorage::StoreFileNames())
+        WriteText(other / name, name);
+    RecordingDirectorySyncs unsupported { Consensus::UnsupportedDirectorySyncAnswers().front() };
+    CHECK(RaftStoreArchiver { other.Path(), unsupported }.Archive("c-laptop").has_value());
 }
