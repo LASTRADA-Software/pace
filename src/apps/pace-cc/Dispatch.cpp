@@ -794,4 +794,11 @@ bool IsWorkerCapacityRefusal(DispatchResult const& result) noexcept
            && (result.decline == DeclineCause::NoCapacity || result.decline == DeclineCause::NodeBusy);
 }
 
+bool IsWorkerCompileKilled(DispatchResult const& result) noexcept
+{
+    return result.status == DispatchStatus::Declined && result.declinedAt.has_value()
+           && result.declinedAt->opcode == std::to_underlying(Wire::Op::Compile)
+           && result.decline == DeclineCause::MemoryKilled;
+}
+
 } // namespace Pace::Cc

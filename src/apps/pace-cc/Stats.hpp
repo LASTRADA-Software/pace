@@ -3,6 +3,7 @@
 
 #include "Dispatch.hpp"
 #include "HitVerification.hpp"
+#include "LocalCeiling.hpp"
 
 #include <Pace/Cli/UsageDoc.hpp>
 
@@ -309,6 +310,11 @@ struct Record
     /// The peak memory the compile used, children included, in bytes. Disengaged when it was
     /// not measured, which is not a compile that used none.
     std::optional<std::uint64_t> peakMemoryBytes;
+
+    /// What defended a compile this launcher ran itself against memory: the local node's compile ceiling, the
+    /// OOM-victim shim alone and why, or nothing (#1770). Disengaged when it ran none -- a hit, a dispatch -- and
+    /// for a line from before the column, neither of which is a compile that ran undefended.
+    std::optional<LocalDefenseReport> localDefense;
 };
 
 /// What reading the invocation log found.

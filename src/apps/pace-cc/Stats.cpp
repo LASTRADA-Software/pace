@@ -407,6 +407,16 @@ namespace
         DeclineReasonRow { .reason = "the job is larger than a worker accepts",
                            .cause = DeclineCause::TooLarge,
                            .specifics = Specifics::Refusal },
+        // The worker's sentence names the cause word (ceiling, shed, killed) and the source.
+        DeclineReasonRow { .reason = "a worker killed the compile for memory",
+                           .cause = DeclineCause::MemoryKilled,
+                           .specifics = Specifics::Refusal },
+        DeclineReasonRow { .reason = "killed for memory twice, so compiled locally",
+                           .cause = DeclineCause::KilledTwice,
+                           .specifics = Specifics::None },
+        DeclineReasonRow { .reason = "no machine's memory budget fits it, so compiled locally outside the ceiling",
+                           .cause = DeclineCause::NeverFits,
+                           .specifics = Specifics::None },
         // An exhausted redirect chain's message IS the last leader's endpoint: peer text, and
         // the verbose line's business rather than something to act on from the log.
         DeclineReasonRow {
@@ -535,6 +545,8 @@ namespace
         std::uint64_t queuedCount {};    ///< Records that carry a slot wait at all.
         /// Largest peak memory any record reported, in bytes; absent when none did.
         std::optional<std::uint64_t> peakMemoryMax;
+        /// Compiles the launcher ran itself, by what defended them against memory, keyed by the log's token (#1770).
+        std::map<std::string, std::uint64_t> localDefenses;
         /// Hits `PACE_VERIFY` rejected; see `Outcome::VerifyMismatch`.
         std::uint64_t verifyMismatches {};
         /// Compiles an input changed during; see `Outcome::InputsMoved`.
@@ -697,9 +709,9 @@ namespace
     /// The format this build writes. **Bumped whenever `LogColumnTable` changes in any way** --
     /// order, meaning, count -- because the version is the only thing a reader can check; the
     /// arity that stood in for it is a count, and two formats can share a count.
-    constexpr unsigned CurrentLogVersion = 3;
+    constexpr unsigned CurrentLogVersion = 4;
 
-    /// One column of a version-3 line, in the order it is written.
+    /// One column of a current-format line, in the order it is written.
     ///
     /// **Persisted: the enumerator values ARE the on-disk column order**, so they are spelled out,
     /// and a change to them is a change to `CurrentLogVersion`.
@@ -722,7 +734,23 @@ namespace
         ExitCode = 14,
         QueuedMs = 15,
         PeakMemoryBytes = 16,
-        Last = 17,
+        /// Version 4 (#1770): what defended a compile the launcher ran itself against memory.
+        LocalDefense = 17,
+        Last = 18,
+    };
+
+    /// How many leading columns each version this build reads wrote: columns are only ever APPENDED, so an older
+    /// line is the current table's prefix and is read by it, the columns it lacks left as a record defaults them.
+    struct LogVersionRow
+    {
+        unsigned version;      ///< The `v<n>` marker.
+        LogColumn firstAbsent; ///< The first column that version did not write; `Last` for the current one.
+    };
+
+    /// Every versioned format this build reads.
+    constexpr std::array LogVersionTable {
+        LogVersionRow { .version = 3, .firstAbsent = LogColumn::LocalDefense },
+        LogVersionRow { .version = CurrentLogVersion, .firstAbsent = LogColumn::Last },
     };
 
     /// How one column is written and read.
@@ -832,6 +860,14 @@ namespace
           .name = "peak-memory-bytes",
           .write = [](Record const& r, std::string& l) { WriteOptionalUnsigned(r.peakMemoryBytes, l); },
           .read = [](std::string_view t, Record& r) { r.peakMemoryBytes = ParseOptionalInteger<std::uint64_t>(t); } },
+        { .column = LogColumn::LocalDefense,
+          .name = "local-defense",
+          .write =
+              [](Record const& r, std::string& l) {
+                  if (r.localDefense.has_value())
+                      l += LocalDefenseToken(*r.localDefense);
+              },
+          .read = [](std::string_view t, Record& r) { r.localDefense = ParseLocalDefenseToken(t); } },
     } };
     static_assert(RowsInEnumeratorOrder(LogColumnTable, &LogColumnRow::column),
                   "LogColumnTable must hold one row per LogColumn, in enumerator order -- which is the column order");
@@ -931,10 +967,12 @@ namespace
                 return std::nullopt;
             return DecodeFields(fields);
         }
-        if (*version != CurrentLogVersion || fields.size() != LogColumnTable.size() + 1)
+        auto const* const format = core::findOrNull(LogVersionTable, *version, &LogVersionRow::version);
+        auto const columns = format == nullptr ? std::size_t {} : static_cast<std::size_t>(format->firstAbsent);
+        if (format == nullptr || fields.size() != columns + 1)
             return std::nullopt;
         Record record;
-        for (auto const& row: LogColumnTable)
+        for (auto const& row: LogColumnTable | std::views::take(columns))
             row.read(fields[static_cast<std::size_t>(row.column) + 1], record);
         return record;
     }
@@ -1184,6 +1222,13 @@ namespace
         if (tally.peakMemoryMax.has_value())
             out << "  peak compile memory "
                 << FormatDecimal(static_cast<double>(*tally.peakMemoryMax) / static_cast<double>(1ULL << 30)) << " GiB\n";
+        // Every way a local compile was defended, named: a defense that is silently off is the failure (#1770).
+        if (!tally.localDefenses.empty())
+        {
+            out << "  local compiles by memory defense:\n";
+            for (auto const& [token, count]: RankedByCount(tally.localDefenses))
+                out << "    " << count << "x  " << token << '\n';
+        }
 
         AppendDispatchLines(out, tally, palette);
 
@@ -1434,6 +1479,8 @@ namespace
                 {
                     tally->peakMemoryMax = std::max(tally->peakMemoryMax.value_or(0), record.peakMemoryBytes.value_or(0));
                 }
+                if (auto const defense = record.localDefense; defense.has_value())
+                    ++tally->localDefenses[LocalDefenseToken(*defense)];
                 if (record.exitCode.has_value())
                 {
                     ++tally->exitCodes;

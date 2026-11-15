@@ -816,13 +816,12 @@ TEST_CASE("A decline says WHICH kind, from either end of the fleet", "[dispatch]
     CHECK(refused.decline != noWorker);
 }
 
-TEST_CASE("CompileKilled: a worker that killed the compile is declined, so the launcher compiles locally",
-          "[dispatch][decline]")
+TEST_CASE("CompileKilled: a worker that killed the compile is declined as a kill, never as a compile", "[dispatch][decline]")
 {
     // A compile the worker's machine killed for memory answered nothing about the code. It must
     // never arrive as `Compiled` with the 137 a kill leaves behind -- the launcher would report a
-    // compiler failure for a TU that compiles -- and it is one machine to go and look at, so it is
-    // graded exactly as the other worker-side refusals are.
+    // compiler failure for a TU that compiles -- and it is its OWN cause (#1770): an admitted one goes
+    // back into the queue, where every other worker-side refusal compiles here.
     ScriptedFleet fleet;
     fleet.Serve(std::string { Scheduler }, GrantReply());
     fleet.Serve(std::string { Worker },
@@ -834,9 +833,10 @@ TEST_CASE("CompileKilled: a worker that killed the compile is declined, so the l
 
     REQUIRE(result.status == DispatchStatus::Declined);
     CHECK(result.status != DispatchStatus::Compiled);
-    CHECK(result.decline == DeclineCause::WorkerRefused);
-    CHECK(DeclineCauseFor(Wire::ErrorCode::WorkerCompileKilled) == DeclineCauseFor(Wire::ErrorCode::WorkerSpawnFailed));
-    CHECK(DeclineCauseFor(Wire::ErrorCode::WorkerCompileKilled) != DeclineCause::Unrecognised);
+    CHECK(result.decline == DeclineCause::MemoryKilled);
+    CHECK(IsWorkerCompileKilled(result));
+    CHECK_FALSE(IsWorkerCapacityRefusal(result));
+    CHECK(DeclineCauseFor(Wire::ErrorCode::WorkerCompileKilled) != DeclineCauseFor(Wire::ErrorCode::WorkerSpawnFailed));
 }
 
 TEST_CASE("A worker that answers endpoint-busy is tallied apart from withdrawn slots", "[dispatch][decline]")
@@ -2799,6 +2799,25 @@ TEST_CASE("Dispatch.worker-grant-naming-no-key-sends-nothing", "[dispatch][admis
 
     CHECK(result.status == DispatchStatus::Unauthenticated);
     CHECK(fleet.Dialled().empty());
+}
+
+TEST_CASE("CompileKilled: only a kill on the compile exchange sends a compile back to the queue", "[dispatch][decline]")
+{
+    std::vector<std::string> const args { "-O2" };
+    core::platform::ManualClock clock;
+    auto const answeredWith = [&](Wire::ErrorCode code) {
+        ScriptedFleet fleet;
+        fleet.Serve(std::string { Worker }, Wire::EncodeErrorReply(code, {}));
+        return Dispatch(fleet, Request(args), AdmittedTo(clock.now()), {}, {}, {}, &clock);
+    };
+    CHECK(IsWorkerCompileKilled(answeredWith(Wire::ErrorCode::WorkerCompileKilled)));
+    // A spawn that failed, a full worker: neither is a compile killed for memory.
+    CHECK_FALSE(IsWorkerCompileKilled(answeredWith(Wire::ErrorCode::WorkerSpawnFailed)));
+    CHECK_FALSE(IsWorkerCompileKilled(answeredWith(Wire::ErrorCode::NoCapacity)));
+    // A scheduler answering the LEASE with the code reached no compiler: nothing was killed.
+    ScriptedFleet leaseRefused;
+    leaseRefused.Serve(std::string { Scheduler }, Wire::EncodeErrorReply(Wire::ErrorCode::WorkerCompileKilled, {}));
+    CHECK_FALSE(IsWorkerCompileKilled(Dispatch(leaseRefused, Request(args))));
 }
 
 TEST_CASE("Dispatch.a-worker-refusing-for-capacity-is-a-capacity-refusal", "[dispatch][admission]")

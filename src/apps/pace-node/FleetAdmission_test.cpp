@@ -34,9 +34,11 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <expected>
 #include <format>
 #include <functional>
+#include <future>
 #include <latch>
 #include <memory>
 #include <mutex>
@@ -258,7 +260,7 @@ struct Plan
         .dispatchAdmitted = [](Cc::AdmitTicket const&) { return Cc::AdmittedDispatch {}; },
         .dispatchUnadmitted = [](Wire::AskOrigin) -> std::optional<Cc::CompileRun> { return std::nullopt; },
         .compileLocal =
-            [&] {
+            [&](Cc::LocalPlacement) {
                 world.NoteSpawn();
                 std::this_thread::sleep_for(plan.duration);
                 Cc::CompileRun run { .exitCode = 0, .out = {}, .err = {} };
@@ -274,6 +276,7 @@ struct Plan
                 return 0;
             },
         .failedOpen = [&](std::string const& reason) { out.failedOpen.push_back(reason); },
+        .killed = {},
     };
     auto const report = Cc::RunMiss(seams);
     out.code = report.code;
@@ -520,5 +523,187 @@ TEST_CASE("FleetAdmission.memory-never-exceeds-budget", "[node][admission][fleet
     // requests waiting behind the ones it granted.
     CHECK(world.Totals().peakShared >= 6 * GiB);
     CHECK(world.Totals().maxDepth > 0);
+    CHECK(WaitFor([&] { return queue.service.AdmissionSnapshotNow().chargedBytes.empty(); }));
+}
+
+// --- a compile killed for memory, asked for again (#1770) -------------------------------------------------------
+//
+// The launcher's real miss flow against the node's real queue: the kill is learned from the admission ending
+// unsettled, the requeue is a second real ADMIT saying `AfterKill`, and the queue decides where and when it runs.
+
+namespace
+{
+
+/// What one launcher whose compiles may be killed did, read on the case's thread after it is joined.
+struct KilledLaunch
+{
+    std::optional<int> code;
+    std::vector<Wire::AskOrigin> origins;       ///< What each ADMIT told the leader.
+    std::vector<Cc::AdmitTicket> grants;        ///< Every grant, in order.
+    std::vector<Cc::LocalPlacement> placements; ///< Where each compile run was asked to run.
+    std::vector<Cc::KillStep> steps;            ///< Every step a kill made the flow take.
+};
+
+/// One launcher's miss for @p key, local-only, whose compile runs are killed as @p killed scripts.
+///
+/// Asserts nothing, for it runs on a thread of its own. @p beforeRun is called with each run's index before it
+/// ends, so a case can place another launcher's request at that moment.
+[[nodiscard]] KilledLaunch InvokeKilled(std::string const& endpoint,
+                                        std::string const& key,
+                                        std::deque<bool> killed,
+                                        std::function<void(std::size_t run)> const& beforeRun = {})
+{
+    KilledLaunch out;
+    auto const request = Wire::AdmitRequest { .kind = Wire::AdmitKind::LocalOnly,
+                                              .fingerprint = {},
+                                              .cacheKey = key,
+                                              .sourcePath = key,
+                                              .treeLabel = "tree",
+                                              .storable = false,
+                                              .acceptedCodecs = {},
+                                              .excluded = {},
+                                              .toolchainLabel = {} };
+    auto const seams = Cc::MissSeams {
+        .open = [&](std::optional<std::string_view>, Wire::AskOrigin origin) -> std::unique_ptr<Cc::IAdmitSession> {
+            out.origins.push_back(origin);
+            auto asked = request;
+            asked.origin = origin;
+            return Cc::OpenAdmitSession(endpoint, Cc::Credential {}, asked, Cc::DefaultAdmitBudget(), Cc::AdmitNote {});
+        },
+        .serveStored = [] { return Cc::StoredFetch { .kind = Cc::StoredFetchKind::Missed, .code = 0 }; },
+        .granted = [&](Cc::AdmitTicket const& ticket) { out.grants.push_back(ticket); },
+        .dispatchAdmitted = [](Cc::AdmitTicket const&) { return Cc::AdmittedDispatch {}; },
+        .dispatchUnadmitted = [](Wire::AskOrigin) -> std::optional<Cc::CompileRun> { return std::nullopt; },
+        .compileLocal =
+            [&](Cc::LocalPlacement placement) {
+                auto const index = out.placements.size();
+                out.placements.push_back(placement);
+                if (beforeRun)
+                    beforeRun(index);
+                auto const dies = !killed.empty() && killed.front();
+                if (!killed.empty())
+                    killed.pop_front();
+                Cc::CompileRun run { .exitCode = dies ? 137 : 0, .out = {}, .err = {} };
+                if (dies)
+                    run.killed = Platform::CompileKill::Ceiling;
+                run.inCgroup = placement == Cc::LocalPlacement::UnderCeiling;
+                return run;
+            },
+        .finish = [](Cc::CompileRun& run, bool&) { return run.exitCode; },
+        .failedOpen = {},
+        .killed = [&](Cc::KillStep step) { out.steps.push_back(step); },
+    };
+    out.code = Cc::RunMiss(seams).code;
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("FleetAdmission.a-local-compile-killed-waits-for-room-and-is-admitted-later", "[node][admission][fleet][oom]")
+{
+    // Kill, requeue, admitted LATER. The killed compile's admission ends unsettled, which frees its charge at once --
+    // another launcher's waiting compile takes that room -- and the requeue then WAITS behind it, never compiling in
+    // the open, until that compile gives the room back.
+    Queue queue;
+    auto const port = queue.Serve();
+    queue.Report(8 * GiB, 8);
+    Teach(port, "victim", 4 * GiB);
+    Teach(port, "holder", 6 * GiB);
+    auto const endpoint = EndpointOf(port);
+
+    std::promise<void> firstRunStarted;
+    std::promise<void> mayKill;
+    auto kill = mayKill.get_future().share();
+    std::promise<void> holderGranted;
+    std::promise<void> mayRelease;
+    auto release = mayRelease.get_future().share();
+
+    std::thread victim;
+    std::thread holder;
+    KilledLaunch launched;
+    bool holderTimedOut {};
+    std::atomic<std::size_t> runs { 0 }; // read while the victim's thread runs, so not `launched`
+    victim = std::thread { [&] {
+        launched = InvokeKilled(endpoint, "victim", { true, false }, [&](std::size_t run) {
+            ++runs;
+            if (run != 0)
+                return;
+            firstRunStarted.set_value();
+            static_cast<void>(kill.wait_for(Pace::Testing::WaitHangGuard));
+        });
+    } };
+    auto const started = firstRunStarted.get_future().wait_for(Pace::Testing::WaitHangGuard) == std::future_status::ready;
+    holder = std::thread { [&] {
+        auto session = Cc::OpenAdmitSession(endpoint,
+                                            Cc::Credential {},
+                                            Wire::AdmitRequest { .kind = Wire::AdmitKind::LocalOnly,
+                                                                 .fingerprint = {},
+                                                                 .cacheKey = "holder",
+                                                                 .sourcePath = "holder",
+                                                                 .treeLabel = "tree",
+                                                                 .storable = false,
+                                                                 .acceptedCodecs = {},
+                                                                 .excluded = {},
+                                                                 .toolchainLabel = {} },
+                                            Cc::DefaultAdmitBudget(),
+                                            Cc::AdmitNote {});
+        if (!session->Await().has_value())
+            return;
+        holderGranted.set_value();
+        holderTimedOut = release.wait_for(Pace::Testing::WaitHangGuard) != std::future_status::ready;
+        session->Settle(Wire::SettleRequest { .outcome = Wire::SettleOutcome::NotStored, .peakBytes = 6 * GiB });
+    } };
+
+    // The holder waits behind the victim's 4 GiB; then the victim is killed.
+    auto const holderQueued = started && WaitFor([&] { return queue.service.AdmissionSnapshotNow().depth == 1; });
+    mayKill.set_value();
+    auto const granted = holderGranted.get_future().wait_for(Pace::Testing::WaitHangGuard) == std::future_status::ready;
+    // And now the requeued victim waits behind the holder's 6 GiB: 4 more would not fit in 8.
+    auto const victimQueued = granted && WaitFor([&] { return queue.service.AdmissionSnapshotNow().depth == 1; });
+    auto const runsWhileQueued = runs.load();
+    mayRelease.set_value();
+    victim.join();
+    holder.join();
+
+    REQUIRE(started);
+    CHECK(holderQueued);
+    REQUIRE(granted);
+    CHECK(victimQueued);
+    CHECK_FALSE(holderTimedOut);
+    CHECK(launched.code == std::optional<int> { 0 });
+    // The second run only after the holder gave its room back: one run while the requeue waited.
+    CHECK(runsWhileQueued == 1);
+    CHECK(launched.placements
+          == std::vector<Cc::LocalPlacement> { Cc::LocalPlacement::UnderCeiling, Cc::LocalPlacement::UnderCeiling });
+    CHECK(launched.origins == std::vector<Wire::AskOrigin> { Wire::AskOrigin::First, Wire::AskOrigin::AfterKill });
+    CHECK(launched.steps == std::vector<Cc::KillStep> { Cc::KillStep::LocalRequeued });
+    REQUIRE(launched.grants.size() == 2);
+    CHECK(launched.grants.back().chargedBytes == 4 * GiB);
+    CHECK(Count(queue, IMetricsSink::Counter::AdmissionRequeuedAfterKill) == 1);
+    CHECK(Count(queue, IMetricsSink::Counter::AdmissionNeverFits) == 0);
+    CHECK(WaitFor([&] { return queue.service.AdmissionSnapshotNow().chargedBytes.empty(); }));
+}
+
+TEST_CASE("FleetAdmission.a-killed-compile-no-machine-can-hold-runs-outside-the-ceiling-counted",
+          "[node][admission][fleet][oom]")
+{
+    // Larger than the machine's whole budget: it ran alone, the ceiling killed it, and its requeue is answered
+    // `NeverFits` -- so the one run left goes outside the ceiling, and the leader counts it.
+    Queue queue;
+    auto const port = queue.Serve();
+    queue.Report(8 * GiB, 8);
+    Teach(port, "huge", 11 * GiB);
+
+    auto const launched = InvokeKilled(EndpointOf(port), "huge", { true, false });
+
+    CHECK(launched.code == std::optional<int> { 0 });
+    CHECK(launched.placements
+          == std::vector<Cc::LocalPlacement> { Cc::LocalPlacement::UnderCeiling, Cc::LocalPlacement::OutsideCeiling });
+    REQUIRE(launched.grants.size() == 2);
+    CHECK(launched.grants.front().localReason == Wire::LocalGrantReason::Asked);
+    CHECK(launched.grants.back().localReason == Wire::LocalGrantReason::NeverFits);
+    CHECK(launched.steps == std::vector<Cc::KillStep> { Cc::KillStep::LocalRequeued });
+    CHECK(Count(queue, IMetricsSink::Counter::AdmissionRequeuedAfterKill) == 1);
+    CHECK(Count(queue, IMetricsSink::Counter::AdmissionNeverFits) == 1);
     CHECK(WaitFor([&] { return queue.service.AdmissionSnapshotNow().chargedBytes.empty(); }));
 }

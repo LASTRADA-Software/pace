@@ -22,9 +22,10 @@
 #   3. It was classified CEILING  -- `pace_worker_compiles_killed_ceiling_total` is 1 and the
 #                                    shed and signal rows are 0: WHICH kill, not whether one.
 #                                    The node logs `was killed (ceiling)`.
-#   4. The client still BUILT it  -- the launcher was refused `worker-compile-killed`,
-#                                    compiled locally, exited 0, and its object is this
-#                                    machine's reference object byte for byte.
+#   4. The client still BUILT it  -- the launcher was refused `worker-compile-killed`, asked
+#                                    the queue ONCE more (#1770), compiled locally only
+#                                    then, exited 0, and its object is this machine's
+#                                    reference object byte for byte.
 #   5. The node SURVIVED          -- the ceiling sits on `compiles/`, never on the node.
 #
 # And the control, a second node with the ceiling at 4g: the same construction is
@@ -353,6 +354,19 @@ grep -qF "was killed (ceiling)" "${workdir}/kill-client.log" \
     || fail "the client's refusal does not name the ceiling as the cause"
 grep -qF "compiling locally" "${workdir}/kill-client.log" \
     || fail "the client did not say it compiled locally after the kill"
+# And not at once (#1770): the kill sends the compile back into the queue ONCE, and only then -- killed
+# again, or no machine's budget able to hold it -- does it compile here. Which of the two depends on the
+# estimate the kill taught against this node's 256m budget, so either is right; neither is not.
+grep -qF "asking the queue once more" "${workdir}/kill-client.log" \
+    || fail "the client compiled locally at once after the kill, without asking the queue once more"
+if grep -qF "the requeued compile was killed for memory again" "${workdir}/kill-client.log"; then
+    requeue_end="killed again, then compiled locally"
+elif grep -qF "no machine's memory budget can hold" "${workdir}/kill-client.log"; then
+    requeue_end="no machine can hold it, compiled locally outside the ceiling"
+else
+    fail "the requeued compile neither was killed again nor was answered never-fits, and still compiled locally"
+fi
+e2e_note "requeued once after the kill: ${requeue_end}"
 cmp -s "${proj}/build/killed-reference.o" "${proj}/build/killed.o" \
     || fail "the locally rebuilt object differs from this machine's reference object"
 
