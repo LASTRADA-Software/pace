@@ -165,6 +165,9 @@ TEST_CASE("ToStringView names every outcome by its token")
     CHECK(ToStringView(Outcome::Unavailable) == "UNAVAILABLE");
     CHECK(ToStringView(Outcome::VerifyMismatch) == "VERIFY-MISMATCH");
     CHECK(ToStringView(Outcome::InputsMoved) == "INPUTS-MOVED");
+    CHECK(ToStringView(Outcome::StoreFailed) == "STORE-FAILED");
+    CHECK(ToStringView(Outcome::Stale) == "STALE");
+    CHECK(ToStringView(Outcome::VerifyFailed) == "VERIFY-FAILED");
 }
 
 TEST_CASE("Every outcome reads back from the log as itself", "[stats][1650]")
@@ -174,8 +177,10 @@ TEST_CASE("Every outcome reads back from the log as itself", "[stats][1650]")
     // record carries. `Unavailable` is last on purpose -- it is also what an unknown token reads
     // back as, so a token the parser lost would pass for it; every other entry cannot.
     ScopedStateDir const scoped;
-    constexpr std::array outcomes { Outcome::Hit,         Outcome::Miss,       Outcome::Uncacheable, Outcome::VerifyMismatch,
-                                    Outcome::InputsMoved, Outcome::Unavailable };
+    constexpr std::array outcomes {
+        Outcome::Hit,         Outcome::Miss,  Outcome::Uncacheable,  Outcome::VerifyMismatch, Outcome::InputsMoved,
+        Outcome::StoreFailed, Outcome::Stale, Outcome::VerifyFailed, Outcome::Unavailable
+    };
     for (auto const outcome: outcomes)
         AppendRecord(MakeRecord(outcome, "main", std::string { ToStringView(outcome) } + ".cpp", 10));
     auto const records = ParseLog("");
@@ -193,6 +198,8 @@ TEST_CASE("A hit the verifier rejected is recorded as its own outcome and never 
     // fresh object: the cache's was wrong. Recording that as a HIT counted every wrong
     // object the verifier caught as a success.
     CHECK(OutcomeOfServedHit(HitVerdict::Mismatched) == Outcome::VerifyMismatch);
+    // A fresh compile that FAILED is evidence against the entry, never an inconclusive hit (#1707).
+    CHECK(OutcomeOfServedHit(HitVerdict::FreshCompileFailed) == Outcome::VerifyFailed);
     // Every other verdict leaves the served object where the build uses it.
     for (auto const verdict:
          { HitVerdict::NotChecked, HitVerdict::Matched, HitVerdict::Inconclusive, HitVerdict::Unsupported })
@@ -1275,4 +1282,22 @@ TEST_CASE("Stats.report-omits-wait-and-peak-without-readings", "[stats][log-form
     auto const report = FormatReport("");
     CHECK_FALSE(report.contains("waited"));
     CHECK_FALSE(report.contains("peak compile memory"));
+}
+
+TEST_CASE("A failed store, a stale hit and a failed verify are each named in the report", "[stats][1707]")
+{
+    // #1707: each read as a healthy outcome -- a failed STORE as a MISS ("compiled and stored"),
+    // a refused stale entry as a cold MISS, a verify whose fresh compile failed as a HIT.
+    ScopedStateDir const scoped;
+    AppendRecord(MakeRecord(Outcome::Miss, "main", "a.cpp", 10));
+    AppendRecord(MakeRecord(Outcome::StoreFailed, "main", "b.cpp", 10));
+    AppendRecord(MakeRecord(Outcome::Stale, "main", "c.cpp", 10));
+    AppendRecord(MakeRecord(Outcome::VerifyFailed, "main", "d.cpp", 10));
+
+    auto const report = FormatReport("");
+    CHECK(report.contains("compiles     : 4"));
+    CHECK(report.contains("misses       : 1"));
+    CHECK(report.contains("store failed : 1"));
+    CHECK(report.contains("stale hits   : 1"));
+    CHECK(report.contains("verify failed: 1"));
 }

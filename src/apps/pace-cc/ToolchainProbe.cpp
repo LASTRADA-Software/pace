@@ -830,7 +830,7 @@ DriverIdentityProbe ProbeDriverIdentity(IProcessRunner& runner, std::string cons
             if (!line.empty() && line.back() == '\r')
                 line.pop_back();
             if (!line.empty())
-                return { .banner = std::move(line), .driverOutput = merged.err };
+                return { .banner = std::move(line), .driverOutput = merged.err, .evidence = IdentityEvidence::Answered };
         }
         // Falls through to `--version` rather than to the basename: a driver that
         // would not answer `-###` has said nothing about the question this function
@@ -849,7 +849,7 @@ DriverIdentityProbe ProbeDriverIdentity(IProcessRunner& runner, std::string cons
         // and nothing else.
         if (!line.empty() && line.back() == '\r')
             line.pop_back();
-        return { .banner = std::move(line), .driverOutput = {} };
+        return { .banner = std::move(line), .driverOutput = {}, .evidence = IdentityEvidence::Answered };
     }
 
     // NORMALIZED, not the basename as spelled -- and that is the whole point of
@@ -868,7 +868,7 @@ DriverIdentityProbe ProbeDriverIdentity(IProcessRunner& runner, std::string cons
     //
     // Lowercased and de-suffixed exactly as `ClassifyCompiler` does, so "which
     // driver is this" and "what do we call it" cannot disagree about `CL.EXE`.
-    return { .banner = NormalizedCompilerName(compiler), .driverOutput = {} };
+    return { .banner = NormalizedCompilerName(compiler), .driverOutput = {}, .evidence = IdentityEvidence::NameOnly };
 }
 
 std::string CompilerBanner(IProcessRunner& runner, std::string const& compiler)

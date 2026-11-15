@@ -1223,11 +1223,44 @@ void AddQueued(std::optional<std::uint64_t>& total, std::optional<std::uint64_t>
         // failed verification never costs the build its object; and the aside, the only
         // good copy, goes only once the put-back is confirmed.
         auto const files = Cc::MakeDiskFiles();
-        return Cc::RestoreServedObject(aside, *served, *files);
+        auto restored = Cc::RestoreServedObject(aside, *served, *files);
+        // Put back cleanly: the compile's failure is the finding, and a source this compiler
+        // rejects did not produce the object served (#1707). A put-back that failed keeps its
+        // own inconclusive answer, which says where the served object went.
+        if (restored.detail.empty())
+            return { .verdict = Cc::HitVerdict::FreshCompileFailed,
+                     .comparison = std::nullopt,
+                     .detail = std::format("the fresh compile exited {}", run.exitCode) };
+        return restored;
     }
 
     auto comparison = Cc::CompareObjectFiles(aside, *served);
     std::filesystem::remove(aside, ec);
+
+    // A difference is only evidence against the cache if the compiler reproduces ITSELF
+    // (#1758): cl 19.51 does not always, and 30 of ~380 verified hits read WRONG OBJECT for
+    // that alone. So a mismatch compiles once more and compares the two fresh objects. Paid
+    // only on a mismatch, which is the rare and expensive answer anyway.
+    if (comparison.verdict == Cc::HitVerdict::Mismatched)
+    {
+        auto const firstFresh = std::filesystem::path { *served }.concat(".pace-verify-fresh");
+        std::filesystem::copy_file(*served, firstFresh, std::filesystem::copy_options::overwrite_existing, ec);
+        if (!ec)
+        {
+            if (RunCaptureSplit(argv).exitCode == 0)
+                comparison = Cc::ConfirmMismatch(std::move(comparison), Cc::CompareObjectFiles(firstFresh, *served));
+            else
+            {
+                // The second compile failed and may have left anything at the output path, so
+                // the first fresh object -- the one this build was going to use -- goes back.
+                // The mismatch stands: a second compile that did not complete settles nothing.
+                auto const files = Cc::MakeDiskFiles();
+                if (auto restored = Cc::RestoreServedObject(firstFresh, *served, *files); !restored.detail.empty())
+                    return restored;
+            }
+            std::filesystem::remove(firstFresh, ec);
+        }
+    }
     return comparison;
 }
 
@@ -1430,9 +1463,7 @@ constexpr std::size_t ReplayRegionCount = 2;
     auto const bytes = Cc::ReadFileBytes(std::filesystem::path { path });
     if (!bytes.has_value())
         return false; // cannot read → let the normal flow handle it
-    std::string_view const text { reinterpret_cast<char const*>(bytes->data()), bytes->size() };
-    constexpr auto VolatileMacros = std::to_array<std::string_view>({ "__TIME__", "__DATE__", "__TIMESTAMP__" });
-    return std::ranges::any_of(VolatileMacros, [text](std::string_view const macro) { return text.contains(macro); });
+    return Cc::TextReferencesVolatileMacro(std::string_view { reinterpret_cast<char const*>(bytes->data()), bytes->size() });
 }
 
 // --- preprocess + compiler identity ----------------------------------------
@@ -2253,6 +2284,16 @@ void NoteNoManifest(InvocationRecord const& record, std::string_view reason)
     // exactly the same set by exactly the same derivation (#1754).
     manifest->shadowCensus = Cc::ShadowCensus(Cc::LocalizedEntries(*manifest, layout), searchDirectories, layout, listing);
 
+    // A header expanding the clock makes the unit's KEY change every second, but a manifest
+    // validates on that header's bytes, which do not: recorded, it served yesterday's date the
+    // next day (#1695). Only the main source used to be scanned.
+    if (std::ranges::any_of(Cc::LocalizedEntries(*manifest, layout),
+                            [](std::string const& path) { return SourceReferencesVolatileMacro(path); }))
+    {
+        NoteNoManifest(record, "a recorded header uses __TIME__/__DATE__/__TIMESTAMP__");
+        return ManifestRecorded::No;
+    }
+
     Note(record.verbose,
          std::format(
              "manifest: {} entries from {} reported dependency path(s) plus the source; {} shadow candidate(s) present",
@@ -2772,6 +2813,17 @@ void RecordPlanRefusal(InvocationRecord& record, PlanRefusal const& refusal)
                                std::format("dispatch preprocess failed ({}); compiling locally",
                                            Cc::DescribeFailedPreprocess(preprocessRun.exitCode, preprocessRun.err)));
 
+    // A driver whose dispatched text leaves macros unexpanded (clang-cl, #1719) needs the
+    // build's definitions IN the text, never on the worker's line: one `#define`/`#undef` per
+    // switch, ahead of everything else. Empty for every other driver, which pays no copy.
+    auto const macroPrologue = Cc::DispatchedMacroPrologue(cmd, argv);
+    if (!macroPrologue.has_value())
+        return DeclineDispatch(record,
+                               RefusedHere("the dispatched text cannot carry the build's macro switches"),
+                               std::format("{}; compiling locally", macroPrologue.error()));
+    std::string const prologuedText = macroPrologue->empty() ? std::string {} : *macroPrologue + preprocessRun.out;
+    std::string_view const dispatchedText = macroPrologue->empty() ? std::string_view { preprocessRun.out } : prologuedText;
+
     // What THIS compile records as its compilation directory, and the directory itself,
     // so a worker can make its object record the same thing. It is the launcher's own
     // working directory -- the local compile below runs with no directory of its own --
@@ -2874,7 +2926,7 @@ void RecordPlanRefusal(InvocationRecord& record, PlanRefusal const& refusal)
                                                .objectKey = key,
                                                .args = plan.args,
                                                .family = Cc::DriverOf(cmd.flavor).family,
-                                               .preprocessed = preprocessRun.out,
+                                               .preprocessed = dispatchedText,
                                                .sourceName = sourceName,
                                                .compileDir = compileDirPath,
                                                .compileDirReplacement = compileDirReplacement,
@@ -2948,7 +3000,12 @@ void RecordPlanRefusal(InvocationRecord& record, PlanRefusal const& refusal)
     // commit, so a failure between the two leaves the OLD object, out of date against the
     // edited source, beside a new dependency record -- which costs a rebuild. The other
     // order left a new object with a fresh timestamp beside the previous build's record.
-    auto const depFileText = cmd.depPath.empty() ? std::string {} : Cc::RenderDepFile(cmd.objPath, dependencyPaths);
+    // The rule the DRIVER would have written (#1696): its `-MT`/`-MQ` targets and its `-MP`
+    // phony rules, which the STORE that follows then files for every later hit.
+    auto const depRules = Cc::DepFileRulesOf(cmd, argv);
+    auto const depFileText =
+        cmd.depPath.empty() ? std::string {}
+                            : Cc::RenderDepFile(depRules.targets, dependencyPaths, depRules.phonyPerDependency, cmd.source);
     if (auto const restored = RestoreCompileOutputs(cmd, outcome.object, depFileText); !restored.has_value())
         return restored.error().role == Cc::OutputRole::Object
                    ? DeclineDispatch(record,
@@ -3233,6 +3290,9 @@ struct CachedCompile
     // absent bound copy: one whose bound value is damaged, of another generation or stale reaches the
     // STORE too, and a portable store there would overwrite the marker for every checkout.
     std::optional<Cc::CheckoutParts> metMarker {};
+    // A hit the FETCH found and refused as stale, so the compile that follows is the repair of an
+    // entry rather than a cold miss, and its record says so (#1707).
+    bool staleHit { false };
 
     /// @param result What `RunCached` returns.
     /// @return A step that settled the invocation with @p result.
@@ -3321,6 +3381,21 @@ FetchStep CachedCompile::ComputeKey()
         // resolved against the compile's working directory first, so it is
         // classified by the file it names rather than by how the driver spelled it.
         // See DependencyProbe.hpp, where each half of that filter is justified.
+        // gcc reads `<header>.gch` in place of a header it includes when one sits beside it, and
+        // nothing the key hashes shows it (#1700): the preprocessed text is the header's. A
+        // compile that could read one is not cached.
+        for (auto const& candidate:
+             Cc::ImplicitPrecompiledHeaderCandidates(argv, Cc::DriverOf(cmd.flavor).family, probe->dependencyPaths))
+        {
+            std::error_code gchError;
+            auto const path = Pace::PathFromNarrowText(candidate);
+            if (path.has_value() && std::filesystem::exists(*path, gchError))
+            {
+                Note(record.verbose, std::format("precompiled header {} would be read in place of its header", candidate));
+                return Settled(Decline(record, "gcc would read a precompiled header the key cannot see; not caching"));
+            }
+        }
+
         auto dependencies = Cc::KeyDependencySet(probe->dependencyPaths, layout, workingDirectory.string());
 
         // Both counts, because they answer different questions and only the pair
@@ -3597,6 +3672,7 @@ FetchStep CachedCompile::ServeHit(Cc::CacheOutcome const& outcome)
             return FetchStep { .decided = true,
                                .result = Warn(record, Cc::CacheActionReason(Cc::FetchObservation::HitObjectUnwritable)) };
         }
+        staleHit = materialized.disposition == HitDisposition::Stale;
         // Stale: the object is fine but the dependency record it carries is not
         // true here -- or the depfile this build names could not be written, which
         // says nothing against the entry -- so fall through and compile for real. The STORE that follows
@@ -3642,8 +3718,10 @@ void CachedCompile::TraceMiss()
     {
         // Which parts, from the marker -- and no claim about WHICH of them differs, which
         // this end cannot know: the trace and the tallied reason say the same thing.
-        TraceOutcome(
-            record, Cc::Outcome::Miss, key, boundMiss.has_value() ? Cc::BoundMissQualifier(*boundMiss) : std::string {});
+        TraceOutcome(record,
+                     staleHit ? Cc::Outcome::Stale : Cc::Outcome::Miss,
+                     key,
+                     boundMiss.has_value() ? Cc::BoundMissQualifier(*boundMiss) : std::string {});
         // A miss carrying a reason, as a crossed reply is: the cache answered honestly, and
         // what it holds under this key names paths this compile does not share -- or this
         // compile's own copy was evicted. Worth ranking, because a translation unit that is a
@@ -3830,6 +3908,9 @@ int CachedCompile::FinishMiss(Cc::CompileRun& run, bool& stored)
     }
 
     stored = StoreCompiledObject(std::move(*permit), record, cfg, key, value.objectBlob, encoded, checkout, metMarker);
+    // A compile the cache did not take is not the "compiled and stored" a MISS claims (#1707).
+    if (!stored && (record.outcome == Cc::Outcome::Miss || record.outcome == Cc::Outcome::Stale))
+        record.outcome = Cc::Outcome::StoreFailed;
 
     // Record the direct-mode manifest so the NEXT compile of this TU can reach the
     // object without preprocessing. The include set comes from the /showIncludes
@@ -4037,6 +4118,11 @@ std::optional<int> CachedCompile::AdmitAndCompile()
     // discovered the ordinary way below.
     auto const identity = Cc::ProbeDriverIdentity(ProcessRunner(), cmd.compiler);
     auto const compilerBanner = identity.banner;
+    // A driver that did not say who it is would be keyed by its file name, which every version
+    // of it shares (#1698): a transient spawn failure under a heavy `-j` keyed g++ 13 and g++ 14
+    // alike. Not cached rather than keyed on nothing.
+    if (identity.evidence == Cc::IdentityEvidence::NameOnly)
+        return Decline(record, "the compiler did not identify itself (its version probe failed); not caching");
 
     // `cc` and `c++` name a policy rather than a product, and on macOS that policy
     // resolves to Apple clang -- CMake's default C++ compiler there. Classified by
@@ -4436,6 +4522,8 @@ int main(int argc, char** argv)
                  "the compile writes a second artefact (a BMI, a precompiled header or cl's shared /Zi PDB) "
                  "or uses a precompiled header with cl (/Yu), whose object is tied to the one pch.obj it was "
                  "compiled against; a cache hit cannot reproduce either, so not cached");
+        if (!cmd.uncacheable.empty())
+            Note(record.verbose, std::format("{}; not cached", cmd.uncacheable));
         if (cmd.separatedPassThrough)
             Note(record.verbose,
                  "a clang-cl pass-through dependency flag (-clang:-MF) carries its value in a separate "

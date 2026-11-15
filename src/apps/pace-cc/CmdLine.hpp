@@ -48,6 +48,27 @@ enum class DriverFamily : std::uint8_t
     Any = 3,  ///< Msvc | Gnu — a spelling every driver accepts.
 };
 
+/// How the text a worker compiles carries the build's macro switches (#1719).
+///
+/// - **`Expanded`** -- the dispatch preprocess expands every macro, so the text carries none
+///   and the switches leave the worker's line (#1481): a definition reaching a worker that
+///   preprocesses AGAIN re-expands identifiers the source had `#undef`ed.
+/// - **`PrependedDirectives`** -- the dispatch preprocess only INLINES the includes
+///   (clang's `-frewrite-includes`) and leaves every macro unexpanded, which is what keeps the
+///   "expanded from a macro defined in a system header" context clang suppresses warnings by.
+///   Plain `/E` loses it, and under `/WX` 76% of a large MFC build failed on the worker and
+///   compiled twice. The worker must then see the build's definitions, and they still never
+///   ride its LINE (a path-valued one would refuse the whole unit, #1481): the client writes
+///   them at the top of the text as `#define`/`#undef` lines, in command-line order
+///   (`DispatchedMacroPrologue`).
+///
+/// Private to the launcher, never transmitted or persisted.
+enum class DispatchMacros : std::uint8_t
+{
+    Expanded,
+    PrependedDirectives,
+};
+
 /// How a driver can be asked where it looks for system headers.
 ///
 /// A mechanism rather than a flag list, because the two families do not merely
@@ -659,6 +680,9 @@ struct DriverSpec
     ///
     /// In the same byte run as the two above, for the padding reason they give.
     FingerprintTree fingerprintTree { FingerprintTree::DiscoveredRoots };
+    /// How the dispatched text carries the build's macro switches; decided by what
+    /// `dispatchPreprocessFlags` leaves unexpanded. In the byte run above, for its padding reason.
+    DispatchMacros dispatchMacros { DispatchMacros::Expanded };
     /// Flags that make the driver print its include search list, for
     /// `IncludeDiscovery::GnuVerbose`. Empty for every other mechanism.
     ///
@@ -798,10 +822,15 @@ struct PassThroughMatch
 struct ParsedCommand
 {
     Flavor flavor { Flavor::Unknown };
-    std::string compiler;            ///< argv[0] — the real compiler to exec.
-    std::string source;              ///< The translation-unit source path.
-    std::string objPath;             ///< The requested object output (/Fo or -o).
-    std::string depPath;             ///< The requested depfile (-MF), if any.
+    std::string compiler; ///< argv[0] — the real compiler to exec.
+    std::string source;   ///< The translation-unit source path.
+    std::string objPath;  ///< The requested object output (/Fo or -o).
+    std::string depPath;  ///< The requested depfile (-MF), if any.
+    /// Why a line that is otherwise a compile is not cacheable, when an argument says so
+    /// (`UncacheableFlags`): it reads a file or a machine property the key cannot see, or asks
+    /// for a depfile the launcher cannot name. Empty when nothing did. A reason rather than a
+    /// flag, so the launcher can say WHICH, as it does for `sideArtefact`.
+    std::string_view uncacheable;
     bool wantShowIncludes { false }; ///< True if /showIncludes was requested.
     /// True when the line also writes a BMI, a precompiled header or `cl`'s shared
     /// PDB, or uses a precompiled header under `cl` (`/Yu`), which makes it
@@ -1194,6 +1223,47 @@ struct MappedCompileDir
 /// @return The preprocess invocation, argv[0] being the compiler.
 [[nodiscard]] std::vector<std::string> DispatchPreprocessCommand(ParsedCommand const& cmd,
                                                                  std::span<std::string const> argv);
+
+/// The rule targets and phony-rule request a GNU compile's depfile is written with: every
+/// `-MT` target as written, every `-MQ` target quoted for make, the object when neither was
+/// given, and whether `-MP` asked for a phony rule per dependency (#1696). A depfile the
+/// launcher writes itself -- a dispatched compile's -- must say what the driver's would.
+struct DepFileRules
+{
+    std::vector<std::string> targets;  ///< The rule's targets, already make-quoted.
+    bool phonyPerDependency { false }; ///< `-MP`.
+};
+
+/// Read `DepFileRules` off a GNU command line.
+/// @param cmd  The parsed command; its object path is the default target.
+/// @param argv The full invocation.
+/// @return The targets and the phony request.
+[[nodiscard]] DepFileRules DepFileRulesOf(ParsedCommand const& cmd, std::span<std::string const> argv);
+
+/// The precompiled headers a GNU driver would read IMPLICITLY for this compile (#1700): gcc uses
+/// `<header>.gch` in place of a header it includes when one sits beside it, and the preprocessed
+/// text -- and so the key -- shows the header, never the `.gch`. Candidates only: every
+/// `-include` argument and every reported dependency, each with `.gch` appended. The caller asks
+/// the filesystem which exist.
+/// @param argv         The full invocation.
+/// @param family       The driver's family; anything but GNU has none.
+/// @param dependencies The dependency paths the key's preprocess reported.
+/// @return The candidate `.gch` paths.
+[[nodiscard]] std::vector<std::string> ImplicitPrecompiledHeaderCandidates(std::span<std::string const> argv,
+                                                                           DriverFamily family,
+                                                                           std::span<std::string const> dependencies);
+
+/// The `#define`/`#undef` lines a driver whose dispatched text leaves macros unexpanded writes
+/// at the top of that text, one per macro switch on the command line, in its order
+/// (`DispatchMacros::PrependedDirectives`, #1719). `-DNAME` defines `NAME` as `1`, `-DNAME=v`
+/// as `v`, an MSVC `/DNAME#v` as `v`, and `-UNAME` undefines it; a pass-through
+/// (`-clang:-DNAME=v`) is one too. Empty for an `Expanded` driver, whose text needs none.
+/// @param cmd  The parsed command.
+/// @param argv The full invocation.
+/// @return The lines, each ending in a newline; or why they cannot be written -- a definition
+///         spanning lines, or a separated pass-through whose value no position names.
+[[nodiscard]] std::expected<std::string, std::string> DispatchedMacroPrologue(ParsedCommand const& cmd,
+                                                                              std::span<std::string const> argv);
 
 /// What a failed preprocess says about itself, for the line that reports it.
 ///

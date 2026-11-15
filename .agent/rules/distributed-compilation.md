@@ -118,6 +118,16 @@ is the reproducible lesson, since no unit test can reach either:
     on the line (measured, `-clang:-D /O2 t.cpp -clang:FOO=3` defines `FOO=3`), and no drop by
     position is right -- "the next argument" there was `/O2`. The key and a local compile read
     the whole line, so it is still cached.
+  - **Since #1719 clang-cl's text is not EXPANDED, so its definitions travel IN THE TEXT.**
+    Plain `/E` dropped clang's "expanded from a macro defined in a system header" context, and
+    under `/WX` 722 of 944 units of an MFC build failed on the worker and compiled twice. The
+    dispatch preprocess is `/E /clang:-frewrite-includes`, which inlines the includes (and
+    evaluates `__has_include`, and inlines `/FI`) and expands nothing, so the worker needs the
+    build's definitions -- and they still leave its LINE, for every reason above. The client
+    writes them at the top of the text as `#define`/`#undef` lines in command-line order
+    (`DriverSpec::dispatchMacros`, `DispatchedMacroPrologue`). The text now keeps the source's
+    own `#undef`s too, which is why #1680's test needs a control naming an identifier the
+    source never undefines.
 
 - **The worker's argument filter is an ALLOWLIST, not a shape-based denylist**
   (`IsAcceptableJobArgument`, `CompileJob.cpp`). The client's arguments are spliced

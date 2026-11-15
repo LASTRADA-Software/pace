@@ -46,6 +46,32 @@ namespace
     }
 } // namespace
 
+std::string RenderDepFile(std::span<std::string const> targets,
+                          std::span<std::string const> dependencyPaths,
+                          bool phonyPerDependency,
+                          std::string_view mainSource)
+{
+    std::string joined;
+    for (auto const& target: targets)
+    {
+        if (!joined.empty())
+            joined += ' ';
+        joined += target;
+    }
+    auto out = RenderDepFile(joined, dependencyPaths);
+    if (!phonyPerDependency)
+        return out;
+    for (auto const& dep: Unique(dependencyPaths))
+    {
+        if (dep == mainSource)
+            continue;
+        out += '\n';
+        out += EscapeForMake(dep);
+        out += ":\n";
+    }
+    return out;
+}
+
 std::string RenderDepFile(std::string_view target, std::span<std::string const> dependencyPaths)
 {
     auto const deps = Unique(dependencyPaths);
