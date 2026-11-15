@@ -208,8 +208,8 @@
 #machine_memory_budget:
 
 # the memory every compile this worker runs may hold together, enforced by
-# the kernel: past it, one is killed and its client compiles it locally.
-# k/m/g = KiB/MiB/GiB or N% of host RAM. Default: the machine budget. Below
+# the kernel: past it, one is killed and its client asks the queue for it
+# once more, charged what it held. k/m/g = KiB/MiB/GiB or N% of host RAM. Default: the machine budget. Below
 # that budget it lowers the budget too. Linux, with a cgroup of the node's
 # own. Reloadable: a reload rewrites the ceiling in place, at once -- unless it
 # raises the ceiling while memory pressure holds compiles to a lowered
@@ -220,7 +220,8 @@
 # ones -- while it spends more than this share of 10 s stalled on memory (PSI
 # "some", /proc/pressure/memory) and the stall is not the compiles' own: a game
 # or an editor needs the memory. Running compiles are held to what they hold
-# then: one that grows past it is killed and its client compiles it locally.
+# then: one that grows past it is killed and its client asks the queue for it
+# once more.
 # Default 10; 0 never yields. Linux. Reloadable.
 #memory_pressure_yield:
 

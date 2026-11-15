@@ -3523,7 +3523,7 @@ oscillate:
 | Level | Entered when | What the node does |
 | --- | --- | --- |
 | `calm` | — | nothing; compiles are admitted up to their allowance |
-| `yielding` | PSI `some` `avg10` above `--memory-pressure-yield`, and the stall is **not the compiles' own** | admits no new compile on this machine — fleet ones **and its own local ones** — and holds the running ones at what they hold now (the allowance below): one that grows past it is killed by the ceiling and its client compiles it locally |
+| `yielding` | PSI `some` `avg10` above `--memory-pressure-yield`, and the stall is **not the compiles' own** | admits no new compile on this machine — fleet ones **and its own local ones** — and holds the running ones at what they hold now (the allowance below): one that grows past it is killed by the ceiling and its client asks the queue for it once more |
 | `shedding` | PSI `full` `avg10` at or above `--memory-pressure-shed` (the desktop freezing, whoever causes it), or a foreign stall that has held `yielding` for twenty seconds | admits nothing, and kills the **youngest** running compile, one per ten seconds, until the level drops |
 
 - **A stall that is the compiles' own is not a yield.** When the `compiles/` cgroup carries at least
@@ -3665,7 +3665,13 @@ machine's budget alone never answers *never fits* for a compile the workers held
   down is waited for, never ruled out.
 - **Killed twice**: the requeued compile is killed again. The one requeue is spent, so it compiles on
   the client's machine, charged there -- never a third trip through the fleet, which is how a kill
-  cannot loop. Tallied by the client as *killed for memory twice*.
+  cannot loop. Tallied by the client as *killed for memory twice*. When what it held is more than the
+  client machine's budget, the queue grants it there alone with the reason `runs-alone` -- never
+  *never fits*, since a worker held it -- and the client runs it **outside** that machine's ceiling at
+  once: the ceiling is that budget, and joining it would be a third kill.
+
+What a kill teaches is bounded by the budget of the machine the compile was killed on: a compile cannot
+hold more than its ceiling, so a peer's figure can raise an estimate at most that far.
 
 Every requeue is counted by the leader in `pace_admission_requeued_after_kill_total`. Waiting is
 bounded as every admission wait is: the queue pulses while it holds the request, and the client gives

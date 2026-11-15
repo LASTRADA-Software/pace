@@ -1418,7 +1418,8 @@ std::span<OptionSpec<NodeConfig> const> NodeOptions() noexcept
             .apply = AssignFrom<&NodeConfig::compileMemoryLimitBytes, ParseCompileMemoryBytes>(),
             .description = "the memory every compile this worker runs may hold\n"
                            "together, enforced by the kernel: past it, one is\n"
-                           "killed and its client compiles it locally. k/m/g =\n"
+                           "killed and its client asks the queue for it once\n"
+                           "more, charged what it held. k/m/g =\n"
                            "KiB/MiB/GiB or N% of host RAM. Default: the machine\n"
                            "budget. Below that budget it lowers the budget too.\n"
                            "Linux, with a cgroup of the node's own. Reloadable.",
