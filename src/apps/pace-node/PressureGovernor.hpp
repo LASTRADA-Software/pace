@@ -243,6 +243,8 @@ class PressureGovernor
     /// When each confined candidate was last seen at its own limit, held as `_atLimitSeen` is; a cgroup the source no
     /// longer reports is forgotten.
     std::map<std::filesystem::path, core::platform::SteadyTimePoint> _confinedSeen;
+    /// The cgroup the last decision named as discounted; held down to the exit thresholds.
+    std::optional<std::filesystem::path> _discounting;
 };
 
 } // namespace Pace::Node

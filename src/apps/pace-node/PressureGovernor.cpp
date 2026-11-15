@@ -137,12 +137,20 @@ GovernorDecision PressureGovernor::Step(Platform::PressureSample const& sample,
     if (killYoungest)
         _lastKill = now;
 
-    // Named only where it changed the answer: a confined stall too small to yield on is nothing to say.
+    // Named only where it changed the answer: a confined stall too small to yield on is nothing to say. With the
+    // levels' own hysteresis -- from above the entry threshold, held down to the exit one for the cgroup already
+    // named -- so a stall hovering at a threshold does not start and end the discount, and its line, every sample.
+    auto const naming = [&](std::optional<Platform::ConfinedStall> const& carrier) {
+        return carrier.has_value() && _discounting == carrier->cgroup;
+    };
     auto discounted = std::optional<Platform::ConfinedStall> {};
-    if (confined.full && systemFull >= thresholds.shedEnter)
+    if (confined.full
+        && (systemFull >= thresholds.shedEnter || (naming(confined.full) && systemFull >= thresholds.shedExit)))
         discounted = confined.full;
-    else if (confined.some && systemSome > thresholds.yieldEnter && !ownStall)
+    else if (confined.some && !ownStall
+             && (systemSome > thresholds.yieldEnter || (naming(confined.some) && systemSome >= thresholds.yieldExit)))
         discounted = confined.some;
+    _discounting = discounted.transform([](Platform::ConfinedStall const& stall) { return stall.cgroup; });
 
     return { .level = _level,
              .allowanceBytes = _allowanceBytes,

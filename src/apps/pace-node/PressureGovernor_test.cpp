@@ -860,3 +860,23 @@ TEST_CASE("A shed spares the sole compile within the allowance, and kills one pa
         CHECK(rig.governor.Step(SampleOf(Freezing), 1 * GiB).killYoungest);
     }
 }
+
+TEST_CASE("A discounted cgroup is named through a stall hovering at the threshold", "[node][pressure][confined]")
+{
+    // Named from above the entry threshold and kept down to the exit one, as a level is: a stall hovering at the
+    // yield threshold must not start and end the discount -- and its log line -- every other sample.
+    Rig rig;
+    auto const named = [&](double some) {
+        rig.clock.advance(1s);
+        auto const script = Script { .some = some, .full = 0.0, .compiles = 0.0 };
+        return rig.governor.Step(WithConfined(script, some * 0.95, 0.0, true), 0).discounted.has_value();
+    };
+    CHECK(named(11.0));
+    CHECK(named(9.5));
+    CHECK(named(10.5));
+    CHECK(named(9.0));
+    CHECK(named(5.5));
+    CHECK_FALSE(named(4.0)); // below the exit threshold: no longer anything to name
+    CHECK_FALSE(named(9.0)); // and below the entry one, a new discount is not named yet
+    CHECK(named(10.5));
+}

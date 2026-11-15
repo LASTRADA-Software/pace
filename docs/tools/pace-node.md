@@ -3555,7 +3555,8 @@ oscillate:
   counts again. The at-limit evidence is held for two dwells, so a shed can come up to twenty seconds
   late after such a cgroup leaves its limit while the stall it carried goes on. The node's own
   cgroup, its ancestors and the compiles' are never such a cgroup: a stall there is one its own yield
-  relieves. The node names the cgroup at Info when it starts not counting it, and again when it counts
+  relieves. The node names the cgroup at Info when it starts not counting it (above the entry
+  threshold, and held down to the exit one, as a level is), and again when it counts
   it once more — never per sample.
   - **What it reads, and how often.** It walks the cgroup tree under `/sys/fs/cgroup` only while the
     machine stalls at all, at most once every ten seconds: one listing and one `memory.pressure` per
