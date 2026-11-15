@@ -3879,6 +3879,41 @@ if(NOT WIN32)
 endif()
 
 # ---------------------------------------------------------------------------
+# The `clang-tidy` job analyses a changed HEADER with the command of a unit that
+# includes it (`scripts/tidy-header-commands.py`), rather than the command clang
+# interpolates from the nearest-NAMED unit -- which, for a test-only header, lacked
+# the include directories it needs and failed a required check on a header that
+# compiles everywhere it is included. The self-test drives a synthetic tree and
+# database: a direct includer's command with the source swapped for the header, a
+# header reached only through other headers, a header no unit includes getting no
+# entry AND being named, and the units already there left unchanged.
+#
+# Python through the `find_package(Python3)` above, and the verdict is the exit
+# code. Needs no compiler, so it is `hygiene`.
+#
+# `if(NOT WIN32)` as `tidy-sweep-scope` carries it: the script serves the Linux
+# leg's GNU-style compile lines, and the Windows tidy leg does not call it.
+if(NOT WIN32)
+    if(NOT Python3_Interpreter_FOUND)
+        message(WARNING
+            "tidy-header-commands-selftest: no Python 3 interpreter found, so how the "
+            "clang-tidy job chooses a changed header's compile command is NOT tested in this build tree")
+        pace_register_skipped_test("tidy-header-commands-selftest"
+            "no Python 3 interpreter found, so how the clang-tidy job chooses a changed header's compile command is NOT tested in this build tree")
+    else()
+        add_test(
+            NAME "tidy-header-commands-selftest"
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_SOURCE_DIR}/scripts/tidy-header-commands.py" --self-test
+        )
+        set_tests_properties("tidy-header-commands-selftest" PROPERTIES
+            LABELS "hygiene"
+            TIMEOUT 60
+        )
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
 # The documented way to build the tidy sweep's compile database is the way CI
 # builds it. Fails when `scripts/tidy-sweep.sh` or
 # `.agent/rules/build-and-toolchain.md` documents a configure line that differs
