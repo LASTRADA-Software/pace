@@ -790,6 +790,10 @@ struct DispatchResult
     /// records beside the fixed tally reason, so a refusal can be acted on without `-v` and
     /// without the node's counters.
     std::string refusal;
+    /// What a compile the worker's machine killed held when it died (`worker-compile-killed`'s trailer, #1770): the
+    /// lower bound its admission is settled `Killed` with. Disengaged for every other result, and for a kill nobody
+    /// measured.
+    std::optional<std::uint64_t> killedPeakBytes {};
 
     /// @return True when a worker actually ran the compiler.
     [[nodiscard]] bool Ran() const noexcept

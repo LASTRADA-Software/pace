@@ -834,13 +834,16 @@ JobError JobError::RejectedArgumentsNaming(std::span<std::string const> argument
                       .killed = std::nullopt };
 }
 
-JobError JobError::KilledCompile(Platform::CompileKill kill, std::string_view sourceName)
+JobError JobError::KilledCompile(Platform::CompileKill kill,
+                                 std::string_view sourceName,
+                                 std::optional<std::uint64_t> heldBytes)
 {
     auto const& row = CompileKillRowFor(kill);
     return JobError { .reason = JobRefusal::CompileKilled,
                       .detail = std::format("the compiler of {} was killed ({}): {}", sourceName, row.word, row.why),
                       .subjects = {},
-                      .killed = kill };
+                      .killed = kill,
+                      .killedPeakBytes = heldBytes };
 }
 
 bool IsAcceptableJobArgument(std::string_view arg, DriverSpec const& driver, std::span<std::string const> operatorAllowed)
@@ -1627,11 +1630,12 @@ std::expected<CompileOutcome, JobError> CompileJobRunner::Run(CompileJob const& 
 
     // A compiler that was KILLED answered nothing about the code, so it is refused rather than
     // returned with its 137: as an outcome, a TU that compiles would reach its client as a compiler
-    // failure. Its peak is dropped with it -- cut short, it is a lower bound, and the client's local
-    // recompile measures the true one. Named by `source`'s file name, which is `SafeSourceName`'s
-    // output and never the client's bytes.
+    // failure. Its peak rides the refusal as what it HELD -- cut short, a lower bound, which the client
+    // settles its admission with so its requeue is charged at least that (#1770); it is never reported as
+    // a measurement. Named by `source`'s file name, which is `SafeSourceName`'s output and never the
+    // client's bytes.
     if (run.killed.has_value())
-        return std::unexpected(JobError::KilledCompile(*run.killed, source.filename().string()));
+        return std::unexpected(JobError::KilledCompile(*run.killed, source.filename().string(), run.peakMemoryBytes));
 
     CompileOutcome outcome {
         .exitCode = run.exitCode,

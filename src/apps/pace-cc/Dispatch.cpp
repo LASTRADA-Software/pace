@@ -113,6 +113,8 @@ namespace
         // The peer's words alone, without the endpoint and code name `detail` wraps them in:
         // the half an operator acts on, kept for the log rather than only the verbose line.
         result.refusal = outcome.message;
+        if (result.decline == DeclineCause::MemoryKilled)
+            result.killedPeakBytes = Wire::KilledPeakOf(outcome.trailer);
         return result;
     }
 

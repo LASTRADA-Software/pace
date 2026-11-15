@@ -188,7 +188,11 @@ void AdmissionQueue::Settle(Ticket ticket, Settlement const& settlement)
         return;
     }
 
-    if (settlement.peakBytes)
+    // A killed compile's peak is what it held when it died: a lower bound, folded in as one, so the requeue it is
+    // about to make is charged at least that (#1770). Every other outcome's peak is a measurement.
+    if (settlement.outcome == SettleOutcome::Killed)
+        _estimates.RecordKilled(charge->entry.request.estimate, settlement.peakBytes);
+    else if (settlement.peakBytes)
         _estimates.Record(charge->entry.request.estimate, *settlement.peakBytes);
 
     if (settlement.outcome == SettleOutcome::Stored)

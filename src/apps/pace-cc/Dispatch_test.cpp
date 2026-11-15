@@ -2811,6 +2811,18 @@ TEST_CASE("CompileKilled: only a kill on the compile exchange sends a compile ba
         return Dispatch(fleet, Request(args), AdmittedTo(clock.now()), {}, {}, {}, &clock);
     };
     CHECK(IsWorkerCompileKilled(answeredWith(Wire::ErrorCode::WorkerCompileKilled)));
+    // What the killed compile held rides the refusal's trailer, and reaches the result (#1770); none says none.
+    {
+        ScriptedFleet fleet;
+        fleet.Serve(std::string { Worker },
+                    Wire::EncodeErrorReply(Wire::ErrorCode::WorkerCompileKilled,
+                                           "the compiler of a.cpp was killed (ceiling)",
+                                           Wire::EncodeKilledPeakTrailer(7'000'000'000ULL)));
+        auto const killed = Dispatch(fleet, Request(args), AdmittedTo(clock.now()), {}, {}, {}, &clock);
+        CHECK(killed.killedPeakBytes == std::optional<std::uint64_t> { 7'000'000'000ULL });
+        CHECK(killed.refusal == "the compiler of a.cpp was killed (ceiling)");
+    }
+    CHECK_FALSE(answeredWith(Wire::ErrorCode::WorkerCompileKilled).killedPeakBytes.has_value());
     // A spawn that failed, a full worker: neither is a compile killed for memory.
     CHECK_FALSE(IsWorkerCompileKilled(answeredWith(Wire::ErrorCode::WorkerSpawnFailed)));
     CHECK_FALSE(IsWorkerCompileKilled(answeredWith(Wire::ErrorCode::NoCapacity)));

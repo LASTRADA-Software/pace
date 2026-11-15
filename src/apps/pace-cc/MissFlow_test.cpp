@@ -145,6 +145,8 @@ struct Harness
     std::vector<AdmitTicket> granted;
     std::deque<bool> workerRefuses; ///< Per admitted dispatch: whether the worker refuses.
     std::deque<bool> workerKills;   ///< Per admitted dispatch the worker did not refuse: whether its machine kills it.
+    /// What a killed worker compile held, as the worker's refusal says.
+    std::optional<std::uint64_t> workerKilledPeak { 8'192 };
     /// How one compile run here ends.
     struct LocalScript
     {
@@ -206,7 +208,10 @@ struct Harness
                     if (refused)
                         out.setback = WorkerSetback::Refused;
                     else if (killed)
+                    {
                         out.setback = WorkerSetback::Killed;
+                        out.killedPeakBytes = workerKilledPeak;
+                    }
                     else if (!admittedDispatchDeclines)
                         out.run = CompileRun { .exitCode = compileExit, .out = {}, .err = {} };
                     return out;
@@ -991,12 +996,14 @@ TEST_CASE("Launcher.a-worker-kill-requeues-once-and-runs-elsewhere", "[launcher]
     // Never compiled here: the requeue found a machine that could hold it.
     CHECK(harness.events.Count("compile") == 0);
     CHECK(harness.events.Count("dispatch-admitted") == 2);
-    // The killed grant ended UNSETTLED -- the leader reads that as a kill and raises the estimate the requeue is
-    // charged -- and it ended before the requeue was asked.
-    CHECK_FALSE(harness.events.Saw("s0:settle"));
+    // The killed grant was settled `Killed` with what the worker said it held -- the leader charges the requeue at
+    // least that -- and it ended before the requeue was asked.
+    CHECK(harness.events.At("s0:settle") < harness.events.At("s0:closed"));
     CHECK(harness.events.At("s0:closed") < harness.events.At("s1:await"));
-    REQUIRE(harness.events.settles.size() == 1);
-    CHECK(harness.events.settles.front().outcome == Wire::SettleOutcome::Stored);
+    REQUIRE(harness.events.settles.size() == 2);
+    CHECK(harness.events.settles[0].outcome == Wire::SettleOutcome::Killed);
+    CHECK(harness.events.settles[0].peakBytes == std::optional<std::uint64_t> { 8'192 });
+    CHECK(harness.events.settles[1].outcome == Wire::SettleOutcome::Stored);
     CHECK(harness.openOrigins == std::vector<Wire::AskOrigin> { Wire::AskOrigin::First, Wire::AskOrigin::AfterKill });
     // The requeue is the request as described -- no worker excluded -- so "elsewhere or later" is the queue's call.
     CHECK(harness.asked == std::vector<std::optional<std::string>> { std::nullopt, std::nullopt });
@@ -1014,7 +1021,8 @@ TEST_CASE("Launcher.a-worker-kill-requeued-and-admitted-here-runs-in-the-ceiling
 
     CHECK(report.code == 0);
     CHECK(harness.placements == std::vector<LocalPlacement> { LocalPlacement::UnderCeiling });
-    CHECK_FALSE(harness.events.Saw("s0:settle"));
+    REQUIRE(harness.events.settles.size() == 2);
+    CHECK(harness.events.settles[0].outcome == Wire::SettleOutcome::Killed);
     CHECK(harness.events.Saw("s1:settle"));
     CHECK(harness.killSteps == std::vector<KillStep> { KillStep::WorkerRequeued });
 }
@@ -1034,10 +1042,11 @@ TEST_CASE("Launcher.killed-twice-compiles-locally-charged-here", "[launcher][adm
     CHECK(harness.events.Count("dispatch-admitted") == 2);
     CHECK(harness.events.Count("compile") == 1);
     CHECK(harness.killSteps == std::vector<KillStep> { KillStep::WorkerRequeued, KillStep::WorkerKilledTwice });
-    // Both killed grants ended unsettled; the local one asked local-only with the killing worker excluded.
-    CHECK_FALSE(harness.events.Saw("s0:settle"));
-    CHECK_FALSE(harness.events.Saw("s1:settle"));
-    CHECK(harness.events.Saw("s2:settle"));
+    // Both killed grants were settled `Killed`; the local one asked local-only with the killing worker excluded.
+    REQUIRE(harness.events.settles.size() == 3);
+    CHECK(harness.events.settles[0].outcome == Wire::SettleOutcome::Killed);
+    CHECK(harness.events.settles[1].outcome == Wire::SettleOutcome::Killed);
+    CHECK(harness.events.settles[2].outcome == Wire::SettleOutcome::Stored);
     REQUIRE(harness.asked.size() == 3);
     CHECK(harness.asked[2] == std::optional<std::string> { "worker:1" });
     // And NOT as a requeue after a kill: that ask would be judged never-fits against this machine alone, and a
@@ -1060,8 +1069,9 @@ TEST_CASE("Launcher.a-compile-no-machine-can-hold-runs-here-outside-the-ceiling"
     // The ceiling would only kill it again: outside it, under the shim, held by the grant and settled with the peak
     // it measured there -- the figure that teaches the leader what it needs.
     CHECK(harness.placements == std::vector<LocalPlacement> { LocalPlacement::OutsideCeiling });
-    REQUIRE(harness.events.settles.size() == 1);
-    CHECK(harness.events.settles.front().peakBytes == std::optional<std::uint64_t> { 4'096 });
+    REQUIRE(harness.events.settles.size() == 2);
+    CHECK(harness.events.settles[1].outcome == Wire::SettleOutcome::Stored);
+    CHECK(harness.events.settles[1].peakBytes == std::optional<std::uint64_t> { 4'096 });
     CHECK(harness.killSteps == std::vector<KillStep> { KillStep::WorkerRequeued });
 }
 
@@ -1075,15 +1085,17 @@ TEST_CASE("Launcher.a-local-kill-waits-once-then-runs-outside-the-ceiling", "[la
     auto const report = RunMiss(harness.Seams());
 
     CHECK(report.code == 0);
-    // Killed in the ceiling: the admission is abandoned and asked again, to WAIT for room; killed there again, it runs
-    // once more outside the ceiling under the same grant -- and no fourth run, whatever happens.
+    // Killed in the ceiling: the admission is settled `Killed` and asked again, to WAIT for room; killed there again, it
+    // runs once more outside the ceiling under the same grant -- and no fourth run, whatever happens.
     CHECK(harness.placements
           == std::vector<LocalPlacement> {
               LocalPlacement::UnderCeiling, LocalPlacement::UnderCeiling, LocalPlacement::OutsideCeiling });
     CHECK(harness.killSteps == std::vector<KillStep> { KillStep::LocalRequeued, KillStep::LocalOutsideCeiling });
-    CHECK_FALSE(harness.events.Saw("s0:settle"));
-    REQUIRE(harness.events.settles.size() == 1);
-    CHECK(harness.events.settles.front().outcome == Wire::SettleOutcome::Stored);
+    // The first grant is settled `Killed` with what the compile held in the ceiling, so the wait is charged that.
+    REQUIRE(harness.events.settles.size() == 2);
+    CHECK(harness.events.settles[0].outcome == Wire::SettleOutcome::Killed);
+    CHECK(harness.events.settles[0].peakBytes == std::optional<std::uint64_t> { 4'096 });
+    CHECK(harness.events.settles[1].outcome == Wire::SettleOutcome::Stored);
     CHECK(harness.openOrigins == std::vector<Wire::AskOrigin> { Wire::AskOrigin::First, Wire::AskOrigin::AfterKill });
 }
 
@@ -1100,8 +1112,10 @@ TEST_CASE("Launcher.a-kill-outside-every-ceiling-ends-the-compile-killed", "[lau
     CHECK(report.code == 137);
     CHECK(harness.placements.size() == 2);
     CHECK(harness.killSteps == std::vector<KillStep> { KillStep::LocalRequeued, KillStep::LocalKilledOutside });
-    // Neither run teaches the leader its peak -- a killed run's is a lower bound -- and nothing is stored.
-    CHECK(harness.events.settles.empty());
+    // Both runs are settled `Killed`: what they held is a lower bound the leader folds in as one, never a measure.
+    REQUIRE(harness.events.settles.size() == 2);
+    CHECK(harness.events.settles[0].outcome == Wire::SettleOutcome::Killed);
+    CHECK(harness.events.settles[1].outcome == Wire::SettleOutcome::Killed);
     CHECK_FALSE(harness.events.Saw("store"));
     CHECK_FALSE(report.peakMemoryBytes.has_value());
 }

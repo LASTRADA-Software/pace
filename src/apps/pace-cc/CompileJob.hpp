@@ -215,13 +215,20 @@ struct JobError
     /// by it (`CompileKillTable`), and a counter chosen by parsing a sentence breaks the day the
     /// sentence is reworded.
     std::optional<Platform::CompileKill> killed;
+    /// What a `CompileKilled` compile held when it died, when its cgroup said (#1770): a LOWER bound on what it
+    /// needs, carried to the client in the refusal's trailer so its requeue is charged at least that. Disengaged
+    /// for every other refusal, and for a kill nobody measured.
+    std::optional<std::uint64_t> killedPeakBytes {};
 
     /// A `CompileKilled` refusal: the compiler of @p sourceName was killed, for @p kill.
     /// @param kill Why, as the process runner reported it.
     /// @param sourceName The name the worker gave the source in scratch -- `SafeSourceName`'s
     ///        output, never the client's bytes, since this lands on the wire and in a log.
+    /// @param heldBytes What it held when it died; disengaged when unmeasured.
     /// @return The refusal, its detail naming the cause word and the source.
-    [[nodiscard]] static JobError KilledCompile(Platform::CompileKill kill, std::string_view sourceName);
+    [[nodiscard]] static JobError KilledCompile(Platform::CompileKill kill,
+                                                std::string_view sourceName,
+                                                std::optional<std::uint64_t> heldBytes = std::nullopt);
 
     /// A `RejectedArgument` refusal naming the offending argument.
     ///

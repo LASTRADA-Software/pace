@@ -72,10 +72,10 @@ void PeakEstimates::Record(EstimateKey const& key, std::uint64_t peakBytes)
     _byShape.Put(shapeKey, known != nullptr ? std::max(*known, peakBytes) : peakBytes);
 }
 
-void PeakEstimates::RecordKilled(EstimateKey const& key)
+void PeakEstimates::RecordKilled(EstimateKey const& key, std::optional<std::uint64_t> heldBytes)
 {
     auto const* const known = _byKey.Find(key.cacheKey);
-    Record(key, std::max(known != nullptr ? *known : std::uint64_t { 0 }, _defaultBytes));
+    Record(key, std::max({ known != nullptr ? *known : std::uint64_t { 0 }, _defaultBytes, heldBytes.value_or(0) }));
 }
 
 std::uint64_t PeakEstimates::DefaultBytes() const noexcept

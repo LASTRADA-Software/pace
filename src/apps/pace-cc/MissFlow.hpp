@@ -34,7 +34,8 @@ enum class WorkerSetback : std::uint8_t
     /// budget): the request goes back into the queue on the same connection.
     Refused,
     /// The worker's machine killed the compiler for memory (`worker-compile-killed`, #1770): the admission is
-    /// abandoned -- which teaches the leader the compile was killed -- and the compile asked for once more as
+    /// settled `Killed` with what it held -- the leader charges the requeue at least that -- and the compile asked
+    /// for once more as
     /// `AskOrigin::AfterKill`, never compiled here at once.
     Killed,
     Last
@@ -47,6 +48,9 @@ struct AdmittedDispatch
     std::optional<CompileRun> run;
     /// Why `run` is disengaged; meaningless when it is engaged.
     WorkerSetback setback { WorkerSetback::Failed };
+    /// What a `Killed` compile held when the worker's machine killed it, as the worker said (#1770); disengaged
+    /// otherwise. The admission is settled `Killed` with it, so the requeue is charged at least that.
+    std::optional<std::uint64_t> killedPeakBytes {};
 };
 
 /// One step the miss path took because a compiler was killed for memory (#1770). Private: never stored or sent;

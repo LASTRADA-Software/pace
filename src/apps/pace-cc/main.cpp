@@ -3085,7 +3085,9 @@ void RecordPlanRefusal(InvocationRecord& record, PlanRefusal const& refusal)
             Note(record.verbose,
                  std::format(
                      "worker {} killed the compile for memory ({})", Cc::DescribeWorkerReached(outcome), outcome.detail));
-            return Cc::AdmittedDispatch { .run = std::nullopt, .setback = Cc::WorkerSetback::Killed };
+            return Cc::AdmittedDispatch { .run = std::nullopt,
+                                          .setback = Cc::WorkerSetback::Killed,
+                                          .killedPeakBytes = outcome.killedPeakBytes };
         }
         return DeclineDispatch(record, fleetAnswer, std::format("not dispatched ({}); compiling locally", outcome.detail));
     }

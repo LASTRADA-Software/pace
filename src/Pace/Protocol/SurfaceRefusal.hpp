@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -140,14 +141,16 @@ struct UntriagedRefusal
 /// @param metrics Where the refusal is recorded, or null when nothing collects.
 /// @param refusal Which refusal, as one row.
 /// @param detail Words for a person, or empty when there are none to add.
+/// @param trailer Structured facts the code carries beside the words (`EncodeErrorReply`); empty for none.
 /// @return The encoded reply.
 [[nodiscard]] inline std::vector<std::byte> Refuse(IMetricsSink* metrics,
                                                    SurfaceRefusal const& refusal,
-                                                   std::string_view detail = {})
+                                                   std::string_view detail = {},
+                                                   std::span<std::byte const> trailer = {})
 {
     if (metrics != nullptr)
         metrics->Increment(refusal.counter);
-    return CompileCacheWire::EncodeErrorReply(refusal.code, detail);
+    return CompileCacheWire::EncodeErrorReply(refusal.code, detail, trailer);
 }
 
 /// Answer a refusal, and record it.
@@ -157,12 +160,14 @@ struct UntriagedRefusal
 /// @param metrics Where the refusal is recorded.
 /// @param refusal Which refusal, as one row.
 /// @param detail Words for a person, or empty when there are none to add.
+/// @param trailer Structured facts the code carries beside the words; empty for none.
 /// @return The encoded reply.
 [[nodiscard]] inline std::vector<std::byte> Refuse(IMetricsSink& metrics,
                                                    SurfaceRefusal const& refusal,
-                                                   std::string_view detail = {})
+                                                   std::string_view detail = {},
+                                                   std::span<std::byte const> trailer = {})
 {
-    return Refuse(&metrics, refusal, detail);
+    return Refuse(&metrics, refusal, detail, trailer);
 }
 
 /// Answer a refusal that is deliberately not counted.

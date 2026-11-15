@@ -584,7 +584,11 @@ std::vector<std::byte> WorkerProtocol::Compile(std::span<std::byte const> payloa
         // Told WHICH, at the moment the counter below is told HOW MANY and for the same row,
         // so the node can name the argument somewhere an operator looks.
         _refusals.OnJobRefused(outcome.error());
-        return Refuse(_metrics, RefusalFor(outcome.error()), outcome.error().detail);
+        // A killed compile says what it held, so its client's requeue is charged at least that (#1770).
+        auto const trailer = outcome.error().killedPeakBytes.has_value()
+                                 ? Wire::EncodeKilledPeakTrailer(*outcome.error().killedPeakBytes)
+                                 : std::vector<std::byte> {};
+        return Refuse(_metrics, RefusalFor(outcome.error()), outcome.error().detail, trailer);
     }
 
     // The peak the compiler and its children measured, for the estimate this compile was admitted

@@ -6757,7 +6757,8 @@ TEST_CASE("The admission enums have their specified bytes", "[wire][admission]")
     CHECK(static_cast<std::uint8_t>(SettleOutcome::NotStored) == 1);
     CHECK(static_cast<std::uint8_t>(SettleOutcome::Failed) == 2);
     CHECK(static_cast<std::uint8_t>(SettleOutcome::WorkerRefused) == 3);
-    CHECK(static_cast<std::uint8_t>(SettleOutcome::Last) == 4);
+    CHECK(static_cast<std::uint8_t>(SettleOutcome::Killed) == 4);
+    CHECK(static_cast<std::uint8_t>(SettleOutcome::Last) == 5);
 
     CHECK(static_cast<std::uint8_t>(LocalGrantReason::Asked) == 0);
     CHECK(static_cast<std::uint8_t>(LocalGrantReason::NoWorker) == 1);
@@ -6880,4 +6881,35 @@ TEST_CASE("The budget values keep their layout, read back as sent, and refuse a 
     CHECK(decoded.overrideId == 4242);
     CHECK_FALSE(DecodeBudgetBaselineValue(EncodeBudgetClearValue(BudgetClearValue { .tier = 1 })).has_value());
     CHECK_FALSE(DecodeBudgetDropValue(baselineBytes).has_value());
+}
+
+TEST_CASE("An error reply carries a trailer after its message, and a reader of the message never sees it",
+          "[wire][admission][oom]")
+{
+    // #1770: `worker-compile-killed` says what the killed compile held. The words stay words: every reader that
+    // takes the message stops at the separator, and the trailer is eight big-endian bytes.
+    auto const trailer = EncodeKilledPeakTrailer(0x0102030405060708ULL);
+    auto const frame =
+        EncodeErrorReply(ErrorCode::WorkerCompileKilled, "the compiler of a.cpp was killed (ceiling)", trailer);
+    auto const payload = std::span { frame }.subspan(ReplyHeaderSize);
+
+    auto const decoded = Unwrap(DecodeErrorPayload(payload));
+    CHECK(decoded.first == ErrorCode::WorkerCompileKilled);
+    CHECK(decoded.second == "the compiler of a.cpp was killed (ceiling)");
+    CHECK(std::ranges::equal(ErrorTrailerOf(payload), Bytes({ 1, 2, 3, 4, 5, 6, 7, 8 })));
+    CHECK(KilledPeakOf(ErrorTrailerOf(payload)) == std::optional<std::uint64_t> { 0x0102030405060708ULL });
+
+    // With none, the payload is byte for byte what it always was, and there is no peak.
+    auto const plain = EncodeErrorReply(ErrorCode::WorkerCompileKilled, "words");
+    auto const plainPayload = std::span { plain }.subspan(ReplyHeaderSize);
+    CHECK(plainPayload.size() == 1 + std::string_view { "words" }.size());
+    CHECK(ErrorTrailerOf(plainPayload).empty());
+    CHECK_FALSE(KilledPeakOf(ErrorTrailerOf(plainPayload)).has_value());
+    // A trailer of another shape names no peak; a message holding the separator cannot forge one.
+    CHECK_FALSE(KilledPeakOf(Bytes({ 1, 2, 3 })).has_value());
+    auto message = std::string { "a" };
+    message.push_back('\0');
+    message.append(8, '\x01');
+    auto const forged = EncodeErrorReply(ErrorCode::WorkerCompileKilled, message);
+    CHECK(ErrorTrailerOf(std::span { forged }.subspan(ReplyHeaderSize)).empty());
 }

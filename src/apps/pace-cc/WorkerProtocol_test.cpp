@@ -2904,7 +2904,7 @@ TEST_CASE("WorkerProtocol.reports-no-peak-it-did-not-measure-or-cannot-key", "[w
     }
 }
 
-TEST_CASE("WorkerProtocol.CompileKilled: a killed compile is refused by cause, counted, and reports no peak",
+TEST_CASE("WorkerProtocol.CompileKilled: a killed compile is refused by cause, counted, and says what it held",
           "[worker-protocol][machinebudget]")
 {
     // A killed compile's peak is a LOWER bound -- it was cut short -- so the worker reports none and
@@ -2951,7 +2951,11 @@ TEST_CASE("WorkerProtocol.CompileKilled: a killed compile is refused by cause, c
         auto const& [code, message] = Unwrap(refusal);
         CHECK(code == Wire::ErrorCode::WorkerCompileKilled);
         CHECK(message.contains(tested.word));
+        // What it held rides the refusal's trailer, for the client's requeue (#1770) -- and the words stop before it.
+        CHECK(Wire::KilledPeakOf(Wire::ErrorTrailerOf(reply.payload)) == std::optional<std::uint64_t> { 3'000'000'000ULL });
+        CHECK_FALSE(message.contains('\0'));
 
+        // Never a MEASUREMENT: a killed run's peak is a lower bound, reported only as what it held.
         CHECK(measurements.peaks.empty());
         REQUIRE(refusals.Seen().size() == 1);
         CHECK(refusals.Seen().front().killed == std::optional { tested.cause });

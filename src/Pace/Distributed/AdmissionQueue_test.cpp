@@ -1126,3 +1126,44 @@ TEST_CASE("AdmissionQueue.a-budget-the-allowance-holds-down-is-waited-for-not-ne
     CHECK(Unwrap(later[0].placement).machine == "w");
     CHECK_FALSE(later[0].neverFits);
 }
+
+TEST_CASE("AdmissionQueue.a-killed-compile-is-charged-at-least-what-it-held", "[distributed][admission][oom]")
+{
+    // A settle `Killed` carries what the compile held when it died: a lower bound the estimate rises to, so the
+    // requeue is charged above its first grant and placed only where a configured budget holds THAT -- not on the
+    // equal-size machine that just killed it.
+    Fixture f;
+    f.placement.byFingerprint["fp"] = { WorkerOn("small"), WorkerOn("medium"), WorkerOn("large") };
+    f.queue.ReportMachine("small", Report(2 * GiB, 4));
+    f.queue.ReportMachine("medium", Report(4 * GiB, 4));
+    f.queue.ReportMachine("large", Report(16 * GiB, 4));
+    f.queue.ReportMachine("m", Report(4 * GiB, 4));
+    f.estimates.Record(EstimateKey { .cacheKey = "grows", .sourcePath = "big.cpp", .compilerIdentity = "fp" }, 1 * GiB);
+
+    auto const first = f.Ask(AdmitKind::Dispatchable, "m", "grows", AskOrigin::First);
+    auto const placed = f.queue.Pump();
+    REQUIRE(placed.size() == 1);
+    CHECK(placed[0].chargedBytes == 1 * GiB);
+    CHECK(Unwrap(placed[0].placement).machine == "small");
+
+    f.queue.Settle(first, Settlement { .outcome = SettleOutcome::Killed, .peakBytes = 6 * GiB });
+
+    f.Ask(AdmitKind::Dispatchable, "m", "grows", AskOrigin::AfterKill);
+    auto const again = f.queue.Pump();
+    REQUIRE(again.size() == 1);
+    CHECK(again[0].chargedBytes == 6 * GiB);
+    CHECK(Unwrap(again[0].placement).machine == "large");
+    CHECK_FALSE(again[0].neverFits);
+}
+
+TEST_CASE("AdmissionQueue.a-killed-peak-raises-and-never-lowers-the-estimate", "[distributed][admission][oom]")
+{
+    // A lower bound: below what is known, it changes nothing -- a kill that came early proves no compile small.
+    Fixture f;
+    auto const key = EstimateKey { .cacheKey = "known", .sourcePath = "big.cpp", .compilerIdentity = "fp" };
+    f.estimates.Record(key, 10 * GiB);
+    f.estimates.RecordKilled(key, 5 * GiB);
+    CHECK(f.estimates.Estimate(key) == 10 * GiB);
+    f.estimates.RecordKilled(key, 12 * GiB);
+    CHECK(f.estimates.Estimate(key) == 12 * GiB);
+}

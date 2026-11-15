@@ -166,17 +166,27 @@ namespace
         return MissReport { .code = code, .queuedMs = std::nullopt, .peakMemoryBytes = run.peakMemoryBytes };
     }
 
-    /// Finish a compile that ended KILLED, with nothing settled: whatever holds it ends unsettled, which the leader
-    /// reads as a kill and so raises the compile's estimate -- where a `Failed` settle would teach it the killed run's
-    /// peak, a LOWER bound, as the compile's measure.
-    /// @param seams What to run. @param run The killed compile.
+    /// Tell the leader a compile it granted was KILLED for memory, with what it held when it died (#1770): a lower
+    /// bound the leader folds into its estimate as one, so the next ask is charged at least that -- where a `Failed`
+    /// settle would teach it the killed run's peak as the compile's MEASURE, and a bare close would teach it nothing
+    /// past the default.
+    /// @param session The held admission. @param heldBytes What the compile held; disengaged when unmeasured.
+    void SettleKilled(IAdmitSession& session, std::optional<std::uint64_t> heldBytes)
+    {
+        session.Settle(Wire::SettleRequest { .outcome = Wire::SettleOutcome::Killed, .peakBytes = heldBytes });
+    }
+
+    /// Finish a compile that ended KILLED: settled `Killed` when an admission holds it, and reported with no peak --
+    /// a killed run's is a lower bound, never the compile's measure.
+    /// @param seams What to run. @param session The held admission; null when none holds it. @param run The compile.
     /// @return The report: the compiler's own exit, and no peak.
-    [[nodiscard]] MissReport FinishKilled(MissSeams const& seams, CompileRun& run)
+    [[nodiscard]] MissReport FinishKilled(MissSeams const& seams, IAdmitSession* session, CompileRun& run)
     {
         Say(seams, KillStep::LocalKilledOutside);
-        run.peakMemoryBytes.reset();
         bool stored = false;
         auto const code = seams.finish(run, stored);
+        if (session != nullptr)
+            SettleKilled(*session, run.peakMemoryBytes);
         return MissReport { .code = code, .queuedMs = std::nullopt, .peakMemoryBytes = std::nullopt };
     }
 
@@ -191,9 +201,9 @@ namespace
 
     /// Run the compiler here under @p session, which a grant placed here.
     ///
-    /// A run killed for memory while the requeue is unspent ends the session UNSETTLED (`Killed`), so the caller
-    /// asks once more. Once it is spent, a run killed inside the ceiling runs once more outside it, under the same
-    /// grant; one killed outside every ceiling ends killed.
+    /// A run killed for memory while the requeue is unspent settles the session `Killed` with what it held, so the
+    /// caller asks once more, charged at least that. Once it is spent, a run killed inside the ceiling runs once more
+    /// outside it, under the same grant; one killed outside every ceiling ends killed.
     /// @param seams What to run. @param waits Whether the requeue is spent. @param session The held admission.
     /// @param placement Where the grant lets it run.
     /// @return The report, or `Killed` for the caller to ask again.
@@ -206,7 +216,10 @@ namespace
         if (!run.killed.has_value())
             return FinishHeld(seams, session, run);
         if (!waits.RequeueSpent())
+        {
+            SettleKilled(session, run.peakMemoryBytes);
             return Killed { .worker = std::nullopt };
+        }
         if (run.inCgroup)
         {
             Say(seams, KillStep::LocalOutsideCeiling);
@@ -214,7 +227,7 @@ namespace
             if (!run.killed.has_value())
                 return FinishHeld(seams, session, run);
         }
-        return FinishKilled(seams, run);
+        return FinishKilled(seams, &session, run);
     }
 
     /// What the FETCH after a `Stored` grant leads to.
@@ -267,8 +280,9 @@ namespace
                     switch (attempt.setback)
                     {
                         case WorkerSetback::Killed:
-                            // Ended UNSETTLED, deliberately: the leader reads the close as a kill and raises this
-                            // compile's estimate, which is what its requeue is charged (#1770).
+                            // Settled `Killed` with what the worker said it held: the leader raises this compile's
+                            // estimate to at least that, which is what its requeue is charged (#1770).
+                            SettleKilled(*session, attempt.killedPeakBytes);
                             return Killed { .worker = ticket->endpoint };
                         case WorkerSetback::Refused:
                             // The launcher's own stop. The queue DID answer, so the compile that now runs
@@ -323,7 +337,7 @@ namespace
             run = seams.compileLocal(LocalPlacement::OutsideCeiling);
         }
         if (run.killed.has_value())
-            return FinishKilled(seams, run);
+            return FinishKilled(seams, nullptr, run);
         bool stored = false;
         auto const code = seams.finish(run, stored);
         return MissReport { .code = code, .queuedMs = std::nullopt, .peakMemoryBytes = run.peakMemoryBytes };

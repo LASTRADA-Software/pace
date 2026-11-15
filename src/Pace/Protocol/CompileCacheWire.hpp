@@ -251,7 +251,9 @@ using WireVersion = std::uint8_t;
 /// Also in 18, for the same reason (#1770, before 18 was released): `AskOrigin::AfterKill`, a compile asked
 /// for again after its compiler was killed for memory, and `LocalGrantReason::NeverFits`, the leader's answer
 /// when no machine's budget can hold it. Each is an enumerator past a version-17 decoder's `Last`, which that
-/// decoder refuses as a malformed frame rather than misreads.
+/// decoder refuses as a malformed frame rather than misreads. And `SettleOutcome::Killed`, with the peak the killed
+/// compile held; a `worker-compile-killed` reply carries that peak as an error TRAILER after a `0x00` separator,
+/// which a version-17 reader would show as part of the message -- nothing it decides on.
 inline constexpr WireVersion CurrentVersion = 18;
 
 /// The oldest version this build still accepts. Equal to `CurrentVersion` while
@@ -3968,18 +3970,53 @@ inline constexpr CacheVerbs FleetSharedCacheVerbs { Op::SharedFetch, Op::SharedS
 /// @param code The refusal reason.
 /// @param message Detail for a human; falls back to the table's default when empty.
 /// @return The framed reply.
-[[nodiscard]] inline std::vector<std::byte> EncodeErrorReply(ErrorCode code, std::string_view message = {})
+/// What separates an `Error` reply's message from its TRAILER: structured facts a code carries beside the words
+/// (#1770: the peak a killed compile held). A message is text for a person and never holds this byte.
+inline constexpr std::byte ErrorTrailerSeparator { 0x00 };
+
+[[nodiscard]] inline std::vector<std::byte> EncodeErrorReply(ErrorCode code,
+                                                             std::string_view message = {},
+                                                             std::span<std::byte const> trailer = {})
 {
     if (message.empty())
         if (auto const* row = Describe(code); row != nullptr)
             message = row->defaultMessage;
-    if (message.size() >= MaxFramePayload)
+    // Text up to the separator: a message holding one would hand its tail to the trailer's reader.
+    message = message.substr(0, message.find(static_cast<char>(ErrorTrailerSeparator)));
+    if (message.size() + 1 + trailer.size() >= MaxFramePayload)
         throw std::length_error("compile-cache error message exceeds the u32 wire length");
 
-    std::vector<std::byte> payload(1 + message.size());
-    payload[0] = static_cast<std::byte>(code);
-    std::ranges::copy(AsBytes(message), std::next(payload.begin()));
+    std::vector<std::byte> payload;
+    payload.reserve(1 + message.size() + (trailer.empty() ? 0 : 1 + trailer.size()));
+    payload.push_back(static_cast<std::byte>(code));
+    std::ranges::copy(AsBytes(message), std::back_inserter(payload));
+    if (!trailer.empty())
+    {
+        payload.push_back(ErrorTrailerSeparator);
+        std::ranges::copy(trailer, std::back_inserter(payload));
+    }
     return EncodeReply(Status::Error, payload);
+}
+
+/// The trailer a `worker-compile-killed` reply carries: the peak the killed compile held, eight bytes big-endian
+/// (#1770). What the client settles its admission `Killed` with, so its requeue is charged at least that.
+/// @param peakBytes What the compile's cgroup held at its most.
+/// @return The trailer.
+[[nodiscard]] inline std::vector<std::byte> EncodeKilledPeakTrailer(std::uint64_t peakBytes)
+{
+    std::vector<std::byte> out(sizeof(std::uint64_t));
+    WireFields::PutBigEndian<std::uint64_t>(out, 0, peakBytes);
+    return out;
+}
+
+/// The peak a `worker-compile-killed` trailer names.
+/// @param trailer What followed the separator.
+/// @return The peak; disengaged for any trailer that is not exactly eight bytes -- none, or another build's.
+[[nodiscard]] inline std::optional<std::uint64_t> KilledPeakOf(std::span<std::byte const> trailer)
+{
+    if (trailer.size() != sizeof(std::uint64_t))
+        return std::nullopt;
+    return ReadBigEndian<std::uint64_t>(trailer);
 }
 
 /// Decode the fixed request header.
@@ -4099,7 +4136,7 @@ inline constexpr CacheVerbs FleetSharedCacheVerbs { Op::SharedFetch, Op::SharedS
     return AuthView { .kind = kind, .username = (*fields)[1], .secret = (*fields)[2] };
 }
 
-/// Split an `Error` reply payload into its code and message.
+/// Split an `Error` reply payload into its code and message: the text up to the trailer's separator.
 /// @param payload The bytes following the reply header.
 /// @return The code and message, or nullopt when the payload is empty.
 [[nodiscard]] inline std::optional<std::pair<ErrorCode, std::string_view>> DecodeErrorPayload(
@@ -4107,7 +4144,24 @@ inline constexpr CacheVerbs FleetSharedCacheVerbs { Op::SharedFetch, Op::SharedS
 {
     if (payload.empty())
         return std::nullopt;
-    return std::pair { static_cast<ErrorCode>(payload[0]), AsStringView(payload.subspan(1)) };
+    auto const rest = payload.subspan(1);
+    auto const separator = std::ranges::find(rest, ErrorTrailerSeparator);
+    return std::pair { static_cast<ErrorCode>(payload[0]),
+                       AsStringView(rest.first(static_cast<std::size_t>(separator - rest.begin()))) };
+}
+
+/// The trailer of an `Error` reply payload: what follows the separator after its message.
+/// @param payload The bytes following the reply header.
+/// @return The trailer; empty when there is none.
+[[nodiscard]] inline std::span<std::byte const> ErrorTrailerOf(std::span<std::byte const> payload)
+{
+    if (payload.empty())
+        return {};
+    auto const rest = payload.subspan(1);
+    auto const separator = std::ranges::find(rest, ErrorTrailerSeparator);
+    if (separator == rest.end())
+        return {};
+    return rest.subspan(static_cast<std::size_t>(separator - rest.begin()) + 1);
 }
 
 // --- distributed execution ---------------------------------------------------
@@ -10274,7 +10328,11 @@ enum class SettleOutcome : std::uint8_t
     Failed = 2,
     /// The worker declined the job: the request is parked again at the head of the queue.
     WorkerRefused = 3,
-    Last = 4
+    /// The compiler was KILLED for memory (#1770): `peakBytes`, when present, is what it held when it died -- a
+    /// LOWER bound on what it needs, which the leader folds in as one (`PeakEstimates::RecordKilled`) rather than
+    /// as a measurement. Its waiters compile themselves; the client asks again as `AskOrigin::AfterKill`.
+    Killed = 4,
+    Last = 5
 };
 
 // --- admission: ADMIT, SETTLE and MACHINE-BUDGET (#1728) ---------------------
