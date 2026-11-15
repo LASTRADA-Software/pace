@@ -1040,9 +1040,11 @@ TEST_CASE("Launcher.killed-twice-compiles-locally-charged-here", "[launcher][adm
     CHECK(harness.events.Saw("s2:settle"));
     REQUIRE(harness.asked.size() == 3);
     CHECK(harness.asked[2] == std::optional<std::string> { "worker:1" });
+    // And NOT as a requeue after a kill: that ask would be judged never-fits against this machine alone, and a
+    // compile two workers held would be counted as one no machine can hold. It is the same compile asked again.
     CHECK(
         harness.openOrigins
-        == std::vector<Wire::AskOrigin> { Wire::AskOrigin::First, Wire::AskOrigin::AfterKill, Wire::AskOrigin::AfterKill });
+        == std::vector<Wire::AskOrigin> { Wire::AskOrigin::First, Wire::AskOrigin::AfterKill, Wire::AskOrigin::AfterGrant });
 }
 
 TEST_CASE("Launcher.a-compile-no-machine-can-hold-runs-here-outside-the-ceiling", "[launcher][admission][oom]")

@@ -104,6 +104,16 @@ namespace
             return _compileGranted ? CompileCacheWire::AskOrigin::AfterGrant : CompileCacheWire::AskOrigin::First;
         }
 
+        /// What a LOCAL-ONLY ask after a failed or killed worker tells the leader: never `AfterKill`. That claim asks
+        /// the leader to place the compile only where it fits and to answer `NeverFits` when nothing does -- judged,
+        /// for a local-only ask, against THIS machine alone, so a compile two workers held but this laptop cannot would
+        /// be counted as one no machine can hold. The fallback is the same compile asked again, which `AfterGrant` says.
+        /// @return `AfterGrant` once a compile was granted, else `First`.
+        [[nodiscard]] CompileCacheWire::AskOrigin LocalOrigin() const noexcept
+        {
+            return _compileGranted || _killed ? CompileCacheWire::AskOrigin::AfterGrant : CompileCacheWire::AskOrigin::First;
+        }
+
       private:
         std::optional<std::uint64_t> _opening;
         std::optional<std::uint64_t> _total;
@@ -329,7 +339,7 @@ namespace
     /// @return A report when the compile ran under this admission, else what to do next.
     [[nodiscard]] Placement AdmitHere(MissSeams const& seams, Waits& waits, WorkerFailed const& failed)
     {
-        auto session = seams.open(std::string_view { failed.endpoint }, waits.Origin());
+        auto session = seams.open(std::string_view { failed.endpoint }, waits.LocalOrigin());
         if (session == nullptr)
             return Unplaced::FailOpen;
         auto const ticket = Read(seams, waits, session->Await());
