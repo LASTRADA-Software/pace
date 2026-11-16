@@ -49,6 +49,19 @@ class RaftLog
     {
         AppendResult result {}; ///< Whether the consistency check passed.
         LogIndex matchIndex {}; ///< How far the log now provably matches the leader.
+
+        /// The first index this append CHANGED -- truncated or appended -- or nullopt when it
+        /// changed nothing: it was rejected, every entry it carried was already held at its
+        /// term, or it carried none.
+        ///
+        /// What the follower makes durable is this and everything after it, never the request's
+        /// whole run. A leader re-sends every unacknowledged entry on every heartbeat, so a run
+        /// the follower already holds arrives once per interval for as long as its answer is
+        /// in flight -- and rewriting it each time is a truncation and TWO flushes per heartbeat.
+        /// Where those two take longer than the interval -- a flush of about half of it -- that
+        /// follower never catches up with its own leader's re-sends, and the acknowledgement that
+        /// would stop them never leaves.
+        std::optional<LogIndex> changedFrom;
     };
 
     RaftLog() = default;

@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -138,6 +139,7 @@ TEST_CASE("TryAppend accepts the first entry into an empty log", "[consensus][ra
 
     CHECK(outcome.result == AppendResult::Accepted);
     CHECK(outcome.matchIndex == LogIndex { .value = 2 });
+    CHECK(outcome.changedFrom == std::optional { LogIndex { .value = 1 } });
     CHECK(PayloadAt(log, 1) == "a");
     CHECK(PayloadAt(log, 2) == "b");
 }
@@ -150,6 +152,7 @@ TEST_CASE("A heartbeat is accepted and changes nothing", "[consensus][raft][log]
 
     CHECK(outcome.result == AppendResult::Accepted);
     CHECK(outcome.matchIndex == LogIndex { .value = 3 });
+    CHECK_FALSE(outcome.changedFrom.has_value());
     CHECK(log.LastIndex() == LogIndex { .value = 3 });
 }
 
@@ -168,6 +171,8 @@ TEST_CASE("A conflicting term truncates from the conflict and appends the leader
 
     CHECK(outcome.result == AppendResult::Accepted);
     CHECK(outcome.matchIndex == LogIndex { .value = 4 });
+    // Changed from the conflict, which is also where the durable copy must be cut.
+    CHECK(outcome.changedFrom == std::optional { LogIndex { .value = 3 } });
     CHECK(log.LastIndex() == LogIndex { .value = 4 });
     CHECK(PayloadAt(log, 1) == "a");
     CHECK(PayloadAt(log, 2) == "b");
@@ -184,8 +189,54 @@ TEST_CASE("Entries already present at the same term are skipped, not rewritten",
     auto const outcome = log.TryAppend(LogIndex { .value = 1 }, Term { .value = 1 }, incoming);
 
     CHECK(outcome.result == AppendResult::Accepted);
+    // And reported as changing nothing, so the follower rewrites nothing on disk either.
+    CHECK_FALSE(outcome.changedFrom.has_value());
     CHECK(log.LastIndex() == LogIndex { .value = 3 });
     CHECK(PayloadAt(log, 3) == "c");
+}
+
+TEST_CASE("A re-sent run with a new tail changes the log from the first entry it did not hold", "[consensus][raft][log]")
+{
+    // A leader re-sends every unacknowledged entry on every heartbeat, so the run that
+    // grows a follower's log usually starts with entries the follower already holds.
+    auto log = ThreeEntryLog();
+    auto const incoming = std::vector { Entry(1, "b"), Entry(2, "c"), Entry(2, "d") };
+
+    auto const outcome = log.TryAppend(LogIndex { .value = 1 }, Term { .value = 1 }, incoming);
+
+    CHECK(outcome.result == AppendResult::Accepted);
+    CHECK(outcome.matchIndex == LogIndex { .value = 4 });
+    CHECK(outcome.changedFrom == std::optional { LogIndex { .value = 4 } });
+    CHECK(PayloadAt(log, 4) == "d");
+}
+
+TEST_CASE("A held prefix followed by a conflict changes the log from the conflict, not from the run's start",
+          "[consensus][raft][log]")
+{
+    // The path where "where the run starts" and "where the log changed" differ AND something must
+    // be cut: the leader re-sends entries this follower holds, then one that contradicts its tail.
+    RaftLog log;
+    auto const held = std::vector { Entry(1, "a"), Entry(1, "b"), Entry(1, "c") };
+    REQUIRE(log.TryAppend(LogIndex::BeforeFirst(), Term::None(), held).result == AppendResult::Accepted);
+
+    auto const incoming = std::vector { Entry(1, "a"), Entry(1, "b"), Entry(2, "C") };
+    auto const outcome = log.TryAppend(LogIndex::BeforeFirst(), Term::None(), incoming);
+
+    CHECK(outcome.result == AppendResult::Accepted);
+    CHECK(outcome.matchIndex == LogIndex { .value = 3 });
+    CHECK(outcome.changedFrom == std::optional { LogIndex { .value = 3 } });
+    CHECK(PayloadAt(log, 3) == "C");
+}
+
+TEST_CASE("A rejected append changes nothing", "[consensus][raft][log]")
+{
+    auto log = ThreeEntryLog();
+    auto const incoming = std::vector { Entry(2, "x") };
+
+    auto const outcome = log.TryAppend(LogIndex { .value = 9 }, Term { .value = 2 }, incoming);
+
+    CHECK(outcome.result == AppendResult::Rejected);
+    CHECK_FALSE(outcome.changedFrom.has_value());
 }
 
 TEST_CASE("A duplicated older AppendEntries does not delete newer entries", "[consensus][raft][log]")
@@ -201,6 +252,7 @@ TEST_CASE("A duplicated older AppendEntries does not delete newer entries", "[co
     auto const outcome = log.TryAppend(LogIndex { .value = 1 }, Term { .value = 1 }, stale);
 
     CHECK(outcome.result == AppendResult::Accepted);
+    CHECK_FALSE(outcome.changedFrom.has_value());
     // Entry 3 must survive: nothing about this message contradicted it.
     CHECK(log.LastIndex() == LogIndex { .value = 3 });
     CHECK(PayloadAt(log, 3) == "c");

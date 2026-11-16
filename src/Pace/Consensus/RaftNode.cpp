@@ -1504,11 +1504,20 @@ void RaftNode::OnAppendEntries(AppendEntriesRequest const& request, core::platfo
         // The log is durable state on a follower exactly as on a leader: these
         // entries are about to be acknowledged, and a leader may commit on that
         // acknowledgement, so losing them to a restart loses a committed entry.
-        // `fromIndex` is where the leader's run starts, which is also the
-        // truncation point when this repaired a divergent suffix.
-        if (!request.entries.empty())
+        //
+        // From where the log CHANGED, never from where the leader's run starts:
+        // a leader re-sends every entry this node has not acknowledged on every
+        // heartbeat, so a run already held arrives again once per interval, and
+        // writing it again from `prevLogIndex + 1` truncated the durable log and
+        // flushed it twice per heartbeat. A follower whose flushes outlasted the
+        // interval fell behind its leader's re-sends for good: its reactor stayed
+        // busy persisting them, the acknowledgement that would have stopped them
+        // never reached the leader, and a joining voter was never promoted.
+        // `changedFrom` is also where a conflict truncated, so a repaired
+        // divergent suffix is still cut on disk.
+        if (outcome.changedFrom.has_value())
         {
-            RecordLogAppend(output, request.prevLogIndex.Advanced(1));
+            RecordLogAppend(output, *outcome.changedFrom);
 
             // The log moved, so the active configuration may have moved with it
             // -- forwards on a new entry, and BACKWARDS when a conflicting
@@ -1517,9 +1526,10 @@ void RaftNode::OnAppendEntries(AppendEntriesRequest const& request, core::platfo
             // back, and a node that kept one the cluster discarded would count
             // quorums against a set nobody else has.
             //
-            // Inside the guard, not beside it: a heartbeat carries no entries
-            // and cannot have moved anything, so scanning on one would be a walk
-            // of the log per interval per peer for a result that cannot change.
+            // Inside the guard, not beside it: an append that changed nothing --
+            // a heartbeat, or a re-sent run already held -- cannot have moved
+            // anything, so scanning on one would be a walk of the log per
+            // interval per peer for a result that cannot change.
             RefreshConfiguration();
         }
 

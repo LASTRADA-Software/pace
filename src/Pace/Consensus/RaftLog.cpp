@@ -133,7 +133,9 @@ void RaftLog::TruncateFrom(LogIndex from) noexcept
 RaftLog::AppendOutcome RaftLog::TryAppend(LogIndex prevIndex, Term prevTerm, std::span<LogEntry const> entries)
 {
     if (!MatchesAt(prevIndex, prevTerm))
-        return AppendOutcome { .result = AppendResult::Rejected, .matchIndex = LogIndex::BeforeFirst() };
+        return AppendOutcome { .result = AppendResult::Rejected,
+                               .matchIndex = LogIndex::BeforeFirst(),
+                               .changedFrom = std::nullopt };
 
     // Find where the incoming run stops agreeing with what we already hold. Both
     // ways out of the loop leave `appendFrom` at the first entry to copy, so the
@@ -167,12 +169,20 @@ RaftLog::AppendOutcome RaftLog::TryAppend(LogIndex prevIndex, Term prevTerm, std
 
     _entries.insert(_entries.end(), entries.begin() + static_cast<std::ptrdiff_t>(appendFrom), entries.end());
 
+    // Where the log changed, if it did: the first entry copied, which is also where a
+    // conflict truncated. Every entry before it was already held at its term, so the
+    // durable copy of it is already right and must not be rewritten.
+    auto const changedFrom =
+        appendFrom < entries.size() ? std::optional { prevIndex.Advanced(appendFrom + 1) } : std::nullopt;
+
     // Deliberately what this request proved, not LastIndex(). A duplicate of an
     // older AppendEntries skips every entry it carries and leaves a longer log in
     // place; reporting LastIndex() would tell the leader the follower matches
     // further than this request established, and the leader counts match indices
     // to decide what is committed.
-    return AppendOutcome { .result = AppendResult::Accepted, .matchIndex = prevIndex.Advanced(entries.size()) };
+    return AppendOutcome { .result = AppendResult::Accepted,
+                           .matchIndex = prevIndex.Advanced(entries.size()),
+                           .changedFrom = changedFrom };
 }
 
 } // namespace Pace::Consensus
