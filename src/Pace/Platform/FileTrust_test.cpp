@@ -801,6 +801,27 @@ using LocalBlock = std::unique_ptr<void, LocalFreeDeleter>;
     return std::format("{}\\{}", domain.data(), name.data());
 }
 
+/// The account a well-known SID names, spelled `DOMAIN\name` as THIS host localizes it.
+///
+/// Never an English literal (#1733, #1683): Windows translates its well-known accounts, so
+/// `NT AUTHORITY\LOCAL SERVICE` is `NT-AUTORITÄT\Lokaler Dienst` on a German host and the
+/// English spelling fails to resolve there (error 1332).
+/// @param sidText The SID, e.g. `S-1-5-19`.
+/// @return The account name.
+[[nodiscard]] std::string AccountNameOfSid(char const* sidText)
+{
+    PSID sid = nullptr;
+    REQUIRE(::ConvertStringSidToSidA(sidText, &sid) != FALSE);
+    LocalBlock const owned { sid };
+    std::array<char, 256> name {};
+    auto nameSize = static_cast<DWORD>(name.size());
+    std::array<char, 256> domain {};
+    auto domainSize = static_cast<DWORD>(domain.size());
+    SID_NAME_USE use = SidTypeUnknown;
+    REQUIRE(::LookupAccountSidA(nullptr, sid, name.data(), &nameSize, domain.data(), &domainSize, &use) != FALSE);
+    return std::format("{}\\{}", domain.data(), name.data());
+}
+
 /// Grant `BUILTIN\Users` read on @p path, the way `%ProgramData%` does.
 /// @param path The entry.
 /// @param inheritance `SUB_CONTAINERS_AND_OBJECTS_INHERIT` for the directory the installer
@@ -1175,7 +1196,8 @@ TEST_CASE("FileTrust: a foreign-owned entry is refused with the deletion remedy"
     }
 
     std::array const credentialLeaves { std::filesystem::path { "node-key" } };
-    auto const secured = Pace::SecureDirectoryForService(directory, "NT AUTHORITY\\LOCAL SERVICE", credentialLeaves);
+    // LOCAL SERVICE by its well-known SID, in this host's language (#1733).
+    auto const secured = Pace::SecureDirectoryForService(directory, AccountNameOfSid("S-1-5-19"), credentialLeaves);
     REQUIRE_FALSE(secured.has_value());
     INFO(secured.error());
     CHECK(secured.error().contains(key.string()));
