@@ -307,6 +307,7 @@ launcher's cache key is made of. Before `apps/pace-cc/`, `CompileCache/`.
   later edit wins by its recorded BASELINE, never by comparing clocks (`BudgetOverrideApplier`).
 - A node SERVES while it identifies its toolchains: the cheap half at startup, the walk on the heartbeat thread's
   first round, registering NOTHING until the fingerprint is real (`ToolchainSurvey` travels beside the map, no default).
+- A GNU fingerprint drops the machine's `/usr/include` by RESOLVED EQUALITY, never containment: libstdc++ is NESTED there.
 - Fingerprint inputs are CAPTURED, never re-gathered: `FINGERPRINT-INPUTS` reads what the survey
   published; ONE capture walk per process runs on a thread of its own, and no request starts one.
 - A node never reports a child's `ru_maxrss` as a compile's peak (Linux folds the spawner's RSS into it): a
@@ -1486,9 +1487,8 @@ wrong quantity**. Record a table of conditions, not a number.
 - **The receiver owes one thing back: state what would FALSIFY a claim BEFORE opening
   the file to check it**, or reading for confirmation stops at the first line that
   matches. **A relayed diagnosis is relayed code.**
-- **It does NOT reach a measurement's CONDITIONS — pin those, do not point at them**,
-  and say *why* they are pinned, or the next cleanup reverses it: the corrected comment
-  looks like the defect.
+- **It does NOT reach a measurement's CONDITIONS — pin those, do not point at them**, and say
+  *why* they are pinned, or the next cleanup reverses it: the corrected comment looks like the defect.
 
 All three, with the measurements that produced them, are in
 [`.agent/rules/compile-cache.md`](.agent/rules/compile-cache.md).

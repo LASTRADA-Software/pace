@@ -1107,16 +1107,43 @@ IncludeSearchRoots FingerprintIncludeRoots(IProcessRunner& runner,
             // and the grammar by construction, not because a probe came back empty.
             return IncludeSearchRoots { .roots = {}, .targetTriple = {}, .answered = true };
 
-        case FingerprintTree::OwnTreeWhenTargetingMsvc:
-            // A target the probe did not name keeps every root, which is the direction
-            // that can only cost a match: the borrowed trees stay in and two machines
-            // may split, as they did before #1656, rather than a tree being dropped on
-            // a guess.
+        case FingerprintTree::OwnTrees:
+            // A target the probe did not name keeps every root but the machine's own,
+            // which is the direction that can only cost a match: the borrowed trees stay
+            // in and two machines may split, as they did before #1656, rather than a
+            // tree being dropped on a guess. The machine's own roots go whatever the
+            // target, because they are recognised by what they RESOLVE to and no MSVC
+            // tree resolves to `/usr/include`.
             if (!TargetsMsvc(discovered.targetTriple))
-                return discovered;
+                return WithoutSystemIncludeRoots(host, discovered);
             return ClangResourceIncludeRoots(runner, host, compiler);
     }
     return {};
+}
+
+bool IsSystemIncludeRoot(IToolchainHost& host, std::string_view root)
+{
+    // The rows are POSIX paths, and on a host where a leading `/` is drive-relative they
+    // name whatever the current drive holds there -- not the directory a driver meant.
+    // Nothing is recognised, so everything stays folded.
+    if (host.LeadingSlashIsDriveRelative())
+        return false;
+
+    // Unresolvable is NOT a system root: two answers of `nullopt` must never compare
+    // equal, and a root that cannot be classified stays folded.
+    auto const resolved = host.ResolveDirectory(root);
+    if (!resolved.has_value())
+        return false;
+
+    return std::ranges::any_of(SystemIncludeDirectories, [&](SystemIncludeDirectory const& row) {
+        return host.ResolveDirectory(row.path) == resolved;
+    });
+}
+
+IncludeSearchRoots WithoutSystemIncludeRoots(IToolchainHost& host, IncludeSearchRoots discovered)
+{
+    std::erase_if(discovered.roots, [&host](std::string const& root) { return IsSystemIncludeRoot(host, root); });
+    return discovered;
 }
 
 std::string ParseDriverTargetTriple(std::string_view driverOutput)
@@ -1366,10 +1393,12 @@ ToolchainIdentity CachedToolchainFingerprint(IProcessRunner& runner,
         // layout -- the #195 identity of every MSVC ever installed.
         //
         // Every other row is judged here on DISCOVERY's roots, because this runs before
-        // the cache read and the folded tree of `OwnTreeWhenTargetingMsvc` is only known
+        // the cache read and the folded tree of `OwnTrees` is only known
         // on the walk. The walk asks the question again of the tree it folded -- see
         // `foldedNothing` below -- so an MSVC-targeting clang whose banner fell back and
-        // whose resource probe named no directory is refused there, never served.
+        // whose resource probe named no directory, or a GNU driver whose fallback banner
+        // sits over nothing but the machine's own include directories, is refused there,
+        // never served.
         auto const foldsNoTree = spec.fingerprintTree == FingerprintTree::None || roots.empty();
         if (spec.includeDiscovery != IncludeDiscovery::None && foldsNoTree && banner == NormalizedCompilerName(compiler))
             return IdentityDefect::NoEvidence;
@@ -1463,9 +1492,11 @@ ToolchainIdentity CachedToolchainFingerprint(IProcessRunner& runner,
     // `NoEvidence` asked again, of the tree the digest FOLDED, which only the walk
     // knows. It differs from `probeDefect` only where the walk selected fewer roots
     // than discovery found -- an MSVC-targeting clang whose resource probe named no
-    // directory -- and there a fallback banner over no tree is the string `clang++`
-    // and its grammar, every such install alike. Not cached, for the reason it was
-    // not caught above: a later HIT asks only discovery's roots, and would serve it.
+    // directory, or a GNU driver whose every discovered root was one of the machine's
+    // own (`SystemIncludeDirectories`) -- and there a fallback banner over no tree is
+    // the driver's name and its grammar, every such install alike. Not cached, for the
+    // reason it was not caught above: a later HIT asks only discovery's roots, and
+    // would serve it.
     auto const foldedNothing = probeDefect == IdentityDefect::None && walked.answered
                                && spec.includeDiscovery != IncludeDiscovery::None && walked.roots.empty()
                                && banner == NormalizedCompilerName(compiler);

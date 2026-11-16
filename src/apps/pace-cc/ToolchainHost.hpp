@@ -109,6 +109,20 @@ class IToolchainHost
     /// @return True when it exists and is a directory.
     [[nodiscard]] virtual bool DirectoryExists(std::string_view path) = 0;
 
+    /// The directory @p path names, with every symbolic link and `..` resolved.
+    ///
+    /// For asking whether two spellings name ONE directory -- the question a path is
+    /// classified by, since a path is what it RESOLVES to and never how it is spelled.
+    /// A compiler lists `/usr/include` as `/usr/lib/gcc/<target>/<version>/../../../../include`
+    /// on one machine, and `/usr/local` is a link into `/var` on an image-based one, so
+    /// neither spelling can be compared as text.
+    ///
+    /// @param path Directory path, in any spelling.
+    /// @return Its resolved, `/`-separated path; `std::nullopt` when it does not exist,
+    ///         is not a directory, or cannot be resolved -- so a caller comparing two
+    ///         answers never finds two unresolvable paths equal.
+    [[nodiscard]] virtual std::optional<std::string> ResolveDirectory(std::string_view path) = 0;
+
     /// Whether @p path names a file this host would run.
     ///
     /// On POSIX that is a regular file with an execute bit set for somebody; on

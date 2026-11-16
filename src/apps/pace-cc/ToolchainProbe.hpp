@@ -10,6 +10,7 @@
 #include <Pace/CompileCache/VersionName.hpp>
 #include <Pace/Core/EnumTable.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -475,7 +476,7 @@ struct IncludeSearchRoots
     ///
     /// Only `IncludeDiscovery::GnuVerbose` fills it: `-E -v` prints the `-cc1` line and
     /// the `Target:` header beside the search list, so this costs no spawn. It is what
-    /// `FingerprintTree::OwnTreeWhenTargetingMsvc` decides on -- and it is NOT the cache
+    /// `FingerprintTree::OwnTrees` decides on -- and it is NOT the cache
     /// key's target, which `DiscoverTargetTriple` asks for per invocation.
     std::string targetTriple;
 
@@ -503,12 +504,66 @@ struct IncludeSearchRoots
 /// @return True when a driver generating for it borrows the VC toolset and the SDK.
 [[nodiscard]] bool TargetsMsvc(std::string_view triple) noexcept;
 
+/// One include directory a GNU-family driver searches that belongs to the MACHINE rather
+/// than to the toolchain.
+struct SystemIncludeDirectory
+{
+    /// The directory, as an absolute POSIX path. Compared by what it resolves to.
+    std::string_view path;
+    /// Which of GCC's configuration values places it there -- documentation, never read.
+    std::string_view origin;
+};
+
+/// The machine's own include directories, which no toolchain fingerprint folds.
+///
+/// They hold glibc's headers and those of every `-devel` package and hand install on the
+/// machine -- never the compiler's. A worker compiles text the client ALREADY preprocessed
+/// and reads no header from either directory to generate code (measured: a clean
+/// preprocessed compile under gcc 16.2 and clang 22.1 and 20.1, C and C++, opens nothing
+/// beneath them; gcc opens one only to print the source excerpt of a diagnostic that points
+/// into it, which reaches stderr and never the object), and the cache key hashes that text,
+/// so what was installed beside the compiler is covered where it matters. Folded, the two directories split machines with
+/// byte-identical compiler packages on how many `-devel` packages each had installed, and nothing dispatched between them.
+///
+/// Recognised by EQUALITY of resolved paths, never containment: libstdc++ resolves to
+/// `/usr/include/c++/<version>`, nested under a row, and must stay folded. Debian's
+/// `/usr/include/<multiarch>` is likewise not a row and stays folded (#1783).
+///
+/// Exactly the native paths, never a sysroot's spelling of them, and that is the narrow
+/// direction: a sysroot is more than headers to a driver (Apple clang derives
+/// `-target-sdk-version` from the SDK's `SDKSettings.json`), so its tree stays folded as the evidence of
+/// which SDK a worker would build against. libstdc++ and the compiler's resource
+/// directory are roots of their own in every `-v` list and are untouched by this table.
+inline constexpr std::array<SystemIncludeDirectory, 2> SystemIncludeDirectories { {
+    { .path = "/usr/local/include", .origin = "LOCAL_INCLUDE_DIR" },
+    { .path = "/usr/include", .origin = "NATIVE_SYSTEM_HEADER_DIR" },
+} };
+
+/// Whether @p root is one of `SystemIncludeDirectories`, judged by what both resolve to.
+///
+/// Resolved rather than compared as text, because neither spelling is stable: gcc lists
+/// libstdc++ as `/usr/lib/gcc/<target>/<version>/../../../../include/c++/<version>`, and
+/// an image-based system links `/usr/local` into `/var`. A root that cannot be resolved,
+/// and every root on a host where a leading `/` is drive-relative, is NOT a system root --
+/// the direction that keeps a tree folded rather than drops one on a guess.
+/// @param host The machine's filesystem.
+/// @param root A root as the driver listed it.
+/// @return True when it resolves to the same directory as a table row does.
+[[nodiscard]] bool IsSystemIncludeRoot(IToolchainHost& host, std::string_view root);
+
+/// @p discovered with every root `IsSystemIncludeRoot` recognises removed, order kept.
+/// @param host The machine's filesystem.
+/// @param discovered What discovery answered.
+/// @return The same answer -- target and `answered` included -- over the toolchain's roots.
+[[nodiscard]] IncludeSearchRoots WithoutSystemIncludeRoots(IToolchainHost& host, IncludeSearchRoots discovered);
+
 /// The include roots a toolchain FINGERPRINT walks, chosen from those discovery found.
 ///
 /// Dispatches on `spec.fingerprintTree` with no `default:`. The answer is a subset of
 /// the toolchain's trees, never a superset, so it can only make two machines AGREE
-/// where they disagreed on a tree the driver does not own (#1656); the banner and the
-/// grammar still separate one compiler from another.
+/// where they disagreed on a tree the driver does not own -- the MSVC it borrows
+/// (#1656), the machine's `/usr/include` (`SystemIncludeDirectories`); the banner, the
+/// grammar and the trees the driver does own still separate one compiler from another.
 ///
 /// Called on the walk's path only, so a cache hit spawns nothing for it. A clang that
 /// targets MSVC is asked `-print-resource-dir` here -- one spawn, on a miss, and only on
@@ -553,7 +608,7 @@ struct IncludeSearchRoots
 /// `cl`'s banner names its toolset and target since #195, so `cl` folds none of
 /// those trees either (`FingerprintTree::None`), and a GNU-grammar clang targeting
 /// MSVC folds this directory and nothing else
-/// (`FingerprintTree::OwnTreeWhenTargetingMsvc`).
+/// (`FingerprintTree::OwnTrees`).
 ///
 /// @param runner Process-spawning seam.
 /// @param host The machine's filesystem.

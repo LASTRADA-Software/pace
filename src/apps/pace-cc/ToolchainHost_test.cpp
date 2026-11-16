@@ -11,8 +11,10 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 #if defined(_WIN32)
     #include <windows.h>
@@ -340,4 +342,45 @@ TEST_CASE("The real host reads the environment through the shared leaf", "[toolc
     CHECK(Pace::Testing::Unwrap(value) == "present");
 
     CHECK_FALSE(host->Environment("PACE_TOOLCHAIN_HOST_ABSENT").has_value());
+}
+
+TEST_CASE("The real host resolves a directory through .. and a link, and nothing else", "[toolchain-host]")
+{
+    Pace::Testing::ScratchDirectory tree { "pace-tch-resolve" };
+    tree.Write("usr/include/stdio.h", "#pragma once\n");
+    tree.Write("usr/lib/gcc/16/marker.txt", "x");
+
+    auto const host = MakeToolchainHost();
+    auto const expected = host->ResolveDirectory((tree.Path() / "usr" / "include").string());
+    REQUIRE(expected.has_value());
+
+    // gcc's own spelling of `/usr/include` resolves to the same directory.
+    CHECK(host->ResolveDirectory((tree.Path() / "usr/lib/gcc/16/../../../include").string()) == expected);
+
+    // A path that is not there, and a FILE, are no answer -- so two of them can never
+    // compare equal to each other or to a directory.
+    CHECK_FALSE(host->ResolveDirectory((tree.Path() / "absent").string()).has_value());
+    CHECK_FALSE(host->ResolveDirectory((tree.Path() / "usr/include/stdio.h").string()).has_value());
+
+#if !defined(_WIN32)
+    // A link -- the shape of an image-based system's `/usr/local` -- resolves to its
+    // target. POSIX only: creating one on Windows needs a privilege a runner may lack.
+    std::error_code ec;
+    std::filesystem::create_directory_symlink(tree.Path() / "usr" / "include", tree.Path() / "linked", ec);
+    REQUIRE_FALSE(ec);
+    CHECK(host->ResolveDirectory((tree.Path() / "linked").string()) == expected);
+#endif
+}
+
+TEST_CASE("The scripted host resolves a directory through a link it was given", "[toolchain-host]")
+{
+    ScriptedToolchainHost host;
+    host.AddDirectory("/scratch/usr/include").AddDirectoryLink("/usr/include", "/scratch/usr/include");
+
+    CHECK(host.ResolveDirectory("/usr/include") == std::optional<std::string> { "/scratch/usr/include" });
+    CHECK(host.ResolveDirectory("/scratch/usr/include/") == std::optional<std::string> { "/scratch/usr/include" });
+    // A link to nothing resolves to nothing, as a dangling link does.
+    host.AddDirectoryLink("/usr/local/include", "/scratch/absent");
+    CHECK_FALSE(host.ResolveDirectory("/usr/local/include").has_value());
+    CHECK_FALSE(host.ResolveDirectory("/never/added").has_value());
 }

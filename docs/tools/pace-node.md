@@ -444,7 +444,12 @@ change, so it costs the fleet no re-registration.
 
 Two consequences worth knowing. An operator's pinned `<fingerprint>=<compiler>` is
 **never** re-derived: it is not probed in the first place, and pinning a digest by
-hand is how you force a fleet to agree while a machine is being repaired. And a
+hand is how you force a fleet to agree while a machine is being repaired. A pin
+is also never re-derived across an UPGRADE that changes how fingerprints are
+computed: after moving to the `toolchain-v4` schema, a pin written under v3
+advertises a digest no client computes any more, and that toolchain is silently
+never matched. Re-derive such a pin (`pace-cc --print-toolchain-fingerprint
+<compiler>`) or remove it. And a
 machine whose only compiler an upgrade removed or broke keeps running while serving
 nothing, rather than exiting — the compiler may come back with the next package, and
 a routine upgrade must not be able to take a machine out of the fleet permanently.
@@ -520,7 +525,17 @@ IntelliSense XML lands in the toolset's `include` directory (#1656). So two
 Windows machines need the same compiler *version*, not the same SDK or the same
 Visual Studio languages. The banner names the target as well as the version —
 `... Version 19.51.36252 for x64` — which is what tells the x86 and x64 `cl.exe`
-of one toolset apart. Matching is
+of one toolset apart. Under GCC and Clang the machine's own `/usr/local/include`
+and `/usr/include` are left out for the same reason: they hold glibc and every
+`-devel` package and hand install, not the compiler. libstdc++ and the compiler's
+own `include` directory stay in, and so does every other directory the driver
+lists. On a distribution that keeps its architecture headers in `/usr/include`
+itself — Fedora, where this was measured — two machines therefore need the same
+compiler packages rather than the same set of libraries. Debian and Ubuntu also
+list `/usr/include/<multiarch>` (kernel headers, glibc's architecture bits, the
+architecture-specific headers of `-dev` packages), which is still folded, so
+there two machines still need matching `-dev` sets
+([#1783](https://github.com/LASTRADA-Software/pace/issues/1783)). Matching is
 byte-identical and cannot be loosened: an over-strict match costs a local
 compile, an over-loose one produces a silently wrong object that is then stored
 under a key other machines fetch.
@@ -529,7 +544,9 @@ Computing it walks that tree, which takes a few seconds the first time a machine
 sees a toolchain and is cached afterwards.
 
 **Which tree, per driver.** GCC and Clang are asked directly (`-E -v`) and fold
-every directory they list — libstdc++, an Xcode SDK. A Clang whose target is
+every directory they list — libstdc++, an Xcode SDK — except the machine's own
+`/usr/local/include` and `/usr/include`, recognised by the directory they resolve
+to. A Clang whose target is
 `*-windows-msvc*` folds only its own resource directory, as `clang-cl` does
 (`-print-resource-dir`): `<prefix>\lib\clang\<version>\include`. `cl` folds **no**
 tree: its banner names its toolset version and target, and everything its layout

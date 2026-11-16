@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <map>
+#include <optional>
 #include <ranges>
 #include <set>
 #include <string>
@@ -179,6 +180,31 @@ class ScriptedToolchainHost final: public IToolchainHost
         return _directories.contains(Normalize(path));
     }
 
+    /// Make @p link resolve to @p target, as a symbolic link to a directory does.
+    ///
+    /// The scripted half of `ResolveDirectory`: a case that needs a well-known system
+    /// path such as `/usr/include` to name a directory it wrote somewhere else says so
+    /// here, which is exactly the shape of a real machine whose `/usr/local` is a link.
+    /// @param link The spelling that is resolved.
+    /// @param target The directory it resolves to; it must be added as a directory
+    ///        for the link to resolve at all.
+    /// @return This host, for chaining.
+    ScriptedToolchainHost& AddDirectoryLink(std::string_view link, std::string_view target)
+    {
+        _directoryLinks.insert_or_assign(Normalize(link), Normalize(target));
+        return *this;
+    }
+
+    std::optional<std::string> ResolveDirectory(std::string_view path) override
+    {
+        auto key = Normalize(path);
+        if (auto const link = _directoryLinks.find(key); link != _directoryLinks.end())
+            key = link->second;
+        if (!_directories.contains(key))
+            return std::nullopt;
+        return key;
+    }
+
     bool ExecutableExists(std::string_view path) override
     {
         return _executables.contains(Normalize(path));
@@ -338,6 +364,7 @@ class ScriptedToolchainHost final: public IToolchainHost
 
     std::set<std::string> _directories;
     std::set<std::string> _executables;
+    std::map<std::string, std::string> _directoryLinks;
     bool _leadingSlashIsDriveRelative { false };
     /// `X64` by default because it is what nearly every case means by "a machine",
     /// and a case about architecture says so with `WithNativeArchitecture`.

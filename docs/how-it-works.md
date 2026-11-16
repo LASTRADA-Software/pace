@@ -286,7 +286,19 @@ machine fetches.
   the resource directory the driver names when asked (`-print-resource-dir`). They
   *borrow* the VC toolset and the SDK rather than owning them, so two machines with
   different SDKs or VS languages installed still match. A clang targeting anything
-  else carries every directory its `-v` search list names, as GCC does.
+  else carries every directory its `-v` search list names, as GCC does — except
+  the machine's own `/usr/local/include` and `/usr/include`.
+- **GCC and clang** leave out the machine's own `/usr/local/include` and
+  `/usr/include`, wherever a leading `/` names the filesystem root (measured on
+  Fedora Linux only). Those hold glibc and the headers of every `-devel` package
+  and hand install on the machine, not the compiler, and a worker reads neither to
+  generate code for a preprocessed compile. Folded, they split two Fedora machines
+  with byte-identical compiler packages on which libraries each had installed.
+  libstdc++ and the compiler's own `include` directory stay in, as does a sysroot's
+  `usr/include` — and so does Debian and Ubuntu's `/usr/include/<multiarch>`,
+  which holds architecture-specific library headers, so two such machines still
+  need matching `-dev` sets
+  ([#1783](https://github.com/LASTRADA-Software/pace/issues/1783)).
 
 None of them reads `INCLUDE` for its fingerprint. That variable is set by a
 developer command prompt and is never inherited by a Windows service — so a worker
