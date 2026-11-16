@@ -57,7 +57,13 @@ struct ToolchainFile
 /// own resource directory (`FingerprintTree`), so the same toolchain digests
 /// differently under v2 and v3. The fingerprint cache's stamp folds this tag, so an
 /// entry written under v2 is a miss rather than a v2 value served as a v3 one.
-inline constexpr std::string_view FingerprintSchema = "toolchain-v3";
+///
+/// v4: a GNU-family driver no longer folds the machine's own `/usr/local/include` and
+/// `/usr/include` (`SystemIncludeDirectories` in the launcher), which split machines
+/// with byte-identical compiler packages on which `-devel` packages each had installed.
+/// The same toolchain digests differently under v3 and v4, so a v3 node and a v4 node
+/// match nothing until both are upgraded -- the safe direction, a local compile.
+inline constexpr std::string_view FingerprintSchema = "toolchain-v4";
 
 /// Everything a toolchain fingerprint is computed from, as the digest saw it.
 ///
@@ -133,7 +139,9 @@ struct FingerprintInputs
 /// BORROWS (the VC toolset and the Windows SDK, under `cl` and under any clang
 /// targeting MSVC) is never passed, because a worker opens no header from it for a
 /// preprocessed compile, and passing it split machines on an installed VS language
-/// pack's IntelliSense XML (#1656). A banner alone is what the cache key
+/// pack's IntelliSense XML (#1656). Nor is the machine's own `/usr/include` or
+/// `/usr/local/include` under a GNU driver (v4): glibc and every `-devel` package, which
+/// split machines on what was installed BESIDE the compiler. A banner alone is what the cache key
 /// already uses, and it is too weak here: two machines can print an identical
 /// `--version` while resolving different libstdc++ headers, and for *distribution*
 /// that produces a silently wrong object rather than the stale path a replay guard

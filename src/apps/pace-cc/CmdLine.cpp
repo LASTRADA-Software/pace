@@ -406,10 +406,12 @@ namespace
           // version string covers x86_64 and aarch64 alike, and an arch-independent
           // translation unit keys the same on both.
           .targetDiscovery = TargetDiscovery::GnuTargetLine,
-          // No gcc targets MSVC, so this keeps every root for gcc itself. It is the
-          // Clang row's answer because a `cc`/`c++` that IS an MSVC-targeting clang
-          // reaches this row by its stem, and must fingerprint as the Clang row does.
-          .fingerprintTree = FingerprintTree::OwnTreeWhenTargetingMsvc,
+          // No gcc targets MSVC, so for gcc itself this keeps every root but the
+          // machine's `/usr/local/include` and `/usr/include`: libstdc++ and gcc's own
+          // `include` stay folded. It is the Clang row's answer because a `cc`/`c++`
+          // that IS an MSVC-targeting clang reaches this row by its stem, and must
+          // fingerprint as the Clang row does.
+          .fingerprintTree = FingerprintTree::OwnTrees,
           .dispatchMacros = DispatchMacros::Expanded,
           .includeProbeFlags = GnuIncludeProbe,
           .targetProbeFlags = GnuTargetProbe,
@@ -428,9 +430,10 @@ namespace
           .targetDiscovery = TargetDiscovery::ClangDriverLine,
           // On Windows its `-v` list is clang's resource directory plus the VC
           // toolset and the SDK it borrows, which it is identified without, as
-          // `clang-cl` is; anywhere else the list is libstdc++ or an SDK it reads,
-          // and stays folded (#1656).
-          .fingerprintTree = FingerprintTree::OwnTreeWhenTargetingMsvc,
+          // `clang-cl` is (#1656); anywhere else the list is libstdc++ or an SDK it
+          // reads, and stays folded -- all but the machine's own `/usr/local/include`
+          // and `/usr/include`, which hold its libraries rather than its compiler.
+          .fingerprintTree = FingerprintTree::OwnTrees,
           .dispatchMacros = DispatchMacros::Expanded,
           .includeProbeFlags = GnuIncludeProbe,
           .targetProbeFlags = GnuTargetProbe,

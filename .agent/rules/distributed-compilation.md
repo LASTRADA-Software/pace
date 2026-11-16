@@ -3159,8 +3159,19 @@ Which tree a fingerprint walks is `DriverSpec::fingerprintTree`, a column, never
 on the driver: `cl` folds **none** (its banner names toolset and target, #195), a clang
 whose `-v` probe names a `*-windows-msvc*` target folds only its resource directory (the
 `gcc` row too, since a `cc` that IS such a clang reaches it by its stem), and every
-other GNU driver keeps its whole `-v` list — libstdc++ IS read, and two machines
-can differ in it under one `--version`.
+other GNU driver keeps its `-v` list — libstdc++ IS read, and two machines
+can differ in it under one `--version` — **except the machine's own `/usr/local/include`
+and `/usr/include`** (`SystemIncludeDirectories`, `toolchain-v4`). Those are glibc and
+every `-devel` package; a clean preprocessed compile opens neither (strace-measured under
+gcc 16.2, clang 22.1 and 20.1, C and C++), and gcc reads a header beneath them only to
+print a diagnostic's source excerpt, which reaches stderr and never the object. Folding
+them split two Fedora boxes with identical compiler rpms on every toolchain. A root is
+recognised by what it RESOLVES to (`IToolchainHost::ResolveDirectory`) and by EQUALITY,
+never containment: libstdc++ resolves to `/usr/include/c++/<v>`, NESTED under a dropped
+root, and a prefix match would drop it on every real Linux host. A sysroot's `usr/include`
+deliberately is not recognised, and neither is Debian's `/usr/include/<multiarch>`
+(#1783): a root that cannot be classified stays folded, so the Fedora measurement is the
+whole of the claim.
 - **That makes the banner the whole of `cl`'s identity, so a FALLBACK banner is
   `NoEvidence` under `cl` whatever its layout** — a row that folds no tree BY
   CONSTRUCTION is judged as having none, or #195's "every MSVC is `cl`" comes back behind
@@ -4351,3 +4362,9 @@ translation unit and every test green.
   deduplicated across machines that share a cache, so the same compile can be admitted twice.
 - **[#1731](https://github.com/LASTRADA-Software/pace/issues/1731)** — admission test gaps
   deferred by the #1728 reviews.
+- **[#1783](https://github.com/LASTRADA-Software/pace/issues/1783)** — a GNU toolchain's
+  fingerprint still folds Debian and Ubuntu's `/usr/include/<multiarch>` (kernel headers,
+  glibc's architecture bits, `-dev` packages' architecture headers), so two such machines
+  with one compiler still split on their `-dev` sets. `SystemIncludeDirectories` drops only
+  the native `/usr/include` and `/usr/local/include`, by resolved EQUALITY; recognising the
+  multiarch directory needs the driver's own name for it, and a clang triple is not it.

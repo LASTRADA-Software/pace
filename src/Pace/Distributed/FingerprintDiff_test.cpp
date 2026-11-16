@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <format>
 #include <string>
 #include <utility>
 #include <vector>
@@ -153,7 +154,7 @@ TEST_CASE("Diff names a schema and a grammar difference as facts", "[distributed
     CHECK(diff.schemaDiffers);
     REQUIRE(diff.grammar.has_value());
     CHECK(Unwrap(diff.grammar).second == "msvc");
-    CHECK(diff.verdict.contains("the fingerprint schemas differ (toolchain-v3 vs toolchain-v2)"));
+    CHECK(diff.verdict.contains(std::format("the fingerprint schemas differ ({} vs toolchain-v2)", Cc::FingerprintSchema)));
     CHECK(diff.verdict.contains("the driver grammars differ (gnu vs msvc)"));
     CHECK_FALSE(diff.inferred);
 }

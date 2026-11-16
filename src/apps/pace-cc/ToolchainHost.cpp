@@ -219,6 +219,31 @@ namespace
             return std::filesystem::is_directory(*directory, ec) && !ec;
         }
 
+        std::optional<std::string> ResolveDirectory(std::string_view path) override
+        {
+            auto const opened = PathFromNarrowText(path);
+            if (!opened.has_value())
+                return std::nullopt;
+
+            // `canonical`, never `weakly_canonical`: a path that does not exist must be no
+            // answer rather than its own lexical normalization, or two missing spellings
+            // that normalize alike would be reported as one directory.
+            std::error_code ec;
+            auto const resolved = std::filesystem::canonical(*opened, ec);
+            if (ec || !std::filesystem::is_directory(resolved, ec) || ec)
+                return std::nullopt;
+
+            // `PathBytes`, never `generic_string()`, which THROWS on Windows for a name
+            // holding an unpaired surrogate. The native separator is then folded to `/`
+            // by hand, which is all `generic_string()` added -- and only where it IS a
+            // separator: on POSIX a `\` is a byte of a name, and folding it would make
+            // `/usr\include` the same directory as `/usr/include`.
+            auto bytes = PathBytes(resolved);
+            if constexpr (std::filesystem::path::preferred_separator != '/')
+                std::ranges::replace(bytes, static_cast<char>(std::filesystem::path::preferred_separator), '/');
+            return bytes;
+        }
+
         bool ExecutableExists(std::string_view path) override
         {
             auto const opened = PathFromNarrowText(path);

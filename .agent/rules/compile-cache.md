@@ -196,6 +196,9 @@ same on both — the same defect with no MSVC anywhere near it.
       platform. `toolchain-v2` and `toolchain-cache-name-v2` moved together. `toolchain-v3`
       (#1656, which trees are folded) moved alone, because the stamp folds the schema
       since then, so a bump misses every older cache entry without renaming the file.
+      `toolchain-v4` (the machine's `/usr/include` and `/usr/local/include` dropped)
+      moved alone for the same reason; no `objkey-v*` or `manifest-v*` moves with a
+      fingerprint bump, because no cache key folds the fingerprint.
     - A test staging two different include trees would pass under the bug. The banner and
       the file list are held EQUAL and the grammar is the only difference, with the
       same-grammar case asserted beside it — a digest that separated everything would pass

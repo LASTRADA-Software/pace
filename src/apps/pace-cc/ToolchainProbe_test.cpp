@@ -2958,6 +2958,178 @@ TEST_CASE("A clang targeting anything else still folds every tree it searches", 
     CHECK(oneRunner.ResourceProbes() == 0);
 }
 
+namespace
+{
+/// What one Linux machine's GNU-driver include trees say, file by file.
+struct LinuxTrees
+{
+    std::string_view libstdcxx { "// libstdc++ 16\n" }; ///< `c++/16/vector`, a root of its own.
+    std::string_view resource { "// clang 22\n" };      ///< The compiler's `stddef.h`.
+    std::string_view usrInclude { "// glibc\n" };       ///< `/usr/include/stdio.h`.
+    std::string_view usrLocal { "// refs\n" };          ///< `/usr/local/include/gsl.h`.
+    std::string_view sysroot { "// sysroot libc\n" };   ///< A sysroot's `usr/include/stdio.h`.
+    bool extraDevelPackage { false };                   ///< One more header under `/usr/include`.
+};
+
+/// A Linux clang whose `-v` list is libstdc++, its resource directory, the machine's
+/// `/usr/local/include` and `/usr/include`, and a sysroot's `usr/include` -- the last
+/// one a root nothing classifies.
+///
+/// The machine's two directories are written under the scratch tree and the scripted
+/// host LINKS `/usr/include` and `/usr/local/include` to them, which is how a real
+/// machine's are recognised too: by what they resolve to.
+///
+/// libstdc++ sits where production puts it, NESTED under the machine's `/usr/include`
+/// (`usr/include/c++/16`), and resolves: a classifier that dropped every root UNDER a
+/// system directory, rather than the directory itself, would drop it here as it would on
+/// every real Linux host, and the separation case below would go red.
+/// @param machine Where it lives.
+/// @param host The scripted machine.
+/// @param trees What each tree says.
+/// @return The install.
+[[nodiscard]] ClangMachine WriteLinuxClang(Pace::Testing::ScratchDirectory const& machine,
+                                           ScriptedToolchainHost& host,
+                                           LinuxTrees const& trees)
+{
+    auto clang = WriteClangInstall(machine, host, trees.resource, "usr/include/c++/16", trees.libstdcxx);
+    host.AddDirectory((machine / "usr/include/c++/16").generic_string());
+    auto const addRoot = [&](std::string_view relative, std::string_view file, std::string_view content) {
+        machine.Write(std::string { relative } + "/" + std::string { file }, content);
+        auto const root = (machine / std::string { relative }).generic_string();
+        host.AddDirectory(root);
+        clang.roots.push_back(root);
+        return root;
+    };
+    host.AddDirectoryLink("/usr/local/include", addRoot("usr/local/include", "gsl.h", trees.usrLocal));
+    host.AddDirectoryLink("/usr/include", addRoot("usr/include", "stdio.h", trees.usrInclude));
+    addRoot("sysroot/usr/include", "stdio.h", trees.sysroot);
+    if (trees.extraDevelPackage)
+        machine.Write("usr/include/openssl/ssl.h", "// openssl-devel\n");
+    return clang;
+}
+
+/// A Linux clang's fingerprint under @p flavor's row, refreshed.
+/// @param machine Where it lives.
+/// @param trees What each tree says.
+/// @param flavor Which driver row identifies it.
+/// @return The identity.
+[[nodiscard]] ToolchainIdentity LinuxClangIdentity(Pace::Testing::ScratchDirectory const& machine,
+                                                   LinuxTrees const& trees,
+                                                   Flavor flavor = Flavor::Clang)
+{
+    ScriptedToolchainHost host;
+    auto const clang = WriteLinuxClang(machine, host, trees);
+    ClangProbeRunner runner { ClangVerbose(LinuxTriple, LinuxTriple, clang.roots), clang.resourceDir };
+    return CachedFingerprintSerially(runner, host, clang.compiler, Clang22Banner, DriverOf(flavor), /*forceRefresh=*/true);
+}
+} // namespace
+
+TEST_CASE("A GNU driver is identified without the machine's /usr/include and /usr/local/include",
+          "[toolchain-probe][fingerprint-tree][system-include]")
+{
+    // Two Fedora machines with byte-identical compiler packages split on every toolchain:
+    // one had 137 `-devel` packages and hand-installed headers in `/usr/local/include`,
+    // the other 109 and a different hand install. Neither directory is the compiler's,
+    // and a worker opens neither for a preprocessed compile, so they agree now.
+    Pace::Testing::ScratchDirectory one { "pace-tcp-sysinc-1" };
+    Pace::Testing::ScratchDirectory two { "pace-tcp-sysinc-2" };
+    Pace::Testing::ScratchDirectory state { "pace-tcp-sysinc-state" };
+    Pace::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
+
+    auto const a = LinuxClangIdentity(one, LinuxTrees {});
+    auto const b = LinuxClangIdentity(
+        two,
+        LinuxTrees { .usrInclude = "// glibc, other -devel set\n", .usrLocal = "// glaze\n", .extraDevelPackage = true });
+    REQUIRE(a.Usable());
+    REQUIRE(b.Usable());
+    CHECK(a.fingerprint == b.fingerprint);
+
+    // The gcc row selects alike: one binary reaches both rows by its stem.
+    Pace::Testing::ScratchDirectory three { "pace-tcp-sysinc-3" };
+    Pace::Testing::ScratchDirectory four { "pace-tcp-sysinc-4" };
+    CHECK(LinuxClangIdentity(three, LinuxTrees {}, Flavor::Gcc).fingerprint
+          == LinuxClangIdentity(four, LinuxTrees { .usrInclude = "// other glibc\n" }, Flavor::Gcc).fingerprint);
+
+    // Only the digest narrowed: the roots are still the evidence the stamp and the node's
+    // re-survey watch, so installing a `-devel` package still restamps.
+    REQUIRE(b.evidence.has_value());
+    CHECK(Pace::Testing::Unwrap(b.evidence).roots.size() == 5);
+    // And the record a node explains a fingerprint from names no file of those trees.
+    REQUIRE(b.inputs.has_value());
+    CHECK_FALSE(HasPath(Pace::Testing::Unwrap(b.inputs).files, "gsl.h"));
+    CHECK(HasPath(Pace::Testing::Unwrap(b.inputs).files, "vector"));
+}
+
+TEST_CASE("libstdc++ and the compiler's resource directory still separate two GNU toolchains",
+          "[toolchain-probe][fingerprint-tree][system-include]")
+{
+    // The direction the drop must not break: the trees the compiler OWNS are its
+    // identity beyond the banner, and two builds under one version line differ there.
+    Pace::Testing::ScratchDirectory base { "pace-tcp-sysinc-own-base" };
+    Pace::Testing::ScratchDirectory stdlib { "pace-tcp-sysinc-own-stdlib" };
+    Pace::Testing::ScratchDirectory resource { "pace-tcp-sysinc-own-resource" };
+    Pace::Testing::ScratchDirectory same { "pace-tcp-sysinc-own-same" };
+    Pace::Testing::ScratchDirectory state { "pace-tcp-sysinc-own-state" };
+    Pace::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
+
+    auto const reference = LinuxClangIdentity(base, LinuxTrees {}).fingerprint;
+    CHECK(reference != LinuxClangIdentity(stdlib, LinuxTrees { .libstdcxx = "// libstdc++ 16, patched\n" }).fingerprint);
+    CHECK(reference != LinuxClangIdentity(resource, LinuxTrees { .resource = "// clang 22, patched\n" }).fingerprint);
+    // The control: identical trees agree, so the two splits are the CONTENT's doing.
+    CHECK(reference == LinuxClangIdentity(same, LinuxTrees {}).fingerprint);
+}
+
+TEST_CASE("An include root that cannot be classified stays folded", "[toolchain-probe][fingerprint-tree][system-include]")
+{
+    // Err narrow. A sysroot's `usr/include` is spelled like the machine's but resolves
+    // elsewhere, and a driver reads more of a sysroot than its headers, so it is not
+    // recognised and still separates.
+    Pace::Testing::ScratchDirectory one { "pace-tcp-sysinc-unknown-1" };
+    Pace::Testing::ScratchDirectory two { "pace-tcp-sysinc-unknown-2" };
+    Pace::Testing::ScratchDirectory state { "pace-tcp-sysinc-unknown-state" };
+    Pace::Testing::ScopedEnv const env { StateVariable, state.Path().string() };
+
+    CHECK(LinuxClangIdentity(one, LinuxTrees {}).fingerprint
+          != LinuxClangIdentity(two, LinuxTrees { .sysroot = "// another sysroot libc\n" }).fingerprint);
+}
+
+TEST_CASE("A system include root is recognised by what it resolves to", "[toolchain-probe][system-include]")
+{
+    ScriptedToolchainHost host;
+    host.AddDirectory("/scratch/usr/include").AddDirectoryLink("/usr/include", "/scratch/usr/include");
+    host.AddDirectory("/scratch/sysroot/usr/include");
+    host.AddDirectory("/scratch/usr/include/c++/16");
+
+    // Any spelling resolving to the row's directory is the row.
+    CHECK(IsSystemIncludeRoot(host, "/usr/include"));
+    CHECK(IsSystemIncludeRoot(host, "/scratch/usr/include"));
+
+    // libstdc++ resolves to a directory NESTED under the row's, and is not the row.
+    CHECK_FALSE(IsSystemIncludeRoot(host, "/scratch/usr/include/c++/16"));
+
+    // A sysroot's spelling is not, nor is a root that resolves to nothing -- and neither
+    // is `/usr/local/include`, which this machine does not have: two unresolvable paths
+    // must never compare equal.
+    CHECK_FALSE(IsSystemIncludeRoot(host, "/scratch/sysroot/usr/include"));
+    CHECK_FALSE(IsSystemIncludeRoot(host, "/usr/local/include"));
+    CHECK_FALSE(IsSystemIncludeRoot(host, "/nowhere"));
+
+    // Order and everything but the roots survive the filter.
+    auto const kept = WithoutSystemIncludeRoots(
+        host,
+        IncludeSearchRoots { .roots = { "/scratch/usr/include/c++/16", "/usr/include", "/scratch/sysroot/usr/include" },
+                             .targetTriple = std::string { LinuxTriple },
+                             .answered = true });
+    CHECK(kept.roots == std::vector<std::string> { "/scratch/usr/include/c++/16", "/scratch/sysroot/usr/include" });
+    CHECK(kept.targetTriple == LinuxTriple);
+    CHECK(kept.answered);
+
+    // On a host where a leading `/` is drive-relative the rows name nothing this driver
+    // meant, so nothing is recognised.
+    host.WithDriveRelativeSlash();
+    CHECK_FALSE(IsSystemIncludeRoot(host, "/usr/include"));
+}
+
 TEST_CASE("An MSVC-targeting clang whose resource probe cannot run is refused and not cached",
           "[toolchain-probe][fingerprint-tree]")
 {

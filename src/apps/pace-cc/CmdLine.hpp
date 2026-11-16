@@ -230,19 +230,30 @@ enum class FingerprintTree : std::uint8_t
     /// discovery finds -- the toolset it lives in, the newest SDK -- is one a worker
     /// never opens for a dispatched compile.
     None,
-    /// The driver's own resource directory when it targets MSVC, exactly as
-    /// `clang-cl` is identified -- and every discovered root otherwise. A GNU-grammar
-    /// clang on Windows lists the VC toolset and the SDK in its `-v` search list; on
-    /// Linux it lists libstdc++, which it does read, and that stays folded. Decided by
-    /// the target the include probe's own output names, so it costs no spawn on a
-    /// driver that targets anything else.
+    /// The trees the toolchain OWNS, out of a GNU-family `-v` search list.
+    ///
+    /// When the driver targets MSVC, its own resource directory, exactly as `clang-cl`
+    /// is identified: a GNU-grammar clang on Windows lists the VC toolset and the SDK
+    /// it borrows. Decided by the target the include probe's own output names, so it
+    /// costs no spawn on a driver that targets anything else.
+    ///
+    /// Otherwise every discovered root but the MACHINE's own include directories --
+    /// `SystemIncludeDirectories`, `/usr/local/include` and `/usr/include`, recognised
+    /// by what they resolve to. Those hold glibc and every `-devel` package and hand
+    /// install, never the compiler, so two machines with one compiler package split on
+    /// which libraries were installed beside it. libstdc++ and the compiler's resource
+    /// directory are listed as roots of their own and stay folded, as does any root
+    /// that cannot be classified. A SYSROOT's `usr/include` is deliberately not
+    /// recognised: a driver reads more of a sysroot than its headers -- Apple clang
+    /// derives `-target-sdk-version` from the SDK's `SDKSettings.json` -- so its tree
+    /// is the only evidence of which SDK a worker would compile against.
     ///
     /// The `gcc` row carries it too, although no gcc targets MSVC. One binary reaches
     /// both rows -- the node and `--print-toolchain-fingerprint` classify a driver by
     /// its STEM, the launcher corrects that by its banner, and both share one cache
     /// file per grammar -- so a `cc` that is really an MSVC-targeting clang must
     /// fingerprint alike under either row, or a worker and its clients split.
-    OwnTreeWhenTargetingMsvc,
+    OwnTrees,
 };
 
 /// True when two family sets overlap.

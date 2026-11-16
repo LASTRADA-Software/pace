@@ -1341,7 +1341,7 @@ TEST_CASE("toolchain_diff refuses a side digested under another schema, naming b
                                              Cc::ComputeToolchainFingerprint(foreign)));
     CHECK(result.isError);
     CHECK(result.text.contains("schema skew"));
-    CHECK(result.text.contains("pace-node 1.0.0 under fingerprint schema toolchain-v3"));
+    CHECK(result.text.contains(std::format("pace-node 1.0.0 under fingerprint schema {}", Cc::FingerprintSchema)));
     CHECK(result.text.contains("pace-node 0.9.0 under toolchain-v2"));
 }
 

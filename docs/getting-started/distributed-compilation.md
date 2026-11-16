@@ -861,7 +861,13 @@ on nothing but an installed Visual Studio language pack (#1656). `clang-cl`, and
 the driver names when asked (`-print-resource-dir`), because they borrow the VC
 toolset and the SDK rather than owning them — so two machines with different
 SDKs or VS languages installed still match. A clang targeting anything else
-carries every directory its `-v` search list names, as GCC does. None of them
+carries every directory its `-v` search list names, as GCC does — except the
+machine's own `/usr/local/include` and `/usr/include`, which hold its libraries
+(glibc, every `-devel` package, hand installs) rather than its compiler. On Fedora,
+where this was measured, two machines therefore need the same compiler packages,
+not the same `-devel` set. Debian and Ubuntu also list `/usr/include/<multiarch>`,
+which is still folded, so there two machines still need matching `-dev` sets
+([#1783](https://github.com/LASTRADA-Software/pace/issues/1783)). None of them
 derives its fingerprint from `INCLUDE`, which is set per developer command
 prompt and never inherited by a service — so a worker installed as a service
 matches the launchers that talk to it.
