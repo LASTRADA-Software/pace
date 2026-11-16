@@ -2675,11 +2675,9 @@ keep it writable only by root
 tighten it to `0640 root:pace-node` if you put a `requirepass:` in it, since
 the default is readable by every local account.
 
-Compile peaks are **not measured** by the shipped unit, for the reason given under
-[measuring what a compile used](#measuring-what-a-compile-used-linux): measuring takes a
-delegated cgroup, and the unit keeps `ProtectControlGroups=yes`. The node runs correctly and says
-so with a `compile-memory-unmeasured` notice; the same section carries the drop-in that turns
-the measurement on.
+The shipped unit delegates the `memory` controller to the node, so compile peaks are measured and
+every compile runs under one memory ceiling; the reasoning for each line is under
+[memory: measurement, ceiling and pressure](#memory-measurement-ceiling-and-pressure-linux).
 
 Socket activation means systemd owns the port: it answers from boot, so a client
 that leases this worker never races its startup, and an idle worker costs
@@ -3119,7 +3117,7 @@ address — so a list is written as one key with every value under it.
 
 | Reloadable | Requires a restart |
 |---|---|
-| `log_level`, `allow_compile_arg`, `requirepass`, `fleet_open`, `toolchain`, `no_toolchain_discovery`, `advertise`, `raft_self`, `cache_memory`, `cache_disk` | `slots`, `node_class`, `reserve_cores`, and every listen, cluster and TLS setting and every other cache setting |
+| `log_level`, `allow_compile_arg`, `requirepass`, `fleet_open`, `toolchain`, `no_toolchain_discovery`, `advertise`, `raft_self`, `cache_memory`, `cache_disk`, `compile_memory_limit`, `memory_pressure_yield`, `memory_pressure_shed` | `slots`, `node_class`, `reserve_cores`, and every listen, cluster and TLS setting and every other cache setting |
 
 `log_level`, `allow_compile_arg`, `requirepass` and `fleet_open` take
 effect immediately and tell the fleet nothing; `toolchain` and `no_toolchain_discovery`
@@ -3130,6 +3128,12 @@ section states. `raft_self` moves the address this node's peers dial for consens
 bounded slices while it serves -- and a cluster budget override set against the old value is
 dropped, because the edit is the later change (see [cache budget overrides](#cache-budget-overrides-applied-by-the-member)).
 Turning the memory tier on or off, to or from `0`, still takes a restart and is refused by name.
+`compile_memory_limit` rewrites the ceiling over every compile this worker runs, and the machine's budget is
+reported to the fleet, at once -- except that a RAISE waits on the memory-pressure allowance while a yield or
+shed has it lowered, ramping toward the new value ([layer C](#layer-c-the-pressure-governor)); a lowering is
+always at once.
+`memory_pressure_yield` and `memory_pressure_shed` move where the pressure governor acts from its next
+sample, a second later ([layer C](#layer-c-the-pressure-governor)).
 
 Both default to `auto`: the address this machine routes from, on the bound port while the
 listener binds the wildcard, re-derived when the network changes (this machine's fully
@@ -3413,7 +3417,7 @@ tally that also covers a full connection cap, so read the node's own counter: a 
 `pace_worker_jobs_refused_endpoint_busy_total` is the signal to raise
 `--compile-inflight-max`.
 
-#### Measuring what a compile used (Linux)
+#### Memory: measurement, ceiling and pressure (Linux)
 
 A worker reports the peak memory of each compile to the fleet, and the fleet's queue charges
 later compiles of the same kind by it. The figure the kernel offers every process for free,
@@ -3421,7 +3425,7 @@ later compiles of the same kind by it. The figure the kernel offers every proces
 folded into the child's high-water mark when it executes, so a node holding a 13 GB cache tier
 would report 13 GB for every compile — and a budget charged by it admits four jobs on a machine
 with thirty slots. (`pace-cc` is small, so its own local compiles are measured that way
-correctly.)
+correctly; the ones it can place in this node's ceiling are measured there instead.)
 
 So a Linux node measures each compile in **a cgroup of its own** (cgroup v2): the compiler is
 started directly inside a fresh `job-<n>` cgroup under the node's, the cgroup's `memory.peak`
@@ -3431,47 +3435,319 @@ left behind dies with the compile) and removed. At startup the node moves itself
 `node/` cgroup, as cgroup v2 requires of a cgroup that hands a controller to its children, and
 enables the `memory` controller for the others.
 
-That needs a cgroup the node may write to, which **the shipped unit does not give it**: it keeps
-`ProtectControlGroups=yes`, the cgroup filesystem is read-only to it, and the node runs with
-compile peaks unmeasured. It says so at startup (`compile peak memory is not measured ...` at
-Warn) and raises the `compile-memory-unmeasured` condition, whose detail names the first thing
-it found missing. Nothing else is affected: every compile is correct, and the estimator
-falls back to `--compile-estimate-default` rather than learn from a figure it cannot trust.
+That needs a cgroup the node may write to, which **the shipped units give it**. The system unit
+sets `Delegate=memory`, `ProtectControlGroups=private` and `RestrictNamespaces=no`; the user unit
+(`pace-node-user.service`) sets `Delegate=memory` and `RestrictNamespaces=no`. What each buys:
 
-To measure, give the node its own delegated cgroup with a drop-in
-(`systemctl edit pace-node`):
+- `Delegate=memory` hands the node a cgroup subtree to create children in, with the `memory`
+  controller. The node moves itself into a leaf `node/` cgroup (cgroup v2 requires it of a cgroup
+  that hands a controller to its children), enables `memory` for the others, and keeps every
+  compile under `compiles/`.
+- `ProtectControlGroups=private` gives the service a cgroup namespace with a writable mount of its
+  own delegated subtree and nothing else. It needs systemd 257 or newer; the packages declare no
+  minimum systemd, and an older one logs a parse warning, ignores the value
+  and leaves the setting at `no`: the unit starts and delegation works, with the whole cgroup
+  filesystem writable to the service. Say `ProtectControlGroups=no` in a drop-in
+  (`systemctl edit pace-node`) to make that explicit; do not use `yes`, which makes the
+  delegated subtree read-only and leaves the node uncapped. The user unit has no such line:
+  systemd does not support it for user instances, and the user manager's tree is already writable
+  by its user.
+- `RestrictNamespaces=no` because starting a process inside a cgroup is `clone3`, which a seccomp
+  filter cannot inspect: systemd refuses it outright whenever any namespace is restricted
+  (measured on systemd 259: `ENOTSUP`). `SystemCallFilter=@system-service` permits `clone3` itself.
+- `Slice=pace.slice` (system unit only) runs the node in a slice of its own, a sibling of
+  `system.slice`, which is what keeps a system-unit node out of systemd-oomd's choice of victim
+  (#1773). The package ships the slice; it limits nothing.
+- `ManagedOOMPreference=omit` states the intent to keep the node out of systemd-oomd's choice of
+  victim; what actually takes it out is the node's own mark on its `node/` cgroup under the user
+  unit, and the slice above under the system unit (see layer A below).
 
-```ini
-[Service]
-# A cgroup subtree the node may create children in, with the memory controller.
-Delegate=memory
-# Hands the service its own view of the cgroup tree, writable inside the delegated
-# subtree only. Requires systemd 257 or newer; on older systemd use
-# ProtectControlGroups=no, which opens the whole cgroup filesystem to the service.
-ProtectControlGroups=private
-# Starting a process inside a cgroup is the clone3 system call, and a seccomp filter
-# cannot inspect its flags: systemd refuses clone3 outright whenever any namespace is
-# restricted. The node checks this at startup and names it if it is refused.
-RestrictNamespaces=no
-```
-
-`SystemCallFilter=@system-service` permits `clone3` on current systemd and needs no change. The
-user unit (`pace-node-user.service`) needs the same `Delegate=memory` and `RestrictNamespaces=no`
-in its drop-in (`systemctl --user edit pace-node-user`); the user manager's own cgroup tree is
-already writable by its user, so `ProtectControlGroups` does not come into it. A node started by
-hand from a terminal is not delegated — the terminal's scope holds the shell — and runs
-unmeasured; so does a node on a kernel older than 5.19, which has no `memory.peak`, or on a
-glibc older than 2.39, which cannot start a process inside a cgroup. The check is on the effect, not
-on a marker: systemd's delegation xattr is unreadable to the unprivileged account a service runs
-as, so the node verifies instead that it may write the cgroup, that nothing else lives in it,
-that the system lets it start a process inside a cgroup, and that `memory` is still enabled when it
-reads it back. On macOS and Windows a child's `ru_maxrss` / job object is the child's own and is used
-as it is. On any other platform nothing measures a compile apart from the node, and the node says so
-at Info and raises nothing: no remedy would apply.
+A node started by hand from a terminal is not delegated — the terminal's scope holds the shell — and
+runs unmeasured and uncapped; so does a node on a kernel older than 5.19, which has no `memory.peak`,
+or on a glibc older than 2.39, which cannot start a process inside a cgroup. The check is on the
+effect, not on a marker: systemd's delegation xattr is unreadable to the unprivileged account a service
+runs as, so the node verifies instead that it may write the cgroup, that nothing else lives in it, that
+the system lets it start a process inside a cgroup, and that `memory` is still enabled when it reads it
+back. Where it cannot, it says so at startup (`compile peak memory is not measured ...` and the
+ceiling's counterpart, at Warn) and raises `compile-memory-unmeasured` and `compile-memory-uncapped`,
+whose details name the first thing it found missing; under systemd the remedy for an older unit is
+the three lines above in a drop-in. Nothing else is affected: every compile is correct, and the
+estimator falls back to `--compile-estimate-default` rather than learn from a figure it cannot trust.
+On macOS and Windows a child's `ru_maxrss` / job object is the child's own and is used as it is, and
+no ceiling is applied. On any other platform nothing measures a compile apart from the node, and the
+node says so at Info and raises nothing: no remedy would apply.
 
 A compile that runs unmeasured *after* startup — a cgroup that could not be made, a compiler the
 system would not start inside it, a cgroup the kernel gave no `memory.peak` for — is counted in
 `pace_worker_compiles_unmeasured_total` and said once at Warn per body.
+
+##### Layer B: one ceiling over every compile
+
+The node writes one memory ceiling on the `compiles/` cgroup — never on the delegated cgroup, so the
+node's own memory (the cache tier) is outside it and can never be the victim of an overrun — and
+sets `memory.swap.max=0` there: a compile does not swap, since swapping buys nothing when the client can
+recompile and is what freezes a desktop. Each `job-<n>` cgroup has `memory.oom.group=1`, so the kernel
+kills a compile whole (driver, `cc1plus`, `ld`, LTO workers) and never leaves a half-dead driver waiting
+on a killed child. There is no `memory.high`: a compile throttled at it would register as memory
+stall in the machine's pressure figures and make the pressure layer see a shortage that is not there.
+
+The ceiling defaults to the machine budget the node already reports to the fleet's queue (75% of RAM
+less the cache reservation, or `--machine-memory-budget`), so admission and the ceiling cannot
+disagree. `--compile-memory-limit` (YAML `compile_memory_limit`, **reloadable**) overrides it; typed
+below the budget, it lowers the budget the node reports too, so the queue never admits what the
+ceiling would kill. A reload rewrites the control file at once -- lowered or raised -- and never writes a limit
+above the configured value. The one exception to *at once* is a raise while the memory-pressure allowance is
+lowered (layer C below): the ceiling then stays at the allowance and grows toward the new value with it. The startup line states the ceiling in force and whether it was derived or typed.
+
+A compile the ceiling killed is **never a compiler failure**. It is classified *killed* when its
+cgroup's `memory.events` shows `oom_kill` above zero, when the node's own shedding killed it, or when
+the compiler ended by `SIGKILL` for any other reason — a compiler never sends itself `SIGKILL`, so
+this also covers systemd-oomd or the global OOM killer. The worker answers `worker-compile-killed`
+(`0x35`), and the client treats it as a miss that **waits for memory** rather than compiling locally at
+once (see *A killed compile waits for memory* below); the kill is counted by cause in
+`pace_worker_compiles_killed_ceiling_total`, `..._shed_total` and `..._signal_total` and logged once
+per kill at Info, naming the cause and the source file's name as the worker gave it in scratch (its base
+name) -- not its cache key, which the worker does not hold, and not its full path.
+
+##### Layer C: the pressure governor
+
+The ceiling keeps compiles from taking more than their share; it cannot know that a game, an IDE or a
+browser needs memory *now*. So every node watches the machine's memory pressure — the kernel's
+pressure stall information (PSI), `/proc/pressure/memory`, read once a second on a thread of its own —
+and the `compiles/` cgroup's own `memory.pressure` beside it. The first says *the machine is stalling
+on memory*; the second says *and the compiles are the ones stalling*, which tells "the game needs
+memory" apart from "compiles are fighting each other under their ceiling". It has three levels, each
+with an entry threshold, an exit threshold below it and a ten-second minimum stay, so it cannot
+oscillate:
+
+| Level | Entered when | What the node does |
+| --- | --- | --- |
+| `calm` | — | nothing; compiles are admitted up to their allowance |
+| `yielding` | PSI `some` `avg10` above `--memory-pressure-yield`, and the stall is **not the compiles' own** | admits no new compile on this machine while any compile runs there — fleet ones **and its own local ones** — and holds the running ones at what they hold now (the allowance below): one that grows past it is killed by the ceiling and its client asks the queue for it once more |
+| `shedding` | PSI `full` `avg10` at or above `--memory-pressure-shed` (the desktop freezing, whoever causes it), or a foreign stall that has held `yielding` for twenty seconds | admits nothing while any compile runs there, and kills the **youngest** running compile, one per ten seconds, until the level drops — but never the **sole** compile while it holds no more than the allowance |
+
+- **A stall that is the compiles' own is not a yield.** When the `compiles/` cgroup carries at least
+  80% of the machine's `some` stall **and has stood at its own ceiling within the last twenty seconds**
+  — its `memory.events` `max` count rose between two samples, or `memory.current` was within 5% of
+  `memory.max` — the stall is the ceiling working. The evidence is held for two dwells because it
+  describes a second while PSI's `avg10` describes ten, and must outlive the first moment a shed may end: a shed's own kill leaves the survivors below
+  the ceiling while the average still carries the stall they caused. When those files cannot be read
+  the node says so once at Warn, and every stall counts as foreign until they can. An own stall
+  keeps the level calm; a yield caused by something else is not held by the
+  compiles then stalling against the allowance it set. Compiles far below their ceiling that stall
+  with the machine are stalling because the kernel reclaims from everyone, a game's shortage
+  included, so that yields. Leaving `shedding` treats a `full` stall the compiles carry the same way,
+  and `shedding` left that way is not re-entered on the same stall: it takes the `full` stall turning
+  foreign, or falling below a fifth of `--memory-pressure-shed`, before a freeze sheds again.
+  Without a readable compiles reading every stall counts as foreign, and the node says so once at
+  Warn (and once at Info when it is readable again).
+- **A stall confined to another cgroup's own limit is not the machine's.** PSI is the host's, and a
+  service stalling at its own `memory.max` (or throttled at its own `memory.high`) raises it as
+  surely as a shortage does — with gigabytes free, and nothing freeing them could relieve it. So a
+  cgroup elsewhere that carries at least 80% of the machine's `some` stall while standing
+  at its own limit — its own `memory.events.local` count (the hierarchical `memory.events` on a kernel
+  without it) rose between two samples, held for two dwells as the compiles' evidence is; standing
+  near a limit it never reaches, as page cache filling up to it does, is not enough — neither yields nor sheds, and
+  eases a level the way an own stall does — its `full` stall too, but only as the owner of the `some`
+  share: in a machine-wide freeze every busy cgroup's `full` reads about the machine's, a cgroup at its
+  own limit included, so `full` alone says nothing about whose a freeze is. One cgroup must carry the
+  share alone; a real shortage stalls the rest of the machine too, so the share drops and the stall
+  counts again. The at-limit evidence is held for two dwells, so a shed can come up to twenty seconds
+  late after such a cgroup leaves its limit while the stall it carried goes on. The node's own
+  cgroup, its ancestors and the compiles' are never such a cgroup: a stall there is one its own yield
+  relieves. The node names the cgroup at Info when it starts not counting it (above the entry
+  threshold, and held down to the exit one, as a level is), and again when it counts
+  it once more — never per sample.
+  - **What it reads, and how often.** It walks the cgroup tree under `/sys/fs/cgroup` only while the
+    machine stalls at all, at most once every ten seconds: one listing and one `memory.pressure` per
+    child, descending only into a cgroup that carries 80% of the `some` stall (a cgroup's PSI covers its
+    subtree, so nothing below one that does not can), at most 64 cgroups and 8 levels. Between walks
+    each second re-reads only the up to four cgroups the last walk kept. A cgroup that reaches its limit
+    after a walk is found by the next: until then its stall counts as the machine's, which yields when it
+    need not — admissions lost, never a freeze missed.
+  - **A tree it cannot list** is no confined stall at all: every stall counts as the machine's, and the
+    node says so once at Warn (and once at Info when it can read the tree again). A subtree it may not
+    read counts the same way, silently.
+- **An idle machine still runs its own compiles, one at a time.** Once none of the fleet's compiles
+  runs or is reserved on it, the queue admits this machine's OWN next compile that fits the budget
+  it reports (under pressure, the allowance below), and nothing beside it. PSI is the host's, so
+  another cgroup stalling at its own `memory.max` raises it as surely as a shortage does, and
+  nothing a build does can end that: holding every compile until it ends stalled a build on that
+  machine for as long as it lasted. Another machine's compile is never placed on a pressed machine.
+- **The sole compile within the allowance is spared.** Under `shedding` the queue still runs this
+  machine's own compiles one at a time; killing that one would only send it back, admit it, kill it
+  again and run it outside every ceiling after the second kill. So while exactly one compile runs and
+  it holds no more than the allowance — which the ceiling already holds it to — the shed kills nothing,
+  and says so once at Info. Two or more, or one past the allowance, and the youngest is killed as below.
+- **The leader gives back what a settled compile was counted as.** A machine report counts what runs
+  there; once a compile the queue granted has settled, a report that arrived during it no longer
+  counts it, so the next of the machine's own compiles runs at once rather than at the next 20 s report.
+- **The youngest** because it has made the least progress, so its client loses the least by
+  compiling it again. It is marked *shed* before its `cgroup.kill` is written, so the worker answers
+  `worker-compile-killed` with that cause and counts it in `pace_worker_compiles_killed_shed_total`;
+  its client asks the queue for it once more, as for a ceiling kill.
+- **The allowance.** Entering `yielding` or `shedding` sets the compiles' allowance to what they hold at that
+  moment — the larger of what `compiles/` is resident in (`compiles/memory.current`) and what the
+  machine's compiles are charged, local leases included — the work that demonstrably fits beside
+  whatever else runs, but never less than one default compile estimate (`--compile-estimate-default`),
+  so a machine whose compiles held next to nothing still reports a budget one compile fits. It becomes both the ceiling written on `compiles/memory.max` and the budget the
+  machine reports, so the fleet's queue and the kernel agree. **A running compile that grows past it is
+  killed by the ceiling** (`worker-compile-killed`, counted in `pace_worker_compiles_killed_ceiling_total`)
+  and its client asks the queue for it once more: a yield stops new work *and* caps the work already running. While
+  `calm` it grows back by 5% of the configured ceiling every 30 s, so it reaches the configured value in
+  ten minutes; a new yield resets it. It is never above the configured ceiling — `--compile-memory-limit`,
+  or the machine budget — and it lives in the node process only: a restart starts calm, at the
+  configured value.
+- **A raise of the configured ceiling** (a reload of `--compile-memory-limit`, or a cache tier that
+  shrank) takes effect at once while the allowance stands at the configured value — pressure never
+  lowered it, or it has ramped all the way back. While a yield or shed has it lowered, it stays where
+  it is and ramps toward the new value instead, and the node says so once at Info (`the compile ceiling
+  rose to ... but compiles stay held to ...`). A lowered ceiling always applies at once.
+- **The fleet hears it at once.** A level change sends the machine-budget report immediately rather
+  than at the next 20 s round, carrying the level beside the lowered budget, and the leader's queue
+  admits nothing on a machine whose report is not `calm` while any compile runs or is reserved there,
+  and no other machine's compile at all — the run-alone exception for a compile larger than the whole
+  budget included. Idle, the machine runs its own compiles that fit, one at a time. That exception stays closed while the allowance still holds
+  the reported budget below the configured one, `calm` or not: the report says which, and a compile
+  larger than the held budget waits for the ramp rather than run alone into a ceiling that kills it.
+
+Each change is logged once — at Warn entering `shedding`, at Info otherwise — naming the level, the
+system's `some` and `full` figures and the allowance. The level is the live condition
+`memory-pressure-shedding` (raised while not `calm`; the detail names the level and the allowance),
+the gauge `pace_node_memory_pressure` (0 calm, 1 yielding, 2 shedding; absent where no watcher runs), the counters
+`pace_node_memory_pressure_{yield,shed}_seconds_total` and `..._{yield,shed}_entries_total`, and the
+binding limit `memory-pressure` in `pacectl node`'s slot ceilings and the dashboard's node panel.
+
+| Option | Default | What it states |
+| --- | --- | --- |
+| `--memory-pressure-yield` (`memory_pressure_yield`) | `10` | The PSI `some` `avg10` percentage above which a foreign stall yields; it eases below half of it. `0` never yields. **Reloadable.** |
+| `--memory-pressure-shed` (`memory_pressure_shed`) | `5` | The PSI `full` `avg10` percentage at which the node sheds; it eases below a fifth of it. `0` never sheds — a held yield is not escalated either. **Reloadable.** |
+
+The defaults sit far below systemd-oomd's (Fedora 44's per-slice defaults kill a whole cgroup in
+`system.slice` or in a user's slices at 80% pressure held for 20 s — under the user unit that is the
+desktop, the game and the editor with it): 10% `some` over ten seconds is already a desktop that
+stutters, and 5% `full` one that freezes, so the node acts before oomd chooses a victim.
+
+**Degraded modes.** On a node whose compiles run in no cgroup of its own (a hand-started node, an
+older unit, `--slots=0`), the watcher still runs on system PSI and changes only what the machine
+reports — its level and allowance, so the queue still stops admitting work there — and its start line
+says so: no ceiling is lowered and nothing is killed. Without PSI (a kernel built without it, or
+`psi=0` on its command line) the watcher does not run: the node says why once at startup, at Info --
+a stated no-op rather than a fault -- answers `memory-pressure-shedding` not evaluated, and reports no
+`pace_node_memory_pressure` at all. On a platform other than Linux it never samples, and says so the
+same way.
+
+##### Layer A: compilers are the kernel's first victims
+
+Every compiler a worker runs starts with `oom_score_adj=1000`, the kernel's largest, so when the
+machine runs out of memory the kernel's OOM killer picks a compile before a desktop process — and
+before the node, whose own score is never changed. The node does not spawn the compiler directly: it
+spawns its own binary under the name `pace-oom-victim-exec`, which writes `1000` to
+`/proc/self/oom_score_adj` and then `exec`s the compiler. The score is set **before** the `exec`, so
+the compiler and every process it starts (`cc1plus`, `ld`, LTO workers) inherit it from their first
+instruction; there is no window in which any of them runs at the node's score, which writing the score
+from outside after the spawn could not promise. The shim is what the compile's `job-<n>` cgroup
+receives, and it becomes the compiler by `exec`, so the measurement and the ceiling above are
+unchanged. The shim is chosen by the name it is invoked under, never by a flag, so nothing an operator
+types selects it and no service registration carries it.
+
+Raising its own score needs no privilege. If the write fails anyway (no `/proc`), the shim prints one
+warning on the compile's stderr and the compile still runs, at the node's score: a compile matters
+more than its kill priority. On a platform other than Linux there is no `oom_score_adj`, and compilers
+are spawned directly, as before.
+
+For the third party in that picture, systemd-oomd: oomd kills a whole cgroup, and with the node in
+its choice the node would die with its cache tier, so the node takes its own `node/` cgroup out of
+oomd's choice by setting the extended attribute `user.oomd_omit=1` on it at startup; the ceiling
+(layer B) and the pressure governor (layer C) act on single compiles first, the governor at thresholds
+set far below oomd's (above) so that it acts before oomd chooses a victim. The units' own
+`ManagedOOMPreference=omit` line does not do this by itself: it marks the unit's cgroup, which under
+`Delegate=` is no leaf, and oomd reads the mark on the cgroup it would kill rather than inheriting it.
+
+**Where the mark is honoured.** oomd honours a `user.` attribute only on a cgroup owned by the user its
+manager runs as. Under the shipped **user** unit the node's `node/` cgroup is the user's own, so the
+mark takes effect. Under the **system** unit `node/` is owned by the service account, so root's oomd
+ignores the mark; what takes that node out instead is where its cgroup sits (#1773). oomd only chooses
+a cgroup below one it monitors, and Fedora's defaults monitor `system.slice` and the user managers'
+slices (`/usr/lib/systemd/{system/system.slice.d,user/slice.d}/10-oomd-per-slice-defaults.conf`, 80%
+pressure held for 20 s) and nothing else -- measured on Fedora 44 with systemd 259, where `oomctl` lists
+exactly those. A service with no `Slice=` lands in `system.slice`; the system unit names
+`Slice=pace.slice`, which the package ships as a sibling of `system.slice` under the root slice, so
+the node is outside every cgroup oomd monitors there. The slice sets nothing: the node holds its
+compiles under its own ceiling, and a limit on the slice would put the cache tier under it too. A
+distribution that also monitors the root slice includes the node again, and `oomctl` on the host says
+which cgroups are monitored; `systemctl show -p ControlGroup pace-node` should read
+`/pace.slice/pace-node.service`. A node that was running when the package was upgraded moves at its
+next restart. When the mark cannot be set at all
+(a kernel without user extended attributes on cgroupfs) the node says so once at Warn, naming the
+cgroup, and runs as before.
+
+##### A killed compile waits for memory
+
+A compile a worker's machine killed for memory goes back into the fleet's admission queue, asked for
+**once more** (`AskOrigin::AfterKill` on the `ADMIT`), instead of compiling on the client's machine at
+once, outside every layer above. The worker's refusal carries what the compile held when it died, and the
+client settles the admission `Killed` with it; the leader raises that compile's estimate to at least that
+and to `--compile-estimate-default` (never lowers it), and the requeue is charged that -- what the compile
+is now known to need at least, not what it was charged the first time. The queue then places it
+only on a machine whose **configured** budget can hold that estimate -- never alone on a smaller one,
+where its ceiling would kill it again -- and it waits there, as any admission waits, until one has room:
+on another worker, on the asking machine, now or later.
+
+It compiles on the client's machine instead in exactly two cases, each named and counted (the second is
+never counted as the first: the local fallback after a second kill asks as an ordinary re-ask, so this
+machine's budget alone never answers *never fits* for a compile the workers held):
+
+- **No machine can hold it**: the estimate is above the configured budget of every machine the queue
+  could run it on, the asking one included. The queue grants it `Local` with the reason `never-fits`,
+  alone on the asking machine (as any compile larger than a whole budget runs), and the client runs it
+  **outside** that machine's compile ceiling, which would only kill it again -- still as the kernel's
+  first OOM victim. The leader counts it in `pace_admission_never_fits_total`; the client tallies it in
+  `pace-cc --show-stats` as *no machine's memory budget fits it*. A budget the pressure allowance holds
+  down is waited for, never ruled out.
+- **Killed twice**: the requeued compile is killed again. The one requeue is spent, so it compiles on
+  the client's machine, charged there -- never a third trip through the fleet, which is how a kill
+  cannot loop. Tallied by the client as *killed for memory twice*. When what it held is more than the
+  client machine's budget, the queue grants it there alone with the reason `runs-alone` -- never
+  *never fits*, since a worker held it -- and the client runs it **outside** that machine's ceiling at
+  once: the ceiling is that budget, and joining it would be a third kill.
+
+What a kill teaches is bounded by the budget of the machine the compile was killed on: a compile cannot
+hold more than its ceiling, so a peer's figure can raise an estimate at most that far.
+
+Every requeue is counted by the leader in `pace_admission_requeued_after_kill_total`. Waiting is
+bounded as every admission wait is: the queue pulses while it holds the request, and the client gives
+up as it would on any admission, compiling as it did before a queue existed.
+
+##### The compiles `pace-cc` runs itself
+
+A compile `pace-cc` runs on its own machine -- no fleet, a miss that is not dispatched, either fallback
+above -- joins **this node's** `compiles/` ceiling when it can. A node whose ceiling holds names its
+`compiles/` cgroup in the file `compile-ceiling` in its runtime directory (`$RUNTIME_DIRECTORY`, which the
+shipped units set); `pace-cc` reads `$XDG_RUNTIME_DIR/pace-node/compile-ceiling`, makes a
+`pace-cc-<pid>-<n>` cgroup of its own below that, and starts the compiler inside it, so the ceiling,
+the pressure governor's allowance and the kernel's OOM grouping hold it exactly as they hold the
+node's own compiles. Those two paths meet under the **user** unit, whose node and the user's builds
+share an owner. Under the system unit the runtime directory is `/run/pace-node`, readable only by the
+`pace` account, and its cgroup is not the user's to write, so the user's compiles do not join it; a
+node started by hand has no runtime directory and names nothing. A node whose ceiling does not hold
+withdraws the file; systemd removes the directory when the unit stops.
+
+Where a compile cannot join -- no node, the system unit's node, a build whose cgroup shares no writable
+ancestor with the node's (an `ssh` session's scope, say), a host with no cgroups -- `pace-cc` still starts
+the compiler as the kernel's first OOM victim (`pace-cc` is its own `pace-oom-victim-exec` shim, as the
+node is). Which of the two applied is named for every such compile in the invocation log and counted
+by `pace-cc --show-stats` under *local compiles by memory defense* (`ceiling`, or `shim:` and why), and
+said on the verbose line.
+
+A compile killed there is no compiler error either. Its first kill -- inside the ceiling or outside it --
+settles the admission `Killed` with what it held and waits in the queue for room **once**, exactly as a
+worker's kill does. Killed a second time inside the ceiling, it runs once more **outside** the ceiling,
+under the same admission. Killed a second time outside every ceiling, it is not retried again: it ends with
+the kill's status, and `pace-cc` says so on stderr whatever the verbosity, naming it as no compiler error.
+With no queue to wait in, a compile the ceiling killed runs once more outside it at once, and one killed
+outside every ceiling ends there. Where the ceiling cannot be joined, the compile's peak is still measured
+the way the launcher always measured its own (`ru_maxrss`), so the queue keeps learning.
 
 #### The machine's compile budget
 
@@ -3484,9 +3760,12 @@ started with `--slots=0` runs no worker and still has a machine.
 | --- | --- | --- |
 | `--machine-slots` (`machine_slots`) | the machine's logical cores | Compiles the machine runs at once, every one on it counted, local ones included. Not `--slots`, which sizes the worker and is `0` on a node with none. `0` is refused. |
 | `--machine-memory-budget` (`machine_memory_budget`) | 75% of RAM, less this node's cache tier, never below `--compile-estimate-default` | The memory those compiles may hold at once. `k`/`m`/`g` or `N%` of host RAM. A typed figure is used as given. `0` is refused. |
+| `--compile-memory-limit` (`compile_memory_limit`) | the machine budget | The memory every compile this worker runs may hold **together**, enforced by the kernel on the `compiles/` cgroup (Linux, with a cgroup of the node's own) -- and, under the user unit, on the compiles `pace-cc` runs itself on this machine: past it, one compile is killed and its client asks the queue for it once more. Typed below the machine budget, it lowers the budget this machine reports too, so the queue never admits what the ceiling would kill. `k`/`m`/`g` or `N%` of host RAM. `0` is refused. **Reloadable.** |
 | `--compile-estimate-default` (`compile_estimate_default`) | `2g` | What a translation unit nobody has measured is assumed to need. Too low is the out-of-memory kill the queue exists to prevent. `0` is refused. |
 
-All three are **restart-only**, and a service registration replays only the ones typed.
+All but `--compile-memory-limit` are **restart-only**, and a service registration replays only the ones typed.
+In `yielding` and `shedding` the memory budget reported is the pressure governor's allowance where that is lower
+(see [layer C](#layer-c-the-pressure-governor)).
 Beside the figures, the report carries what the machine's compiles hold now and a
 bounded sample of the peaks its compiler processes measured, so the leader's estimates
 learn from the machines that ran the compiles. A leader that cannot take the report
@@ -3678,7 +3957,9 @@ Every row says two things before anything else:
 | `state-directory-unsynced` | latched | warning | the filesystem holding the state directory answers a directory sync with "not supported here" (`EINVAL`, `ENOTSUP`, `EBADF` from `fsync`; `ERROR_INVALID_FUNCTION`, `ERROR_NOT_SUPPORTED`, `ERROR_INVALID_PARAMETER` from `FlushFileBuffers`), so a replaced state file is not known to survive a power loss: every replace still lands and is used. The detail names the directory and the answer; also counted in `pace_state_directory_syncs_unsupported_total` | stop the node, move the state directory **whole** to a local volume (it holds the node's identity, so a new empty directory is a new machine), point `--cluster-dir` at it and start; restarting on the same volume does not clear it |
 | `cache-budget-override-dropped` | latched | warning | a cluster cache budget override was dropped because this machine's own `--cache-memory`/`--cache-disk` changed after the override was set (its configured value no longer equals the baseline it reported); the detail names the tier, both values and the override's figure | the machine's own configuration changed after the override was set; set it again with set_cache_budget if still wanted |
 | `formation-move-refused` | live | alert | a move of this node's formation -- to the mode the detail names -- was not taken, because the startup rules refuse the shape it would give this node: a restart into it would be refused, so the node keeps the mode it is in. Every move is judged this way before its record is written, whether or not it rebuilds the node; the detail names the rule | fix the rule the detail names and restart this node; until then it keeps the mode it is in rather than serve a shape its next restart would refuse |
-| `compile-memory-unmeasured` | latched | notice | the worker cannot measure the peak memory of a compile, so it reports none and the fleet's admission estimates stay at their default instead of learning; the detail names what this machine lacked (no delegated cgroup — the shipped Linux unit's case —, no `memory.peak`, a seccomp filter refusing `clone3`, or a glibc older than 2.39). Not evaluated on a node that runs no worker, nor on a platform other than Linux, macOS and Windows, where nothing could measure and no remedy applies | give the node a cgroup of its own: [measuring what a compile used](#measuring-what-a-compile-used-linux) |
+| `compile-memory-unmeasured` | latched | notice | the worker cannot measure the peak memory of a compile, so it reports none and the fleet's admission estimates stay at their default instead of learning; the detail names what this machine lacked (no delegated cgroup — a hand-started node or an older unit —, no `memory.peak`, a seccomp filter refusing `clone3`, or a glibc older than 2.39). Not evaluated on a node that runs no worker, nor on a platform other than Linux, macOS and Windows, where nothing could measure and no remedy applies | give the node a cgroup of its own: [memory: measurement, ceiling and pressure](#memory-measurement-ceiling-and-pressure-linux) |
+| `compile-memory-uncapped` | live | warning | the worker cannot hold the compiles it runs under one memory ceiling (`--compile-memory-limit`, by default the machine budget), so one that grows can take memory from everything else on the machine; the detail names what this machine lacked, as `compile-memory-unmeasured`'s does, or the ceiling the kernel refused. Raised again by a reload whose ceiling cannot be written, and cleared by the next write that lands. Not evaluated on a node that runs no worker, nor on a platform other than Linux, which has no cgroups | give the node a cgroup of its own: [memory: measurement, ceiling and pressure](#memory-measurement-ceiling-and-pressure-linux) |
+| `memory-pressure-shedding` | live | notice | the machine stalls waiting for memory and the stall is not the compiles' own, so the node's pressure governor yields — admits nothing on this machine beside a running compile, local ones included, and idle only its own, one at a time — or, while the whole machine freezes, sheds — also kills its youngest compile once per ten seconds, sparing a sole one within the allowance; the detail names the level and what compiles may hold. Clears by itself once the stall eases. Not evaluated where PSI cannot be read | usually nothing: something else needed the memory, and compiles return gradually once it is free. Raised with nothing else running means the compiles alone outgrow the machine: lower `--compile-memory-limit`. `--memory-pressure-yield` and `--memory-pressure-shed` move where it acts: [layer C](#layer-c-the-pressure-governor) |
 
 The remedy each row carries is longer than this column, and it is the node's text: an older
 client or leader prints a newer node's row exactly as that node wrote it, rather than looking
@@ -3799,6 +4080,13 @@ exposition cannot drift apart again without a red build.
 | `pace_worker_jobs_refused_spawn_failed_total` | Jobs refused because the compiler could not be spawned: the toolchain this worker advertises is not usable here. |
 | `pace_worker_jobs_refused_compiler_unclassified_total` | Jobs refused because this worker cannot classify the compiler its own --toolchain names: it ran, and this build does not recognise which driver it is. Not a path fault -- see pace_worker_jobs_refused_spawn_failed_total for that one. |
 | `pace_worker_jobs_refused_survey_in_flight_total` | Jobs refused because this worker had not finished identifying its toolchains: it is still starting, not misconfigured. Rises only from clients dialling this port directly -- the scheduler is not offered this worker until the survey completes. |
+| `pace_worker_compiles_killed_ceiling_total` | Compiles the kernel killed inside this worker's compile memory ceiling. Each was refused and compiled locally by its client. Two causes, told apart by the memory-pressure counters: the configured ceiling is below what the fleet's translation units need, or a yield or shed lowered the allowance to what compiles held and a compile grew past it. Check pace_node_memory_pressure_yield_seconds_total and ..._shed_seconds_total before raising --compile-memory-limit: a rise that moves with them is the allowance, which raising the limit does not change. |
+| `pace_worker_compiles_killed_shed_total` | Compiles this node's pressure governor killed to give memory back to the machine. Each was refused and compiled locally by its client. |
+| `pace_worker_compiles_killed_signal_total` | Compiles ended by SIGKILL that neither the compile memory ceiling nor the pressure governor accounts for: a global OOM kill, systemd-oomd, or a person. Each was refused and compiled locally by its client. |
+| `pace_node_memory_pressure_yield_seconds_total` | Seconds this node held the yield level: the machine stalled on memory for something other than its compiles, so nothing was admitted on it beside a running compile, local ones included -- idle, only its own, one at a time. Its rate over a window is the share of the window spent yielding; calm is the rest. |
+| `pace_node_memory_pressure_shed_seconds_total` | Seconds this node held the shed level: the machine froze on memory, so it admitted nothing beside a running compile and killed its youngest once per dwell, sparing a sole one within the allowance. |
+| `pace_node_memory_pressure_yield_entries_total` | Times this node entered the yield level, from calm or stepping down from shed. Many entries with few seconds behind them is a machine stalling in short bursts. |
+| `pace_node_memory_pressure_shed_entries_total` | Times this node entered the shed level, from calm on a freeze or escalating a sustained yield. |
 | `pace_worker_jobs_refused_not_a_member_total` | Connections refused because the caller is neither on this machine nor a cluster member. A rise means something is trying to spend a machine it has no claim on. |
 | `pace_worker_jobs_refused_stopping_total` | Jobs refused because this worker had begun stopping. Never sum with no_slot: that one says the fleet is too small, this one says a node is draining and a retry will land somewhere else. |
 | `pace_worker_jobs_refused_cordoned_total` | Jobs refused because an operator cordoned this worker. Never sum with stopping: a stop ends by itself, a cordon lasts until somebody lifts it. A steady rise says the scheduler is not hearing this worker's heartbeat. |
@@ -3872,6 +4160,7 @@ fact about it. These are gauges, not counters, except the two CPU tick series.
 | `pace_node_slots_configured` | Concurrent compiles this node advertises to the scheduler. |
 | `pace_node_slots_busy` | Compiles running right now — **sampled**, so it is a reading and not a difference of two counters. |
 | `pace_node_cordoned` | 1 while an operator has cordoned this node's worker, 0 otherwise. Read beside `pace_node_slots_busy`: cordoned with compiles running is draining, cordoned with none is safe to stop. A restart clears it, so `== 1` for a day is a machine somebody forgot. |
+| `pace_node_memory_pressure` | This machine's memory-pressure level as the node's watcher reads it: 0 calm, 1 yielding (nothing admitted beside a running compile), 2 shedding (that, and its youngest compile killed). **Absent** where no watcher runs (no PSI, or a platform other than Linux): absent is not calm. |
 | `pace_node_cpu_busy_ticks_total` | Host-wide CPU ticks spent doing anything but idling, this node's own compiles included. A **counter** in platform ticks, whose length differs per platform, so it means nothing alone: `rate(pace_node_cpu_busy_ticks_total[1m]) / rate(pace_node_cpu_ticks_total[1m])` is the machine's busy share. Absent when the platform would not report its CPU. |
 | `pace_node_cpu_ticks_total` | Host-wide CPU ticks accounted for at all: the denominator of the row above. |
 | `pace_node_memory_available_bytes` | Memory a new process could actually obtain: *available*, not free, so the page cache the kernel hands back on demand counts. Absent when the platform would not say. |
@@ -4336,13 +4625,13 @@ What it shows, and why each part is split the way it is:
 |---|---|
 | The readouts | The figures across the top: compiles dispatched over the selected range (with a sparkline), compiling now, cache hit rate, the share of dispatch decisions refused, leases outstanding, the **oldest** heartbeat in the fleet, and how many toolchains have **never been picked**. The oldest heartbeat and not the mean — one machine that stopped answering an hour ago is the fact worth surfacing, and an average over a healthy fleet buries it. Never picked counts distinct toolchains rather than registry entries, so one compiler served by four machines and reached through any of them counts as reached; a fleet with nothing registered shows `–` rather than `0`, because zero here means *every toolchain is being reached* and an empty fleet cannot claim it. |
 | Fleet capacity | One meter over every registered slot, split three ways: compiling, free, and **withheld** by a ceiling. The third is the one to read first — slots a ceiling withdrew are not this fleet being busy, so buying machines does not return them. A fleet that has never been dispatched to says *that* instead, because the same three numbers mean something else there — see below. |
-| Machines | One row **per machine**, not per toolchain: its `name` and `node-id` — the member holding the identity key the machine's connection **proved**, `–` when no member holds it, and never matched by the endpoint, which a machine only claims — the software version it is running, cores, memory, free scratch, class and reserve, cache hit rate, heartbeat age. |
+| Machines | One row **per machine**, not per toolchain: its `name` and `node-id` — the member holding the identity key the machine's connection **proved**, `–` when no member holds it, and never matched by the endpoint, which a machine only claims — the software version it is running, cores, memory, free scratch, `memory-pressure`, class and reserve, cache hit rate, heartbeat age. `memory-pressure` is the level the machine's node last stated in its budget report to the leader's queue — `calm`, `yielding` (it takes nothing beside a running compile) or `shedding` (it also stops its youngest compile, see [layer C](#layer-c-the-pressure-governor)) — and `–` when it has stated none (no report yet, or a node too old to send one), never `calm`. A follower leads no queue, so its column is `–` throughout. |
 | Workers | One row per `(toolchain, endpoint)` registry entry: the `node-id` its registration's proven key places it at (as on a machine row), slots, in flight, available — and *which* limit withdrew the difference. The `compiler` column says what the toolchain **is** (`cl 19.44.35207`); the `toolchain` fingerprint beside it is what actually decides a match, and a row shows `–` when the node did not say, which a pinned `--toolchain=<fingerprint>=<compiler>` override never does. The `family` column is the compiler family the node read off the banner rather than the name it was invoked by — Apple clang installed as `gcc` is `apple-clang` — and it is what the MCP `toolchains` upgrade report compares versions within; `–` when no banner was read or no family is known for the driver. `registered-age` and `last-picked-age` are read together: the second is `–` when the scheduler has never chosen that entry, and that is a finding beside a registration age of forty minutes and says nothing beside one of a second. |
 | Leases outstanding | One row per lease the scheduler has handed out and not yet seen resolved: the object key, the worker it went to, that worker's endpoint, and how long it has been held. **Oldest first, and bounded** — the header says `the 50 oldest of 900` when there are more, so a truncated table is not read as the whole fleet's work. A client hands its lease back when the job ends however it ended, so a row that has been there for minutes is a client that died mid-build, and the endpoint is where its work was going. A row with no endpoint is a lease against a worker that is no longer registered. |
 | Why requests were refused | Granted, and refused split four ways, each with what it tells you to do. |
 | Cache tiers | Items, bytes, budget, evictions and index RAM **per tier**. A tier no member runs has no column at all, and a fleet where nobody runs one says so rather than showing an empty table. `index-ram` is what the tier's key index costs in memory: always RAM, even for a disk tier whose budget is bytes on a filesystem, so the two are not comparable and must not be added. |
-| Compile queue | The leader's admission queue (#1728): how many compiles are **waiting**, which machine and build tree each client is compiling for with how many **running** and **queued**, what the queue has **charged** each machine, what is **in use** on it (the larger of that charge and what the machine itself reports holding: after a failover the charge starts at zero while the machine is still full, and in-use is the figure admission refuses on), and the memory **budget** it stated. In `/fleet.json` this is the `admission` object (`depth`, `clients`, `machines`), `null` on a node that leads no queue, and `/fleet.txt` serves the clients as the `clients` section beside the `queue-depth` headline figure (the per-machine ledger is in the JSON and on the page). A node that has not heard a budget or a request shows `–`, never `0 waiting`: zero would say every compile was admitted at once. A machine that stated a budget but no worker name is shown by the first bytes of its key in hex. A budget cell is `–` until the machine has reported one. |
-| Over time | Four charts over 24 hours or 7 days: compiles dispatched, refusals stacked four ways, offerable capacity against jobs in flight, and cache hit rate per bucket. |
+| Compile queue | The leader's admission queue (#1728): how many compiles are **waiting**, which machine and build tree each client is compiling for with how many **running** and **queued**, what the queue has **charged** each machine, what is **in use** on it (the larger of that charge and what the machine itself reports holding: after a failover the charge starts at zero while the machine is still full, and in-use is the figure admission refuses on), the memory **budget** it stated, what holds that budget where it is (`budget-limit`: `configured`, or `pressure-allowance` while the node's pressure governor keeps it below its configured figure — nothing larger than it then runs there, even alone on an idle machine), and its `memory-pressure` level as on the machine row. In `/fleet.json` this is the `admission` object (`depth`, `clients`, `machines`), `null` on a node that leads no queue, and `/fleet.txt` serves the clients as the `clients` section beside the `queue-depth` headline figure (the per-machine ledger is in the JSON and on the page). A node that has not heard a budget or a request shows `–`, never `0 waiting`: zero would say every compile was admitted at once. A machine that stated a budget but no worker name is shown by the first bytes of its key in hex. A budget cell, its `budget-limit` and its `memory-pressure` are `–` until the machine has reported one. |
+| Over time | Four charts over 24 hours or 7 days: compiles dispatched, refusals stacked four ways, offerable capacity against jobs in flight, and cache hit rate per bucket. Offerable capacity counts a machine whose `memory-pressure` is `yielding` or `shedding` as withheld, as the admission queue does — so a chart spanning the upgrade that introduced the column can dip where a pressed machine stops being counted as offering. The scheduler's own worker pick does not yet read the level, so a lease picked outside the queue can still go to such a machine. |
 | Members | Who the cluster has agreed on, and where each answers. A member that has announced none shows no scheduler endpoint, because it has not said. |
 
 These distinctions cost real debugging time when they are collapsed:
@@ -4355,7 +4644,9 @@ These distinctions cost real debugging time when they are collapsed:
   four different problems: `external-cpu` means somebody is using that machine,
   `memory` and `scratch` mean it is out of something, and `compile-budget` means the
   compiles it is running hold nearly all of `--compile-inflight-max`, priced at its own
-  mean per job. Buying hardware fixes exactly one of them.
+  mean per job. `memory-pressure` means the machine's own node is yielding or shedding
+  memory to something else running there, as its budget report to the queue said: it
+  comes back by itself. Buying hardware fixes exactly one of them.
 - **Do not add the lease refusals together.** `no-worker` is a misconfiguration,
   `no-capacity` says buy more machines (or raise a `compile-budget`-limited worker's
   `--compile-inflight-max`), `withdrawn` says your machines are busy

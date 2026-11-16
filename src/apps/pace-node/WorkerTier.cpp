@@ -392,6 +392,7 @@ WorkerTier::WorkerTier(WorkerTierParts const& parts,
     _appliedExtraArgs { parts.cfg.extraAllowedArgs },
     _leaseState { std::move(leaseState) },
     _refusedArguments { parts.conditions, parts.logger, parts.cfg.extraAllowedArgs },
+    _killedCompiles { _refusedArguments, parts.logger },
     // The envelope ceiling is THIS surface's request cap, named rather than left to the
     // decoder's default. `AvailableCodecs()`, never a literal: this list is what the
     // worker answers a compile in, chosen against what the client accepts (#265).
@@ -401,7 +402,7 @@ WorkerTier::WorkerTier(WorkerTierParts const& parts,
     // registers nowhere, so no grant names it.
     _protocol {
         _jobs,         std::move(validator), Cc::AvailableCodecs(), parts.prover != nullptr ? &parts.prover->Key() : nullptr,
-        parts.metrics, _refusedArguments,    parts.measurements,    CompileRequestMaxOf(parts.cfg)
+        parts.metrics, _killedCompiles,      parts.measurements,    CompileRequestMaxOf(parts.cfg)
     },
     _slots { slots },
     // Sized to the slot cap, which is what makes an admitted job always find a thread,
@@ -423,6 +424,7 @@ WorkerTier::WorkerTier(WorkerTierParts const& parts,
     _advertisedWire {},
     _machineCapacity { parts.capacity },
     _registeredCapacity { parts.capacity.Current() },
+    _pressure { parts.pressure },
     _dialer { parts.schedulerDialer },
     _link { std::move(link) },
     _hostInbox { [this] { _capacity.WakeHeartbeat(); }, parts.suspendWait },
@@ -626,6 +628,14 @@ WorkerHeartbeat WorkerTier::Launch(core::platform::IClock const& statusClock, Sc
         [this, &statusClock, &reachability](std::stop_token const& stop) { Heartbeat(stop, statusClock, reachability); } } };
 }
 
+Distributed::SlotCeilings WorkerTier::StatusCeilings(Distributed::NodeLoad load) const
+{
+    if (_pressure != nullptr)
+        if (auto const pressure = _pressure->Current(); pressure.has_value())
+            load.pressure = pressure->level;
+    return Distributed::SlotCeilingsFor(_registeredCapacity, _slots, load);
+}
+
 void WorkerTier::Heartbeat(std::stop_token const& stop,
                            core::platform::IClock const& statusClock,
                            SchedulerReachability& reachability)
@@ -651,10 +661,12 @@ void WorkerTier::Heartbeat(std::stop_token const& stop,
                                  // The ceilings `node-status` names: the scheduler's own arithmetic over the
                                  // capacity this worker's registrations carry (`FollowCapacity` moves it, once
                                  // a beat, before the round) and the load this round sent.
+                                 // The pressure level rides beside it: the heartbeat's load record carries none
+                                 // (the scheduler hears it in the machine-budget report), so it is folded in HERE,
+                                 // where the ceilings are named.
                                  .sampled = [this, &statusClock](Distributed::NodeLoad const& load) {
-                                     _runtime.PublishSlotCeilings(SlotCeilingsReading {
-                                         .ceilings = Distributed::SlotCeilingsFor(_registeredCapacity, _slots, load),
-                                         .sampledAt = statusClock.now() });
+                                     _runtime.PublishSlotCeilings(SlotCeilingsReading { .ceilings = StatusCeilings(load),
+                                                                                        .sampledAt = statusClock.now() });
                                  } };
 
     // The configuration snapshot this thread last surveyed against, so a reload is

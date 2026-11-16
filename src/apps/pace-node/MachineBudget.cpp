@@ -32,6 +32,17 @@ namespace
         return std::max(usable * MachineBudgetSharePercent / 100, CompileEstimateDefaultOf(cfg));
     }
 
+    /// The budget this machine reports: typed or derived, and never above a typed compile ceiling (C3), so
+    /// the queue never admits what the ceiling will kill.
+    /// @param cfg The parsed configuration.
+    /// @param capacity What this machine is.
+    /// @return The budget in bytes.
+    [[nodiscard]] std::uint64_t BudgetOf(NodeConfig const& cfg, Distributed::NodeCapacity const& capacity) noexcept
+    {
+        auto const budget = cfg.machineMemoryBudgetBytes.value_or(DerivedBudgetOf(cfg, capacity));
+        return std::min(budget, cfg.compileMemoryLimitBytes.value_or(budget));
+    }
+
     /// The report's half of the round: say it on one connection.
     class BudgetAnnouncement final: public IAnnouncement
     {
@@ -95,18 +106,45 @@ namespace
     };
 } // namespace
 
+std::uint64_t CompileCeilingOf(NodeConfig const& cfg, Distributed::NodeCapacity const& capacity) noexcept
+{
+    return cfg.compileMemoryLimitBytes.value_or(BudgetOf(cfg, capacity));
+}
+
 Distributed::MachineReport MachineBudgetOf(NodeConfig const& cfg,
                                            Distributed::NodeCapacity const& capacity,
-                                           HeldCharges const& held) noexcept
+                                           HeldCharges const& held,
+                                           MachinePressure const& pressure) noexcept
 {
+    auto const budget = BudgetOf(cfg, capacity);
+    // Never above the configured budget: the allowance only ever lowers it.
+    auto const reported = std::min(budget, pressure.allowanceBytes.value_or(budget));
     return Distributed::MachineReport {
-        .memoryBudgetBytes = cfg.machineMemoryBudgetBytes.value_or(DerivedBudgetOf(cfg, capacity)),
+        .memoryBudgetBytes = reported,
         // Zero cores is "did not say", and one is the answer `OfferableSlots` gives for it: a machine
         // that reports no slot is one the queue could never run a compile on.
         .slots = cfg.machineSlots.value_or(std::max<std::uint32_t>(capacity.logicalCores, 1)),
         .heldSlots = held.slots,
         .heldBytes = held.bytes,
+        .pressure = pressure.level,
+        // Configured only once the CEILING is: a typed `--compile-memory-limit` above the budget leaves a ramping
+        // allowance between the two, reporting the whole budget while `compiles/memory.max` still sits below the
+        // limit -- and a compile run alone there would meet that lower ceiling. Any allowance at all is a held one.
+        .standing = pressure.allowanceBytes.has_value() ? Distributed::BudgetStanding::HeldByAllowance
+                                                        : Distributed::BudgetStanding::Configured,
     };
+}
+
+std::optional<MachinePressure> PublishedPressure::Current() const
+{
+    auto const guard = std::scoped_lock { _mutex };
+    return _pressure;
+}
+
+void PublishedPressure::Publish(MachinePressure const& pressure)
+{
+    auto const guard = std::scoped_lock { _mutex };
+    _pressure = pressure;
 }
 
 void MeasuredPeaks::OnPeak(Wire::EstimateKeyFields const& key, std::uint64_t peakBytes)
@@ -152,14 +190,18 @@ Wire::MachineBudgetReport MachineBudgetToWire(Distributed::MachineReport const& 
                                        .slots = report.slots,
                                        .heldSlots = report.heldSlots,
                                        .heldBytes = report.heldBytes,
-                                       .peaks = std::move(peaks) };
+                                       .peaks = std::move(peaks),
+                                       .pressure = report.pressure,
+                                       .standing = report.standing };
 }
 
 bool SendMachineBudgetOnce(MachineBudgetRound const& round, SchedulerLink& link, IEndpointDialer& dialer)
 {
     // Read per round, never captured: what is held is the one figure here that moves between rounds.
     auto taken = round.peaks.Take();
-    auto const report = MachineBudgetToWire(MachineBudgetOf(round.cfg, round.capacity, round.held.Held()), taken);
+    auto const pressure =
+        round.pressure != nullptr ? round.pressure->Current().value_or(MachinePressure {}) : MachinePressure {};
+    auto const report = MachineBudgetToWire(MachineBudgetOf(round.cfg, round.capacity, round.held.Held(), pressure), taken);
 
     BudgetAnnouncement announcement { report, round.logger, round.reachability };
     (void) DialAndAnnounce(link,

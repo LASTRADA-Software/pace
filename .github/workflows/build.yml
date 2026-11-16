@@ -1025,8 +1025,14 @@ jobs:
       # A translation unit the compile database does not hold is not this leg's:
       # it compiles on another platform (`clang-tidy-windows` covers the
       # `_WIN32` ones), and analysing it here would fail on headers Linux does
-      # not have. A header is analysed as itself, with the command clang
-      # interpolates from its nearest unit in the database.
+      # not have. A header is analysed as itself, with the command of a unit in
+      # the database that INCLUDES it (`scripts/tidy-header-commands.py`, into a
+      # database of its own under `$RUNNER_TEMP`, the build tree's left as
+      # configure wrote it). Left to clang's interpolation from the nearest-NAMED
+      # unit, a test-only header was guessed a command without the include
+      # directories it needs and failed `file not found` on a header that
+      # compiles everywhere it is included. One no unit includes still gets the
+      # guess, and the script names it.
       - name: "Analyse the changed lines"
         id: tidy-diff
         env:
@@ -1057,10 +1063,13 @@ jobs:
             '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hh' '*.hpp' '*.hxx' "${excludes[@]}")
 
           jq -r '.[].file' "${DB}/compile_commands.json" | sort -u > "${RUNNER_TEMP}/units"
+          # The header extensions are written once, here: a header is selected
+          # AND collected for its borrowed command in the same arm.
           selected=()
+          headers=()
           for path in "${changed[@]}"; do
             case "$path" in
-              *.h|*.hh|*.hpp|*.hxx) selected+=("$path") ;;
+              *.h|*.hh|*.hpp|*.hxx) selected+=("$path"); headers+=("$path") ;;
               *) if grep -qxF "${GITHUB_WORKSPACE}/${path}" "${RUNNER_TEMP}/units"; then
                    selected+=("$path")
                  else
@@ -1078,6 +1087,9 @@ jobs:
           targets="$(ninja -C "$DB" -t targets all | awk -F: '/^cmake_object_order_depends_target_/ { print $1 }')"
           [[ -z "$targets" ]] || ninja -C "$DB" $targets > "${RUNNER_TEMP}/generated-sources.log"
 
+          tidyDb="${RUNNER_TEMP}/tidy-db"
+          python3 scripts/tidy-header-commands.py --db "$DB" --out "$tidyDb" "${headers[@]}"
+
           # clang-tidy-diff.py reports a clang-tidy it could not START as a
           # `Failed:` line on stderr and still exits 0 -- measured with a binary that had
           # lost its executable bit -- so a run that analysed nothing would pass.
@@ -1085,7 +1097,7 @@ jobs:
           log="${RUNNER_TEMP}/clang-tidy-diff.log"
           set +e
           git diff -U0 --no-color "${base}...HEAD" -- "${selected[@]}" \
-            | python3 "$TIDY_DIFF" -p1 -path "$DB" -clang-tidy-binary "$TIDY" -j "$(nproc)" -quiet 2>&1 \
+            | python3 "$TIDY_DIFF" -p1 -path "$tidyDb" -clang-tidy-binary "$TIDY" -j "$(nproc)" -quiet 2>&1 \
             | tee "$log"
           status=("${PIPESTATUS[@]}")
           set -e
@@ -2662,7 +2674,8 @@ jobs:
           # it, and the pipeline then reports "no finding" exactly when there was
           # one (build-and-toolchain.md).
           for unit in packaging/linux/pace-kv.service packaging/linux/pace-kv-user.service \
-                      packaging/linux/pace-node.service packaging/linux/pace-node.socket; do
+                      packaging/linux/pace-node.service packaging/linux/pace-node.socket \
+                      packaging/linux/pace.slice; do
             echo "== $unit"
             out=$(systemd-analyze verify "$unit" 2>&1 || true)
             echo "$out"
@@ -2696,6 +2709,7 @@ jobs:
                       ./usr/lib/tmpfiles.d/pace-kv.conf \
                       ./usr/lib/systemd/system/pace-node.service \
                       ./usr/lib/systemd/system/pace-node.socket \
+                      ./usr/lib/systemd/system/pace.slice \
                       ./usr/lib/sysusers.d/pace-node.conf \
                       ./etc/pace/pace-node.yaml \
                       ./etc/pace/pace-kv.yaml; do
@@ -2735,6 +2749,7 @@ jobs:
                       /usr/lib/tmpfiles.d/pace-kv.conf \
                       /usr/lib/systemd/system/pace-node.service \
                       /usr/lib/systemd/system/pace-node.socket \
+                      /usr/lib/systemd/system/pace.slice \
                       /usr/lib/sysusers.d/pace-node.conf \
                       /etc/pace/pace-node.yaml \
                       /etc/pace/pace-kv.yaml; do
@@ -2974,6 +2989,12 @@ jobs:
 
           test "$(systemctl show -p User --value pace-node)" = pace-node
 
+          # Out of systemd-oomd's choice: the unit names the slice the package ships, a
+          # sibling of system.slice, and the cgroup is where it says (#1773). The
+          # ControlGroup is the fact; the Slice property is only the unit's claim.
+          test "$(systemctl show -p ControlGroup --value pace-node)" = /pace.slice/pace-node.service \
+            || { echo "::error::the worker is not in pace.slice: $(systemctl show -p ControlGroup --value pace-node)"; exit 1; }
+
           # The stop path, on real systemd and on an ADOPTED descriptor. This is
           # the assertion that matters most here: POSIX does not unblock a parked
           # accept() when the listener is closed, so a worker without a receive
@@ -3004,6 +3025,7 @@ jobs:
           test ! -e /usr/lib/systemd/system/pace-kv.service
           test ! -e /usr/lib/systemd/system/pace-node.service
           test ! -e /usr/lib/systemd/system/pace-node.socket
+          test ! -e /usr/lib/systemd/system/pace.slice
           # A leftover wants-symlink makes systemd log a failure on every boot.
           test ! -e /etc/systemd/system/multi-user.target.wants/pace-kv.service
           # The socket is the unit that gets enabled, so it is the one that

@@ -697,13 +697,18 @@ Writes use an atomic append (`FILE_APPEND_DATA` / `O_APPEND`) so the hundreds of
 concurrent compilers in one build interleave whole lines instead of shredding
 each other's. Recording failures are swallowed: statistics never break a build.
 
-A line is tab-separated and names its own format first: `v3`, then seventeen columns in
+A line is tab-separated and names its own format first: `v4`, then eighteen columns in
 this order — `outcome`, `prefetch-group`, `value-bytes`, `elapsed-ms`, `source`,
 `detail`, `preprocess-ms`, `cache-ms`, `direct-ms`, `direct-hit`, `timestamp` (seconds
 since the Unix epoch), `dispatch`, `dispatch-detail`, `dispatch-specifics`,
 `exit-code` (the code the compile exited with), `queued-ms` (milliseconds waited for a
-compile slot) and `peak-memory-bytes`. An empty `exit-code`, `queued-ms` or
-`peak-memory-bytes` means no reading, never a zero. `pace-cc -s` prints the wait and the
+compile slot), `peak-memory-bytes` and `local-defense` -- what defended a compile the launcher ran
+itself against memory: `ceiling` (inside the local node's compile ceiling), `shim:<why>` (the
+OOM-victim shim alone, and why not the ceiling) or `none:<why>`; see
+[the compiles pace-cc runs itself](pace-node.md#the-compiles-pace-cc-runs-itself). An empty
+`exit-code`, `queued-ms`, `peak-memory-bytes` or `local-defense` means no reading, never a zero. A `v3`
+line is read as the same columns less the last, so the log written before `local-defense` existed
+still counts. `pace-cc -s` prints the wait and the
 peak-memory lines only over records that carry them. A line with no version was written by
 an older launcher and is read by how many columns it has, as it always was; its exit
 code is *absent*, never a zero that would call every old compile a success. A line
@@ -855,6 +860,9 @@ none of them is a caching failure.
 | `the fleet refused this client` | A credential, membership or lease refusal — the fleet would not let this client ask. Fixed where the client is configured or on the scheduler's member list, never by adding machines. |
 | `the worker refused the job` | A lease was granted and the worker then said no: a lease it would not honour, a scratch root it cannot write, a compiler it could not spawn. **One machine to go and look at**, and `PACE_VERBOSE` names it. |
 | `a worker would not take an argument of this compile` | The worker's allowlist has no row for a flag on this command line, which every worker of the same build refuses alike — so it is a flag this *fleet* does not dispatch, not one machine. The last column of the invocation log carries the worker's sentence naming every argument it refused, so a line needing several entries shows all of them at once. If it runs no program and names no path, add it on the workers with `--allow-compile-arg`; otherwise those compiles stay local, correctly. Until the worker had a code of its own for this it answered `malformed-frame`, and this row read as the wire disagreement below. |
+| `a worker killed the compile for memory` | The worker's machine killed the compiler -- its compile ceiling, its pressure governor, or another `SIGKILL` -- and nothing better followed: a compile asked for again after a kill and dispatched elsewhere is recorded as that dispatch. The last column of the invocation log carries the worker's sentence naming the cause. |
+| `killed for memory twice, so compiled locally` | A compile killed for memory went back into the queue once, as every killed compile does, and was killed again; the one requeue is spent, so it compiled on this machine. A rise names translation units larger than the fleet's machines hold beside other work. |
+| `no machine's memory budget fits it, so compiled locally outside the ceiling` | A compile killed for memory that no machine's configured budget can hold: the queue ran it alone on this machine, outside the compile ceiling that would only kill it again. |
 | `the job is larger than a worker accepts` | The translation unit's frame, or the size its compressed envelope declares, is over the ceiling a worker's compile surface takes. That ceiling is the worker's `--compile-request-max` (256 MiB unless raised). In a fleet that leaves it at the default, or sets it alike everywhere, every worker refuses the same unit: a property of the unit, not of one machine and not a wire disagreement. In a fleet whose workers set it differently it is one machine's setting instead, and the worker's sentence names the ceiling it applied. Either way the compile runs here, correctly, and the last column of the invocation log carries the worker's sentence naming the ceiling. |
 | `the fleet named no leader to ask` | The scheduler chain answered `NotLeader` until the redirect ceiling. Transient during an election and permanent when a fleet is misconfigured; the rate is what separates those, which is why it is not folded in with the credential refusal above. |
 | `this launcher and the fleet disagree about the wire` | A protocol, codec or framing mismatch, or a peer answering a compile with a refusal from another surface. Expected and bounded during a staggered upgrade; a count that keeps rising afterwards names a machine that never came back. Two machines of one build cannot produce it. |
@@ -887,6 +895,19 @@ waited, in which case the launcher fetches it.
   memory back at once; nothing has to expire.
 - **A worker that declines keeps your place.** A refused dispatch goes back to the front of the
   queue on the same connection and is counted; after three refusals the compile runs locally.
+- **A compile killed for memory waits for memory** (#1770). A worker's `worker-compile-killed`, or
+  this machine's own compile ceiling killing a local compile, settles the admission `Killed` with
+  what the compile held -- the leader raises the compile's estimate to at least that -- and it is asked
+  for **once more**, which the queue places only where its configured budget can hold it, waiting
+  for room as any request waits. Killed again, it compiles here (from a worker) or once more outside
+  the ceiling (from this machine); one no machine can hold runs here, alone, outside the ceiling.
+  Each is a tally above, and the full rules are in
+  [a killed compile waits for memory](pace-node.md#a-killed-compile-waits-for-memory).
+- **A local compile runs under the node's ceiling where it can.** Every compile the launcher runs
+  itself joins this machine's node's compile ceiling when that node runs as the user's own unit,
+  and otherwise starts as the kernel's first OOM victim; `-s` counts which, under *local compiles
+  by memory defense*. See
+  [the compiles pace-cc runs itself](pace-node.md#the-compiles-pace-cc-runs-itself).
 - **A wait is not a hang.** The leader pulses while a request is queued, so the launcher tells a
   long queue from a dead leader; `PACE_VERBOSE` says when it is waiting.
 - **It fails open.** A node that is stopped, unreachable, refuses the verb, or answers something

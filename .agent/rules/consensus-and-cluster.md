@@ -2534,3 +2534,11 @@ surface shows one name for one machine. It is a LABEL, in the sense the hostname
   trigger is natural — whenever the COMMAND format next bumps for a reason that
   carries the migration on its own, this rides along. `StateVersion` moving alone is
   not that trigger: #1340 moved it for a fact `Apply` derives, which no command carries.
+- **[#1782](https://github.com/LASTRADA-Software/pace/issues/1782)** — a follower persists what an
+  AppendEntries delivers synchronously, on the reactor that reads its leader's session and under the
+  driver's mutex. Re-sent entries it already holds are no longer rewritten (only what an append
+  CHANGED is made durable, `RaftLog::AppendOutcome::changedFrom`), which removed the trigger that
+  stalled a joining voter's promotion on a slow disk; a long run of genuinely NEW entries on a disk
+  whose flushes outlast the heartbeat interval can still keep that reactor busy enough that the
+  follower's acknowledgement does not leave. Offloading or yielding between frames is the open
+  question.

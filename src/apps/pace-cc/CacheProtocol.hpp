@@ -177,6 +177,9 @@ struct CacheOutcome
     std::vector<std::byte> value;                                                     ///< Payload on a hit.
     CompileCacheWire::ErrorCode code { CompileCacheWire::ErrorCode::MalformedFrame }; ///< Valid when `kind == Rejected`.
     std::string message; ///< The daemon's own words, when it refused.
+    /// The structured facts a refusal carried beside its words (`Wire::ErrorTrailerOf`): a killed compile's peak
+    /// (#1770). Empty for every refusal that carries none.
+    std::vector<std::byte> trailer {};
 
     /// True when a credential was presented and the daemon did not understand the
     /// AUTH verb at all — i.e. it predates authentication on this protocol.

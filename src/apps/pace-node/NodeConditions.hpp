@@ -65,6 +65,8 @@ enum class NodeCondition : std::uint8_t
                             ///< a power loss.
     CacheBudgetOverrideDropped, ///< A cluster cache budget override was dropped: this machine's own later edit wins.
     CompileMemoryUnmeasured,    ///< The worker cannot measure a compile's peak memory, so it reports none.
+    CompileMemoryUncapped,      ///< The worker cannot hold its compiles under one memory ceiling.
+    MemoryPressureShedding,     ///< The machine stalls on memory, so this node yields or sheds its compiles.
     Last,                       ///< Not a condition.
 };
 
@@ -381,9 +383,10 @@ inline constexpr EnumTable<NodeCondition, NodeConditionRow> NodeConditionTable {
       .remedy = "the machine's own configuration changed after the override was set; set it again with "
                 "set_cache_budget if still wanted" },
     // Latched: the meter is chosen once, at startup, from what the machine's cgroup tree allowed this process;
-    // nothing the node does afterwards changes it. A notice and not a warning, because it is the SHIPPED default
-    // (the unit does not delegate a cgroup) and every compile is correct -- only the fleet's memory estimates
-    // lose their measurements. Worker scope: no worker runs no compiles to measure.
+    // nothing the node does afterwards changes it. A notice and not a warning, because a hand-started node or an older unit
+    // (the shipped units now delegate a cgroup) is still a legitimate way to run it, raising this routinely, and every
+    // compile is correct -- only the fleet's memory estimates lose their measurements. Worker scope: no worker runs no
+    // compiles to measure.
     { .condition = NodeCondition::CompileMemoryUnmeasured,
       .id = "compile-memory-unmeasured",
       .persistence = CompileCacheWire::ConditionPersistence::Latched,
@@ -394,6 +397,37 @@ inline constexpr EnumTable<NodeCondition, NodeConditionRow> NodeConditionTable {
                 "node's own: under systemd, a drop-in with Delegate=memory, ProtectControlGroups=private (systemd 257 or "
                 "newer) and RestrictNamespaces=no, then a restart; see docs/tools/pace-node.md. The detail names what "
                 "this machine lacked." },
+    // Live: whether `compiles/` exists is decided once, at startup, with the meter -- but whether its ceiling HOLDS is
+    // asked again at every write: a reload whose ceiling the kernel refuses raises it, and the next write that lands
+    // clears it. A row that clears is live; reading it as latched would tell an operator a cleared fault still
+    // stands. A warning and not a notice, unlike its sibling: an uncapped compile that grows takes memory from
+    // everything else on the machine -- a desktop freezes, the out-of-memory killer picks a victim -- where an
+    // unmeasured one only teaches the fleet nothing. Worker scope: the ceiling covers the compiles this worker runs.
+    { .condition = NodeCondition::CompileMemoryUncapped,
+      .id = "compile-memory-uncapped",
+      .persistence = CompileCacheWire::ConditionPersistence::Live,
+      .severity = CompileCacheWire::ConditionSeverity::Warning,
+      .scope = ConditionScope::Worker,
+      .remedy = "This worker's compiles run with no memory ceiling over them, so one that grows can take memory from "
+                "everything else on the machine. The ceiling takes a cgroup of this node's own, as measuring does: "
+                "under systemd, a drop-in with Delegate=memory, ProtectControlGroups=private (systemd 257 or newer) and "
+                "RestrictNamespaces=no, then a restart; see docs/tools/pace-node.md. The detail names what this machine "
+                "lacked." },
+    // Live: raised while the pressure watcher's level is not calm, cleared when it is; the detail names the level
+    // and the allowance. Notice, not Warning: the node is doing what it is for -- a game or an editor needed the
+    // memory -- and on a desktop that is routine; the counters say how often. Process scope: every node reports its
+    // machine's budget, so every node with PSI runs the watcher. A node without PSI answers it not evaluated.
+    { .condition = NodeCondition::MemoryPressureShedding,
+      .id = "memory-pressure-shedding",
+      .persistence = CompileCacheWire::ConditionPersistence::Live,
+      .severity = CompileCacheWire::ConditionSeverity::Notice,
+      .scope = ConditionScope::Process,
+      .remedy =
+          "Nothing, usually: this machine stalls on memory, so it takes no compile beside a running one, the fleet's or "
+          "its own, and when the machine freezes kills its youngest (never a sole one within the allowance), which "
+          "its client compiles locally. It ends once the stall eases. Raised while nothing else runs, the compiles "
+          "outgrow the machine: lower --compile-memory-limit. --memory-pressure-yield and --memory-pressure-shed "
+          "move where it acts (0 turns each off)." },
 } };
 static_assert(RowsInEnumeratorOrder(NodeConditionTable, &NodeConditionRow::condition),
               "NodeConditionTable must hold one row per NodeCondition, in enumerator order");

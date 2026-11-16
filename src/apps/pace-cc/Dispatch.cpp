@@ -113,6 +113,8 @@ namespace
         // The peer's words alone, without the endpoint and code name `detail` wraps them in:
         // the half an operator acts on, kept for the log rather than only the verbose line.
         result.refusal = outcome.message;
+        if (result.decline == DeclineCause::MemoryKilled)
+            result.killedPeakBytes = Wire::KilledPeakOf(outcome.trailer);
         return result;
     }
 
@@ -792,6 +794,13 @@ bool IsWorkerCapacityRefusal(DispatchResult const& result) noexcept
     return result.status == DispatchStatus::Declined && result.declinedAt.has_value()
            && result.declinedAt->opcode == std::to_underlying(Wire::Op::Compile)
            && (result.decline == DeclineCause::NoCapacity || result.decline == DeclineCause::NodeBusy);
+}
+
+bool IsWorkerCompileKilled(DispatchResult const& result) noexcept
+{
+    return result.status == DispatchStatus::Declined && result.declinedAt.has_value()
+           && result.declinedAt->opcode == std::to_underlying(Wire::Op::Compile)
+           && result.decline == DeclineCause::MemoryKilled;
 }
 
 } // namespace Pace::Cc

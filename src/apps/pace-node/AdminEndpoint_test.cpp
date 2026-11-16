@@ -34,6 +34,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -2197,6 +2198,77 @@ TEST_CASE("A compile the admission queue placed on a worker reads as dispatched 
     REQUIRE(json.status == "200 OK");
     // Exactly one: the compile the queue placed, and neither the absent `null` nor the `0` it read before.
     CHECK(json.body.contains(R"("dispatched":{"value":1,)"));
+}
+
+TEST_CASE("Two samples taken at once never overlap so a stale reading cannot be recorded last",
+          "[node][admin][fleethistory]")
+{
+    // A sample READS and then RECORDS, and the history keeps its newest record as the reading the next delta is
+    // taken from. Two overlapping samples can therefore record out of the order they read in, and the queued
+    // grant's dispatch tile read 0 that way whenever the sampler's own thread overlapped a case's sample. So
+    // `SampleOnce` is serialised with that thread, and this case asks the property directly: the node-facts
+    // provider is called inside a sample, before its records, and counts how many samples are inside at once.
+    struct Overlap
+    {
+        std::mutex mutex;
+        int inFlight = 0;
+        int peak = 0;
+        int entries = 0;
+        std::atomic<bool> rendezvousTaken { false };
+    } overlap;
+
+    // The FIRST entrant holds its sample open until a second sample is inside too, or the bound runs out.
+    // Unserialised, the second arrives within microseconds and the peak is 2 on every run. Serialised, the
+    // second cannot enter while the first is inside, so the first waits out the whole bound: absence
+    // can be shown only by a wait that expires, which is why the bound is short.
+    auto rendezvous = Testing::WaitOptions {};
+    rendezvous.bound = std::chrono::milliseconds { 500 };
+    auto const facts = NodeFacts();
+    AdminHttpServer::SnapshotProvider const counting = [&overlap, facts, rendezvous] {
+        {
+            auto const lock = std::scoped_lock { overlap.mutex };
+            ++overlap.inFlight;
+            ++overlap.entries;
+            overlap.peak = std::max(overlap.peak, overlap.inFlight);
+        }
+        if (!overlap.rendezvousTaken.exchange(true))
+            // Expiry is the EXPECTED outcome when the lock holds, so the outcome is discarded: what the case
+            // asserts is the peak, read after every sampling thread has stopped.
+            (void) Testing::WaitUntilOutcome(
+                "a second sample to be inside the sampler while the first still is",
+                [&overlap] {
+                    auto const lock = std::scoped_lock { overlap.mutex };
+                    return overlap.inFlight >= 2;
+                },
+                [&overlap] {
+                    auto const lock = std::scoped_lock { overlap.mutex };
+                    return std::format("{} inside, {} entered", overlap.inFlight, overlap.entries);
+                },
+                rendezvous);
+        auto const lock = std::scoped_lock { overlap.mutex };
+        --overlap.inFlight;
+        return facts();
+    };
+
+    {
+        AtomicMetricsSink metrics;
+        NullLogger logger;
+        Testing::PlacedWallClock wall;
+        // Constructed inside this scope so its destructor joins the sampler's own thread before the counts are
+        // read: that thread samples at construction, and is a third sampler here.
+        FleetSampler sampler { std::nullopt, metrics, counting, wall, HistoryPaths {}, logger };
+        std::jthread helper { [&sampler] { (void) sampler.SampleOnce(); } };
+        (void) sampler.SampleOnce();
+        helper.join();
+    }
+
+    auto const lock = std::scoped_lock { overlap.mutex };
+    // The control: both of this case's samples reached the provider, and the rendezvous ran, so a peak of one
+    // is samples kept apart rather than samples that never happened.
+    REQUIRE(overlap.entries >= 2);
+    REQUIRE(overlap.rendezvousTaken.load());
+    CHECK(overlap.inFlight == 0);
+    CHECK(overlap.peak == 1);
 }
 
 TEST_CASE("fleet.json refuses an unknown range in JSON and still ignores a section", "[node][admin][fleettext]")

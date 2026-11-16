@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <list>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -43,9 +44,11 @@ class PeakEstimates
     /// @param peakBytes Its measured peak.
     void Record(EstimateKey const& key, std::uint64_t peakBytes);
 
-    /// Records that a compile was killed: its estimate is raised to the default unless already higher.
+    /// Records that a compile was killed: its estimate is raised to the default, and to what it held when it was
+    /// killed, unless already higher -- a killed run's peak is a LOWER bound, so it raises and never replaces.
     /// @param key The compile that was killed.
-    void RecordKilled(EstimateKey const& key);
+    /// @param heldBytes What it held when it died (#1770); disengaged when nobody measured it.
+    void RecordKilled(EstimateKey const& key, std::optional<std::uint64_t> heldBytes = std::nullopt);
 
     /// @return The estimate for a compile nothing is known about.
     [[nodiscard]] std::uint64_t DefaultBytes() const noexcept;

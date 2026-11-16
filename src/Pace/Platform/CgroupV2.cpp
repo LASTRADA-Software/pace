@@ -3,10 +3,12 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <charconv>
 #include <format>
 #include <ranges>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 
@@ -14,6 +16,7 @@
     #include <sys/stat.h>
     #include <sys/types.h>
     #include <sys/wait.h>
+    #include <sys/xattr.h>
 
     #include <cerrno>
 
@@ -76,16 +79,31 @@ namespace
         return value;
     }
 
+    /// Whether the cgroup @p directory holds a process now: `cgroup.events`' `populated 1`.
+    /// @param host The cgroup tree.
+    /// @param directory The cgroup.
+    /// @return True only when the file was read and said so; unreadable is false.
+    [[nodiscard]] bool Populated(ICgroupHost const& host, std::filesystem::path const& directory)
+    {
+        auto const text = host.ReadFile(directory / "cgroup.events");
+        if (!text.has_value())
+            return false;
+        auto const lines = std::string_view { *text };
+        return std::ranges::any_of(std::views::split(lines, '\n'), [](auto const line) {
+            return std::string_view { line.begin(), line.end() } == "populated 1";
+        });
+    }
+
     /// One job's cgroup directory, open.
     class CgroupJob final: public IJobCgroup
     {
       public:
         CgroupJob(std::shared_ptr<ICgroupHost const> host,
-                  std::filesystem::path directory,
+                  std::shared_ptr<CgroupJobSource::JobState> state,
                   int descriptor,
                   CgroupTeardownPolicy teardown):
             _host { std::move(host) },
-            _directory { std::move(directory) },
+            _state { std::move(state) },
             _descriptor { descriptor },
             _teardown { teardown }
         {
@@ -103,7 +121,7 @@ namespace
         ~CgroupJob() override
         {
             _host->CloseDescriptor(_descriptor);
-            static_cast<void>(RemoveCgroup(*_host, _directory, _teardown));
+            static_cast<void>(RemoveCgroup(*_host, _state->directory, _teardown));
         }
 
         /// @copydoc IJobCgroup::DirectoryDescriptor
@@ -115,18 +133,74 @@ namespace
         /// @copydoc IJobCgroup::PeakBytes
         [[nodiscard]] std::optional<std::uint64_t> PeakBytes() const override
         {
-            auto const text = _host->ReadFile(_directory / "memory.peak");
+            auto const text = _host->ReadFile(_state->directory / "memory.peak");
             if (!text.has_value())
                 return std::nullopt;
             return ParseDecimal(*text);
         }
 
+        /// @copydoc IJobCgroup::OomKilled
+        [[nodiscard]] bool OomKilled() const override
+        {
+            auto const text = _host->ReadFile(_state->directory / "memory.events");
+            if (!text.has_value())
+                return false;
+            constexpr std::string_view Key = "oom_kill ";
+            auto const lines = std::string_view { *text };
+            for (auto const line: std::views::split(lines, '\n'))
+            {
+                auto const view = std::string_view { line.begin(), line.end() };
+                if (!view.starts_with(Key))
+                    continue;
+                auto value = std::uint64_t { 0 };
+                auto const digits = view.substr(Key.size());
+                auto const [end, error] = std::from_chars(digits.data(), digits.data() + digits.size(), value);
+                return error == std::errc {} && end == digits.data() + digits.size() && value > 0;
+            }
+            return false;
+        }
+
+        /// @copydoc IJobCgroup::Shed
+        [[nodiscard]] bool Shed() const noexcept override
+        {
+            // Acquire, pairing with `KillYoungest`'s release: the mark is stored before the kill is written.
+            return _state->shed.load(std::memory_order_acquire);
+        }
+
       private:
         std::shared_ptr<ICgroupHost const> _host;
-        std::filesystem::path _directory;
+        /// Shared with the source's weak list only while this job lives, which is how a finished job drops out.
+        std::shared_ptr<CgroupJobSource::JobState> _state;
         int _descriptor;
         CgroupTeardownPolicy _teardown;
     };
+
+    /// Whether a refusal to write a control file means only that this kernel does not have it.
+    /// @param error The refusal.
+    /// @return True for a missing or unsupported file; false for everything else (a permission, a busy cgroup).
+    [[nodiscard]] bool MeansAbsent(std::error_code const& error) noexcept
+    {
+        return error == std::errc::no_such_file_or_directory || error == std::errc::not_supported
+               || error == std::errc::operation_not_supported;
+    }
+
+    /// One setting of `compiles/` beyond the ceiling.
+    struct CompilesSetting
+    {
+        std::string_view file;    ///< The control file.
+        std::string_view value;   ///< What is written.
+        std::string_view without; ///< What goes on without it, for the line that says so.
+    };
+
+    /// The settings `PrepareJobCgroups` writes on `compiles/`, in order. No swap for a compile (a thrashing
+    /// compile freezes a desktop long before it dies), and no group kill at the ceiling (a job is its own
+    /// group; the ceiling reclaims one job at a time).
+    constexpr auto CompilesSettings = std::to_array<CompilesSetting>({
+        { .file = "memory.swap.max", .value = "0", .without = "compiles may swap" },
+        { .file = "memory.oom.group",
+          .value = "0",
+          .without = "the ceiling may kill every compile at once rather than one" },
+    });
 
 } // namespace
 
@@ -191,8 +265,13 @@ std::expected<CgroupLayout, CgroupFailure> PrepareJobCgroups(ICgroupHost const& 
 
     // `/` is the root of THIS process's cgroup namespace (a service with `ProtectControlGroups=private`
     // sees its own subtree as the mount's root), so it joins like any other path.
-    auto layout = CgroupLayout { .delegated = own->size() > 1 ? mount / own->substr(1) : mount, .leaf = {} };
+    auto layout = CgroupLayout { .delegated = own->size() > 1 ? mount / own->substr(1) : mount,
+                                 .leaf = {},
+                                 .compiles = {},
+                                 .notApplied = {},
+                                 .oomdOmitRefused = std::nullopt };
     layout.leaf = layout.delegated / NodeLeafName;
+    layout.compiles = layout.delegated / CompilesCgroupName;
 
     // Read once: its absence is how a v1 or hybrid host shows (the mount holds no such file), and its
     // contents say whether the memory controller can be handed down at all.
@@ -259,29 +338,72 @@ std::expected<CgroupLayout, CgroupFailure> PrepareJobCgroups(ICgroupHost const& 
     if (auto const peak = host.ReadFile(layout.leaf / "memory.peak"); !peak.has_value())
         return Failed(CgroupUnavailable::PeakNotReadable, Because(layout.leaf / "memory.peak", peak.error()));
 
-    // A node killed before it could remove its jobs (nothing cleans a hand-delegated subtree) leaves
-    // `job-*` behind. Swept now, so `Create` never has to step over a long run of them; a name it still
-    // meets is skipped there as a backstop.
-    if (auto const entries = host.ListDirectory(layout.delegated); entries.has_value())
+    // Out of systemd-oomd's choice: the node and its cache are what oomd must not kill with the compiles. Tolerated
+    // and named when it cannot be marked -- the ceiling works without it, and oomd stays the only thing it decides.
+    if (auto const marked = host.SetExtendedAttribute(layout.leaf, OomdOmitAttribute, OomdOmitValue); !marked.has_value())
+        layout.oomdOmitRefused = Because(layout.leaf, marked.error());
+
+    // `compiles/` carries the ceiling over every job, so it is a sibling of the node's leaf and never
+    // its parent: the node is never inside the limit it enforces.
+    if (auto const made = host.MakeDirectory(layout.compiles); !made.has_value() && made.error() != std::errc::file_exists)
+        return Failed(CgroupUnavailable::CompilesNotCreated, Because(layout.compiles, made.error()));
+    auto const compilesControl = layout.compiles / "cgroup.subtree_control";
+    if (auto const enabled = host.WriteFile(compilesControl, "+memory"); !enabled.has_value())
+        return Failed(CgroupUnavailable::CompilesNotCreated, Because(compilesControl, enabled.error()));
+    if (auto const now = host.ReadFile(compilesControl); now.has_value() && !ListsWord(*now, "memory"))
+        return Failed(CgroupUnavailable::CompilesNotCreated,
+                      compilesControl.string() + " does not list memory after it was enabled");
+    // The ceiling works without any of these, so a kernel that LACKS one (no swap accounting, say) is
+    // tolerated and named; one that REFUSES one for another reason will not take the ceiling either.
+    for (auto const& setting: CompilesSettings)
     {
+        auto const file = layout.compiles / setting.file;
+        auto const written = host.WriteFile(file, setting.value);
+        if (written.has_value())
+            continue;
+        if (!MeansAbsent(written.error()))
+            return Failed(CgroupUnavailable::CompilesNotCreated, Because(file, written.error()));
+        layout.notApplied.push_back(
+            std::format("{}: {} not writable ({})", setting.without, setting.file, written.error().message()));
+    }
+
+    // A node killed before it could remove its jobs (nothing cleans a hand-delegated subtree) leaves
+    // `job-*` behind -- under `compiles/`, or directly under the delegated cgroup if the node was an
+    // older build. Swept now, so `Create` never has to step over a long run of them; a name it still
+    // meets is skipped there as a backstop.
+    for (auto const& parent: { layout.compiles, layout.delegated })
+    {
+        auto const entries = host.ListDirectory(parent);
+        if (!entries.has_value())
+            continue;
         for (auto const& name: *entries)
         {
-            if (!name.starts_with("job-"))
+            if (!name.starts_with(NodeJobCgroupPrefix))
                 continue;
-            if (auto const removed = RemoveCgroup(host, layout.delegated / name, teardown); !removed.has_value())
-                return Failed(CgroupUnavailable::StaleJobCgroups, Because(layout.delegated / name, removed.error()));
+            if (auto const removed = RemoveCgroup(host, parent / name, teardown); !removed.has_value())
+                return Failed(CgroupUnavailable::StaleJobCgroups, Because(parent / name, removed.error()));
         }
     }
 
     return layout;
 }
 
+std::expected<void, std::error_code> SetCompileCeiling(ICgroupHost const& host,
+                                                       CgroupLayout const& layout,
+                                                       std::optional<std::uint64_t> bytes)
+{
+    return host.WriteFile(layout.compiles / "memory.max",
+                          bytes.has_value() ? std::to_string(*bytes) : std::string { "max" });
+}
+
 CgroupJobSource::CgroupJobSource(std::shared_ptr<ICgroupHost const> host,
                                  CgroupLayout layout,
-                                 CgroupTeardownPolicy teardown):
+                                 CgroupTeardownPolicy teardown,
+                                 std::string namePrefix):
     _host { std::move(host) },
     _layout { std::move(layout) },
-    _teardown { teardown }
+    _teardown { teardown },
+    _namePrefix { std::move(namePrefix) }
 {
 }
 
@@ -293,7 +415,8 @@ std::expected<std::unique_ptr<IJobCgroup>, std::error_code> CgroupJobSource::Cre
     auto lastError = std::error_code {};
     for ([[maybe_unused]] auto const attempt: std::views::iota(std::uint32_t { 0 }, Attempts))
     {
-        auto const directory = _layout.delegated / std::format("job-{}", _next.fetch_add(1, std::memory_order_relaxed));
+        auto const directory =
+            _layout.compiles / std::format("{}{}", _namePrefix, _next.fetch_add(1, std::memory_order_relaxed));
         auto const made = _host->MakeDirectory(directory);
         if (!made.has_value())
         {
@@ -308,9 +431,55 @@ std::expected<std::unique_ptr<IJobCgroup>, std::error_code> CgroupJobSource::Cre
             static_cast<void>(_host->RemoveCgroupDirectory(directory));
             return std::unexpected { descriptor.error() };
         }
-        return std::make_unique<CgroupJob>(_host, directory, *descriptor, _teardown);
+        // A job is killed whole when it is the victim: one compile is one process tree, and half of one is
+        // worth nothing. A kernel without the file still has the ceiling, so its ABSENCE is tolerated (and was
+        // named at preparation, on `compiles/`); any other refusal is a cgroup tree that is not the node's.
+        if (auto const grouped = _host->WriteFile(directory / "memory.oom.group", "1");
+            !grouped.has_value() && !MeansAbsent(grouped.error()))
+        {
+            _host->CloseDescriptor(*descriptor);
+            static_cast<void>(_host->RemoveCgroupDirectory(directory));
+            return std::unexpected { grouped.error() };
+        }
+        auto state = std::make_shared<JobState>();
+        state->directory = directory;
+        {
+            auto const guard = std::scoped_lock { _jobsMutex };
+            // Pruned here, so the list holds at most the jobs running plus those finished since the last make.
+            std::erase_if(_jobs, [](std::weak_ptr<JobState> const& job) { return job.expired(); });
+            _jobs.push_back(state);
+        }
+        return std::make_unique<CgroupJob>(_host, std::move(state), *descriptor, _teardown);
     }
     return std::unexpected { lastError };
+}
+
+bool CgroupJobSource::KillYoungest()
+{
+    auto victim = std::shared_ptr<JobState> {};
+    {
+        auto const guard = std::scoped_lock { _jobsMutex };
+        for (auto const& job: _jobs | std::views::reverse)
+        {
+            auto live = job.lock();
+            // A job whose cgroup holds no process -- made, its compiler not yet started, or already exited -- is no
+            // victim: killing it frees nothing, and the shed's one kill per dwell would be spent on nothing.
+            if (live == nullptr || live->shed.load(std::memory_order_acquire) || !Populated(*_host, live->directory))
+                continue;
+            // `exchange` claims it: a job is shed once, so two callers never choose the same victim.
+            if (!live->shed.exchange(true, std::memory_order_acq_rel))
+            {
+                victim = std::move(live);
+                break;
+            }
+        }
+    }
+    if (victim == nullptr)
+        return false;
+    // Held across the write, so the directory is the victim's however soon it finishes. A job that ended between
+    // the choice and the write answers the write with an error, which kills nothing that is not already gone.
+    static_cast<void>(_host->WriteFile(victim->directory / "cgroup.kill", "1"));
+    return true;
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -474,6 +643,16 @@ std::uint32_t SystemCgroupHost::OwnProcessId() const noexcept
     return static_cast<std::uint32_t>(::getpid());
 }
 
+std::expected<void, std::error_code> SystemCgroupHost::SetExtendedAttribute(std::filesystem::path const& path,
+                                                                            std::string_view name,
+                                                                            std::string_view value) const
+{
+    auto const attribute = std::string { name };
+    if (::setxattr(path.c_str(), attribute.c_str(), value.data(), value.size(), 0) != 0)
+        return std::unexpected { LastError() };
+    return {};
+}
+
 #else // not Linux
 
 std::expected<std::string, std::error_code> SystemCgroupHost::ReadFile(std::filesystem::path const&) const
@@ -521,6 +700,13 @@ std::expected<void, std::error_code> SystemCgroupHost::ProbeSpawnInto(int) const
 std::uint32_t SystemCgroupHost::OwnProcessId() const noexcept
 {
     return 0;
+}
+
+std::expected<void, std::error_code> SystemCgroupHost::SetExtendedAttribute(std::filesystem::path const&,
+                                                                            std::string_view,
+                                                                            std::string_view) const
+{
+    return std::unexpected { std::make_error_code(std::errc::operation_not_supported) };
 }
 
 #endif

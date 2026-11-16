@@ -47,12 +47,13 @@ namespace
         return outcome;
     }
 
-    /// Build a Rejected outcome carrying the daemon's own reason.
-    [[nodiscard]] CacheOutcome Rejected(Wire::ErrorCode code, std::string message)
+    /// Build a Rejected outcome carrying the daemon's own reason, and the trailer beside it.
+    [[nodiscard]] CacheOutcome Rejected(Wire::ErrorCode code, std::string message, std::span<std::byte const> trailer = {})
     {
         auto outcome = Plain(CacheOutcomeKind::Rejected);
         outcome.code = code;
         outcome.message = std::move(message);
+        outcome.trailer.assign(trailer.begin(), trailer.end());
         return outcome;
     }
 
@@ -163,7 +164,7 @@ namespace
                     auto const decoded = Wire::DecodeErrorPayload(payload);
                     if (!decoded.has_value())
                         co_return Plain(CacheOutcomeKind::Transport);
-                    co_return Rejected(decoded->first, std::string { decoded->second });
+                    co_return Rejected(decoded->first, std::string { decoded->second }, Wire::ErrorTrailerOf(payload));
                 }
 
                 case Wire::Status::Progress:

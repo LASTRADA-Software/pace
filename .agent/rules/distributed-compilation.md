@@ -4154,6 +4154,47 @@ Each rule below is a shape a plausible simpler design gets wrong, and none of th
     production wrappers each have a case asserting the request reaches the socket under them; the fake's
     is the proven-leader forwarding case, whose ledger sits UNDER it.
 
+- **A compile killed for memory waits for memory, ONCE** (#1770). A worker's `worker-compile-killed`,
+  or a kill of a compile the launcher ran itself, settles the admission `SettleOutcome::Killed` with
+  what it HELD (the worker's in the 0x35 reply's trailer) -- a LOWER bound the leader folds in as one
+  (`PeakEstimates::RecordKilled`: raise, never replace), never as a measure -- and asks again as
+  `AskOrigin::AfterKill`, so the requeue is charged at least what it held. The local-only fallback after
+  a SECOND kill asks `AfterGrant`, never `AfterKill`: judged against this machine alone, a compile two
+  workers held would otherwise be counted never-fits. The queue places such a request only on a machine whose CONFIGURED budget
+  holds its estimate, never alone on a smaller one (that machine's ceiling is its budget: the run
+  would be the next kill); a held-down budget is waited for, never ruled out. When every reported
+  machine it could run on is too small, its caller included, it is `LocalGrantReason::NeverFits`,
+  alone on the caller, OUTSIDE the ceiling. A second kill anywhere spends the one requeue: from a
+  worker it compiles here (`KillStep::WorkerKilledTwice`), inside this machine's ceiling it runs once
+  more outside it, and outside every ceiling it ends killed -- nothing loops (`Cc::RunMiss`).
+- **A pressed machine is never STARVED of its own compiles** (`AdmissionQueue::Pump`): under `yield` or
+  `shed` it takes nothing while any compile of the fleet runs or is reserved there and no other
+  machine's work at all (`BarredWhilePressed`), but IDLE it runs its own next compile that fits the
+  budget it reports, one at a time. PSI is the HOST's, so a pressure the fleet did not cause and cannot
+  end held every launcher on that machine for as long as it lasted (dist-compile-e2e case 9). Three
+  shapes reopen it, each a test: work that can never run there must not become its HEAD or RESERVE
+  there (the hold keeps it from ever being idle); a settle gives back what a report taken AFTER its
+  grant counted (`Charge::reportsAtGrant`), or the floor runs one compile per 20 s report; and a shed
+  SPARES the sole compile within the allowance (`ShedKill::SpareSoleWithinAllowance`), or the floor's
+  one compile is killed, requeued and finally run outside every ceiling.
+- **A stall confined to another cgroup's OWN memory limit is not the machine's**
+  (`Platform::ConfinedStallScan`): one cgroup carrying `ownShare` of the `some` stall at its own
+  `memory.max`/`memory.high` neither yields nor sheds, the compiles' own rule mirrored. **`some` decides
+  ownership, never `full`**: in a machine-wide freeze every busy cgroup's `full` reads about the
+  system's, so a `full` share alone discounted a genuine freeze. ONE cgroup must carry the share alone,
+  so a real shortage -- which stalls the rest of the machine too -- still sheds; an unreadable tree is
+  NO confined stall (said once); the node's own subtree and ancestors are never one. The walk is
+  bounded (only while stalled, once per 10 s, pruned by share, 64 cgroups, 8 levels) and its staleness
+  errs toward a yield; a shed is DELAYED by at most two dwells (the held at-limit evidence) after a
+  cgroup leaves its limit.
+- **The compiles `pace-cc` runs itself join the node's ceiling through a RENDEZVOUS, never a guess**:
+  the node writes `compiles/`'s path to `$RUNTIME_DIRECTORY/compile-ceiling` while its ceiling holds
+  and withdraws it when not; the launcher reads `$XDG_RUNTIME_DIR/pace-node/compile-ceiling`. The two
+  meet only under the USER unit, which is the design: the system unit's node is another account's.
+  A node with no `RUNTIME_DIRECTORY` (started by hand, a fixture) names NOTHING, so it can never
+  overwrite or withdraw the rendezvous of the node the user runs. Which defense applied is named per
+  compile (`Cc::LocalDefense` + `Cc::CeilingMiss`), in the log and in `-s`: silence is the anti-goal.
+
 ## Fingerprint inputs: captured, never re-gathered
 
 <!-- agent-tripwire: Fingerprint inputs are CAPTURED, never re-gathered -->

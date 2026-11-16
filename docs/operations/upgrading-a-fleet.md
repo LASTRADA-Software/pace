@@ -33,13 +33,31 @@ What makes it a *fleet* problem rather than a daemon problem is that a fleet has
 than one process. A cache daemon is upgraded, restarted, and done; twenty nodes cannot
 be.
 
-## This release: 0xFC version 17, discovery version 3, consensus version 5
+## This release: 0xFC version 18, discovery version 3, consensus version 5
 
 Every one of the three wires changed its grammar, so every node, every `pace-kv` serving
 `0xFC`, every `pace-cc` and every `pacectl` moves together (the supported procedure
 below).
 
-- **`0xFC` 17** (on top of 16's changes below):
+- **`0xFC` 18** (on top of 17's changes below):
+  - MACHINE-BUDGET grew from five fields to seven: the node's memory pressure level, so the leader's
+    queue holds back a machine whose node is yielding or shedding memory, and whether its budget is
+    the configured one or one the pressure allowance still holds below it, so the queue does not let
+    a compile larger than that run alone there.
+  - A worker refuses a compile it lost to a memory kill with the new `worker-compile-killed`
+    (`0x35`); the client compiles locally. A byte, not a grammar change.
+  - A version-17 peer is refused `unsupported-version`, naming the range.
+- **The shipped units changed.** Both now delegate a cgroup to the node (`Delegate=memory`,
+  `ProtectControlGroups=private` in the system unit, `RestrictNamespaces=no`), which is what holds
+  the compiles under one memory ceiling and lets the node shed them. A package upgrade replaces
+  the unit; a unit copied or overridden by hand keeps the old lines, and the node then runs as before,
+  uncapped, raising `compile-memory-uncapped` -- remove the override, or add those lines to it, and
+  restart. Under the user unit the node also takes its own cgroup out of systemd-oomd's choice of
+  victim. Under the system unit it cannot mark itself, so the unit runs it in `pace.slice`, a slice
+  the package now ships beside `system.slice`, outside the slices oomd monitors by default (#1773);
+  a node running at the upgrade moves there at its next restart (see
+  [layer A](../tools/pace-node.md#layer-a-compilers-are-the-kernels-first-victims)).
+- **`0xFC` 17:**
   - FLEET-TEXT carries a trailing format field, so it can return the fleet JSON `/fleet.json` serves
     (the MCP surface reads the fleet that way), and NODE-STATUS can list the MCP surface.
   - A version-16 peer is refused `unsupported-version`, naming the range.

@@ -64,11 +64,12 @@ AdminHttpServer::SnapshotProvider MakeNodeSnapshotProvider(NodeScrapeSources sou
                                .cordoned = sources.cordoned && sources.cordoned() ? std::size_t { 1 } : std::size_t { 0 } },
             // Raw counters rather than a utilization, so no reader's interval is cut by
             // another's; see `NodeScrapeSources::load`.
-            .hostLoad =
-                sources.load != nullptr
-                    ? std::optional { HostLoadReading { .cpu = sources.load->Cpu(),
-                                                        .availableMemoryBytes = sources.load->AvailableMemoryBytes() } }
-                    : std::nullopt,
+            .hostLoad = sources.load != nullptr
+                            ? std::optional { HostLoadReading {
+                                  .cpu = sources.load->Cpu(),
+                                  .availableMemoryBytes = sources.load->AvailableMemoryBytes(),
+                                  .memoryPressure = sources.memoryPressure ? sources.memoryPressure() : std::nullopt } }
+                            : std::nullopt,
             // Absent when there is no cache at all: a node running none has no
             // upstream question to answer either, and a `0` there would claim it
             // does and has none.
@@ -1197,6 +1198,11 @@ std::vector<Distributed::FleetBucket> FleetSampler::Buckets(Distributed::FleetRa
 
 bool FleetSampler::SampleOnce()
 {
+    // One sample at a time, from its first read through its last record and the
+    // keyed histories' fold: the history's newest record must be its newest READING.
+    // See the header.
+    auto const sampling = std::scoped_lock { _sampling };
+
     // ALWAYS, whoever leads. What this machine's cache did and how many of its slots
     // were busy are facts about the machine, and a node that stopped recording them
     // the moment it lost an election is a node whose year of history belongs to

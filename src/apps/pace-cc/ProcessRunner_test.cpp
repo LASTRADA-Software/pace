@@ -4,6 +4,8 @@
 // they use a shell one-liner that exists on every host the launcher targets.
 
 #include "IProcessRunner.hpp"
+#include "OomVictimExec.hpp"
+#include "OomVictimTestSupport.hpp"
 
 #include <Pace/Platform/Environment.hpp>
 #include <Pace/Platform/JobCgroups.hpp>
@@ -22,6 +24,7 @@
 #include <system_error>
 #include <vector>
 
+#include <tests/OwnCgroup.hpp>
 #include <tests/Unwrap.hpp>
 
 using Pace::Testing::Unwrap;
@@ -293,6 +296,23 @@ TEST_CASE("ProcessRunner.peak-memory-is-measured", "[pace-cc][process]")
     CHECK(Unwrap(run.peakMemoryBytes) > 0);
 }
 
+#if !defined(_WIN32)
+TEST_CASE("A compiler ended by SIGKILL is reported killed, not failed", "[cc][process]")
+{
+    auto const runner = MakeProcessRunner(PeakSource::Unmeasured, std::nullopt);
+
+    auto const killed = runner->RunCaptureSplit(ShellCommand("kill -9 $$"));
+    CHECK(killed.exitCode == 137);
+    REQUIRE(killed.killed.has_value());
+    CHECK(Unwrap(killed.killed) == Pace::Platform::CompileKill::Signal);
+
+    // Control: the same status by a plain exit is a failure, not a kill.
+    auto const exited = runner->RunCaptureSplit(ShellCommand("exit 137"));
+    CHECK(exited.exitCode == 137);
+    CHECK_FALSE(exited.killed.has_value());
+}
+#endif
+
 TEST_CASE("ProcessRunner.peak-covers-child-process", "[pace-cc][process]")
 {
     // The parent is a shell and stays small; the 256 MiB lives in its CHILD, so only a
@@ -326,7 +346,7 @@ TEST_CASE("ProcessRunner.unmeasured-reports-no-peak", "[pace-cc][process]")
 {
     // The node's runner on a machine that gave it no cgroup: the compile runs, and no figure is made up.
     // On Linux the figure `ru_maxrss` would give is the SPAWNER's resident set, which is the bug.
-    auto const runner = MakeProcessRunner(PeakSource::Unmeasured);
+    auto const runner = MakeProcessRunner(PeakSource::Unmeasured, std::nullopt);
 #if defined(_WIN32)
     auto const run = runner->RunCaptureSplit(ShellCommand("echo hi"));
     REQUIRE(run.exitCode == 0);
@@ -341,7 +361,7 @@ TEST_CASE("ProcessRunner.unmeasured-reports-no-peak", "[pace-cc][process]")
 
 TEST_CASE("ProcessRunner.resource-usage-source-still-measures", "[pace-cc][process]")
 {
-    auto const runner = MakeProcessRunner(PeakSource::ResourceUsage);
+    auto const runner = MakeProcessRunner(PeakSource::ResourceUsage, std::nullopt);
     auto const run = runner->RunCaptureSplit(ShellCommand("echo hi"));
 
     REQUIRE(run.exitCode == 0);
@@ -379,6 +399,14 @@ class UnusableJob final: public Pace::Platform::IJobCgroup
     [[nodiscard]] std::optional<std::uint64_t> PeakBytes() const override
     {
         return 12345; // Never asked for: the spawn that would have run in it was refused.
+    }
+    [[nodiscard]] bool OomKilled() const override
+    {
+        return false;
+    }
+    [[nodiscard]] bool Shed() const noexcept override
+    {
+        return false;
     }
 
   private:
@@ -447,7 +475,7 @@ TEST_CASE("ProcessRunner.cgroup-runner-runs-the-compile-when-no-cgroup-can-be-ma
     if (!CanSpawnIntoCgroups())
         SKIP("this build cannot spawn into a cgroup, so its runner never asks for one (see the case below)");
     auto source = std::make_shared<ScriptedJobSource>(ScriptedJobSource::Answer::RefuseToCreate);
-    auto const runner = MakeProcessRunner(source);
+    auto const runner = MakeProcessRunner(source, std::nullopt);
 
     auto const run = runner->RunCaptureSplit(ShellCommand("echo hi"));
 
@@ -463,7 +491,7 @@ TEST_CASE("ProcessRunner.cgroup-runner-runs-the-compile-when-the-system-refuses-
     if (!CanSpawnIntoCgroups())
         SKIP("this build cannot spawn into a cgroup, so its runner never asks for one (see the case below)");
     auto source = std::make_shared<ScriptedJobSource>(ScriptedJobSource::Answer::CreateUnusableJob);
-    auto const runner = MakeProcessRunner(source);
+    auto const runner = MakeProcessRunner(source, std::nullopt);
 
     auto const run = runner->RunCaptureSplit(ShellCommand("echo hi"));
 
@@ -475,12 +503,40 @@ TEST_CASE("ProcessRunner.cgroup-runner-runs-the-compile-when-the-system-refuses-
     CHECK(source->Refusals() == 1);
 }
 
+TEST_CASE("ProcessRunner.a-launcher-compile-outside-its-cgroup-is-still-measured", "[pace-cc][process][local-ceiling]")
+{
+    // #1770: the launcher places its own compiles in the node's ceiling where it can; where it cannot -- no cgroup
+    // could be made, or the system would not start the child in one (an ssh session's scope) -- the compile ran
+    // where the small launcher is, and `ru_maxrss` is its own peak, as it was before the ceiling existed. A node's
+    // runner keeps answering nothing there (the two cases above): its `ru_maxrss` is its own resident set.
+    if (!CanSpawnIntoCgroups())
+        SKIP("this build cannot spawn into a cgroup, so its runner never asks for one");
+    auto answer = ScriptedJobSource::Answer::RefuseToCreate;
+    SECTION("no cgroup could be made")
+    {
+        answer = ScriptedJobSource::Answer::RefuseToCreate;
+    }
+    SECTION("the system would not start the child in its cgroup")
+    {
+        answer = ScriptedJobSource::Answer::CreateUnusableJob;
+    }
+    auto source = std::make_shared<ScriptedJobSource>(answer);
+    auto const runner = MakeProcessRunner(source, std::nullopt, PeakSource::ResourceUsage);
+
+    auto const run = runner->RunCaptureSplit(ShellCommand("echo hi"));
+
+    REQUIRE(run.exitCode == 0);
+    CHECK_FALSE(run.inCgroup);
+    REQUIRE(run.peakMemoryBytes.has_value());
+    CHECK(Unwrap(run.peakMemoryBytes) > 0);
+}
+
 TEST_CASE("ProcessRunner.cgroup-runner-still-reports-an-unspawnable-program", "[pace-cc][process]")
 {
     if (!CanSpawnIntoCgroups())
         SKIP("this build cannot spawn into a cgroup, so its runner never asks for one (see the case below)");
     auto source = std::make_shared<ScriptedJobSource>(ScriptedJobSource::Answer::CreateUnusableJob);
-    auto const runner = MakeProcessRunner(source);
+    auto const runner = MakeProcessRunner(source, std::nullopt);
 
     auto const run = runner->RunCaptureSplit({ { "definitely-not-a-real-program-xyzzy" } });
 
@@ -500,13 +556,168 @@ TEST_CASE("ProcessRunner.cgroup-runner-on-a-build-without-support-never-asks-for
     if (CanSpawnIntoCgroups())
         SKIP("this build can spawn into a cgroup; the case is about the one that cannot");
     auto source = std::make_shared<ScriptedJobSource>(ScriptedJobSource::Answer::CreateUnusableJob);
-    auto const runner = MakeProcessRunner(source);
+    auto const runner = MakeProcessRunner(source, std::nullopt);
 
     auto const run = runner->RunCaptureSplit(ShellCommand("echo hi"));
 
     REQUIRE(run.exitCode == 0);
     CHECK_FALSE(run.peakMemoryBytes.has_value());
     CHECK(source->Created() == 0);
+}
+
+#endif
+
+#if defined(__linux__)
+
+namespace
+{
+
+/// What a job reports about its own death, as a case scripts it.
+struct KillMarks
+{
+    bool shed = false;      ///< `IJobCgroup::Shed`.
+    bool oomKilled = false; ///< `IJobCgroup::OomKilled`.
+};
+
+/// A job that runs the child in a REAL cgroup -- this process's own, so nothing on the machine moves -- and answers
+/// the kill marks the case gave it. The descriptor is borrowed, never closed here.
+class MarkedJob final: public Pace::Platform::IJobCgroup
+{
+  public:
+    MarkedJob(int descriptor, KillMarks marks):
+        _descriptor { descriptor },
+        _marks { marks }
+    {
+    }
+    [[nodiscard]] int DirectoryDescriptor() const noexcept override
+    {
+        return _descriptor;
+    }
+    [[nodiscard]] std::optional<std::uint64_t> PeakBytes() const override
+    {
+        return std::nullopt;
+    }
+    [[nodiscard]] bool OomKilled() const override
+    {
+        return _marks.oomKilled;
+    }
+    [[nodiscard]] bool Shed() const noexcept override
+    {
+        return _marks.shed;
+    }
+
+  private:
+    int _descriptor;
+    KillMarks _marks;
+};
+
+/// Makes `MarkedJob`s over this process's own cgroup, and counts the spawns the system refused to place there.
+class MarkedJobSource final: public Pace::Platform::IJobCgroupSource
+{
+  public:
+    MarkedJobSource(int descriptor, KillMarks marks):
+        _descriptor { descriptor },
+        _marks { marks }
+    {
+    }
+    [[nodiscard]] std::expected<std::unique_ptr<Pace::Platform::IJobCgroup>, std::error_code> Create() override
+    {
+        return std::make_unique<MarkedJob>(_descriptor, _marks);
+    }
+    void NoteUnmeasured(Unmeasured why) noexcept override
+    {
+        if (why == Unmeasured::SpawnRefused)
+            ++_refused;
+    }
+    /// @return How many spawns ran outside the cgroup, where the runner drops the job.
+    [[nodiscard]] int Refused() const noexcept
+    {
+        return _refused;
+    }
+
+  private:
+    int _descriptor;
+    KillMarks _marks;
+    std::atomic<int> _refused { 0 };
+};
+
+} // namespace
+
+TEST_CASE("ProcessRunner.a-killed-compile-names-shed-before-ceiling-before-signal", "[pace-cc][process][KillYoungest]")
+{
+    // C1. `KillOf` reads the job's marks while its cgroup is alive: a shed is the governor's own kill and names
+    // itself whatever else is true; an OOM kill inside the ceiling comes next; anything else is a plain signal.
+    if (!CanSpawnIntoCgroups())
+        SKIP("this build cannot spawn into a cgroup, so its runner never keeps a job to read");
+    Pace::Testing::OwnCgroupDirectory const own;
+    if (own.Descriptor() < 0)
+        SKIP("this process's own cgroup v2 directory cannot be opened");
+
+    struct Row
+    {
+        KillMarks marks {};
+        Pace::Platform::CompileKill expected {};
+    };
+    auto const rows = std::array {
+        Row { .marks = { .shed = true, .oomKilled = true }, .expected = Pace::Platform::CompileKill::Shed },
+        Row { .marks = { .shed = true, .oomKilled = false }, .expected = Pace::Platform::CompileKill::Shed },
+        Row { .marks = { .shed = false, .oomKilled = true }, .expected = Pace::Platform::CompileKill::Ceiling },
+        Row { .marks = { .shed = false, .oomKilled = false }, .expected = Pace::Platform::CompileKill::Signal },
+    };
+    for (auto const& row: rows)
+    {
+        auto const source = std::make_shared<MarkedJobSource>(own.Descriptor(), row.marks);
+        auto const runner = MakeProcessRunner(source, std::nullopt);
+        auto const killed = runner->RunCaptureSplit(ShellCommand("kill -9 $$"));
+        if (source->Refused() != 0)
+            SKIP("the system refused to start a child inside this process's own cgroup");
+        CAPTURE(row.marks.shed, row.marks.oomKilled);
+        CHECK(killed.exitCode == 137);
+        REQUIRE(killed.killed.has_value());
+        CHECK(Unwrap(killed.killed) == row.expected);
+    }
+}
+
+TEST_CASE("A compile spawned through the OOM-victim shim lands in its job cgroup and is classified as without it",
+          "[pace-cc][process][KillYoungest][oom]")
+{
+    // The shim is what the job cgroup receives, and it becomes the compiler by `exec`: the compiler runs at score 1000
+    // and a kill reads the same marks it reads without the shim. `Shed` and `Ceiling` are read off the job the runner
+    // KEPT, which it keeps only when the spawn was placed in its cgroup (a refused placement drops it and is skipped
+    // below), so those rows are the placement's evidence as well as the classification's.
+    using namespace Pace::Cc::OomVictimTesting;
+    if (!CanSpawnIntoCgroups())
+        SKIP("this build cannot spawn into a cgroup, so its runner never keeps a job to read");
+    Pace::Testing::OwnCgroupDirectory const own;
+    if (own.Descriptor() < 0)
+        SKIP("this process's own cgroup v2 directory cannot be opened");
+    if (OwnScore() == OomVictimScore)
+        SKIP("this test process already runs at oom_score_adj 1000, so a child inheriting it proves nothing");
+    auto const victim = OomVictim { .self = ShimPath() };
+
+    struct Row
+    {
+        KillMarks marks {};
+        Pace::Platform::CompileKill expected {};
+    };
+    auto const rows = std::array {
+        Row { .marks = { .shed = true, .oomKilled = false }, .expected = Pace::Platform::CompileKill::Shed },
+        Row { .marks = { .shed = false, .oomKilled = true }, .expected = Pace::Platform::CompileKill::Ceiling },
+        Row { .marks = { .shed = false, .oomKilled = false }, .expected = Pace::Platform::CompileKill::Signal },
+    };
+    for (auto const& row: rows)
+    {
+        auto const source = std::make_shared<MarkedJobSource>(own.Descriptor(), row.marks);
+        auto const runner = MakeProcessRunner(source, victim);
+        auto const killed = runner->RunCaptureSplit(ShellCommand("cat /proc/self/oom_score_adj; kill -9 $$"));
+        if (source->Refused() != 0)
+            SKIP("the system refused to start a child inside this process's own cgroup");
+        CAPTURE(row.marks.shed, row.marks.oomKilled, killed.err);
+        CHECK(LinesOf(killed.out) == std::vector<std::string> { "1000" });
+        CHECK(killed.exitCode == 137);
+        REQUIRE(killed.killed.has_value());
+        CHECK(Unwrap(killed.killed) == row.expected);
+    }
 }
 
 #endif

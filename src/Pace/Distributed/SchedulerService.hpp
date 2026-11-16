@@ -674,6 +674,7 @@ struct AdmissionVerdict
     std::vector<std::byte> grant;          ///< The encoded `AdmitGrant`, when `refusal` is not engaged.
     std::uint64_t chargedBytes {};         ///< What the grant charged; zero for `Stored`.
     bool ranAlone {};                      ///< Its estimate exceeded the whole budget.
+    bool neverFits {};                     ///< A killed compile no machine can hold, run alone here (#1770).
     /// Enqueue to decision, on the service clock: what the GRANT tells the client, which sums one
     /// opening by its last grant (`Cc::RunMiss`), so a requeued request still counts its first wait.
     std::chrono::milliseconds queued {};

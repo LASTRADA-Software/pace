@@ -81,6 +81,14 @@ if(PACE_PACKAGE_ROOT_PREFIX AND UNIX AND NOT APPLE)
         # storage, and the trust model gives a worker no cache credentials at all.
         "linux/pace-node.service|${PACE_SYSTEMD_SYSTEM_DIR}|data|pace-node.service|Runtime"
         "linux/pace-node.socket|${PACE_SYSTEMD_SYSTEM_DIR}|data|pace-node.socket|Runtime"
+        # The slice the system unit names (`Slice=pace.slice`): a sibling of
+        # system.slice, which is what keeps the node out of systemd-oomd's choice
+        # of victim (#1773). A unit naming a slice nobody installed still starts --
+        # systemd loads a slice with no file as an empty one (measured on 259) -- so
+        # a missing row would be silent, and would lose the slice's own statement of
+        # why; `ctest -R node-working-directory` reads this table for it. The maintainer
+        # scripts' unconditional daemon-reload is what loads it.
+        "linux/pace.slice|${PACE_SYSTEMD_SYSTEM_DIR}|data|pace.slice|Runtime"
         "linux/pace-node.sysusers|${PACE_SYSUSERS_DIR}|data|pace-node.conf|Runtime"
         # The worker's own configuration file, marked `config` for the reason
         # pace-kv.yaml is: it is the file an operator edits to make the worker

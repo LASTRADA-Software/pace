@@ -828,7 +828,22 @@ JobError JobError::RejectedArgumentsNaming(std::span<std::string const> argument
                                                           - std::string_view { " are" }.size()),
                                     Predicate);
 
-    return JobError { .reason = JobRefusal::RejectedArgument, .detail = std::move(detail), .subjects = std::move(subjects) };
+    return JobError { .reason = JobRefusal::RejectedArgument,
+                      .detail = std::move(detail),
+                      .subjects = std::move(subjects),
+                      .killed = std::nullopt };
+}
+
+JobError JobError::KilledCompile(Platform::CompileKill kill,
+                                 std::string_view sourceName,
+                                 std::optional<std::uint64_t> heldBytes)
+{
+    auto const& row = CompileKillRowFor(kill);
+    return JobError { .reason = JobRefusal::CompileKilled,
+                      .detail = std::format("the compiler of {} was killed ({}): {}", sourceName, row.word, row.why),
+                      .subjects = {},
+                      .killed = kill,
+                      .killedPeakBytes = heldBytes };
 }
 
 bool IsAcceptableJobArgument(std::string_view arg, DriverSpec const& driver, std::span<std::string const> operatorAllowed)
@@ -1086,7 +1101,8 @@ std::expected<std::optional<std::string>, JobError> WorkerSourcePathRule(std::st
         return std::unexpected(JobError { .reason = JobRefusal::RejectedArgument,
                                           .detail = "a source-path replacement and the path it replaces travel "
                                                     "together; one without the other is half a rule",
-                                          .subjects = {} });
+                                          .subjects = {},
+                                          .killed = std::nullopt });
 
     // From here on every way of not building a rule is NO RULE, which is
     // `WorkerSourceNameRule`'s answer and not `WorkerPrefixMapRules`'. The client did
@@ -1217,7 +1233,8 @@ std::expected<std::vector<std::string>, JobError> WorkerPrefixMapRules(std::stri
         return std::unexpected(JobError { .reason = JobRefusal::RejectedArgument,
                                           .detail = "a compilation-directory replacement needs the directory it "
                                                     "replaces",
-                                          .subjects = {} });
+                                          .subjects = {},
+                                          .killed = std::nullopt });
 
     // A family with no row is a worker that cannot honour the request at all. Refused
     // rather than skipped, unlike the source-name rule: a mapping the client ASKED for
@@ -1229,7 +1246,8 @@ std::expected<std::vector<std::string>, JobError> WorkerPrefixMapRules(std::stri
             JobError { .reason = JobRefusal::SpawnFailed,
                        .detail = "this worker's driver family has no path-mapping switch, so a dispatched object "
                                  "cannot record the compilation directory the client asked for",
-                       .subjects = {} });
+                       .subjects = {},
+                       .killed = std::nullopt });
 
     // ALL THREE values, through the same predicate `WorkerSourceNameRule` uses -- two
     // copies of one alphabet is two chances to diverge -- and the two halves are
@@ -1245,7 +1263,8 @@ std::expected<std::vector<std::string>, JobError> WorkerPrefixMapRules(std::stri
             JobError { .reason = JobRefusal::SpawnFailed,
                        .detail = "this worker's own compile directory cannot be spelled inside a mapping rule, so no "
                                  "unambiguous rule exists",
-                       .subjects = {} });
+                       .subjects = {},
+                       .killed = std::nullopt });
 
     auto const ruleFor = [&](std::string_view directory) {
         return PrefixMapRule(*row, directory, replacement);
@@ -1354,10 +1373,12 @@ std::expected<CompileOutcome, JobError> CompileJobRunner::Run(CompileJob const& 
         // reporting `UnknownFingerprint` there tells an operator the fleet is matching
         // the wrong machines when the answer is "this one is still starting" (#365).
         if (!_survey.HasCompleted())
-            return std::unexpected(JobError { .reason = JobRefusal::ToolchainSurveyInFlight, .detail = {}, .subjects = {} });
+            return std::unexpected(JobError {
+                .reason = JobRefusal::ToolchainSurveyInFlight, .detail = {}, .subjects = {}, .killed = std::nullopt });
         auto const found = _toolchains.find(job.fingerprint);
         if (found == _toolchains.end())
-            return std::unexpected(JobError { .reason = JobRefusal::UnknownFingerprint, .detail = {}, .subjects = {} });
+            return std::unexpected(
+                JobError { .reason = JobRefusal::UnknownFingerprint, .detail = {}, .subjects = {}, .killed = std::nullopt });
         compiler = found->second;
     }
 
@@ -1383,7 +1404,8 @@ std::expected<CompileOutcome, JobError> CompileJobRunner::Run(CompileJob const& 
         return std::unexpected(JobError { .reason = JobRefusal::CompilerUnclassified,
                                           .detail = "this worker's configured compiler matches no known driver "
                                                     "family, so its command line cannot be built safely",
-                                          .subjects = {} });
+                                          .subjects = {},
+                                          .killed = std::nullopt });
 
     // Checked again here, on the receiving side, and against an ALLOWLIST -- see
     // `IsAcceptableJobArgument`. The client's filter protects an honest client from
@@ -1417,7 +1439,8 @@ std::expected<CompileOutcome, JobError> CompileJobRunner::Run(CompileJob const& 
     auto const scratch = _scratchRoot / std::format("job-{}", _nextJob.fetch_add(1, std::memory_order_relaxed));
     std::filesystem::create_directories(scratch, ec);
     if (ec)
-        return std::unexpected(JobError { .reason = JobRefusal::ScratchUnavailable, .detail = {}, .subjects = {} });
+        return std::unexpected(
+            JobError { .reason = JobRefusal::ScratchUnavailable, .detail = {}, .subjects = {}, .killed = std::nullopt });
 
     // Removed however this returns, including on a refusal below: a worker that
     // leaked a directory per job would fill its disk in a long-running build.
@@ -1448,10 +1471,12 @@ std::expected<CompileOutcome, JobError> CompileJobRunner::Run(CompileJob const& 
     {
         std::ofstream out { source, std::ios::binary };
         if (!out)
-            return std::unexpected(JobError { .reason = JobRefusal::ScratchUnavailable, .detail = {}, .subjects = {} });
+            return std::unexpected(
+                JobError { .reason = JobRefusal::ScratchUnavailable, .detail = {}, .subjects = {}, .killed = std::nullopt });
         out.write(job.preprocessed.data(), static_cast<std::streamsize>(job.preprocessed.size()));
         if (!out.good())
-            return std::unexpected(JobError { .reason = JobRefusal::ScratchUnavailable, .detail = {}, .subjects = {} });
+            return std::unexpected(
+                JobError { .reason = JobRefusal::ScratchUnavailable, .detail = {}, .subjects = {}, .killed = std::nullopt });
     }
 
     std::vector<std::string> argv;
@@ -1488,7 +1513,8 @@ std::expected<CompileOutcome, JobError> CompileJobRunner::Run(CompileJob const& 
                                               .detail = "this worker cannot read its own working directory, so a "
                                                         "dispatched object cannot record the compilation directory "
                                                         "the client asked for",
-                                              .subjects = {} });
+                                              .subjects = {},
+                                              .killed = std::nullopt });
 
         // Through `CompilerWorkingDirectory` for the same reason the client's side is:
         // the rule this builds has to match what the compiler about to be spawned will
@@ -1599,7 +1625,17 @@ std::expected<CompileOutcome, JobError> CompileJobRunner::Run(CompileJob const& 
         // The compiler could not be spawned at all. Deliberately NOT reported as a
         // failed compile: the client must be able to tell "this worker is broken"
         // from "your code does not compile", because only the second is its answer.
-        return std::unexpected(JobError { .reason = JobRefusal::SpawnFailed, .detail = {}, .subjects = {} });
+        return std::unexpected(
+            JobError { .reason = JobRefusal::SpawnFailed, .detail = {}, .subjects = {}, .killed = std::nullopt });
+
+    // A compiler that was KILLED answered nothing about the code, so it is refused rather than
+    // returned with its 137: as an outcome, a TU that compiles would reach its client as a compiler
+    // failure. Its peak rides the refusal as what it HELD -- cut short, a lower bound, which the client
+    // settles its admission with so its requeue is charged at least that (#1770); it is never reported as
+    // a measurement. Named by `source`'s file name, which is `SafeSourceName`'s output and never the
+    // client's bytes.
+    if (run.killed.has_value())
+        return std::unexpected(JobError::KilledCompile(*run.killed, source.filename().string(), run.peakMemoryBytes));
 
     CompileOutcome outcome {
         .exitCode = run.exitCode,
@@ -1616,7 +1652,8 @@ std::expected<CompileOutcome, JobError> CompileJobRunner::Run(CompileJob const& 
             // The compiler said it succeeded and produced nothing readable. Refused
             // rather than returned as an empty object, which the client would write
             // to disk and cache.
-            return std::unexpected(JobError { .reason = JobRefusal::ScratchUnavailable, .detail = {}, .subjects = {} });
+            return std::unexpected(
+                JobError { .reason = JobRefusal::ScratchUnavailable, .detail = {}, .subjects = {}, .killed = std::nullopt });
         outcome.object = *std::move(bytes);
     }
     return outcome;

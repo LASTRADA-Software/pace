@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <stop_token>
 #include <thread>
@@ -34,10 +35,17 @@
 namespace Pace::Node
 {
 
+class CompileCeilingKeeper;
+class INodeConfigSource;
+class PresenceWake;
+
 /// What the presence loop borrows from the node. All of it outlives the loop.
 struct NodePresenceParts
 {
-    NodeConfig const& cfg; ///< The configuration the node started with.
+    /// The configuration IN FORCE, read per round for the machine budget: `--compile-memory-limit` reloads, and a
+    /// budget read from the configuration the body started with would go on admitting what a lowered ceiling
+    /// kills until a restart.
+    INodeConfigSource const& inForce;
     /// Where the loop registers, re-read at every round (`AppliedSchedulers`): the process's one,
     /// shared with the worker's heartbeat and told every applied state by the consensus tier.
     ISchedulerEndpointSource const& schedulers;
@@ -71,6 +79,14 @@ struct NodePresenceParts
     IHeldCharges const& held;
     /// The peaks this node's worker measured and has not reported; drained into the report.
     MeasuredPeaks& peaks;
+    /// Keeps the compile ceiling from the same configuration and capacity the round reports the budget from;
+    /// null on a node that runs no worker, whose compiles nothing caps.
+    CompileCeilingKeeper* ceiling {};
+    /// The wait between rounds: the process's one, so the pressure watcher and the reload listener can end it
+    /// (`PresenceWake::RequestRound`) whether or not a loop runs to hear them.
+    PresenceWake& wake;
+    /// The memory-pressure level and allowance the machine budget states; null where no watcher runs (calm).
+    IMachinePressureSource const* pressure {};
 };
 
 /// Per-call send/recv ceiling on the presence loop's connection to a scheduler: the ceiling of
@@ -147,6 +163,8 @@ enum class PresenceWakeReason : std::uint8_t
 {
     Elapsed,   ///< The interval ran out.
     HostEvent, ///< A resume or a network change asked for a round now.
+    Pressure,  ///< The memory-pressure level changed, and the fleet must hear it now (`RequestRound`).
+    Reload,    ///< An accepted reload changed what the machine reports (`RequestRound`).
     Stopped,   ///< The node is stopping.
 };
 
@@ -164,6 +182,15 @@ class PresenceWake final: public IHostEventSink
     /// @copydoc IHostEventSink::OnHostEvent
     void OnHostEvent(HostEvent event) override;
 
+    /// Ask for a round now, from any thread: what this machine reports changed and the next interval is too late.
+    ///
+    /// **The 20 s cadence is too slow to yield in time** (the pressure design): a machine entering `Yield` must stop
+    /// the fleet's queue admitting work onto it within one wait, not one interval. A reload is the second caller,
+    /// so a lowered `--compile-memory-limit` is reported as soon as it is written. A request while one is still
+    /// owed is one round, not two, and a suspend supersedes it as it supersedes a host event's.
+    /// @param reason Why; `Pressure` or `Reload`, which `WaitOut` hands back.
+    void RequestRound(PresenceWakeReason reason);
+
     /// Wait out @p interval, or less.
     /// @param stop Ends the wait at once.
     /// @param interval The longest wait.
@@ -171,9 +198,9 @@ class PresenceWake final: public IHostEventSink
     [[nodiscard]] PresenceWakeReason WaitOut(std::stop_token const& stop, std::chrono::milliseconds interval);
 
   private:
-    std::mutex _mutex;                 ///< Guards `_announceNow`.
+    std::mutex _mutex;                 ///< Guards `_owed`.
     std::condition_variable_any _wake; ///< Notified when a wake is posted; `_any` because the wait takes a stop token.
-    bool _announceNow { false };       ///< A round is owed now. Under `_mutex`.
+    std::optional<PresenceWakeReason> _owed {}; ///< A round is owed now, and why: the latest asker. Under `_mutex`.
 };
 
 /// Whether this node's announce loops run: its formation record names somewhere it registers
@@ -255,7 +282,7 @@ class NodePresence
     [[nodiscard]] bool WaitOutInterval(std::stop_token const& stop);
 
     // The announcement keeps no `_cfg` of its own: the scheduler list is read once in `Start`.
-    // `_cfg` is for the machine's compile BUDGET (#1728), and `_capacity` is read per round for
+    // `_inForce` is for the machine's compile BUDGET (#1728), and `_capacity` is read per round for
     // both that budget and NODE-ANNOUNCE's capacity record, since a live cache-budget override
     // moves the reserve both are derived from.
     Cc::IAdvertisedEndpointSource const& _announced;
@@ -268,7 +295,8 @@ class NodePresence
     SchedulerReachability& _reachability;
     Cluster::IAskedJoinsSource const* _askedJoins;
     IEndpointRefresh* _endpoints;         ///< Refreshed at the top of each round; null for none.
-    NodeConfig const& _cfg;               ///< The configuration, for the machine budget's flags.
+    INodeConfigSource const& _inForce;    ///< The configuration in force, for the machine budget; read per round.
+    CompileCeilingKeeper* _ceiling;       ///< Kept per round from the same pair as the budget; null without a worker.
     INodeCapacitySource const& _capacity; ///< What this machine is; read per round.
     IHeldCharges const& _held;            ///< What compiles on it hold; read per round.
     MeasuredPeaks& _peaks;                ///< Measured and unreported; drained per round.
@@ -284,8 +312,11 @@ class NodePresence
     IEndpointDialer& _dialer;
     SchedulerLink _link;
 
-    /// The bounded, cancellable wait between rounds, which a resume or a network change ends.
-    PresenceWake _presenceWake;
+    IMachinePressureSource const* _pressure; ///< Read per round for the budget; null for calm.
+
+    /// The bounded, cancellable wait between rounds, which a resume, a network change, a pressure change or a
+    /// reload ends. Borrowed: the process owns it, so its askers need no loop to exist.
+    PresenceWake& _presenceWake;
     /// Listening from construction; destroyed before `_presenceWake` and after `_thread`.
     HostEventSubscription _hostSubscription;
 

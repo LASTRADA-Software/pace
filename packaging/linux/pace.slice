@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The slice the SYSTEM compile node runs in (`Slice=pace.slice` in pace-node.service),
+# so that systemd-oomd's choice of victim does not include it (#1773).
+#
+# systemd-oomd kills a whole cgroup, and only one below a cgroup it MONITORS: a slice
+# that carries `ManagedOOMMemoryPressure=kill` or `ManagedOOMSwap=kill`. Fedora's
+# defaults set the first on exactly two places --
+#
+#     /usr/lib/systemd/system/system.slice.d/10-oomd-per-slice-defaults.conf
+#     /usr/lib/systemd/user/slice.d/10-oomd-per-slice-defaults.conf
+#
+# -- `system.slice` and the user managers' slices, at 80% pressure held for 20 s, with no
+# swap policy and nothing on the root slice (measured on Fedora 44, systemd 259: `oomctl`
+# lists `/system.slice` and the `user@<uid>.service` slices and nothing else). A service
+# with no `Slice=` lands in `system.slice`, so the node and its cache tier were a candidate.
+#
+# The node cannot take itself out from inside: it marks its own `node/` cgroup
+# `user.oomd_omit=1`, and oomd honours a `user.` mark only on a cgroup owned by the user
+# its manager runs as -- the user unit's case, never this one, where `node/` belongs to the
+# service account and root's oomd is the one watching. `ManagedOOMPreference=omit` on the
+# unit marks the unit's cgroup, which under `Delegate=` is no leaf and is not what oomd
+# ranks. What is left is WHERE the cgroup sits: this slice's name has no `-`, so its parent
+# is the root slice and it is a SIBLING of `system.slice`, outside every cgroup oomd
+# monitors by default. A distribution that also monitors the root slice includes it again;
+# `oomctl` on the host says which cgroups are monitored.
+#
+# It limits nothing, and must not (`ctest -R node-working-directory` refuses any setting in
+# the [Slice] section below). The node already holds its compiles under one memory ceiling
+# of its own, set on `compiles/` and never on its own cgroup; a `MemoryMax=` here would put
+# the cache tier and the compiles under one ceiling, which is the arrangement that ceiling
+# exists to avoid, and a `ManagedOOM*=kill` would put the node straight back in oomd's choice.
+
+[Unit]
+Description=Slice for the Pace compile node
+Documentation=https://github.com/LASTRADA-Software/pace
+
+[Slice]
+# Deliberately empty: see above.

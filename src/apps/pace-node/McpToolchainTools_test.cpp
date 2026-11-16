@@ -1052,8 +1052,8 @@ TEST_CASE("toolchain_diff pages two nodes across cursor boundaries and loses not
     CHECK(CountOf(At(out, "only_a")) == 0);
     auto const& paths = Elements(At(At(out, "content_differs"), "paths"));
     REQUIRE(paths.size() == 5);
-    CHECK(*paths.front().AsString() == "c++/13/bits/h000.h");
-    CHECK(*paths.back().AsString() == "c++/13/bits/h016.h");
+    CHECK(Unwrap(paths.front().AsString()) == "c++/13/bits/h000.h");
+    CHECK(Unwrap(paths.back().AsString()) == "c++/13/bits/h016.h");
     CHECK(At(out, "inferred").AsBool() == std::optional { true });
     CHECK(TextAt(out, "verdict").value_or("").contains("inferred: likely a different libstdc++ package build"));
     CHECK(TextAt(At(out, "b"), "node") == "node-b");

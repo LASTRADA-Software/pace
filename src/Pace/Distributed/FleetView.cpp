@@ -210,6 +210,7 @@ namespace
         { .limit = SlotLimit::Scratch, .chipClass = "chip--scratch", .tone = CellTone::Alert },
         { .limit = SlotLimit::CompileBudget, .chipClass = "chip--memory", .tone = CellTone::Limited },
         { .limit = SlotLimit::Cordoned, .chipClass = "chip--cordoned", .tone = CellTone::Limited },
+        { .limit = SlotLimit::MemoryPressure, .chipClass = "chip--memory", .tone = CellTone::Limited },
     } };
 
     static_assert(RowsInEnumeratorOrder(LimitDressTable, &LimitDress::limit),
@@ -586,8 +587,60 @@ namespace
             .project = [](AdmissionClientRow const& row) { return FleetCell::Of(std::uint64_t { row.queued }); } },
     };
 
+    /// A machine's memory-pressure level as a report spells it, or the absence a machine that has not reported one
+    /// carries (#1771) -- never `calm`, which would claim a reading nobody took.
+    /// @param level The level, if one was reported.
+    /// @return The cell.
+    [[nodiscard]] FleetCell PressureCell(std::optional<PressureLevel> level)
+    {
+        return level.has_value() ? FleetCell::Of(std::string { TraitsFor(*level).name }) : FleetCell::Nothing();
+    }
+
+    /// What the column naming a machine's memory-pressure level says it is, on every table that carries it.
+    constexpr std::string_view PressureHelp =
+        "How hard the machine's memory is pressed, as its node last reported to this leader's queue: calm, yielding "
+        "(it takes nothing beside a running compile) or shedding (it also stops its youngest). Absent when it has not "
+        "reported, "
+        "which is not calm.";
+
+    /// True when `PressureHelp` names every level the way `PressureLevelTable` spells it, so the help cannot drift
+    /// from the cell it explains (#1771).
+    constexpr bool PressureHelpNamesEveryLevel = std::ranges::all_of(
+        PressureLevelTable, [](PressureLevelTraits const& row) { return PressureHelp.contains(row.name); });
+    static_assert(PressureHelpNamesEveryLevel, "PressureHelp must name every PressureLevelTable row by its spelling");
+
+    /// The `budget-limit` column's help, composed from `BudgetLimitTable`'s rows so a standing's word and its remedy
+    /// are written in one place: a row added there is explained here without an edit (#1771).
+    constexpr auto BudgetLimitHelpText = [] {
+        constexpr std::string_view Lead = "What holds the budget where it is.";
+        constexpr std::string_view Tail = " Absent until the machine has reported a budget.";
+        struct Text
+        {
+            std::array<char, 1024> chars {}; ///< The characters; only the first `size` are the text.
+            std::size_t size {};             ///< How many are.
+        };
+        Text text;
+        auto const append = [&text](std::string_view part) {
+            for (auto const c: part)
+                text.chars.at(text.size++) = c;
+        };
+        append(Lead);
+        for (auto const& row: BudgetLimitTable)
+        {
+            append(" ");
+            append(row.name);
+            append(": ");
+            append(row.remedy);
+        }
+        append(Tail);
+        return text;
+    }();
+
+    /// The view the column table holds.
+    constexpr std::string_view BudgetLimitHelp { BudgetLimitHelpText.chars.data(), BudgetLimitHelpText.size };
+
     /// What a compile-queue ledger row shows (#1728).
-    constexpr std::array<FleetColumn<AdmissionMachineRow>, 4> BudgetColumns {
+    constexpr std::array<FleetColumn<AdmissionMachineRow>, 6> BudgetColumns {
         FleetColumn<AdmissionMachineRow> {
             .name = "machine",
             .help = "The machine, by its display name.",
@@ -615,6 +668,22 @@ namespace
             .format = CellFormat::Bytes,
             .keep = ColumnKeep::Vital,
             .project = [](AdmissionMachineRow const& row) { return FleetCell::Maybe(row.budgetBytes); } },
+        FleetColumn<AdmissionMachineRow> { .name = "budget-limit",
+                                           .help = BudgetLimitHelp,
+                                           .format = CellFormat::Text,
+                                           .keep = ColumnKeep::Vital,
+                                           .project =
+                                               [](AdmissionMachineRow const& row) {
+                                                   return row.standing.has_value()
+                                                              ? FleetCell::Of(std::string { TraitsFor(*row.standing).name })
+                                                              : FleetCell::Nothing();
+                                               } },
+        FleetColumn<AdmissionMachineRow> {
+            .name = "memory-pressure",
+            .help = PressureHelp,
+            .format = CellFormat::Text,
+            .keep = ColumnKeep::Vital,
+            .project = [](AdmissionMachineRow const& row) { return PressureCell(row.pressure); } },
     };
 
     /// The rows of the queue's two tables, or none where this node leads no queue: the marker line of the
@@ -873,7 +942,7 @@ namespace
     };
 
     /// What a node row shows, before its per-tier cache columns.
-    constexpr std::array<FleetColumn<NodeReport>, 14> NodeColumns {
+    constexpr std::array<FleetColumn<NodeReport>, 15> NodeColumns {
         FleetColumn<NodeReport> { .name = "endpoint",
                                   .help = "host:port the machine answers on.",
                                   .format = CellFormat::Text,
@@ -976,6 +1045,12 @@ namespace
                                   .format = CellFormat::Bytes,
                                   .keep = ColumnKeep::Vital,
                                   .project = [](NodeReport const& n) { return FleetCell::Maybe(n.load.freeScratchBytes); } },
+        // From the machine's budget report to this leader's queue (`JoinReportedPressure`), never from a
+        // heartbeat, which does not carry it: a follower leads no queue, so its rows are absent here.
+        FleetColumn<NodeReport> { .name = "memory-pressure",
+                                  .help = PressureHelp,
+                                  .format = CellFormat::Text,
+                                  .project = [](NodeReport const& n) { return PressureCell(n.load.pressure); } },
         FleetColumn<NodeReport> { .name = "cache-hit-rate",
                                   .help = "Reads this node's cache served. Absent when it has served none.",
                                   .format = CellFormat::Share,
@@ -1424,9 +1499,15 @@ FleetTotals TotalsFor(FleetSnapshot const& snapshot) noexcept
         // rendered "8 compiling, 8 free" out of 8 registered, and the legend
         // offered a compile a start on a machine that could take none.
         //
-        // `WorkerRegistry::FreeSlots` is the definition this has to match, and it
-        // subtracts before calling anything free. Two answers to "what is free"
-        // is how a page comes to disagree with the scheduler it is describing.
+        // Subtracting before calling anything free is what `WorkerRegistry::FreeSlots`
+        // does too. But the load here carries the machine's reported pressure level
+        // (`JoinReportedPressure`, #1771), so a yielding or shedding machine offers
+        // nothing to the fleet -- which matches the admission queue, which places no other machine's work on it
+        // (`AdmissionQueue::BarredWhilePressed`), and NOT the
+        // registry: `FreeSlots` and the `Withdrawn` refusal read the registry's own
+        // heartbeat load, which carries no level, so a lease picked outside the queue
+        // can still land on a pressed machine that this total calls withheld. Two
+        // answers to "what is free" is that gap, stated rather than hidden.
         auto const ceiling = std::min(ceilings.available, registered);
         totals.free += node.fleetJobsInFlight >= ceiling ? 0U : ceiling - node.fleetJobsInFlight;
     }
@@ -1530,12 +1611,42 @@ namespace
             section.machines.push_back(AdmissionMachineRow { .machine = MachineNameOf(machine.machine, workers, cluster),
                                                              .chargedBytes = machine.chargedBytes,
                                                              .inUseBytes = machine.inUseBytes,
-                                                             .budgetBytes = machine.budgetBytes });
+                                                             .budgetBytes = machine.budgetBytes,
+                                                             .pressure = machine.pressure,
+                                                             .standing = machine.standing });
         std::ranges::sort(section.clients, [](AdmissionClientRow const& a, AdmissionClientRow const& b) {
             return std::tie(a.machine, a.tree) < std::tie(b.machine, b.tree);
         });
         std::ranges::sort(section.machines, {}, &AdmissionMachineRow::machine);
         return section;
+    }
+
+    /// Copy each machine's reported pressure level onto the load its rows are drawn from (#1771).
+    ///
+    /// The level reaches the leader in the machine's budget report to its queue and in no heartbeat, so the
+    /// registry's loads never carry it. Joined by the identity key both hold -- the one fact a machine PROVED --
+    /// onto the machine row and every registry entry of it, so `SlotCeilingsFor` names `memory-pressure` where the
+    /// queue places no fleet work, and the fleet totals withhold what the queue will not grant. A machine with no report
+    /// keeps the absence it arrived with.
+    /// @param snapshot The rows to fill.
+    /// @param view The queue, or none where this node leads none.
+    void JoinReportedPressure(FleetSnapshot& snapshot, std::optional<QueueView> const& view)
+    {
+        if (!view.has_value())
+            return;
+        auto const pressureOf = [&machines = view->machines](std::string_view key) -> std::optional<PressureLevel> {
+            if (key.empty())
+                return std::nullopt;
+            auto const* const ledger =
+                core::findIfOrNull(machines, [key](MachineLedgerView const& candidate) { return candidate.machine == key; });
+            return ledger != nullptr ? ledger->pressure : std::nullopt;
+        };
+        for (auto& node: snapshot.nodes)
+            if (auto const pressure = pressureOf(node.identityKey); pressure.has_value())
+                node.load.pressure = pressure;
+        for (auto& worker: snapshot.workers)
+            if (auto const pressure = pressureOf(worker.info.identityKey); pressure.has_value())
+                worker.info.load.pressure = pressure;
     }
 
     /// The scheduler's joined tickets, oldest first, counted in full and listed up to the ceiling.
@@ -1650,6 +1761,7 @@ FleetSnapshot CollectFleet(FleetSources const& sources)
     // ONE read for both sections, so the queue's depth and the compile totals beside it are one sample.
     auto report = sources.scheduler->AdmissionReportNow();
     auto const* const cluster = snapshot.cluster.has_value() ? &*snapshot.cluster : nullptr;
+    JoinReportedPressure(snapshot, report.queue);
     snapshot.admission = AdmissionSectionOf(report.queue, snapshot.workers, cluster);
     snapshot.compiles = CompileSectionOf(std::move(report.compiles), snapshot.workers, cluster);
 

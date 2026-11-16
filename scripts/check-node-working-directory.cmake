@@ -103,6 +103,28 @@
 # started by hand and nothing in it says which one the page means. /var/ is where a
 # system service keeps what it writes, so that is where a citation for one is read.
 #
+# AND THE SLICE A SYSTEM NODE RUNS IN
+#
+# A fourth question about the same unit, and the one systemd-oomd asks. oomd kills a whole
+# cgroup BELOW one it monitors, and Fedora's defaults monitor `system.slice` and the user
+# managers' slices; a system unit with no `Slice=` lands in `system.slice`, so the node and its
+# cache tier are a candidate. Its own `user.oomd_omit` mark is not honoured there (the service
+# account owns the cgroup, root's oomd watches), so what takes it out is the slice: the unit
+# names `Slice=pace.slice`, a sibling of `system.slice` the package ships (#1773).
+#
+#   no Slice=                  the unit lands in system.slice, inside oomd's choice
+#   a later empty assignment   RESETS it to the default, which is system.slice
+#   a slice under system.slice `system-pace.slice` is a CHILD of system.slice by its name
+#   a slice nothing ships      systemd still starts it, in an empty slice of that name,
+#   or installs                so nothing would ever say the shipped file had gone
+#   a slice that limits        a `MemoryMax=` puts the cache tier under the compiles' ceiling,
+#                              a `ManagedOOM*=kill` puts the node back in oomd's choice -- so
+#                              the [Slice] section carries NO setting at all
+#
+# Blind spot, failing OPEN: which slices oomd monitors is the HOST's configuration, not this
+# tree's, so the table of monitored slices below is Fedora's defaults, measured, and a host
+# that monitors the root slice as well includes `pace.slice` with every check here green.
+#
 # Runs as `cmake -P`, for the reasons check-repository-hygiene.cmake states at
 # length: it compares strings and reports, so a .sh + .ps1 pair would be two
 # implementations of one rule differing only in syntax, and cmake is the one tool
@@ -185,6 +207,36 @@ set(PaceCacheDirCitationSources "docs/*.md" "${PaceCacheDirReference}")
 # only under /var/ (the blind spot above). Group 2 is the path; a sentence's closing
 # full stop is trimmed off it before it is judged.
 set(PaceCacheDirCitationPattern "(--cache-dir[= ]|cache_dir:[ \t]*)(/var/[A-Za-z0-9._/+-]*)")
+
+# One row per shipped SYSTEM unit whose node must sit outside systemd-oomd's choice:
+#
+#   <unit under packaging/>|<the slice file it names, under packaging/>|<why>
+#
+# The slice's NAME is the file's name, since that is the name the asset table installs it
+# under and the name `Slice=` must spell. A unit or slice named here that does not exist is a
+# failure, for the first table's reason. The user unit has no row: its node marks its own
+# cgroup, which the user's own oomd honours.
+set(PaceUnitNodeSlices
+    "linux/pace-node.service|linux/pace.slice|The system compile node: with no Slice= it lands in system.slice, which Fedora's oomd monitors, and the node's own user.oomd_omit mark is not honoured on a cgroup the service account owns -- so oomd could kill the node with its cache tier."
+)
+
+# The top-level slices systemd-oomd monitors by default, measured on Fedora 44 / systemd 259
+# (`oomctl`, and the two drop-ins it names). A slice is refused when it IS one of these or
+# lies below one -- and a slice's parent is spelled in its NAME, `a-b.slice` under `a.slice`.
+# `user.slice` is here because oomd monitors the user managers below it.
+set(PaceOomdMonitoredSlices
+    "system.slice|/usr/lib/systemd/system/system.slice.d/10-oomd-per-slice-defaults.conf: ManagedOOMMemoryPressure=kill at 80%"
+    "user.slice|/usr/lib/systemd/user/slice.d/10-oomd-per-slice-defaults.conf, applied to every user manager below it"
+)
+
+# The packaging asset table that installs the slice, and the destination variable a system
+# unit's row names. Read rather than restated, for the state-directory name's reason.
+set(PacePlatformAssetTable "packaging/CMakeLists.txt")
+set(PaceSystemdSystemDirVariable "PACE_SYSTEMD_SYSTEM_DIR")
+
+# What a slice name may be spelled with: segments joined by `-`, no escapes. A name this check
+# cannot split is a parent it cannot judge, so it is refused rather than passed.
+set(PaceSliceNamePattern "^[A-Za-z0-9_.]+(-[A-Za-z0-9_.]+)*[.]slice$")
 
 # systemd's own directory roots, so `RuntimeDirectory=x` is checked against the
 # path it actually creates. All are fixed for a SYSTEM unit, which every row
@@ -585,6 +637,145 @@ if(NOT cacheViolations STREQUAL "")
 endif()
 
 # ---------------------------------------------------------------------------
+# The slice a system node runs in, out of systemd-oomd's choice.
+
+set(sliceViolations "")
+set(assetTableText "")
+if(EXISTS "${PACE_SOURCE_DIR}/${PacePlatformAssetTable}")
+    file(READ "${PACE_SOURCE_DIR}/${PacePlatformAssetTable}" assetTableText)
+    string(REPLACE ";" "<semicolon>" assetTableText "${assetTableText}")
+else()
+    list(APPEND sliceViolations
+        "  ${PacePlatformAssetTable}\n      does not exist, so nothing was read for what the package installs")
+endif()
+
+foreach(row IN LISTS PaceUnitNodeSlices)
+    pace_row_fields("${row}" unit sliceFile reason)
+    set(path "${PACE_SOURCE_DIR}/packaging/${unit}")
+    if(NOT EXISTS "${path}")
+        list(APPEND sliceViolations
+            "  packaging/${unit}\n      is named by the slice table and does not exist, so nothing was scanned")
+        continue()
+    endif()
+    get_filename_component(sliceName "${sliceFile}" NAME)
+
+    # --- the unit names it, and the name is the one in force ----------------
+    # Slice= overrides rather than accumulates, and an empty one resets it to the default --
+    # system.slice -- so the LAST assignment is the one judged.
+    file(READ "${path}" content)
+    pace_unit_directive("${content}" "Slice" assigned)
+    set(value "")
+    list(LENGTH assigned assignedCount)
+    if(assignedCount GREATER 0)
+        math(EXPR lastIndex "${assignedCount} - 1")
+        list(GET assigned ${lastIndex} value)
+    endif()
+    if(value STREQUAL "")
+        if(assignedCount GREATER 0)
+            list(APPEND sliceViolations
+                "  packaging/${unit}\n      ends its Slice= assignments with an empty one, which RESETS it: the unit lands in system.slice, inside systemd-oomd's choice")
+        else()
+            list(APPEND sliceViolations
+                "  packaging/${unit}\n      names no Slice=, so it lands in system.slice, inside systemd-oomd's choice of victim")
+        endif()
+    elseif(NOT value MATCHES "${PaceSliceNamePattern}")
+        list(APPEND sliceViolations
+            "  packaging/${unit}\n      names Slice=${value}, which is not a slice name this check can split into its parents -- and a parent nobody judged may be system.slice")
+    else()
+        # Self and every ancestor its name spells: `a-b-c.slice` is under `a-b.slice`, under `a.slice`.
+        string(REGEX REPLACE "[.]slice$" "" stem "${value}")
+        string(REPLACE "-" ";" segments "${stem}")
+        set(prefix "")
+        foreach(segment IN LISTS segments)
+            if(prefix STREQUAL "")
+                set(prefix "${segment}")
+            else()
+                string(APPEND prefix "-${segment}")
+            endif()
+            foreach(monitored IN LISTS PaceOomdMonitoredSlices)
+                pace_row_fields("${monitored}" monitoredName monitoredWhy)
+                if("${prefix}.slice" STREQUAL "${monitoredName}")
+                    list(APPEND sliceViolations
+                        "  packaging/${unit}\n      names Slice=${value}, which is ${monitoredName} or lies under it (${monitoredWhy}) -- inside systemd-oomd's choice of victim")
+                endif()
+            endforeach()
+        endforeach()
+        if(NOT value STREQUAL sliceName)
+            list(APPEND sliceViolations
+                "  packaging/${unit}\n      names Slice=${value}, while the slice this tree ships is ${sliceName}: systemd starts it in an empty slice of that name, and nothing says the shipped one is unused")
+        endif()
+    endif()
+
+    # --- the slice ships, and limits nothing -------------------------------
+    set(slicePath "${PACE_SOURCE_DIR}/packaging/${sliceFile}")
+    if(NOT EXISTS "${slicePath}")
+        list(APPEND sliceViolations
+            "  packaging/${sliceFile}\n      is named by the slice table and does not exist, so the package ships no slice for the unit to name")
+    else()
+        file(READ "${slicePath}" sliceText)
+        # Walked a LINE at a time with FIND and SUBSTRING, never as a CMake list: a line is
+        # judged by the section header above it, and a list would merge lines across an
+        # unbalanced `[` in a comment -- this file's own comments name `[Slice]`, which is
+        # also why the header is matched as a whole line and never found by substring.
+        set(rest "${sliceText}\n")
+        set(currentSection "")
+        set(sawSliceSection FALSE)
+        while(NOT rest STREQUAL "")
+            string(FIND "${rest}" "\n" eol)
+            string(SUBSTRING "${rest}" 0 ${eol} line)
+            math(EXPR next "${eol} + 1")
+            string(SUBSTRING "${rest}" ${next} -1 rest)
+            if(line MATCHES "^[ \t]*\\[([A-Za-z]+)\\][ \t\r]*$")
+                set(currentSection "${CMAKE_MATCH_1}")
+                if(currentSection STREQUAL "Slice")
+                    set(sawSliceSection TRUE)
+                endif()
+            elseif(currentSection STREQUAL "Slice" AND line MATCHES "^[ \t]*[A-Za-z][A-Za-z0-9]*[ \t]*=")
+                string(STRIP "${line}" setting)
+                list(APPEND sliceViolations
+                    "  packaging/${sliceFile}\n      sets ${setting} in its [Slice] section: the slice must limit nothing -- the node already caps its own compiles on compiles/, a memory limit here would put the cache tier under the same ceiling, and a ManagedOOM*=kill puts the node back in systemd-oomd's choice")
+            endif()
+        endwhile()
+        # The positive control: a walk that never found the section judged nothing in it.
+        if(NOT sawSliceSection)
+            list(APPEND sliceViolations
+                "  packaging/${sliceFile}\n      has no [Slice] section line, so this check judged nothing it sets -- keep the section, empty, with the reason it is empty")
+        endif()
+    endif()
+
+    # --- and the package installs it, as a SYSTEM unit, under its own name --
+    # One row, not commented out: a line break and horizontal whitespace before the quote.
+    if(NOT assetTableText STREQUAL "")
+        string(REPLACE "." "[.]" sliceFilePattern "${sliceFile}")
+        string(REPLACE "." "[.]" sliceNamePattern "${sliceName}")
+        set(rowPattern "[\r\n][ \t]*\"${sliceFilePattern}\\|\\$\\{${PaceSystemdSystemDirVariable}\\}\\|[a-z]+\\|${sliceNamePattern}\\|[A-Za-z]+\"")
+        string(REGEX MATCHALL "${rowPattern}" rows "\n${assetTableText}")
+        list(LENGTH rows rowCount)
+        if(NOT rowCount EQUAL 1)
+            list(APPEND sliceViolations
+                "  ${PacePlatformAssetTable}\n      has ${rowCount} row(s) installing ${sliceFile} into \${${PaceSystemdSystemDirVariable}} as ${sliceName}, not exactly one: the DEB and the RPM ship what that table installs")
+        endif()
+    endif()
+endforeach()
+
+if(NOT sliceViolations STREQUAL "")
+    list(JOIN sliceViolations "\n" sliceReport)
+    set(sliceRulebook "")
+    foreach(row IN LISTS PaceUnitNodeSlices)
+        pace_row_fields("${row}" unit sliceFile reason)
+        string(APPEND sliceRulebook "  packaging/${unit} in packaging/${sliceFile}\n      ${reason}\n")
+    endforeach()
+    # SEND_ERROR for the state verdict's reason: the working-directory verdict below still runs.
+    message(SEND_ERROR
+        "Shipped systemd unit(s) would run the node inside systemd-oomd's choice of victim:\n${sliceReport}\n\n"
+        "A system unit whose node must not be killed with its cache tier names Slice=<a slice this "
+        "package ships>, installed by one row of ${PacePlatformAssetTable}, lying under no slice oomd "
+        "monitors by default, and limiting nothing. Issue #1773.\n\n"
+        "${sliceRulebook}"
+        "The table lives in ${CMAKE_CURRENT_LIST_FILE}.")
+endif()
+
+# ---------------------------------------------------------------------------
 if(NOT violations STREQUAL "")
     list(JOIN violations "\n" report)
 
@@ -610,14 +801,16 @@ if(NOT violations STREQUAL "")
         "The table lives in ${CMAKE_CURRENT_LIST_FILE}.")
 endif()
 
-if(NOT stateViolations STREQUAL "" OR NOT cacheViolations STREQUAL "")
+if(NOT stateViolations STREQUAL "" OR NOT cacheViolations STREQUAL "" OR NOT sliceViolations STREQUAL "")
     return()
 endif()
 list(LENGTH PaceUnitWorkingDirectories unitCount)
 list(LENGTH PaceUnitNodeStateDirectories stateUnitCount)
 list(LENGTH PaceUnitNodeCacheDirectories cacheUnitCount)
+list(LENGTH PaceUnitNodeSlices sliceUnitCount)
 list(LENGTH citationSources sourceCount)
 message(STATUS "unit working directories: ${unitCount} shipped unit(s) start where they should, "
                "${stateUnitCount} hand the node its state directory, ${cacheUnitCount} create the "
                "directory ${citationCount} cache_dir citation(s) across ${sourceCount} file(s) name "
-               "(${citationMode})")
+               "(${citationMode}), ${sliceUnitCount} run the node in a shipped slice outside "
+               "systemd-oomd's default choice")

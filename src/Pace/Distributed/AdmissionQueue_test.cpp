@@ -82,6 +82,22 @@ struct Fixture
         return queue.Enqueue(std::move(request));
     }
 
+    /// Enqueues a request for the compile keyed @p cacheKey, asked for with @p origin, and nothing taught: the
+    /// estimate is whatever the queue has learned of that key -- a kill included.
+    Ticket Ask(
+        AdmitKind kind, std::string caller, std::string cacheKey, AskOrigin origin, std::string const& fingerprint = "fp")
+    {
+        QueueRequest request;
+        request.kind = kind;
+        request.caller = std::move(caller);
+        request.fingerprint = fingerprint;
+        request.estimate =
+            EstimateKey { .cacheKey = std::move(cacheKey), .sourcePath = "big.cpp", .compilerIdentity = fingerprint };
+        request.storable = false;
+        request.origin = origin;
+        return queue.Enqueue(std::move(request));
+    }
+
     int serial {}; ///< Numbers the keys `Add` mints.
 };
 
@@ -89,7 +105,19 @@ constexpr Settlement Done { .outcome = SettleOutcome::NotStored, .peakBytes = st
 
 MachineReport Report(std::uint64_t budget, std::uint32_t slots, std::uint32_t heldSlots = 0, std::uint64_t heldBytes = 0)
 {
-    return MachineReport { .memoryBudgetBytes = budget, .slots = slots, .heldSlots = heldSlots, .heldBytes = heldBytes };
+    return MachineReport { .memoryBudgetBytes = budget,
+                           .slots = slots,
+                           .heldSlots = heldSlots,
+                           .heldBytes = heldBytes,
+                           .pressure = PressureLevel::Calm };
+}
+
+/// An idle machine's report at @p pressure.
+MachineReport Pressed(std::uint64_t budget, std::uint32_t slots, PressureLevel pressure)
+{
+    auto report = Report(budget, slots);
+    report.pressure = pressure;
+    return report;
 }
 
 std::vector<Ticket> Tickets(std::vector<Decision> const& decisions)
@@ -834,4 +862,504 @@ TEST_CASE("AdmissionQueue.snapshot-in-use-is-what-admission-counts-after-a-failo
     // And it is the figure admission refuses on: 2 GiB does not fit in the 1 GiB left.
     f.Local(2 * GiB);
     CHECK(f.queue.Pump().empty());
+}
+
+TEST_CASE("AdmissionQueue.pressured-machine-never-runs-oversize-alone", "[distributed][admission]")
+{
+    // The run-alone exception admits a compile larger than the whole budget onto an idle machine. A
+    // machine under memory pressure is idle BECAUSE it is yielding, so that exception is closed there.
+    SECTION("yielding: the oversize request waits")
+    {
+        Fixture f;
+        f.queue.ReportMachine("m", Pressed(4 * GiB, 4, PressureLevel::Yield));
+        f.Local(6 * GiB);
+        CHECK(f.queue.Pump().empty());
+        CHECK(f.queue.Depth() == 1);
+    }
+    SECTION("calm: the same request runs alone (control)")
+    {
+        Fixture f;
+        f.queue.ReportMachine("m", Pressed(4 * GiB, 4, PressureLevel::Calm));
+        auto const big = f.Local(6 * GiB);
+        auto const granted = f.queue.Pump();
+        REQUIRE(granted.size() == 1);
+        CHECK(granted[0].ticket == big);
+        CHECK(granted[0].ranAlone);
+    }
+}
+
+TEST_CASE("AdmissionQueue.calm-lowered-budget-oversize-request-idle-machine-admits-nothing", "[distributed][admission]")
+{
+    // A yield ended and the machine is Calm again, but the allowance still holds its budget below the configured one
+    // while it ramps back. A compile larger than that held budget must not run alone: the ceiling holds compiles to
+    // the same allowance and would kill it, the client would re-admit it, and the loop lasts as long as the ramp (C3).
+    SECTION("held by the allowance: the oversize request waits")
+    {
+        Fixture f;
+        auto held = Pressed(2 * GiB, 4, PressureLevel::Calm);
+        held.standing = BudgetStanding::HeldByAllowance;
+        f.queue.ReportMachine("m", held);
+        f.Local(6 * GiB);
+        CHECK(f.queue.Pump().empty());
+        CHECK(f.queue.Depth() == 1);
+
+        // A request that fits the held budget still runs: only the run-alone exception is closed.
+        auto const small = f.Local(1 * GiB);
+        auto const granted = f.queue.Pump();
+        REQUIRE(granted.size() == 1);
+        CHECK(granted[0].ticket == small);
+    }
+    SECTION("ramped back to its configured budget: the same request runs alone (control)")
+    {
+        Fixture f;
+        f.queue.ReportMachine("m", Pressed(2 * GiB, 4, PressureLevel::Calm));
+        auto const big = f.Local(6 * GiB);
+        auto const granted = f.queue.Pump();
+        REQUIRE(granted.size() == 1);
+        CHECK(granted[0].ticket == big);
+        CHECK(granted[0].ranAlone);
+    }
+}
+
+TEST_CASE("AdmissionQueue.shedding-machine-admits-nothing-beside-a-running-compile", "[distributed][admission]")
+{
+    // A compile running there is known three ways -- charged by this queue, or only REPORTED, as slots or as bytes
+    // (after a failover, or one the report is ahead of) -- and each keeps the machine from being idle.
+    SECTION("charged by the queue")
+    {
+        Fixture f;
+        f.queue.ReportMachine("m", Pressed(8 * GiB, 4, PressureLevel::Calm));
+        auto const running = f.Local(1 * GiB);
+        REQUIRE(Tickets(f.queue.Pump()) == std::vector<Ticket> { running });
+
+        f.queue.ReportMachine("m", Pressed(8 * GiB, 4, PressureLevel::Shed));
+        auto const small = f.Local(1 * GiB);
+        CHECK(f.queue.Pump().empty());
+        CHECK(f.queue.Depth() == 1);
+
+        // The level is applied on receipt, to a ticket already waiting: calm again, it runs.
+        f.queue.ReportMachine("m", Pressed(8 * GiB, 4, PressureLevel::Calm));
+        CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { small });
+    }
+    SECTION("reported held slots alone")
+    {
+        Fixture f;
+        auto shedding = Report(8 * GiB, 4, 1, 0);
+        shedding.pressure = PressureLevel::Shed;
+        f.queue.ReportMachine("m", shedding);
+        f.Local(1 * GiB);
+        CHECK(f.queue.Pump().empty());
+        CHECK(f.queue.Depth() == 1);
+    }
+    SECTION("reported held bytes alone")
+    {
+        Fixture f;
+        auto shedding = Report(8 * GiB, 4, 0, 1 * GiB);
+        shedding.pressure = PressureLevel::Shed;
+        f.queue.ReportMachine("m", shedding);
+        f.Local(1 * GiB);
+        CHECK(f.queue.Pump().empty());
+        CHECK(f.queue.Depth() == 1);
+    }
+}
+
+TEST_CASE("AdmissionQueue.pressed-idle-machine-still-runs-its-own-compiles-one-at-a-time", "[distributed][admission]")
+{
+    // dist-compile-e2e's case 9 hung here: a cache-only node (`--slots=0`), the leader of its own one-machine fleet,
+    // reported `shed` because the HOST's PSI was high -- another cgroup thrashing at its own `memory.max` -- and the
+    // queue held its launcher's compile for as long as that lasted, which nothing this fleet does can end. A machine
+    // running none of the fleet's compiles gains nothing from waiting, so its OWN compile that fits the budget it
+    // reports runs, one at a time; anything beside it waits for calm, and no other machine's work is placed there.
+    for (auto const level: { PressureLevel::Yield, PressureLevel::Shed })
+    {
+        CAPTURE(static_cast<int>(level));
+        Fixture f;
+        // What a node reports under pressure: its allowance, floored at one default estimate, held below its budget.
+        auto pressed = Pressed(2 * GiB, 4, level);
+        pressed.standing = BudgetStanding::HeldByAllowance;
+        f.queue.ReportMachine("m", pressed);
+
+        // Both fit beside each other in the room, so only the machine not being idle holds the second back.
+        auto const first = f.Add(AdmitKind::LocalOnly, "m", 1 * GiB);
+        auto const second = f.Add(AdmitKind::LocalOnly, "m", 1 * GiB);
+        auto const granted = f.queue.Pump();
+        REQUIRE(Tickets(granted) == std::vector<Ticket> { first });
+        CHECK(granted[0].kind == Pace::CompileCacheWire::GrantKind::Local);
+        CHECK_FALSE(granted[0].ranAlone);
+        CHECK(f.queue.Depth() == 1);
+
+        // The first still running, the second waits; once it has settled, the second runs.
+        CHECK(f.queue.Pump().empty());
+        f.queue.Settle(first, Done);
+        CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { second });
+    }
+}
+
+TEST_CASE("AdmissionQueue.a-settle-gives-back-what-a-later-report-counted", "[distributed][admission]")
+{
+    // A report that arrives while a granted compile runs counts it as held; once it settles, the ledger's max(charged,
+    // held) would still read it as running until the next report, 20 s on. Under pressure that held the floor to one
+    // compile per report period. The settle gives back what that report counted for it.
+    Fixture f;
+    auto shedding = Pressed(2 * GiB, 4, PressureLevel::Shed);
+    f.queue.ReportMachine("m", shedding);
+    auto const first = f.Add(AdmitKind::LocalOnly, "m", 1 * GiB);
+    REQUIRE(Tickets(f.queue.Pump()) == std::vector<Ticket> { first });
+
+    // The machine reports while the first runs: one held, as its node counts it.
+    auto running = Report(2 * GiB, 4, 1, 1 * GiB);
+    running.pressure = PressureLevel::Shed;
+    f.queue.ReportMachine("m", running);
+    auto const second = f.Add(AdmitKind::LocalOnly, "m", 1 * GiB);
+    CHECK(f.queue.Pump().empty());
+
+    f.queue.Settle(first, Done);
+    CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { second });
+}
+
+TEST_CASE("AdmissionQueue.a-settle-gives-back-nothing-a-report-before-its-grant-counted", "[distributed][admission]")
+{
+    // The control: a held compile the queue never granted (one surviving a failover) was counted by a report taken
+    // BEFORE this grant, so this settle owes it nothing back -- the machine stays busy with it.
+    Fixture f;
+    f.queue.ReportMachine("m", Report(2 * GiB, 4, 1, 1 * GiB)); // the survivor holds 1 GiB of 2
+    auto const granted = f.Add(AdmitKind::LocalOnly, "m", 1 * GiB);
+    REQUIRE(Tickets(f.queue.Pump()) == std::vector<Ticket> { granted });
+    f.queue.Settle(granted, Done);
+
+    // The survivor still holds its 1 GiB: a compile wanting the whole 2 GiB does not fit.
+    f.Add(AdmitKind::LocalOnly, "m", 2 * GiB);
+    CHECK(f.queue.Pump().empty());
+}
+
+TEST_CASE("AdmissionQueue.pressed-idle-machine-reporting-no-slot-runs-nothing", "[distributed][admission]")
+{
+    // The floor is a SLOT: a machine that reports none offers none, idle or not.
+    Fixture f;
+    f.queue.ReportMachine("m", Pressed(2 * GiB, 0, PressureLevel::Shed));
+    f.Add(AdmitKind::LocalOnly, "m", 1 * GiB);
+    CHECK(f.queue.Pump().empty());
+    CHECK(f.queue.Depth() == 1);
+}
+
+TEST_CASE("AdmissionQueue.work-that-cannot-run-on-a-pressed-machine-reserves-nothing-there", "[distributed][admission]")
+{
+    // The review's finding on the floor: another machine's dispatchable request that names a shedding worker among its
+    // candidates must not become that worker's head and, a pump later, reserve its whole budget -- that hold keeps the
+    // worker from ever being idle, so its OWN launcher's compile waited as long as the other caller stayed blocked:
+    // case 9's hang, moved to a fleet. Nor may an own request too large to run there under pressure.
+    SECTION("another machine's work")
+    {
+        Fixture f;
+        f.placement.byFingerprint["fp"] = { Placement {
+            .workerId = "worker-1", .machine = "w", .endpoint = "10.0.0.2:6680" } };
+        f.queue.ReportMachine("c", Report(8 * GiB, 4, 4, 8 * GiB)); // the caller is saturated
+        auto pressed = Pressed(2 * GiB, 4, PressureLevel::Shed);
+        pressed.standing = BudgetStanding::Configured; // nothing skips its reservation but the rule under test
+        f.queue.ReportMachine("w", pressed);
+        auto const blocked = f.Add(AdmitKind::Dispatchable, "c", 1 * GiB, "fp");
+        CHECK(f.queue.Pump().empty());
+        CHECK(f.queue.Pump().empty()); // head across a pump: it would reserve now
+
+        auto const own = f.Add(AdmitKind::LocalOnly, "w", 1 * GiB);
+        CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { own });
+        CHECK(f.queue.Depth() == 1);
+        static_cast<void>(blocked);
+    }
+    SECTION("an own request larger than the budget")
+    {
+        Fixture f;
+        auto pressed = Pressed(2 * GiB, 4, PressureLevel::Shed);
+        pressed.standing = BudgetStanding::Configured;
+        f.queue.ReportMachine("w", pressed);
+        f.Add(AdmitKind::LocalOnly, "w", 3 * GiB);
+        CHECK(f.queue.Pump().empty());
+        CHECK(f.queue.Pump().empty());
+        auto const small = f.Add(AdmitKind::LocalOnly, "w", 1 * GiB);
+        CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { small });
+    }
+}
+
+TEST_CASE("AdmissionQueue.pressed-idle-machine-takes-no-other-machines-work", "[distributed][admission]")
+{
+    // The floor above is the caller's own: an idle pressed WORKER is still no target, so with the caller full the
+    // dispatched request waits rather than landing where the governor is yielding.
+    Fixture f;
+    f.placement.byFingerprint["fp"] = { Placement { .workerId = "worker-1", .machine = "w", .endpoint = "10.0.0.2:6680" } };
+    f.queue.ReportMachine("c", Report(8 * GiB, 4, 4, 8 * GiB)); // the caller has no room
+    f.queue.ReportMachine("w", Pressed(8 * GiB, 4, PressureLevel::Shed));
+    f.Add(AdmitKind::Dispatchable, "c", 1 * GiB, "fp");
+    CHECK(f.queue.Pump().empty());
+    CHECK(f.queue.Depth() == 1);
+}
+
+TEST_CASE("AdmissionQueue.pressed-idle-machine-runs-no-oversize-compile", "[distributed][admission]")
+{
+    // The floor admits what fits the budget the machine reports -- under pressure, its allowance. Larger stays the
+    // run-alone exception, which pressure closes (`pressured-machine-never-runs-oversize-alone`).
+    Fixture f;
+    f.queue.ReportMachine("m", Pressed(2 * GiB, 4, PressureLevel::Shed));
+    f.Add(AdmitKind::LocalOnly, "m", 3 * GiB);
+    CHECK(f.queue.Pump().empty());
+    CHECK(f.queue.Depth() == 1);
+}
+
+TEST_CASE("AdmissionQueue.shedding-machine-takes-no-dispatched-work-and-it-runs-elsewhere", "[distributed][admission]")
+{
+    Fixture f;
+    f.placement.byFingerprint["fp"] = { Placement { .workerId = "worker-1", .machine = "w", .endpoint = "10.0.0.2:6680" } };
+    f.queue.ReportMachine("w", Pressed(8 * GiB, 4, PressureLevel::Shed));
+    f.queue.ReportMachine("c", Report(8 * GiB, 4));
+    auto const job = f.Add(AdmitKind::Dispatchable, "c", 1 * GiB, "fp");
+    auto const granted = f.queue.Pump();
+    REQUIRE(granted.size() == 1);
+    CHECK(granted[0].ticket == job);
+    CHECK(granted[0].kind == Pace::CompileCacheWire::GrantKind::Local); // on its caller, never on the shedding worker
+}
+
+TEST_CASE("AdmissionQueue.yield-holds-local-compiles-too", "[distributed][admission]")
+{
+    // The owner's decision: a local build can freeze the desktop as surely as a remote one, so a
+    // request from the yielding machine itself, for itself, waits -- even one its reported room
+    // holds, since a yielding machine's room is what its compiles gave back as they finished.
+    SECTION("yielding: a request that fits the room and a free slot waits, and runs once calm")
+    {
+        Fixture f;
+        auto yielding = Report(8 * GiB, 4, 2, 4 * GiB); // 4 GiB and two slots free
+        yielding.pressure = PressureLevel::Yield;
+        f.queue.ReportMachine("m", yielding);
+        auto const local = f.Add(AdmitKind::LocalOnly, "m", 1 * GiB);
+        CHECK(f.queue.Pump().empty());
+        CHECK(f.queue.Depth() == 1);
+
+        // Calm again: the waiting ticket runs, on receipt of the report.
+        f.queue.ReportMachine("m", Report(8 * GiB, 4, 2, 4 * GiB));
+        CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { local });
+    }
+    SECTION("calm: the same request runs at once (control)")
+    {
+        Fixture f;
+        f.queue.ReportMachine("m", Report(8 * GiB, 4, 2, 4 * GiB));
+        auto const local = f.Add(AdmitKind::LocalOnly, "m", 1 * GiB);
+        CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { local });
+    }
+    SECTION("yielding: an oversize request waits too, and runs alone once calm")
+    {
+        Fixture f;
+        f.queue.ReportMachine("m", Pressed(4 * GiB, 4, PressureLevel::Yield));
+        auto const big = f.Add(AdmitKind::LocalOnly, "m", 6 * GiB);
+        CHECK(f.queue.Pump().empty());
+        f.queue.ReportMachine("m", Pressed(4 * GiB, 4, PressureLevel::Calm));
+        CHECK(Tickets(f.queue.Pump()) == std::vector<Ticket> { big });
+    }
+}
+
+TEST_CASE("AdmissionQueue.yielding-worker-takes-no-dispatched-work-that-fits", "[distributed][admission]")
+{
+    // A dispatched request that fits a yielding worker's room is not placed there: with the caller
+    // full, it waits; once the worker is calm, it runs there.
+    Fixture f;
+    f.placement.byFingerprint["fp"] = { Placement { .workerId = "worker-1", .machine = "w", .endpoint = "10.0.0.2:6680" } };
+    f.queue.ReportMachine("c", Report(8 * GiB, 4, 4, 8 * GiB)); // the caller has no room
+    f.queue.ReportMachine("w", Pressed(8 * GiB, 4, PressureLevel::Yield));
+    auto const job = f.Add(AdmitKind::Dispatchable, "c", 1 * GiB, "fp");
+    CHECK(f.queue.Pump().empty());
+
+    f.queue.ReportMachine("w", Pressed(8 * GiB, 4, PressureLevel::Calm));
+    auto const granted = f.queue.Pump();
+    REQUIRE(granted.size() == 1);
+    CHECK(granted[0].ticket == job);
+    CHECK(granted[0].kind == Pace::CompileCacheWire::GrantKind::Worker);
+}
+
+// --- a compile killed for memory, asked for again (#1770) -------------------------------------------------------
+
+namespace
+{
+/// A worker on machine @p machine, for the toolchain "fp".
+Placement WorkerOn(std::string const& machine)
+{
+    return Placement { .workerId = "worker-" + machine, .machine = machine, .endpoint = machine + ":6680" };
+}
+} // namespace
+
+TEST_CASE("AdmissionQueue.a-killed-compile-is-charged-what-the-kill-taught-and-only-where-it-fits",
+          "[distributed][admission][oom]")
+{
+    // The kill is learned from the admission ending unsettled: the key's estimate is raised to at least the default,
+    // and the requeue is charged that. A machine whose configured budget is below it is then no target at all --
+    // where the same request asked for the first time runs alone on it, and is the ceiling's next kill.
+    Fixture f;
+    f.placement.byFingerprint["fp"] = { WorkerOn("small") };
+    f.queue.ReportMachine("small", Report(2 * GiB, 4));
+    f.queue.ReportMachine("m", Report(8 * GiB, 4));
+    f.estimates.Record(EstimateKey { .cacheKey = "big", .sourcePath = "big.cpp", .compilerIdentity = "fp" }, 1 * GiB);
+
+    auto const first = f.Ask(AdmitKind::Dispatchable, "m", "big", AskOrigin::First);
+    auto const placed = f.queue.Pump();
+    REQUIRE(placed.size() == 1);
+    REQUIRE(placed[0].placement.has_value());
+    CHECK(Unwrap(placed[0].placement).machine == "small");
+    CHECK(placed[0].chargedBytes == 1 * GiB);
+
+    f.queue.Abandon(first); // the worker's machine killed it: the launcher ends the admission unsettled
+
+    SECTION("asked for again after the kill")
+    {
+        f.Ask(AdmitKind::Dispatchable, "m", "big", AskOrigin::AfterKill);
+        auto const again = f.queue.Pump();
+        REQUIRE(again.size() == 1);
+        CHECK(again[0].chargedBytes == 3 * GiB); // the default the kill raised it to
+        CHECK(again[0].kind == Pace::CompileCacheWire::GrantKind::Local);
+        CHECK_FALSE(again[0].placement.has_value());
+        CHECK_FALSE(again[0].neverFits); // this machine holds it
+    }
+    SECTION("the control: asked for as a first request, it runs alone on the machine that killed it")
+    {
+        f.Ask(AdmitKind::Dispatchable, "m", "big", AskOrigin::First);
+        auto const again = f.queue.Pump();
+        REQUIRE(again.size() == 1);
+        REQUIRE(again[0].placement.has_value());
+        CHECK(Unwrap(again[0].placement).machine == "small");
+        CHECK(again[0].ranAlone);
+    }
+}
+
+TEST_CASE("AdmissionQueue.a-killed-compile-waits-for-room-on-a-machine-that-fits", "[distributed][admission][oom]")
+{
+    // Kill, requeue, admitted LATER: the one machine whose budget can hold it is busy, and the asking machine's is
+    // too small to, so the request waits -- rather than running alone where it would be killed -- until room frees.
+    Fixture f;
+    f.placement.byFingerprint["fp"] = { WorkerOn("big") };
+    f.queue.ReportMachine("big", Report(8 * GiB, 4));
+    f.queue.ReportMachine("m", Report(2 * GiB, 4));
+    auto const other = f.Add(AdmitKind::Dispatchable, "x", 6 * GiB, "fp");
+    REQUIRE(f.queue.Pump().size() == 1);
+
+    f.estimates.RecordKilled(EstimateKey { .cacheKey = "killed", .sourcePath = "big.cpp", .compilerIdentity = "fp" });
+    auto const requeued = f.Ask(AdmitKind::Dispatchable, "m", "killed", AskOrigin::AfterKill);
+    CHECK(f.queue.Pump().empty());
+    CHECK(f.queue.Depth() == 1);
+
+    f.queue.Settle(other, Done);
+    auto const later = f.queue.Pump();
+    REQUIRE(later.size() == 1);
+    CHECK(later[0].ticket == requeued);
+    REQUIRE(later[0].placement.has_value());
+    CHECK(Unwrap(later[0].placement).machine == "big");
+    CHECK_FALSE(later[0].neverFits);
+}
+
+TEST_CASE("AdmissionQueue.a-killed-compile-no-machine-can-hold-never-fits", "[distributed][admission][oom]")
+{
+    Fixture f;
+    f.placement.byFingerprint["fp"] = { WorkerOn("w") };
+    f.queue.ReportMachine("w", Report(2 * GiB, 4));
+    f.queue.ReportMachine("m", Report(2 * GiB, 4));
+    f.estimates.RecordKilled(EstimateKey { .cacheKey = "huge", .sourcePath = "big.cpp", .compilerIdentity = "fp" });
+
+    SECTION("dispatchable")
+    {
+        f.Ask(AdmitKind::Dispatchable, "m", "huge", AskOrigin::AfterKill);
+    }
+    SECTION("local-only, the launcher's own requeue after a kill here")
+    {
+        f.Ask(AdmitKind::LocalOnly, "m", "huge", AskOrigin::AfterKill);
+    }
+
+    auto const decided = f.queue.Pump();
+    REQUIRE(decided.size() == 1);
+    CHECK(decided[0].kind == Pace::CompileCacheWire::GrantKind::Local);
+    CHECK(decided[0].neverFits);
+    // Alone on its own machine, as any compile larger than a whole budget runs.
+    CHECK(decided[0].ranAlone);
+}
+
+TEST_CASE("AdmissionQueue.a-budget-the-allowance-holds-down-is-waited-for-not-never", "[distributed][admission][oom]")
+{
+    // A held budget says nothing of the configured one, so it may yet hold the compile: not `neverFits`.
+    Fixture f;
+    f.placement.byFingerprint["fp"] = { WorkerOn("w") };
+    auto held = Report(2 * GiB, 4);
+    held.standing = BudgetStanding::HeldByAllowance;
+    f.queue.ReportMachine("w", held);
+    f.queue.ReportMachine("m", Report(2 * GiB, 4));
+    f.estimates.RecordKilled(EstimateKey { .cacheKey = "huge", .sourcePath = "big.cpp", .compilerIdentity = "fp" });
+
+    f.Ask(AdmitKind::Dispatchable, "m", "huge", AskOrigin::AfterKill);
+    CHECK(f.queue.Pump().empty());
+
+    f.queue.ReportMachine("w", Report(8 * GiB, 4)); // the allowance ramped back
+    auto const later = f.queue.Pump();
+    REQUIRE(later.size() == 1);
+    REQUIRE(later[0].placement.has_value());
+    CHECK(Unwrap(later[0].placement).machine == "w");
+    CHECK_FALSE(later[0].neverFits);
+}
+
+TEST_CASE("AdmissionQueue.a-killed-compile-is-charged-at-least-what-it-held", "[distributed][admission][oom]")
+{
+    // A settle `Killed` carries what the compile held when it died: a lower bound the estimate rises to, so the
+    // requeue is charged above its first grant -- and above the default a bare kill would teach -- and is placed only
+    // where that fits: not on the machine that killed it while that machine's room is less than it.
+    Fixture f;
+    f.placement.byFingerprint["fp"] = { WorkerOn("small"), WorkerOn("large") };
+    f.queue.ReportMachine("small", Report(4 * GiB, 4));
+    f.queue.ReportMachine("large", Report(16 * GiB, 4));
+    f.queue.ReportMachine("m", Report(2 * GiB, 4));
+    f.estimates.Record(EstimateKey { .cacheKey = "grows", .sourcePath = "big.cpp", .compilerIdentity = "fp" }, 1 * GiB);
+
+    auto const first = f.Ask(AdmitKind::Dispatchable, "m", "grows", AskOrigin::First);
+    auto const placed = f.queue.Pump();
+    REQUIRE(placed.size() == 1);
+    CHECK(placed[0].chargedBytes == 1 * GiB);
+    CHECK(Unwrap(placed[0].placement).machine == "small");
+    // Something else takes 1 GiB of `small` meanwhile, so the 3.5 GiB the kill taught no longer fits there.
+    f.Add(AdmitKind::Dispatchable, "x", 1 * GiB, "fp");
+    REQUIRE(f.queue.Pump().size() == 1);
+
+    f.queue.Settle(first, Settlement { .outcome = SettleOutcome::Killed, .peakBytes = 7 * GiB / 2 });
+
+    f.Ask(AdmitKind::Dispatchable, "m", "grows", AskOrigin::AfterKill);
+    auto const again = f.queue.Pump();
+    REQUIRE(again.size() == 1);
+    CHECK(again[0].chargedBytes == 7 * GiB / 2); // above the 1 GiB grant AND the 3 GiB default
+    CHECK(Unwrap(again[0].placement).machine == "large");
+    CHECK_FALSE(again[0].neverFits);
+}
+
+TEST_CASE("AdmissionQueue.a-killed-peak-raises-and-never-lowers-the-estimate", "[distributed][admission][oom]")
+{
+    // A lower bound: below what is known, it changes nothing -- a kill that came early proves no compile small.
+    Fixture f;
+    auto const key = EstimateKey { .cacheKey = "known", .sourcePath = "big.cpp", .compilerIdentity = "fp" };
+    f.estimates.Record(key, 10 * GiB);
+    f.estimates.RecordKilled(key, 5 * GiB);
+    CHECK(f.estimates.Estimate(key) == 10 * GiB);
+    f.estimates.RecordKilled(key, 12 * GiB);
+    CHECK(f.estimates.Estimate(key) == 12 * GiB);
+}
+
+TEST_CASE("AdmissionQueue.a-killed-peak-is-bounded-by-the-budget-of-the-machine-it-ran-on", "[distributed][admission][oom]")
+{
+    // What a killed compile held is a peer's figure, and it raises the key and its source shape for good: one forged
+    // trailer must not make every configuration of that source run alone. A compile cannot hold more than its
+    // machine's budget -- its ceiling -- so that bounds what the kill teaches.
+    Fixture f;
+    f.placement.byFingerprint["fp"] = { WorkerOn("w") };
+    f.queue.ReportMachine("w", Report(16 * GiB, 4));
+    f.queue.ReportMachine("m", Report(8 * GiB, 4));
+    auto const key = EstimateKey { .cacheKey = "forged", .sourcePath = "big.cpp", .compilerIdentity = "fp" };
+    f.estimates.Record(key, 1 * GiB);
+
+    auto const ticket = f.Ask(AdmitKind::Dispatchable, "m", "forged", AskOrigin::First);
+    auto const placed = f.queue.Pump();
+    REQUIRE(placed.size() == 1);
+    REQUIRE(Unwrap(placed[0].placement).machine == "w");
+    f.queue.Settle(ticket, Settlement { .outcome = SettleOutcome::Killed, .peakBytes = 1024 * GiB });
+
+    CHECK(f.estimates.Estimate(key) == 16 * GiB);
+    // And the shape: another configuration of the same source is estimated by it, never by the forged terabyte.
+    CHECK(f.estimates.Estimate(EstimateKey { .cacheKey = "other", .sourcePath = "big.cpp", .compilerIdentity = "fp" })
+          == 16 * GiB);
 }

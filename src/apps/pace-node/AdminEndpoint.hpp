@@ -31,6 +31,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -94,6 +95,9 @@ struct NodeScrapeSources
     /// `busySlots`' reason. Empty reads as not cordoned, which is what a scrape of a node
     /// whose worker nobody wired is.
     std::function<bool()> cordoned {};
+    /// This machine's memory-pressure level, as `HostLoadReading::memoryPressure` carries it; a callable for
+    /// `busySlots`' reason. Empty, or answering nothing, is ABSENT: no watcher runs, which is not calm.
+    std::function<std::optional<std::uint64_t>()> memoryPressure {};
     /// The node's cache, or **null** when it runs none.
     CacheTier const* cache {};
     /// Concurrent compiles this node advertises.
@@ -517,6 +521,14 @@ class FleetSampler final: public IFleetHistoryView
     /// The seam a test drives instead of waiting a minute for the thread: every
     /// rule about *what* a sample holds is then a case over a scripted registry
     /// rather than a sleep.
+    ///
+    /// Serialised with the sampler's own thread, which is what makes "whatever the
+    /// timer is doing" true. A sample READS its sources and only then RECORDS, and a
+    /// history keeps the newest record as the reading the next delta is taken from;
+    /// two unserialised samples could therefore record out of the order they read in,
+    /// leaving a stale reading as the bucket's value -- a compile granted between the
+    /// two reads then rendered as no compile at all.
+    ///
     /// The NODE series is recorded either way; the return value is about the fleet
     /// one, which only a leader can answer for.
     /// @return True when a fleet sample was taken; false when this node does not lead.
@@ -580,6 +592,8 @@ class FleetSampler final: public IFleetHistoryView
     std::function<void()> _afterSample;
     /// After-sample failures whose Warn could not be written either.
     std::atomic<std::uint64_t> _afterSampleUnreported { 0 };
+    /// Held across one whole sample: every read, every record and the keyed histories' fold. See `SampleOnce`.
+    std::mutex _sampling;
     std::jthread _thread;
 };
 

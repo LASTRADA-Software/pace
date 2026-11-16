@@ -1528,6 +1528,16 @@ inline constexpr EnumTable<IMetricsSink::Counter, CounterDescriptor> CounterTabl
       .help = "Grants whose wait pace_admission_wait_milliseconds_total sums: one per grant, a worker refusal's regrant "
               "included. The count of that pair; divide the sum by it for the mean wait.",
       .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionRequeuedAfterKill,
+      .prometheusName = "pace_admission_requeued_after_kill_total",
+      .help = "Compiles asked for again after their compiler was killed for memory, placed only where their estimate "
+              "fits a machine's configured budget.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::AdmissionNeverFits,
+      .prometheusName = "pace_admission_never_fits_total",
+      .help = "Requeued killed compiles no machine's configured budget can hold, run alone on their own machine "
+              "outside the compile ceiling.",
+      .type = MetricType::Counter },
     { .counter = IMetricsSink::Counter::AdmissionForwarded,
       .prometheusName = "pace_admission_forwarded_total",
       .help = "Queue requests (admit and settle) this node relayed to the leader on behalf of a launcher on this "
@@ -1561,6 +1571,44 @@ inline constexpr EnumTable<IMetricsSink::Counter, CounterDescriptor> CounterTabl
               "it, or the kernel gave no memory.peak. The compile itself is correct; the fleet's "
               "memory estimates simply never learn from it. Not counted on a node that measures "
               "nothing at all: that is the compile-memory-unmeasured condition.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::WorkerCompilesKilledCeiling,
+      .prometheusName = "pace_worker_compiles_killed_ceiling_total",
+      .help = "Compiles the kernel killed inside this worker's compile memory ceiling. Each was "
+              "refused and compiled locally by its client. Two causes: the configured ceiling is below "
+              "what the fleet's translation units need, or memory pressure lowered the allowance to what "
+              "compiles held and one grew past it; check pace_node_memory_pressure_yield_seconds_total "
+              "and pace_node_memory_pressure_shed_seconds_total before raising --compile-memory-limit.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::WorkerCompilesKilledShed,
+      .prometheusName = "pace_worker_compiles_killed_shed_total",
+      .help = "Compiles this node's pressure governor killed to give memory back to the machine. "
+              "Each was refused and compiled locally by its client.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::WorkerCompilesKilledSignal,
+      .prometheusName = "pace_worker_compiles_killed_signal_total",
+      .help = "Compiles ended by SIGKILL that neither the compile memory ceiling nor the pressure "
+              "governor accounts for: a global OOM kill, systemd-oomd, or a person. Each was refused "
+              "and compiled locally by its client.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::NodeMemoryPressureYieldSeconds,
+      .prometheusName = "pace_node_memory_pressure_yield_seconds_total",
+      .help = "Seconds this node held the yield level: the machine stalled on memory for something other than its "
+              "compiles, so nothing was admitted on it beside a running compile, local ones included -- idle, only its "
+              "own, one at a time.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::NodeMemoryPressureShedSeconds,
+      .prometheusName = "pace_node_memory_pressure_shed_seconds_total",
+      .help = "Seconds this node held the shed level: the machine froze on memory, so it admitted nothing beside a "
+              "running compile and killed its youngest once per dwell, sparing a sole one within the allowance.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::NodeMemoryPressureYieldEntries,
+      .prometheusName = "pace_node_memory_pressure_yield_entries_total",
+      .help = "Times this node entered the yield level, from calm or stepping down from shed.",
+      .type = MetricType::Counter },
+    { .counter = IMetricsSink::Counter::NodeMemoryPressureShedEntries,
+      .prometheusName = "pace_node_memory_pressure_shed_entries_total",
+      .help = "Times this node entered the shed level, from calm on a freeze or escalating a sustained yield.",
       .type = MetricType::Counter },
 } };
 

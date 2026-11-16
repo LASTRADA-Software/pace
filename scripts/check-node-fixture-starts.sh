@@ -49,7 +49,18 @@
 #              refuses to start (`WorkerWithConsensusClosedRefusal`) -- which this scan does
 #              not judge, because the node itself does, by name, at the first start.
 #
+# A `runs` start is ALSO judged for isolation (#1774), because a worker walks its toolchains
+# into the launcher's machine-wide fingerprint cache, which lives in the CALLER's state
+# directory -- not under `--cluster-dir`. It passes when its text names `--slots=0` (no worker,
+# no survey) or an inline `XDG_STATE_HOME=` prefix; in a `.sh`, when `e2e_node_state_enter`
+# stands on a line ABOVE it; in a `.ps1`, when an enclosing `{` opens on a `Use-E2ENodeState`
+# line -- for a helper row, when the helper's own start is so wrapped. Otherwise it is reported
+# `unisolated-node <file>:<line>`. An `exempt` row excuses it, with its reason.
+#
 # ## What it does NOT cover, said plainly, with the direction each fails in
+#   * Isolation fails OPEN on a `.sh` that enters the seam for ONE node variable and starts
+#     through another, on a `--slots=0` that arrives through text the statement does not carry,
+#     and on any start a PowerShell scriptblock reaches without being lexically inside the block.
 #
 #   * A statement's text is a SUPERSET of what one run passes: every assignment of an array
 #     counts, including one that empties it on another path, and a parenthesis inside a
@@ -122,18 +133,30 @@ if [ "${1:-}" = "--self-test" ]; then
     # A scratch REPOSITORY, because the enumeration is `git ls-files`. This script is not
     # staged: its fixtures below spell the very starts it judges, and the real script is run
     # against the staged tree through the root override.
+    #
+    # ONE repository for every case, built once: a case puts back what the cases write rather
+    # than staging a fresh tree, which cost six processes and a `git init` per case and took this
+    # self-test past its TIMEOUT on an emulated Windows ARM64 runner (#1781). What a case may
+    # write is the scripts directory (every `.sh`/`.ps1` in it is REMOVED, so a file one case
+    # planted is never a subject of the next), the table, the CMake registration and the node's
+    # table (each REWRITTEN), and `.git` (re-created when a case removed it); `Track`'s
+    # `add -A` then makes the index the work tree, removals included.
     Stage() {
-        rm -rf "$scratch/tree"
-        mkdir -p "$scratch/tree/scripts/lib" "$scratch/tree/src/tests"
-        cp "${me%/*}/lib/third-party-roots.sh" "$scratch/tree/scripts/lib/"
-        cp "${me%/*}/lib/third-party-roots.txt" "$scratch/tree/scripts/lib/"
+        local stray=() f
+        if [ ! -d "$scratch/tree/scripts/lib" ]; then
+            mkdir -p "$scratch/tree/scripts/lib" "$scratch/tree/src/tests" "$scratch/tree/src/apps/pace-node"
+            cp "${me%/*}/lib/third-party-roots.sh" "${me%/*}/lib/third-party-roots.txt" "$scratch/tree/scripts/lib/"
+        fi
+        for f in "$scratch"/tree/scripts/*.sh "$scratch"/tree/scripts/*.ps1; do
+            [ -e "$f" ] && stray+=("$f")
+        done
+        [ "${#stray[@]}" -eq 0 ] || rm -f "${stray[@]}"
         : > "$scratch/tree/table.txt"
-        mkdir -p "$scratch/tree/src/apps/pace-node"
         NodeTable '"--print-surfaces"' '"--print-identity"' '"--help"' '"--cluster-status"'
         printf '%s\n' 'add_test(' '    NAME "fixture"' \
             '    COMMAND bash "${CMAKE_SOURCE_DIR}/scripts/fixture.sh"' \
             '        "$<TARGET_FILE:pace-node>")' > "$scratch/tree/src/tests/CMakeLists.txt"
-        scratch_git -C "$scratch/tree" init -q 2>/dev/null
+        [ -d "$scratch/tree/.git" ] || scratch_git -C "$scratch/tree" init -q 2>/dev/null
     }
     Track() { scratch_git -C "$scratch/tree" add -A -f >/dev/null 2>&1; }
     # The node's table as the reader meets it: each argument is one verb row's spelling, laid
@@ -152,13 +175,20 @@ if [ "${1:-}" = "--self-test" ]; then
     }
 
     # @param 1 what is being staged  @param 2 want-pass|want-fail|want-refuse
+    # @param 3 optional: text the output must contain, so a refusal says WHICH refusal
     Case() {
-        local what="$1" want="$2" out got=0
+        local what="$1" want="$2" says="${3-}" out got=0
         selfTestCases=$((selfTestCases + 1))
         Track
         out="$(PACE_FIXTURE_STARTS_ROOT="$scratch/tree" \
-               PACE_FIXTURE_STARTS_TABLE="$scratch/tree/table.txt" \
+               PACE_FIXTURE_STARTS_TABLE="${CaseTable:-$scratch/tree/table.txt}" \
                bash "$me" 2>&1)" || got=$?
+        if [ -n "$says" ] && [[ "$out" != *"$says"* ]]; then
+            echo "  FAIL  ($want, exit $got, without '$says') $what" >&2
+            printf '%s\n' "$out" | sed 's/^/        /' >&2
+            selfTestStatus=1
+            return
+        fi
         case "$want" in
             want-pass)   [ "$got" -eq 0 ] && { echo "  ok    ($want) $what"; return; } ;;
             want-fail)   [ "$got" -eq 1 ] && { echo "  ok    ($want) $what"; return; } ;;
@@ -169,7 +199,17 @@ if [ "${1:-}" = "--self-test" ]; then
         printf '%s\n' "$out" | sed 's/^/        /' >&2
         selfTestStatus=1
     }
-    Fixture() { printf '%s\n' "$@" > "$scratch/tree/scripts/fixture.sh"; }
+    # Every fixture enters the node-state seam on its second line, as a real one does after
+    # reading its arguments, so the cases about the OTHER rules are not refused for isolation;
+    # `NoSeam=1 Fixture ...` writes one that does not, for the isolation cases themselves.
+    Fixture() {
+        {
+            printf '%s\n' "$1"
+            [ -n "${NoSeam:-}" ] || printf '%s\n' 'e2e_node_state_enter node'
+            shift
+            printf '%s\n' "$@"
+        } > "$scratch/tree/scripts/fixture.sh"
+    }
 
     # node-fixture-starts-fixtures: begin -- the lines below PLANT the starts this scan judges,
     # as string literals, so they are a region this file exempts from its own scan. A row
@@ -256,10 +296,56 @@ if [ "${1:-}" = "--self-test" ]; then
     Case "a start after -- with continuation lines is read to its end" want-pass
 
     Stage
+    printf '%s\n' 'param([string]$Node)' '$p = Use-E2ENodeState $h {' '    Start-Background $Node @(' \
+        '        "--cluster-dir=$s", "--listen-raft="' '    ) $log' '}' > "$scratch/tree/scripts/fixture.ps1"
+    Fixture 'node="$1"' '"$node" --listen-raft= --cluster-dir="$w/s" &'
+    Case "a PowerShell start through Start-Background reads its @( ... ) block" want-pass
+
+    # Isolation (#1774): a start that runs a worker keeps its state out of the caller state
+    # directory, where the toolchain fingerprint cache lives.
+    Stage
+    NoSeam=1 Fixture 'node="$1"' '"$node" --listen-raft= --cluster-dir="$w/s" &'
+    Case "a worker start with no node-state seam is REFUSED as unisolated, by line" want-fail \
+        "unisolated-node scripts/fixture.sh:2"
+
+    Stage
+    NoSeam=1 Fixture 'node="$1"' '"$node" --listen-raft= --cluster-dir="$w/s" &' 'e2e_node_state_enter node'
+    Case "the seam entered BELOW the start isolates nothing, and is REFUSED" want-fail \
+        "unisolated-node scripts/fixture.sh:2"
+
+    Stage
+    NoSeam=1 Fixture 'node="$1"' 'e2e_node_state_enter node' '"$node" --listen-raft= --cluster-dir="$w/s" &'
+    Case "a worker start below the node-state seam passes" want-pass
+
+    Stage
+    NoSeam=1 Fixture 'node="$1"' '"$node" \' '    --slots=0 \' '    --listen-raft= --cluster-dir="$w/s" &'
+    Case "a --slots=0 start runs no worker, and passes with no seam" want-pass
+
+    Stage
+    NoSeam=1 Fixture 'node="$1"' 'XDG_STATE_HOME="$w/x" "$node" --listen-raft= --cluster-dir="$w/s" &'
+    Case "a start with its own inline XDG_STATE_HOME= passes with no seam" want-pass
+
+    Stage
     printf '%s\n' 'param([string]$Node)' '$p = Start-Background $Node @(' '    "--cluster-dir=$s", "--listen-raft="' \
         ') $log' > "$scratch/tree/scripts/fixture.ps1"
     Fixture 'node="$1"' '"$node" --listen-raft= --cluster-dir="$w/s" &'
-    Case "a PowerShell start through Start-Background reads its @( ... ) block" want-pass
+    Case "a PowerShell worker start outside Use-E2ENodeState is REFUSED as unisolated" want-fail \
+        "unisolated-node scripts/fixture.ps1:2"
+
+    Stage
+    printf '%s\n' 'param([string]$Node)' 'Use-E2ELauncherState $h {' '    $p = Start-Background $Node @(' \
+        '        "--cluster-dir=$s", "--listen-raft="' '    ) $log' '}' > "$scratch/tree/scripts/fixture.ps1"
+    Fixture 'node="$1"' '"$node" --listen-raft= --cluster-dir="$w/s" &'
+    Case "a PowerShell start inside some OTHER block is not isolated, and is REFUSED" want-fail \
+        "unisolated-node scripts/fixture.ps1:3"
+
+    Stage
+    printf '%s\n' 'param([string]$Node)' 'function Start-NodeIn($argv) {' '    Use-E2ENodeState $h {' \
+        '        Start-Process -FilePath $Node -ArgumentList $argv' '    }' '}' \
+        '$a = Start-NodeIn @("--cluster-dir=$s", "--listen-raft=")' > "$scratch/tree/scripts/fixture.ps1"
+    Fixture 'node="$1"' '"$node" --listen-raft= --cluster-dir="$w/s" &'
+    printf 'helper\tscripts/fixture.ps1\tStart-NodeIn\tits callers name the flags\n' > "$scratch/tree/table.txt"
+    Case "a PowerShell helper whose own start is wrapped isolates every call" want-pass
 
     Stage
     printf '%s\n' 'param([string]$Node)' '$p = Start-Background $Node @(' '    "--cluster-dir=$s"' \
@@ -306,6 +392,24 @@ if [ "${1:-}" = "--self-test" ]; then
     printf 'exempt\tscripts/fixture.sh\n' > "$scratch/tree/table.txt"
     Case "a row with no reason is REFUSED, never read as an exemption" want-refuse
 
+    Stage
+    Fixture 'node="$1"' '"$node" --listen-raft= --cluster-dir="$w/s" &'
+    printf 'exempt\tscripts/fixture.sh\tsome start\t\n' > "$scratch/tree/table.txt"
+    Case "a row whose reason field is there and EMPTY is REFUSED too" want-refuse "the table has a row"
+
+    Stage
+    Fixture 'node="$1"' '"$node" --listen-raft= --cluster-dir="$w/s" &'
+    printf 'exemption\tscripts/fixture.sh\tsome start\ta kind the table does not have\n' > "$scratch/tree/table.txt"
+    Case "a row of a kind the table does not have is REFUSED" want-refuse "the table has a row"
+
+    # A path that does not exist rather than a mode-000 file: chmod cannot take read access away
+    # from root, nor reliably on Git Bash, and either would let the case pass vacuously.
+    Stage
+    Fixture 'node="$1"' '"$node" --listen-raft= --cluster-dir="$w/s" &'
+    CaseTable="$scratch/tree/no-such-table.txt" \
+        Case "a table that cannot be opened is REFUSED, never read as one of no rows" want-refuse \
+        "no table at $scratch/tree/no-such-table.txt"
+
     # ---- the must-NOT-catch half ------------------------------------------
     Stage
     Fixture 'node="$1"' '[[ -n "$node" && -x "$node" ]] || { echo "not found: '"'"'$node'"'"'"; exit 77; }' \
@@ -340,7 +444,7 @@ if [ "${1:-}" = "--self-test" ]; then
     Fixture 'bin="$1"' '"$bin" --help > "$out"'
     # Beside an ordinary start, or the tree has none and is refused for that instead.
     printf '%s
-' 'node="$1"' '"$node" --listen-raft= --cluster-dir="$w/s" &' > "$scratch/tree/scripts/other.sh"
+' 'node="$1"' 'e2e_node_state_enter node' '"$node" --listen-raft= --cluster-dir="$w/s" &' > "$scratch/tree/scripts/other.sh"
     printf 'census\tscripts/fixture.sh\t"$bin" --help\ta one-shot through a variable the scan does not know
 '         > "$scratch/tree/table.txt"
     Case "a census row excuses a start the scan cannot see, so the mechanism works" want-pass
@@ -382,7 +486,7 @@ if [ "${1:-}" = "--self-test" ]; then
         selfTestCases=$((selfTestCases + 1))
         out="$(printf '%s\n' "$@" | bash "$me" --read-rows 2>&1)" || got=$?
         if { [ "$want" = want-pass ] && [ "$got" -eq 0 ]; } || { [ "$want" = want-fail ] && [ "$got" -eq 1 ] \
-            && grep -q "unrecognised judge row" <<< "$out"; }; then
+            && [[ "$out" == *"unrecognised judge row"* ]]; }; then
             echo "  ok    ($want) $what"
             return
         fi
@@ -412,6 +516,7 @@ Fail() { echo "  FAIL: $*" >&2; Problems=$((Problems + 1)); }
 # verbs. The array is flattened first, since clang-format puts a long row's kind and spelling
 # on separate lines. Returns 2, saying why, when the array is not there or names no `--help` --
 # the positive control that this read the table rather than something shaped like it.
+# Sets `OneShotVerbs` rather than printing it, so the call costs no subshell of its own.
 NodeVerbs() {
     local verbs
     [ -r "${NodeTableSource}" ] || {
@@ -446,11 +551,11 @@ NodeVerbs() {
             return 2
             ;;
     esac
-    printf '%s\n' "${verbs% }"
+    OneShotVerbs="${verbs% }"
 }
-OneShotVerbs="$(NodeVerbs)" || exit 2
+NodeVerbs || exit 2
 
-# Every first-party script a start could be in, one per line, through git.
+# Every first-party script a start could be in, one per line, through git. Sets `subjects`.
 Subjects() {
     local tracked firstParty
     tracked="$(git -C "${PaceRoot}" ls-files -- 'scripts/*.sh' 'scripts/*.ps1')" || return 2
@@ -463,39 +568,7 @@ Subjects() {
         echo "check-node-fixture-starts: the third-party roots could not be read. Refused." >&2
         return 2
     }
-    printf '%s\n' "${firstParty}"
-}
-
-# The scripts `src/tests/CMakeLists.txt` hands the node binary, read per `add_test( ... )` block:
-# a block that names `$<TARGET_FILE:pace-node>` -- directly, or through a variable
-# `set()` to it, which is how `pacectl-e2e` passes it -- hands it to the LAST script path
-# the block names, since a wrapper (`run-check.sh`) comes before the script it runs.
-HandedTheNode() {
-    awk '
-        function opens(s,    t) { t = s; return gsub(/\(/, "", t) - gsub(/\)/, "", s) }
-        match($0, /set\([A-Za-z0-9_]+[ \t]+"\$<TARGET_FILE:pace-node>"/) {
-            name = substr($0, RSTART + 4, RLENGTH - 4)
-            sub(/[ \t].*$/, "", name)
-            nodeVars[name] = 1
-        }
-        /add_test\(/ { inTest = 1; depth = 0; block = "" }
-        inTest {
-            block = block " " $0
-            depth += opens($0)
-            if (depth > 0) next
-            inTest = 0
-            handed = (block ~ /TARGET_FILE:pace-node>/)
-            for (name in nodeVars) if (index(block, "${" name "}")) handed = 1
-            if (!handed) next
-            last = ""
-            rest = block
-            while (match(rest, /scripts\/[A-Za-z0-9._-]+\.(sh|ps1)/)) {
-                last = substr(rest, RSTART, RLENGTH)
-                rest = substr(rest, RSTART + RLENGTH)
-            }
-            if (last != "") print last
-        }
-    ' "${PaceRoot}/src/tests/CMakeLists.txt" 2>/dev/null | sort -u
+    subjects="${firstParty}"
 }
 
 # Judge every start in every subject, in ONE awk pass over all of them -- one process for the
@@ -505,15 +578,29 @@ HandedTheNode() {
 #   start <TAB> <path> <TAB> <line> <TAB> <class> <TAB> <verdict> <TAB> <what is missing>
 #   fail  <TAB> <sentence>
 #   judged <TAB> <how many files were judged>
-# @param 1 the subjects, newline-separated  @param 2 the scripts handed the node, newline-separated
+#
+# Before judging anything it reads the two inputs every judgement depends on, and REFUSES
+# (judging nothing) when either cannot be believed -- in the same process, since the self-test
+# runs this whole check once per case and a process each was most of its cost:
+#   * the table, every row `<helper|exempt|census> TAB <path> TAB <what> TAB <reason>`: exit 3,
+#     printing each bad row as `  row <n>: <text>`. A row with no reason is refused rather than
+#     read as a permission. A table awk cannot open (missing or unreadable): exit 5, never read
+#     as one of no rows.
+#   * the scripts `src/tests/CMakeLists.txt` hands the node binary, read per `add_test( ... )`
+#     block: a block that names `$<TARGET_FILE:pace-node>` -- directly, or through a variable
+#     `set()` to it, which is how `pacectl-e2e` passes it -- hands it to the LAST script path the
+#     block names, since a wrapper (`run-check.sh`) comes before the script it runs. None: exit 4.
+# Sets `judgement`, and returns awk's status.
+# @param 1 the subjects, newline-separated
 JudgeAll() {
-    local files=() path
-    while IFS= read -r path; do
-        [ -n "${path}" ] && files+=("${PaceRoot}/${path}")
-    done < <(printf '%s\n' "$1")
-    awk -v root="${PaceRoot}/" -v table="${PaceTable}" \
-        -v subjectList="$(printf '%s\n' "$1" | tr '\n' '\034')" \
-        -v handedList="$(printf '%s\n' "$2" | tr '\n' '\034')" \
+    local files=() path nl=$'\n' fs=$'\034'
+    SplitLines "$1"
+    for path in ${Lines[@]+"${Lines[@]}"}; do
+        files+=("${PaceRoot}/${path}")
+    done
+    judgement="$(awk -v root="${PaceRoot}/" -v table="${PaceTable}" \
+        -v subjectList="${1//${nl}/${fs}}" \
+        -v cmake="${PaceRoot}/src/tests/CMakeLists.txt" \
         -v oneShot="${OneShotVerbs}" -v minting="${MintingVerbs}" -v cap="${StatementCap}" '
         function count(s, c,    t) { t = s; return gsub(c, "", t) }
         function opens(s) { return count(s, "\\(") - count(s, "\\)") }
@@ -590,7 +677,30 @@ JudgeAll() {
             print "start\t" path "\t" line "\t" class "\t" verdict "\t" missing
         }
         function fail(sentence) { print "fail\t" path ": " sentence }
-        function judge(line, text,    k, all, missing) {
+        # A start that runs a worker must keep its state out of the caller state directory: the toolchain
+        # fingerprint cache a worker walks into lives in the state directory (#1774). Satisfied by
+        # `--slots=0` (no worker, no survey), by an inline `XDG_STATE_HOME=` prefix, by the bash
+        # seam entered ABOVE the start, or by a PowerShell start inside `Use-E2ENodeState`.
+        function noWorker(text) { return text ~ /--slots[= \t]+0([^0-9]|$)/ }
+        function wrappedPs(i,    j, d, minD) {
+            d = 0; minD = 0
+            for (j = i; j >= 1 && j >= i - cap; j--) {
+                if (j < i) d += count(L[j], "}") - count(L[j], "{")
+                else d -= count(substr(L[j], 1, index(L[j], "$Node")), "{")
+                if (d < minD) {
+                    minD = d
+                    if (L[j] ~ /Use-E2ENodeState[ \t]/) return 1
+                }
+            }
+            return 0
+        }
+        function isolated(line, all, helper) {
+            if (noWorker(all) || all ~ /(^|[ \t;(])XDG_STATE_HOME=/) return 1
+            if (lang == "sh") return seamLine > 0 && seamLine < line
+            if (helper > 0) return wrappedHelper[helper]
+            return wrappedPs(line)
+        }
+        function judge(line, text, helper,    k, all, missing) {
             for (k = 1; k <= nExempt; k++)
                 if (index(text, E[k])) { used[k] = 1; start(line, "exempt", "pass", ""); return }
             all = resolved(text)
@@ -605,6 +715,7 @@ JudgeAll() {
             if (!empty(all, "listen-raft") && !empty(all, "discovery"))
                 missing = missing (missing == "" ? "" : ", ") "neither --listen-raft= nor --discovery="
             start(line, "runs", missing == "" ? "pass" : "fail", missing)
+            if (!isolated(line, all, helper)) print "unisolated\t" path "\t" line
         }
         # Everything about the file just read: its starts, its helper and exempt rows, its census.
         function judgeFile(    r, h, i, k, d, isDef, call, text, census) {
@@ -617,7 +728,11 @@ JudgeAll() {
             }
             if (begins != ends)
                 fail("unbalanced node-fixture-starts-fixtures markers, so an exempt region would run to the end of the file")
-            nHelper = 0; nExempt = 0; census = 0
+            nHelper = 0; nExempt = 0; census = 0; seamLine = 0
+            if (lang == "sh")
+                for (i = 1; i <= N; i++)
+                    if (L[i] ~ /^[ \t]*e2e_node_state_enter[ \t]/) { seamLine = i; break }
+            split("", wrappedHelper)
             split("", H); split("", E); split("", used); split("", calls); split("", inBody)
             for (r = 1; r <= nRows; r++) {
                 if (RowPath[r] != path) continue
@@ -637,6 +752,8 @@ JudgeAll() {
                     for (k = i; k <= N; k++) {
                         d += count(L[k], "{") - count(L[k], "}")
                         inBody[k] = 1
+                        # A PowerShell helper whose own start is wrapped isolates every call.
+                        if (lang == "ps1" && isStart(L[k]) && wrappedPs(k)) wrappedHelper[h] = 1
                         if (d <= 0 && k > i) break
                     }
                 }
@@ -648,7 +765,7 @@ JudgeAll() {
                     statement(i)
                     text = ""
                     for (k = lo; k <= hi; k++) text = text " " L[k]
-                    judge(i, text)
+                    judge(i, text, 0)
                     i = (hi > i) ? hi : i
                     continue
                 }
@@ -662,7 +779,7 @@ JudgeAll() {
                     statement(i)
                     text = ""
                     for (k = lo; k <= hi; k++) text = text " " L[k]
-                    judge(i, text)
+                    judge(i, text, h)
                     i = (hi > i) ? hi : i
                     break
                 }
@@ -686,19 +803,56 @@ JudgeAll() {
             N = 0; begins = 0; ends = 0; inRegion = 0
             split("", L)
         }
+        # One line of the CMake registrations: records a variable `set()` to the node binary,
+        # and, at the close of an `add_test( ... )` block that hands the node over, the LAST
+        # script path the block names as `handed`.
+        function registration(line,    name, given, last, rest) {
+            if (match(line, /set\([A-Za-z0-9_]+[ \t]+"\$<TARGET_FILE:pace-node>"/)) {
+                name = substr(line, RSTART + 4, RLENGTH - 4)
+                sub(/[ \t].*$/, "", name)
+                nodeVars[name] = 1
+            }
+            if (line ~ /add_test\(/) { inTest = 1; depth = 0; block = "" }
+            if (!inTest) return
+            block = block " " line
+            depth += opens(line)
+            if (depth > 0) return
+            inTest = 0
+            given = (block ~ /TARGET_FILE:pace-node>/)
+            for (name in nodeVars) if (index(block, "${" name "}")) given = 1
+            if (!given) return
+            last = ""
+            rest = block
+            while (match(rest, /scripts\/[A-Za-z0-9._-]+\.(sh|ps1)/)) {
+                last = substr(rest, RSTART, RLENGTH)
+                rest = substr(rest, RSTART + RLENGTH)
+            }
+            if (last != "") { handed[last] = 1; nHanded++ }
+        }
         BEGIN {
             nSubjects = split(subjectList, subjects, "\034")
             if (subjects[nSubjects] == "") nSubjects--
             for (s = 1; s <= nSubjects; s++) isSubject[subjects[s]] = 1
-            n = split(handedList, list, "\034")
-            for (s = 1; s <= n; s++) if (list[s] != "") handed[list[s]] = 1
-            while ((getline row < table) > 0) {
+            # getline answers -1 for a table it cannot open, and a loop on `> 0` alone would read
+            # that as a table of no rows: every exemption gone, or every stale row unseen.
+            while ((tableRead = (getline row < table)) > 0) {
+                tableLine++
                 if (row ~ /^[ \t]*(#|$)/) continue
-                split(row, f, "\t")
+                n = split(row, f, "\t")
+                if (n < 4 || f[4] == "" || (f[1] != "helper" && f[1] != "exempt" && f[1] != "census")) {
+                    print "  row " tableLine ": " row
+                    refused = 3
+                    continue
+                }
                 nRows++
                 RowKind[nRows] = f[1]; RowPath[nRows] = f[2]; RowText[nRows] = f[3]
             }
+            if (tableRead < 0) { refused = 5; exit refused }
             close(table)
+            if (refused) exit refused
+            while ((getline row < cmake) > 0) registration(row)
+            close(cmake)
+            if (!nHanded) { refused = 4; exit refused }
         }
         FNR == 1 {
             if (path != "") judgeFile()
@@ -710,6 +864,8 @@ JudgeAll() {
         /node-fixture-starts-fixtures: end/   { ends++; inRegion = 0; L[++N] = ""; next }
         { L[++N] = (inRegion || $0 ~ /^[ \t]*#/) ? "" : $0 }
         END {
+            # An `exit` in BEGIN still runs this: a refusal judges nothing.
+            if (refused) exit refused
             if (path != "") judgeFile()
             # An EMPTY file has no first line, so no rule above saw it: judged here, as nothing.
             for (s = 1; s <= nSubjects; s++)
@@ -720,7 +876,18 @@ JudgeAll() {
                     print "fail\ta " RowKind[r] " row names " RowPath[r] ", which is not a tracked script (stale row)"
             print "judged\t" judgedFiles
         }
-    ' "${files[@]}"
+    ' "${files[@]}")"
+}
+
+# Split @p 1 at its newlines into the array `Lines`, dropping empty lines, with no process: a
+# `$(... | tr)` or a `< <(printf ...)` here was a fork or three per call, and the self-test makes
+# this whole check once per case. Globbing is off while the words are made, so a path is a path.
+SplitLines() {
+    local IFS=$'\n'
+    set -f
+    # shellcheck disable=SC2206  # word splitting on newlines is the point
+    Lines=($1)
+    set +f
 }
 
 # Read the judge's rows and count what they say. Every row opens with its KIND, and a verdict is
@@ -728,31 +895,39 @@ JudgeAll() {
 # counts what it does not recognise is an unguarded table -- a row kind or a verdict the judge
 # grows would pass unexamined. Splits with parameter expansion, never `cut` per field, and
 # never `read` with a tab IFS, which collapses empty fields.
-# Sets `starts` and `judgedFiles`; findings go through `Fail`.
+# Sets `starts` and `judgedFiles`; findings go through `Fail`. One row per call of
+# `ReadJudgementRow`, after `starts=0` and `judgedFiles=""`; `ReadJudgement` reads them from stdin.
+ReadJudgementRow() {
+    local row="$1" kind rest where line class verdict missing
+    [ -n "${row}" ] || return 0
+    kind="${row%%$'\t'*}"
+    rest="${row#*$'\t'}"
+    case "${kind}" in
+        start)
+            where="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
+            line="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
+            class="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
+            verdict="${rest%%$'\t'*}"; missing="${rest#*$'\t'}"
+            starts=$((starts + 1))
+            case "${verdict}" in
+                pass) ;;
+                fail) Fail "${where}:${line}: starts the node (${class}) with ${missing}" ;;
+                *) Fail "${where}:${line}: a judge row whose verdict is '${verdict}', neither pass nor fail (unrecognised judge row)" ;;
+            esac ;;
+        unisolated)
+            where="${rest%%$'\t'*}"; line="${rest#*$'\t'}"
+            Fail "unisolated-node ${where}:${line}: runs a worker with the caller's state directory -- enter e2e_node_state_enter above it (bash) or start it inside Use-E2ENodeState (PowerShell), or say --slots=0 if it runs no worker" ;;
+        fail) Fail "${rest}" ;;
+        judged) judgedFiles="${rest}" ;;
+        *) Fail "an unrecognised judge row, kind '${kind}': ${row}" ;;
+    esac
+}
 ReadJudgement() {
-    local row kind rest where line class verdict missing
+    local row
     starts=0
     judgedFiles=""
     while IFS= read -r row; do
-        [ -n "${row}" ] || continue
-        kind="${row%%$'\t'*}"
-        rest="${row#*$'\t'}"
-        case "${kind}" in
-            start)
-                where="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
-                line="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
-                class="${rest%%$'\t'*}"; rest="${rest#*$'\t'}"
-                verdict="${rest%%$'\t'*}"; missing="${rest#*$'\t'}"
-                starts=$((starts + 1))
-                case "${verdict}" in
-                    pass) ;;
-                    fail) Fail "${where}:${line}: starts the node (${class}) with ${missing}" ;;
-                    *) Fail "${where}:${line}: a judge row whose verdict is '${verdict}', neither pass nor fail (unrecognised judge row)" ;;
-                esac ;;
-            fail) Fail "${rest}" ;;
-            judged) judgedFiles="${rest}" ;;
-            *) Fail "an unrecognised judge row, kind '${kind}': ${row}" ;;
-        esac
+        ReadJudgementRow "${row}"
     done
 }
 
@@ -766,33 +941,42 @@ if [ "${1:-}" = "--read-rows" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-if [ ! -f "${PaceTable}" ]; then
-    echo "check-node-fixture-starts: no table at ${PaceTable}. A missing table is refused, not read" >&2
-    echo "  as an empty one: two empty answers agree perfectly." >&2
-    exit 2
-fi
-if ! awk -F'\t' '/^[ \t]*(#|$)/ { next } NF < 4 || $4 == "" || ($1 != "helper" && $1 != "exempt" && $1 != "census") { bad = 1; print "  row " NR ": " $0 > "/dev/stderr" } END { exit bad }' "${PaceTable}"; then
-    echo "check-node-fixture-starts: the table has a row that is not <helper|exempt|census> TAB <path> TAB <what> TAB <reason>." >&2
-    echo "  A row with no reason is refused rather than read as a permission." >&2
-    exit 2
-fi
-
-subjects="$(Subjects)" || exit 2
-handed="$(HandedTheNode)"
-if [ -z "${handed}" ]; then
-    echo "check-node-fixture-starts: src/tests/CMakeLists.txt hands the node binary to no script, which" >&2
-    echo "  cannot be true of this tree. Refused rather than read as 'no fixture starts the node'." >&2
-    exit 2
-fi
-
-judgement="$(JudgeAll "${subjects}" "${handed}")" || {
-    echo "check-node-fixture-starts: awk could not judge the scripts. Refused rather than read as clean." >&2
-    exit 2
-}
-ReadJudgement < <(printf '%s\n' "${judgement}")
+Subjects || exit 2
+judgeStatus=0
+JudgeAll "${subjects}" || judgeStatus=$?
+case "${judgeStatus}" in
+    0) ;;
+    3)
+        printf '%s\n' "${judgement}" >&2
+        echo "check-node-fixture-starts: the table has a row that is not <helper|exempt|census> TAB <path> TAB <what> TAB <reason>." >&2
+        echo "  A row with no reason is refused rather than read as a permission." >&2
+        exit 2
+        ;;
+    5)
+        echo "check-node-fixture-starts: no table at ${PaceTable}, or it cannot be read. A missing table is" >&2
+        echo "  refused, not read as an empty one: two empty answers agree perfectly." >&2
+        exit 2
+        ;;
+    4)
+        echo "check-node-fixture-starts: src/tests/CMakeLists.txt hands the node binary to no script, which" >&2
+        echo "  cannot be true of this tree. Refused rather than read as 'no fixture starts the node'." >&2
+        exit 2
+        ;;
+    *)
+        echo "check-node-fixture-starts: awk could not judge the scripts (exit ${judgeStatus}). Refused rather than read as clean." >&2
+        exit 2
+        ;;
+esac
+starts=0
+judgedFiles=""
+SplitLines "${judgement}"
+for row in ${Lines[@]+"${Lines[@]}"}; do
+    ReadJudgementRow "${row}"
+done
 # The judge ends by saying how many files it judged: fewer than were enumerated is a judge that
 # stopped early, which must not read as one that judged them all.
-subjectCount="$(printf '%s\n' "${subjects}" | grep -c .)"
+SplitLines "${subjects}"
+subjectCount="${#Lines[@]}"
 if [ "${judgedFiles}" != "${subjectCount}" ]; then
     echo "check-node-fixture-starts: the judge reported ${judgedFiles:-no count} of ${subjectCount} script(s)." >&2
     echo "  Refused rather than read as clean." >&2

@@ -260,6 +260,11 @@ held="$(listeners_of "$NODE_PORT")"
     || fail "${NODE_PORT} is not the adopted socket alone: ${held}"
 [[ "$(in_container systemctl show -p User --value pace-node)" == "$NODE_ACCOUNT" ]] \
     || fail "the worker does not run as ${NODE_ACCOUNT}"
+# Out of systemd-oomd's choice: in the slice the package ships, a sibling of system.slice
+# (#1773). The ControlGroup is the fact; the Slice property is only the unit's claim.
+node_cgroup="$(in_container systemctl show -p ControlGroup --value pace-node 2>&1 || true)"
+[[ "$node_cgroup" == /pace.slice/pace-node.service ]] \
+    || fail "the worker's cgroup is '${node_cgroup}', expected /pace.slice/pace-node.service"
 
 in_container systemctl stop pace-node
 [[ "$(in_container systemctl show -p Result --value pace-node)" == success ]] \
@@ -282,6 +287,7 @@ in_container dnf -y remove pace > "${workdir}/dnf-remove.log" 2>&1 \
 for leftover in /usr/lib/systemd/system/pace-kv.service \
                 /usr/lib/systemd/system/pace-node.service \
                 /usr/lib/systemd/system/pace-node.socket \
+                /usr/lib/systemd/system/pace.slice \
                 /etc/systemd/system/multi-user.target.wants/pace-kv.service \
                 /etc/systemd/system/sockets.target.wants/pace-node.socket; do
     if in_container test -e "$leftover"; then

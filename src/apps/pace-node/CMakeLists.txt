@@ -29,6 +29,8 @@ set(_pace_node_shared
     "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/DirectManifest.cpp"
     "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/Dispatch.cpp"
     "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/EndpointDial.cpp"
+    "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/LocalCeiling.cpp"
+    "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/OomVictimExec.cpp"
     "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/ParallelFor.cpp"
     "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/ProcessRunner.cpp"
     "${CMAKE_SOURCE_DIR}/src/apps/pace-cc/Stats.cpp"
@@ -87,6 +89,8 @@ add_executable(pace-node
     AdmissionResponder.cpp
     AdmitForwarder.cpp
     MachineBudget.cpp
+    PressureGovernor.cpp
+    PressureWatcher.cpp
     NodeRoster.cpp
     NodeConditions.cpp
     NodeConfig.cpp
@@ -94,6 +98,7 @@ add_executable(pace-node
     NodeFirewall.cpp
     NodeFormation.cpp
     NodeReload.cpp
+    KilledCompiles.cpp
     RefusedArguments.cpp
     NodeFrameSurface.cpp
     NodeIdentity.cpp
@@ -249,12 +254,18 @@ if(PACE_BUILD_TESTS)
         AdmitForwarder_test.cpp
         MachineBudget.cpp
         MachineBudget_test.cpp
+        PressureGovernor.cpp
+        PressureGovernor_test.cpp
+        PressureWatcher.cpp
+        PressureWatcher_test.cpp
         NodeRoster.cpp
         NodeRoster_test.cpp
         NodeRefusal_test.cpp
         OneShotAnswer_test.cpp
         NodeConditions.cpp
         NodeConditions_test.cpp
+        KilledCompiles.cpp
+        KilledCompiles_test.cpp
         RefusedArguments.cpp
         RefusedArguments_test.cpp
         NodeConfig.cpp
@@ -363,6 +374,11 @@ if(PACE_BUILD_TESTS)
         "${CMAKE_SOURCE_DIR}/src/apps/pace-cc"
         "${CMAKE_SOURCE_DIR}/src/apps/pacectl")
     target_link_libraries(pace-node-tests PRIVATE Pace Catch2::Catch2)
+    # The OOM-victim cases spawn through the launcher's test shim, found beside this executable
+    # (src/apps/pace-cc/CMakeLists.txt says why). pace-cc is earlier in the app table, so the guard is live.
+    if(TARGET oom-victim-exec-shim)
+        add_dependencies(pace-node-tests oom-victim-exec-shim)
+    endif()
     # The launchd label the macOS uninstaller boots this worker's job out by,
     # handed to the test so it compares the packaging's value against the one the
     # binary derives -- rather than against a literal of its own, which would

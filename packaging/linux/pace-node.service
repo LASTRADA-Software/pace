@@ -178,33 +178,62 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectHome=yes
-# yes, and that is why compile peaks are not measured by default: the cgroup filesystem is
-# read-only to this service, so it cannot create the per-compile cgroup whose `memory.peak`
-# is the only trustworthy peak (`ru_maxrss` of a child includes its spawner's resident set,
-# which is the whole cache tier). The node runs correctly, says so at startup and raises the
-# `compile-memory-unmeasured` condition. To measure, opt in with a drop-in
-# (`systemctl edit pace-node`):
+# private, so the node has a cgroup tree of its own to build in. Three lines, one purpose
+# (Delegate=memory below, RestrictNamespaces=no further down), and what they buy is the
+# compile memory defence (docs/tools/pace-node.md, "Memory: measurement, ceiling and
+# pressure"): the node creates a `compiles/` cgroup carrying one memory ceiling over
+# every compile it runs, and a `job-<n>` cgroup per compile whose `memory.peak` is the
+# only trustworthy peak (a child's `ru_maxrss` includes its spawner's resident set,
+# which is the whole cache tier). Without them the node still runs correctly, says so
+# at startup, and raises the `compile-memory-uncapped` and `compile-memory-unmeasured`
+# conditions.
 #
-#     [Service]
-#     Delegate=memory
-#     ProtectControlGroups=private
-#     RestrictNamespaces=no
+# `private` gives the service a cgroup namespace with a writable mount of its OWN
+# delegated subtree only; the rest of the cgroup filesystem stays out of reach, which
+# is why this is not `no`. It needs systemd 257 or newer. The packages declare a bare
+# dependency on `systemd` with no minimum (cmake/Packaging.cmake), so an older systemd
+# is possible: it does not know the value `private`, logs a parse warning,
+# ignores the value and leaves ProtectControlGroups= at its default `no` -- the unit
+# still starts and delegation still works, with the whole cgroup filesystem writable
+# to the service instead of one subtree. The fallback is therefore safe, and the
+# looser one of the two ways it can go; set `ProtectControlGroups=no` in a drop-in to
+# say so explicitly there. NOT `yes`: that makes the delegated subtree read-only and
+# the node uncapped.
+ProtectControlGroups=private
+# A cgroup subtree the node may create children in, with the memory controller. The
+# ceiling is set on `compiles/` and never on the delegated cgroup, so the node's own
+# memory (the cache tier) is outside it.
+Delegate=memory
+# systemd-oomd kills a whole cgroup: left in its choice, a memory squeeze would kill the node
+# together with its cache tier, where the node's own ceiling and shedding kill one compile and
+# the client recompiles it. What keeps a node started by this unit out of that choice is the
+# slice it runs in (#1773). oomd only picks a cgroup BELOW one it monitors, and Fedora 44's
+# defaults monitor `system.slice` (and the user managers' slices) -- killing there at 80%
+# pressure held for 20 s -- where a unit with no `Slice=` lands. `pace.slice` is a sibling of
+# `system.slice`, under the root slice, which no default monitors; it limits nothing, the node
+# caps its own compiles. See packaging/linux/pace.slice for the measurement, and `oomctl` for
+# what a given host monitors. A running node moves at its next restart, not at the upgrade.
 #
-# `private` needs systemd 257 or newer (older: `no`). RestrictNamespaces=no is needed
-# because starting a process inside a cgroup is `clone3`, which a seccomp filter cannot
-# inspect and systemd therefore refuses whenever any namespace is restricted (measured on
-# systemd 259: ENOTSUP). @system-service below allows clone3 itself. The node checks it all
-# at startup. See docs/tools/pace-node.md, "Measuring what a compile used".
-ProtectControlGroups=yes
+# Neither of the other two marks does this here. The node marks its own `node/` cgroup
+# `user.oomd_omit=1`, but oomd honours a `user.` mark only on a cgroup owned by the user its
+# manager runs as, and under this SYSTEM unit `node/` belongs to the service account while
+# root's oomd is the one watching. `ManagedOOMPreference=omit` marks the UNIT's cgroup, which
+# with `Delegate=` is no leaf, and oomd reads the mark on the cgroup it would kill rather than
+# inheriting it. The line is kept as the unit's statement of intent. Known since systemd 248.
+Slice=pace.slice
+ManagedOOMPreference=omit
 ProtectKernelLogs=yes
 ProtectKernelModules=yes
 ProtectKernelTunables=yes
 ProtectHostname=yes
 ProtectClock=yes
 ProtectProc=invisible
-# Also what keeps clone3 away from the node (see ProtectControlGroups above): the opt-in to
-# measuring compile peaks relaxes it.
-RestrictNamespaces=yes
+# no, because starting a process inside a cgroup is `clone3`, which a seccomp filter
+# cannot inspect, and systemd therefore refuses clone3 outright whenever any namespace is
+# restricted (measured on systemd 259: ENOTSUP). The node needs it to run each compile
+# inside its `job-<n>` cgroup. @system-service below allows clone3 itself. What it costs:
+# the compilers could create namespaces; nothing else in this block depends on it.
+RestrictNamespaces=no
 RestrictRealtime=yes
 RestrictSUIDSGID=yes
 LockPersonality=yes

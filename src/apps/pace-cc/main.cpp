@@ -63,9 +63,11 @@
 #include "InputFiles.hpp"
 #include "InputWitness.hpp"
 #include "LauncherCli.hpp"
+#include "LocalCeiling.hpp"
 #include "MarkerDiscovery.hpp"
 #include "MissFlow.hpp"
 #include "NotePathCollapse.hpp"
+#include "OomVictimExec.hpp"
 #include "ParallelFor.hpp"
 #include "PathResolve.hpp"
 #include "ReachabilityMemo.hpp"
@@ -85,6 +87,7 @@
 #include <Pace/CompileCache/CompileValue.hpp>
 #include <Pace/CompileCache/PathCanon.hpp>
 #include <Pace/Core/EnumTable.hpp>
+#include <Pace/Platform/CgroupV2.hpp>
 #include <Pace/Platform/Environment.hpp>
 #include <Pace/Platform/NarrowText.hpp>
 #include <Pace/Platform/Terminal.hpp>
@@ -110,6 +113,7 @@
 #include <ostream>
 #include <ranges>
 #include <span>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -456,6 +460,9 @@ struct InvocationRecord
     /// How this invocation's FETCH ended; disengaged when it made none. What a later admission asks
     /// before dialling the node the FETCH just learned is not there.
     std::optional<Cc::CacheOutcomeKind> fetched;
+
+    /// What defended the compile this launcher last ran itself against memory (#1770); disengaged when it ran none.
+    std::optional<Cc::LocalDefenseReport> localDefense;
 
     /// Fall-back reason. Empty on a hit; usually empty on a miss, but see
     /// `ReportCrossedReply` for the one miss that carries one.
@@ -1072,6 +1079,95 @@ using Cc::CompileRun;
 [[nodiscard]] CompileRun RunCaptureSplit(std::span<std::string const> argv)
 {
     return ProcessRunner().RunCaptureSplit(argv);
+}
+
+/// The compiles this launcher runs itself, under the compile-OOM defense where it can reach it (#1770): inside the
+/// local node's compile ceiling where this user may place a compiler there, under the OOM-victim shim wherever there
+/// is one. Created once, as `ProcessRunner` is; the preprocess and the probes stay on that one, since the ceiling is
+/// for what a compile holds and a launcher's own short spawns hold next to nothing.
+/// @return The runner.
+[[nodiscard]] Cc::LocalCompileRunner& LocalCompiles()
+{
+    static auto const victim = Cc::ThisProcessOomVictim();
+    static Cc::RendezvousLocator const locator {
+        [](std::string_view name) { return ReadEnvironmentVariable(name); },
+        [](std::filesystem::path const& path) -> std::optional<std::string> {
+            std::ifstream in { path, std::ios::binary };
+            if (!in)
+                return std::nullopt;
+            std::ostringstream text;
+            text << in.rdbuf();
+            return std::move(text).str();
+        },
+    };
+    static Cc::LocalCompileRunner runner {
+        locator,
+        [](std::filesystem::path const& compiles) -> std::shared_ptr<Platform::IJobCgroupSource> {
+            auto host = std::make_shared<Platform::SystemCgroupHost>();
+            // Per process: two launchers' compiles share the node's `compiles/`, and the node's own are `job-<n>`.
+            auto prefix = std::format("pace-cc-{}-", host->OwnProcessId());
+            return std::make_shared<Platform::CgroupJobSource>(
+                std::move(host),
+                Platform::CgroupLayout {
+                    .delegated = {}, .leaf = {}, .compiles = compiles, .notApplied = {}, .oomdOmitRefused = std::nullopt },
+                Platform::CgroupTeardownPolicy {},
+                std::move(prefix));
+        },
+        [](std::shared_ptr<Platform::IJobCgroupSource> cgroups) {
+            auto shim = victim.has_value() ? std::optional<Cc::OomVictim> { *victim } : std::nullopt;
+            return cgroups != nullptr
+                       ? Cc::MakeProcessRunner(std::move(cgroups), std::move(shim), Cc::PeakSource::ResourceUsage)
+                       : Cc::MakeProcessRunner(Cc::PeakSource::ResourceUsage, std::move(shim));
+        },
+        victim.has_value() ? Cc::ShimState::Shimmed : Cc::ShimState::NoShim,
+        Cc::CanSpawnIntoCgroups(),
+    };
+    return runner;
+}
+
+/// Run the compile here, under whatever defense this launcher can give it, and record and say which (#1770).
+/// @param record The invocation record: what defended the compile lands here.
+/// @param argv The compiler's command line.
+/// @param placement Whether it may join the local node's ceiling.
+/// @return The compile.
+[[nodiscard]] CompileRun RunLocalCompile(InvocationRecord& record,
+                                         std::span<std::string const> argv,
+                                         Cc::LocalPlacement placement)
+{
+    auto local = LocalCompiles().Run(argv, placement);
+    record.localDefense = local.defense;
+    auto const& miss = Cc::CeilingMissTable[static_cast<std::size_t>(local.defense.miss)];
+    switch (local.defense.defense)
+    {
+        case Cc::LocalDefense::Ceiling:
+            Note(record.verbose, "compiled inside the local node's compile ceiling");
+            break;
+        case Cc::LocalDefense::ShimOnly:
+            Note(record.verbose,
+                 std::format("compiled as the first OOM victim only, outside any ceiling: {}", miss.sentence));
+            break;
+        case Cc::LocalDefense::Unprotected:
+        case Cc::LocalDefense::Last:
+            Note(record.verbose, std::format("compiled with no memory defense: {}", miss.sentence));
+            break;
+    }
+    return std::move(local.run);
+}
+
+/// Say a step a kill for memory made the miss path take (#1770), and record the one the dispatch axis tallies.
+///
+/// A compile that ends KILLED is said unconditionally: its 137 fails the build, and read as a compiler error it is
+/// exactly the misreading the defense exists to prevent.
+/// @param record The invocation record. @param step The step.
+void NoteKillStep(InvocationRecord& record, Cc::KillStep step)
+{
+    auto const& row = Cc::KillStepTable[static_cast<std::size_t>(step)];
+    if (step == Cc::KillStep::LocalKilledOutside)
+        std::cerr << "pace-cc: " << row.sentence << '\n';
+    else
+        Note(record.verbose, row.sentence);
+    if (step == Cc::KillStep::WorkerKilledTwice)
+        ApplyDispatchRecording(record, Cc::RecordingFor(Cc::DispatchStatus::Declined, Cc::DeclineCause::KilledTwice));
 }
 
 /// Run `argv` with the streams captured separately, asking the compiler to speak
@@ -2978,7 +3074,20 @@ void RecordPlanRefusal(InvocationRecord& record, PlanRefusal const& refusal)
                  std::format("worker {} refused the admitted job ({}); asking the queue again",
                              Cc::DescribeWorkerReached(outcome),
                              outcome.detail));
-            return Cc::AdmittedDispatch { .run = std::nullopt, .workerRefused = true };
+            return Cc::AdmittedDispatch { .run = std::nullopt, .setback = Cc::WorkerSetback::Refused };
+        }
+        // A worker's machine killed the compiler for memory: not compiled here at once, but asked for once more
+        // after a kill (#1770). Recorded as the kill, which whatever follows -- a dispatch elsewhere, a local
+        // compile the queue placed here -- records over.
+        if (granted != nullptr && Cc::IsWorkerCompileKilled(outcome))
+        {
+            ApplyDispatchRecording(record, fleetAnswer);
+            Note(record.verbose,
+                 std::format(
+                     "worker {} killed the compile for memory ({})", Cc::DescribeWorkerReached(outcome), outcome.detail));
+            return Cc::AdmittedDispatch { .run = std::nullopt,
+                                          .setback = Cc::WorkerSetback::Killed,
+                                          .killedPeakBytes = outcome.killedPeakBytes };
         }
         return DeclineDispatch(record, fleetAnswer, std::format("not dispatched ({}); compiling locally", outcome.detail));
     }
@@ -3095,7 +3204,7 @@ void RecordPlanRefusal(InvocationRecord& record, PlanRefusal const& refusal)
     // them -- an ordering nothing would enforce.
     ApplyDispatchRecording(record, fleetAnswer);
     Note(record.verbose, std::format("DISPATCHED to {} key={}", Cc::DescribeWorkerReached(outcome), key));
-    return Cc::AdmittedDispatch { .run = std::move(run), .workerRefused = false };
+    return Cc::AdmittedDispatch { .run = std::move(run), .setback = Cc::WorkerSetback::Failed };
 }
 
 /// Open an admission for one compile, or decline to ask.
@@ -3213,10 +3322,11 @@ void NoteAdmissionFailedOpen(InvocationRecord const& record,
         .granted = [](Cc::AdmitTicket const&) {},
         .dispatchAdmitted = [](Cc::AdmitTicket const&) { return Cc::AdmittedDispatch {}; },
         .dispatchUnadmitted = [](Wire::AskOrigin) -> std::optional<Cc::CompileRun> { return std::nullopt; },
-        .compileLocal = [&]() { return RunCaptureSplit(args); },
+        .compileLocal = [&](Cc::LocalPlacement placement) { return RunLocalCompile(record, args, placement); },
         .finish = [&](Cc::CompileRun& run,
                       bool&) { return ReplayPlainCompile(run, Cc::StreamGrammar(cmd.flavor), cfg.showIncludesMarker); },
         .failedOpen = [&](std::string const& reason) { NoteAdmissionFailedOpen(record, cfg, memo, memoStore, reason); },
+        .killed = [&](Cc::KillStep step) { NoteKillStep(record, step); },
     };
     auto const report = Cc::RunMiss(seams);
     // Added to what a cached path that declined into this one already recorded: one invocation, one sum.
@@ -4042,10 +4152,11 @@ std::optional<int> CachedCompile::AdmitAndCompile()
             }
             return TryRemoteCompile(record, cfg, cmd, argv, key, *plan, dispatchDependencies, nullptr, {}, origin).run;
         },
-        .compileLocal = [&]() { return RunCaptureSplit(argv); },
+        .compileLocal = [&](Cc::LocalPlacement placement) { return RunLocalCompile(record, argv, placement); },
         .finish = [this](Cc::CompileRun& run, bool& stored) { return FinishMiss(run, stored); },
         .failedOpen =
             [&](std::string const& reason) { NoteAdmissionFailedOpen(record, cfg, admitMemo, admitMemoStore, reason); },
+        .killed = [&](Cc::KillStep step) { NoteKillStep(record, step); },
     };
     auto const report = Cc::RunMiss(seams);
     record.queuedMs = report.queuedMs;
@@ -4397,6 +4508,13 @@ std::optional<int> CachedCompile::AdmitAndCompile()
 
 int main(int argc, char** argv)
 {
+    // FIRST, before anything is parsed or spawned: a compile this launcher runs itself is started through its own
+    // binary under the shim's name, which raises its OOM score and `exec`s the compiler (#1770).
+    if (Cc::ProcSelfOomScoreWriter oomScore;
+        auto const failed = Cc::RunOomVictimExecIfInvoked(
+            std::span<char const* const> { const_cast<char const* const*>(argv), static_cast<std::size_t>(argc) }, oomScore))
+        return *failed;
+
     /// The one instance, owned by the one function that reports it. Every helper
     /// that contributes to it now takes it as a parameter, so what a function does
     /// to the eventual statistics line is visible in its signature -- and the
@@ -4567,6 +4685,7 @@ int main(int argc, char** argv)
             .exitCode = code,
             .queuedMs = record.queuedMs,
             .peakMemoryBytes = record.peakMemoryBytes,
+            .localDefense = record.localDefense,
         });
     }
     return code;

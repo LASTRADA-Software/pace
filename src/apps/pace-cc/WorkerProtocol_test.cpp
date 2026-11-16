@@ -2770,7 +2770,8 @@ namespace
 class PeakRunner final: public IProcessRunner
 {
   public:
-    std::optional<std::uint64_t> peak; ///< What `CompileRun::peakMemoryBytes` reports.
+    std::optional<std::uint64_t> peak;                 ///< What `CompileRun::peakMemoryBytes` reports.
+    std::optional<Pace::Platform::CompileKill> killed; ///< Set to report the compiler killed, and why.
 
     CompileRun RunCaptureCombined(std::span<std::string const> argv) override
     {
@@ -2778,8 +2779,10 @@ class PeakRunner final: public IProcessRunner
     }
     CompileRun RunCaptureSplit(std::span<std::string const> argv) override
     {
+        if (killed.has_value())
+            return CompileRun { .exitCode = 137, .out = {}, .err = {}, .peakMemoryBytes = peak, .killed = killed };
         Test::WriteStubObject(argv, "OBJECT");
-        return CompileRun { .exitCode = 0, .out = {}, .err = {}, .peakMemoryBytes = peak };
+        return CompileRun { .exitCode = 0, .out = {}, .err = {}, .peakMemoryBytes = peak, .killed = std::nullopt };
     }
 };
 
@@ -2899,4 +2902,78 @@ TEST_CASE("WorkerProtocol.reports-no-peak-it-did-not-measure-or-cannot-key", "[w
         CHECK(Decode(Unwrap(answer)).status == Wire::Status::Ok);
         CHECK(measurements.peaks.empty());
     }
+}
+
+TEST_CASE("WorkerProtocol.CompileKilled: a killed compile is refused by cause, counted, and says what it held",
+          "[worker-protocol][machinebudget]")
+{
+    // A killed compile's peak is a LOWER bound -- it was cut short -- so the worker reports none and
+    // the client's local recompile settles the estimate with the true figure. And the refusal says
+    // which of three things killed it, each counted apart: a ceiling too low, a machine the node
+    // shed, and a kill from outside are three different things for an operator to do.
+    using Pace::Platform::CompileKill;
+    struct Case
+    {
+        CompileKill cause;
+        IMetricsSink::Counter counter;
+        std::string_view word;
+    };
+    auto const cases = std::array {
+        Case { .cause = CompileKill::Ceiling,
+               .counter = IMetricsSink::Counter::WorkerCompilesKilledCeiling,
+               .word = "ceiling" },
+        Case { .cause = CompileKill::Shed, .counter = IMetricsSink::Counter::WorkerCompilesKilledShed, .word = "shed" },
+        Case {
+            .cause = CompileKill::Signal, .counter = IMetricsSink::Counter::WorkerCompilesKilledSignal, .word = "killed" },
+    };
+    for (auto const& tested: cases)
+    {
+        INFO("cause: " << tested.word);
+        PeakRunner runner;
+        runner.peak = 3'000'000'000ULL;
+        runner.killed = tested.cause;
+        Pace::Testing::ScratchDirectory const scratch { "pace-wp" };
+        CompileJobRunner jobs { runner, scratch.Path(), { { "gcc-13", "g++" } }, ToolchainSurvey::Completed() };
+        AtomicMetricsSink metrics;
+        RecordingMeasurements measurements;
+        RecordingRefusals refusals;
+        WorkerProtocol worker {
+            jobs,         UncheckedLeaseValidator(),  { Wire::IdentityCodec }, &Testing::TestWorkerKey(), metrics, refusals,
+            measurements, DefaultMaxDecompressedBytes
+        };
+
+        auto const answer = worker.Answer(AdmittedFrame(1ULL << 31, "objkey-abc", "<SRCROOT>/src/a.cpp"));
+        REQUIRE(answer.has_value());
+        auto const reply = Decode(Unwrap(answer));
+        REQUIRE(reply.status == Wire::Status::Error);
+        auto const refusal = Wire::DecodeErrorPayload(reply.payload);
+        REQUIRE(refusal.has_value());
+        auto const& [code, message] = Unwrap(refusal);
+        CHECK(code == Wire::ErrorCode::WorkerCompileKilled);
+        CHECK(message.contains(tested.word));
+        // What it held rides the refusal's trailer, for the client's requeue (#1770) -- and the words stop before it.
+        CHECK(Wire::KilledPeakOf(Wire::ErrorTrailerOf(reply.payload)) == std::optional<std::uint64_t> { 3'000'000'000ULL });
+        CHECK_FALSE(message.contains('\0'));
+
+        // Never a MEASUREMENT: a killed run's peak is a lower bound, reported only as what it held.
+        CHECK(measurements.peaks.empty());
+        REQUIRE(refusals.Seen().size() == 1);
+        CHECK(refusals.Seen().front().killed == std::optional { tested.cause });
+        for (auto const& other: cases)
+            CHECK(metrics.Read(other.counter) == (other.cause == tested.cause ? 1U : 0U));
+        // Not a completed job: a compiler that never finished answered nothing.
+        CHECK(metrics.Read(IMetricsSink::Counter::WorkerJobsCompleted) == 0);
+    }
+}
+
+TEST_CASE("WorkerProtocol.CompileKilled: the refusal is its own byte on the wire", "[worker-protocol]")
+{
+    // The byte is what a launcher of another build reads, and the name is what its verbose line
+    // prints -- so both are pinned, beside the raw enumerator. A launcher predating it reads a
+    // refusal it does not know, and compiles locally all the same.
+    CHECK(static_cast<std::uint8_t>(Wire::ErrorCode::WorkerCompileKilled) == 0x35);
+    auto const* const row = Wire::Describe(Wire::ErrorCode::WorkerCompileKilled);
+    REQUIRE(row != nullptr);
+    CHECK(row->name == "worker-compile-killed");
+    CHECK_FALSE(std::ranges::contains(Wire::RetiredErrorCodes, std::uint8_t { 0x35 }));
 }

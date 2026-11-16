@@ -53,10 +53,40 @@ set(GoodWorker
 "[Service]
 Type=simple
 ExecStart=/usr/bin/pace-node
+Slice=pace.slice
 RuntimeDirectory=pace-node
 WorkingDirectory=/run/pace-node
 StateDirectory=pace-node
 CacheDirectory=pace-node
+")
+# The user unit names no slice: its node marks its own cgroup, which the user's own oomd
+# honours, so the slice table has no row for it -- and the clean case is what shows a check
+# that demanded a slice of every node unit is wrong.
+set(GoodUserWorker
+"[Service]
+Type=simple
+ExecStart=/usr/bin/pace-node
+RuntimeDirectory=pace-node
+WorkingDirectory=/run/pace-node
+StateDirectory=pace-node
+CacheDirectory=pace-node
+")
+# The slice the system unit names, as shipped: a comment that names `[Slice]` above the
+# sections, so a reader finding the header by substring would judge the comment instead.
+set(GoodSlice
+"# It limits nothing: the [Slice] section below stays empty.
+[Unit]
+Description=Slice for the Pace compile node
+
+[Slice]
+# Deliberately empty.
+")
+# The packaging asset table's row, among its neighbours.
+set(GoodAssets
+"    set(PACE_PLATFORM_ASSETS
+        \"linux/pace-node.service|\${PACE_SYSTEMD_SYSTEM_DIR}|data|pace-node.service|Runtime\"
+        \"linux/pace.slice|\${PACE_SYSTEMD_SYSTEM_DIR}|data|pace.slice|Runtime\"
+    )
 ")
 set(GoodNodeDefaults
 "inline constexpr std::string_view NodeStateDirectoryName = \"pace-node\";
@@ -96,7 +126,9 @@ function(pace_make_tree name file body outVar)
     file(WRITE "${tree}/packaging/linux/pace-node.service" "${GoodWorker}")
     file(WRITE "${tree}/packaging/linux/pace-kv.service" "${GoodDaemon}")
     file(WRITE "${tree}/packaging/linux/pace-kv-user.service" "${GoodDaemon}")
-    file(WRITE "${tree}/packaging/linux/pace-node-user.service" "${GoodWorker}")
+    file(WRITE "${tree}/packaging/linux/pace-node-user.service" "${GoodUserWorker}")
+    file(WRITE "${tree}/packaging/linux/pace.slice" "${GoodSlice}")
+    file(WRITE "${tree}/packaging/CMakeLists.txt" "${GoodAssets}")
     file(WRITE "${tree}/packaging/config/pace-node.yaml" "${GoodReference}")
     file(WRITE "${tree}/docs/tools/pace-node.md" "${GoodPage}")
     file(WRITE "${tree}/src/apps/pace-node/NodeDefaults.hpp" "${GoodNodeDefaults}")
@@ -190,6 +222,7 @@ pace_case("clean" "" "" "PASS" ""
 pace_case("missing" "pace-node.service"
 "[Service]
 ExecStart=/usr/bin/pace-node
+Slice=pace.slice
 CacheDirectory=pace-node
 RuntimeDirectory=pace-node
 " "REFUSE" "names no WorkingDirectory"
@@ -198,6 +231,7 @@ RuntimeDirectory=pace-node
 pace_case("root" "pace-node.service"
 "[Service]
 ExecStart=/usr/bin/pace-node
+Slice=pace.slice
 CacheDirectory=pace-node
 RuntimeDirectory=pace-node
 WorkingDirectory=/
@@ -211,6 +245,7 @@ WorkingDirectory=/
 pace_case("comment-only" "pace-node.service"
 "[Service]
 ExecStart=/usr/bin/pace-node
+Slice=pace.slice
 CacheDirectory=pace-node
 RuntimeDirectory=pace-node
 # WorkingDirectory=/run/pace-node
@@ -222,6 +257,7 @@ RuntimeDirectory=pace-node
 pace_case("reset" "pace-node.service"
 "[Service]
 ExecStart=/usr/bin/pace-node
+Slice=pace.slice
 CacheDirectory=pace-node
 RuntimeDirectory=pace-node
 WorkingDirectory=/run/pace-node
@@ -234,6 +270,7 @@ WorkingDirectory=
 pace_case("last-wins" "pace-node.service"
 "[Service]
 ExecStart=/usr/bin/pace-node
+Slice=pace.slice
 CacheDirectory=pace-node
 RuntimeDirectory=pace-node
 StateDirectory=pace-node
@@ -246,6 +283,7 @@ WorkingDirectory=/run/pace-node
 pace_case("dash-prefix" "pace-node.service"
 "[Service]
 ExecStart=/usr/bin/pace-node
+Slice=pace.slice
 CacheDirectory=pace-node
 RuntimeDirectory=pace-node
 WorkingDirectory=-/run/pace-node
@@ -255,6 +293,7 @@ WorkingDirectory=-/run/pace-node
 pace_case("home" "pace-node.service"
 "[Service]
 ExecStart=/usr/bin/pace-node
+Slice=pace.slice
 CacheDirectory=pace-node
 RuntimeDirectory=pace-node
 WorkingDirectory=~
@@ -264,6 +303,7 @@ WorkingDirectory=~
 pace_case("unresolved-specifier" "pace-node.service"
 "[Service]
 ExecStart=/usr/bin/pace-node
+Slice=pace.slice
 CacheDirectory=pace-node
 RuntimeDirectory=pace-node
 WorkingDirectory=%h/pace-node
@@ -273,6 +313,7 @@ WorkingDirectory=%h/pace-node
 pace_case("resolvable-specifier" "pace-node.service"
 "[Service]
 ExecStart=/usr/bin/pace-node
+Slice=pace.slice
 CacheDirectory=pace-node
 RuntimeDirectory=pace-node
 StateDirectory=pace-node
@@ -284,6 +325,7 @@ WorkingDirectory=%t/pace-node
 pace_case("uncreated" "pace-node.service"
 "[Service]
 ExecStart=/usr/bin/pace-node
+Slice=pace.slice
 CacheDirectory=pace-node
 WorkingDirectory=/opt/pace-node
 " "REFUSE" "does not create"
@@ -292,6 +334,7 @@ WorkingDirectory=/opt/pace-node
 pace_case("state-directory" "pace-node.service"
 "[Service]
 ExecStart=/usr/bin/pace-node
+Slice=pace.slice
 CacheDirectory=pace-node
 StateDirectory=pace-node
 WorkingDirectory=/var/lib/pace-node
@@ -321,6 +364,7 @@ WorkingDirectory=/opt/nowhere
 pace_case("state-directory-missing" "pace-node.service"
 "[Service]
 ExecStart=/usr/bin/pace-node
+Slice=pace.slice
 CacheDirectory=pace-node
 RuntimeDirectory=pace-node
 WorkingDirectory=/run/pace-node
@@ -330,6 +374,7 @@ WorkingDirectory=/run/pace-node
 pace_case("state-directory-other-name" "pace-node.service"
 "[Service]
 ExecStart=/usr/bin/pace-node
+Slice=pace.slice
 CacheDirectory=pace-node
 RuntimeDirectory=pace-node
 WorkingDirectory=/run/pace-node
@@ -340,6 +385,7 @@ StateDirectory=pace-worker
 pace_case("state-directory-reset" "pace-node.service"
 "[Service]
 ExecStart=/usr/bin/pace-node
+Slice=pace.slice
 CacheDirectory=pace-node
 RuntimeDirectory=pace-node
 WorkingDirectory=/run/pace-node
@@ -351,6 +397,7 @@ StateDirectory=
 pace_case("state-directory-list" "pace-node.service"
 "[Service]
 ExecStart=/usr/bin/pace-node
+Slice=pace.slice
 CacheDirectory=pace-node
 RuntimeDirectory=pace-node
 WorkingDirectory=/run/pace-node
@@ -365,6 +412,7 @@ StateDirectory=pace-cache pace-node
 pace_case("cache-directory-missing" "pace-node.service"
 "[Service]
 ExecStart=/usr/bin/pace-node
+Slice=pace.slice
 RuntimeDirectory=pace-node
 WorkingDirectory=/run/pace-node
 StateDirectory=pace-node
@@ -374,6 +422,7 @@ StateDirectory=pace-node
 pace_case("cache-directory-comment-only" "pace-node.service"
 "[Service]
 ExecStart=/usr/bin/pace-node
+Slice=pace.slice
 RuntimeDirectory=pace-node
 WorkingDirectory=/run/pace-node
 StateDirectory=pace-node
@@ -384,6 +433,7 @@ StateDirectory=pace-node
 pace_case("cache-directory-reset" "pace-node.service"
 "[Service]
 ExecStart=/usr/bin/pace-node
+Slice=pace.slice
 RuntimeDirectory=pace-node
 WorkingDirectory=/run/pace-node
 StateDirectory=pace-node
@@ -395,6 +445,7 @@ CacheDirectory=
 pace_case("cache-directory-list" "pace-node.service"
 "[Service]
 ExecStart=/usr/bin/pace-node
+Slice=pace.slice
 RuntimeDirectory=pace-node
 WorkingDirectory=/run/pace-node
 StateDirectory=pace-node
@@ -446,6 +497,194 @@ pace_file_case("reference-cites-state-directory" "packaging/config/pace-node.yam
 #cache_dir:
 " "REFUSE" "cites cache_dir /var/lib/pace-node/cache, which"
     "a wrong path in the reference is refused like one in a page, and reported without the full stop that ended its sentence -- the trim the clean tree's reference also needs to pass")
+
+# --- the slice a system node runs in, out of systemd-oomd's choice (#1773) ---
+pace_case("slice-missing" "pace-node.service"
+"[Service]
+ExecStart=/usr/bin/pace-node
+RuntimeDirectory=pace-node
+WorkingDirectory=/run/pace-node
+StateDirectory=pace-node
+CacheDirectory=pace-node
+" "REFUSE" "names no Slice="
+    "a system unit with no Slice= lands in system.slice, which oomd monitors -- this IS #1773")
+
+pace_case("slice-comment-only" "pace-node.service"
+"[Service]
+ExecStart=/usr/bin/pace-node
+RuntimeDirectory=pace-node
+WorkingDirectory=/run/pace-node
+StateDirectory=pace-node
+CacheDirectory=pace-node
+# Slice=pace.slice
+" "REFUSE" "names no Slice="
+    "a commented-out Slice= moves nothing, and the line that fixes this sits under a paragraph explaining it")
+
+pace_case("slice-reset" "pace-node.service"
+"[Service]
+ExecStart=/usr/bin/pace-node
+Slice=pace.slice
+RuntimeDirectory=pace-node
+WorkingDirectory=/run/pace-node
+StateDirectory=pace-node
+CacheDirectory=pace-node
+Slice=
+" "REFUSE" "RESETS it"
+    "a later empty Slice= resets the unit to system.slice")
+
+pace_case("slice-last-wins" "pace-node.service"
+"[Service]
+ExecStart=/usr/bin/pace-node
+Slice=system.slice
+RuntimeDirectory=pace-node
+WorkingDirectory=/run/pace-node
+StateDirectory=pace-node
+CacheDirectory=pace-node
+Slice=pace.slice
+" "PASS" ""
+    "the last Slice= is the one in force, so an earlier system.slice is overridden and harmless")
+
+pace_case("slice-system" "pace-node.service"
+"[Service]
+ExecStart=/usr/bin/pace-node
+Slice=system.slice
+RuntimeDirectory=pace-node
+WorkingDirectory=/run/pace-node
+StateDirectory=pace-node
+CacheDirectory=pace-node
+" "REFUSE" "is system.slice or lies under it"
+    "naming system.slice explicitly is the defect spelled out")
+
+pace_case("slice-under-system" "pace-node.service"
+"[Service]
+ExecStart=/usr/bin/pace-node
+Slice=system-pace.slice
+RuntimeDirectory=pace-node
+WorkingDirectory=/run/pace-node
+StateDirectory=pace-node
+CacheDirectory=pace-node
+" "REFUSE" "is system.slice or lies under it"
+    "a slice's parent is spelled in its name, so system-pace.slice is a child of system.slice and inside oomd's choice")
+
+pace_case("slice-under-user" "pace-node.service"
+"[Service]
+ExecStart=/usr/bin/pace-node
+Slice=user-pace.slice
+RuntimeDirectory=pace-node
+WorkingDirectory=/run/pace-node
+StateDirectory=pace-node
+CacheDirectory=pace-node
+" "REFUSE" "is user.slice or lies under it"
+    "user.slice holds the user managers oomd monitors, so a slice under it is no way out")
+
+pace_case("slice-not-shipped" "pace-node.service"
+"[Service]
+ExecStart=/usr/bin/pace-node
+Slice=fleet.slice
+RuntimeDirectory=pace-node
+WorkingDirectory=/run/pace-node
+StateDirectory=pace-node
+CacheDirectory=pace-node
+" "REFUSE" "while the slice this tree ships is pace.slice"
+    "systemd starts a unit in a slice nobody ships, so nothing else would notice the shipped one went unused")
+
+pace_case("slice-escaped" "pace-node.service"
+"[Service]
+ExecStart=/usr/bin/pace-node
+Slice=system\\x2dpace.slice
+RuntimeDirectory=pace-node
+WorkingDirectory=/run/pace-node
+StateDirectory=pace-node
+CacheDirectory=pace-node
+" "REFUSE" "not a slice name this check can split"
+    "a name the check cannot split into its parents is one whose parent nobody judged")
+
+pace_case("slice-memory-max" "pace.slice"
+"[Unit]
+Description=Slice for the Pace compile node
+
+[Slice]
+MemoryMax=8G
+" "REFUSE" "sets MemoryMax=8G in its [Slice] section"
+    "a limit on the slice puts the cache tier under the compiles' ceiling; the node caps its own compiles")
+
+pace_case("slice-oomd-kill" "pace.slice"
+"[Unit]
+Description=Slice for the Pace compile node
+[Slice]
+ManagedOOMMemoryPressure=kill
+" "REFUSE" "sets ManagedOOMMemoryPressure=kill"
+    "a slice oomd monitors puts the node straight back in its choice of victim")
+
+# The substring trap, pinned: the setting sits in the REAL section while the comment above it
+# also names `[Slice]`. A reader that took the first `[Slice]` it found would judge the comment.
+pace_case("slice-setting-after-commented-header" "pace.slice"
+"# the [Slice] section below stays empty
+[Unit]
+Description=Slice for the Pace compile node
+
+[Slice]
+TasksMax=64
+" "REFUSE" "sets TasksMax=64"
+    "the header is a whole line; a substring match would read the comment and judge nothing")
+
+pace_case("slice-unit-section-settings" "pace.slice"
+"[Unit]
+Description=Slice for the Pace compile node
+Documentation=https://example.invalid/
+
+[Slice]
+# empty
+" "PASS" ""
+    "only the [Slice] section must be empty; [Unit] metadata limits nothing")
+
+pace_case("slice-no-section" "pace.slice"
+"[Unit]
+Description=Slice for the Pace compile node
+" "REFUSE" "has no [Slice] section line"
+    "a walk that never found the section judged nothing in it")
+
+pace_file_case("slice-row-missing" "packaging/CMakeLists.txt"
+"    set(PACE_PLATFORM_ASSETS
+        \"linux/pace-node.service|\${PACE_SYSTEMD_SYSTEM_DIR}|data|pace-node.service|Runtime\"
+    )
+" "REFUSE" "has 0 row(s) installing linux/pace.slice"
+    "a slice the asset table does not install reaches neither the DEB nor the RPM")
+
+pace_file_case("slice-row-commented" "packaging/CMakeLists.txt"
+"    set(PACE_PLATFORM_ASSETS
+        # \"linux/pace.slice|\${PACE_SYSTEMD_SYSTEM_DIR}|data|pace.slice|Runtime\"
+    )
+" "REFUSE" "has 0 row(s) installing linux/pace.slice"
+    "a commented-out row installs nothing")
+
+pace_file_case("slice-row-user-dir" "packaging/CMakeLists.txt"
+"    set(PACE_PLATFORM_ASSETS
+        \"linux/pace.slice|\${PACE_SYSTEMD_USER_DIR}|data|pace.slice|Runtime\"
+    )
+" "REFUSE" "has 0 row(s) installing linux/pace.slice"
+    "the system unit names the slice, so it must be installed where the SYSTEM manager reads units")
+
+pace_file_case("slice-row-twice" "packaging/CMakeLists.txt"
+"    set(PACE_PLATFORM_ASSETS
+        \"linux/pace.slice|\${PACE_SYSTEMD_SYSTEM_DIR}|data|pace.slice|Runtime\"
+        \"linux/pace.slice|\${PACE_SYSTEMD_SYSTEM_DIR}|data|pace.slice|Runtime\"
+    )
+" "REFUSE" "has 2 row(s) installing linux/pace.slice"
+    "two rows install one file twice, and the table is one row per asset")
+
+pace_make_tree("slice-file-absent" "" "" tree)
+file(REMOVE "${tree}/packaging/linux/pace.slice")
+pace_run_check("${tree}" objected output)
+math(EXPR caseCount "${caseCount} + 1")
+if(NOT objected)
+    list(APPEND failures "slice-file-absent: a slice named by the table and missing from the tree was not refused")
+else()
+    string(FIND "${output}" "ships no slice for the unit to name" said)
+    if(said EQUAL -1)
+        list(APPEND failures "slice-file-absent: refused, but not for its own reason")
+    endif()
+endif()
 
 # Which way the citing files were found is part of the verdict: this synthetic tree has no
 # git index of its own, so the walk answered here while git answers in CI, and a pass that

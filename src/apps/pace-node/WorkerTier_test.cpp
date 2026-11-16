@@ -1310,3 +1310,29 @@ TEST_CASE("A worker's compile ceilings come from the RESOLVED slots and the opti
         }));
     }
 }
+
+TEST_CASE("A worker on a yielding machine names memory-pressure as what holds it back", "[node][worker-tier][pressure]")
+{
+    // C5: the heartbeat's load record carries no pressure level, so the ceilings `node-status` names fold the
+    // watcher's published level in -- or `pacectl node` shows a yielding machine's free slots as capacity.
+    PublishedPressure pressure;
+    WorkerTierFixture fixture;
+    fixture.cfg.slots = 4;
+    fixture.pressure = &pressure;
+    auto started = fixture.Start();
+    REQUIRE(started.has_value());
+    REQUIRE(started.value() != nullptr);
+    auto const& tier = *started.value();
+
+    // Nothing published: absent, which names nothing.
+    CHECK(tier.StatusCeilings(Distributed::NodeLoad {}).binding == Distributed::SlotLimit::Registered);
+
+    pressure.Publish(MachinePressure { .level = CompileCacheWire::PressureLevel::Yield, .allowanceBytes = 1 });
+    auto const yielding = tier.StatusCeilings(Distributed::NodeLoad {});
+    CHECK(yielding.binding == Distributed::SlotLimit::MemoryPressure);
+    CHECK(yielding.available == 0);
+
+    // And calm again names nothing again: the level lifts itself.
+    pressure.Publish(MachinePressure { .level = CompileCacheWire::PressureLevel::Calm, .allowanceBytes = 1 });
+    CHECK(tier.StatusCeilings(Distributed::NodeLoad {}).binding == Distributed::SlotLimit::Registered);
+}

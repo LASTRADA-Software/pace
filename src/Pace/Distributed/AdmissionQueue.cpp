@@ -48,6 +48,7 @@ void AdmissionQueue::ReportMachine(MachineId const& machine, MachineReport const
 {
     auto& ledger = _ledgers[machine];
     ledger.report = report;
+    ++ledger.reports;
     ledger.refused = false;
 }
 
@@ -89,7 +90,9 @@ QueueView AdmissionQueue::Snapshot() const
             .machine = machine,
             .chargedBytes = ledger.chargedBytes,
             .inUseBytes = InUseBytes(ledger),
-            .budgetBytes = ledger.report.has_value() ? std::optional { ledger.report->memoryBudgetBytes } : std::nullopt });
+            .budgetBytes = ledger.report.transform([](MachineReport const& report) { return report.memoryBudgetBytes; }),
+            .pressure = ledger.report.transform([](MachineReport const& report) { return report.pressure; }),
+            .standing = ledger.report.transform([](MachineReport const& report) { return report.standing; }) });
     }
     return view;
 }
@@ -144,6 +147,21 @@ std::optional<AdmissionQueue::Charge> AdmissionQueue::Free(Ticket ticket)
     auto& ledger = _ledgers[charge.machine];
     ledger.chargedBytes = Saturating(ledger.chargedBytes, charge.bytes);
     ledger.chargedSlots = Saturating<std::uint32_t>(ledger.chargedSlots, 1);
+    // A report that arrived after the grant counted this compile as held, and max(charged, held) would keep reading
+    // it as running until the next one -- under pressure, one compile per report period. Give that back too.
+    //
+    // The give-back can take a count that was never this compile's, whenever the report arriving after the grant did
+    // not yet hold it: one taken before the node RECORDED it (between the grant and the lease being recorded, or the job
+    // reaching the worker -- its second preprocess included), or a compile that never started at all (a worker that
+    // refused it, which re-parks it at the front through this same free). Then another compile's count is lost. It
+    // matters only while the reported held figure EXCEEDS what this ledger charged -- compiles surviving a failover,
+    // which the queue never granted -- since otherwise max(charged, held) reads the charge anyway, and it lasts until
+    // the next report: fail-open for one report period at most, against fail-closed for every one.
+    if (ledger.report.has_value() && charge.reportsAtGrant < ledger.reports)
+    {
+        ledger.report->heldSlots = Saturating<std::uint32_t>(ledger.report->heldSlots, 1);
+        ledger.report->heldBytes = Saturating(ledger.report->heldBytes, charge.bytes);
+    }
     return charge;
 }
 
@@ -186,7 +204,11 @@ void AdmissionQueue::Settle(Ticket ticket, Settlement const& settlement)
         return;
     }
 
-    if (settlement.peakBytes)
+    // A killed compile's peak is what it held when it died: a lower bound, folded in as one, so the requeue it is
+    // about to make is charged at least that (#1770). Every other outcome's peak is a measurement.
+    if (settlement.outcome == SettleOutcome::Killed)
+        _estimates.RecordKilled(charge->entry.request.estimate, HeldBound(charge->machine, settlement.peakBytes));
+    else if (settlement.peakBytes)
         _estimates.Record(charge->entry.request.estimate, *settlement.peakBytes);
 
     if (settlement.outcome == SettleOutcome::Stored)
@@ -198,11 +220,29 @@ void AdmissionQueue::Settle(Ticket ticket, Settlement const& settlement)
                                                                     .kind = GrantKind::Stored,
                                                                     .placement = std::nullopt,
                                                                     .chargedBytes = 0,
-                                                                    .ranAlone = false },
+                                                                    .ranAlone = false,
+                                                                    .neverFits = false },
                                              .entry = std::move(waiter) });
         }
     else
         Requeue(std::move(waiters));
+}
+
+std::optional<std::uint64_t> AdmissionQueue::HeldBound(MachineId const& machine,
+                                                       std::optional<std::uint64_t> heldBytes) const
+{
+    // What a killed compile held is a figure a PEER states, and it raises the key's estimate and its source shape's
+    // maximum for good. A compile cannot hold more than the machine it ran on lets its compiles hold -- its ceiling is
+    // that budget -- so the figure is bounded by the budget that machine last reported: a forged or mistaken trailer can
+    // teach at most "as much as that machine could give", which a compile that truly needed more is then killed at
+    // again, and compiles here as one killed twice.
+    auto const found = _ledgers.find(machine);
+    if (found == _ledgers.end())
+        return heldBytes;
+    auto const budget = found->second.report.transform([](MachineReport const& report) { return report.memoryBudgetBytes; });
+    if (!budget.has_value())
+        return heldBytes;
+    return heldBytes.transform([limit = *budget](std::uint64_t held) { return std::min(held, limit); });
 }
 
 void AdmissionQueue::ReturnToFront(Ticket ticket)
@@ -292,6 +332,13 @@ AdmissionQueue::Room AdmissionQueue::RoomOn(MachineId const& machine, Reserved c
     return room;
 }
 
+bool AdmissionQueue::BarredWhilePressed(MachineId const& machine, bool placed, std::uint64_t chargedBytes) const
+{
+    auto const& report = _ledgers.at(machine).report;
+    return report.has_value() && report->pressure != PressureLevel::Calm
+           && (placed || chargedBytes > report->memoryBudgetBytes);
+}
+
 std::vector<Decision> AdmissionQueue::Pump()
 {
     /// A machine an entry may run on; `placement` is engaged for a worker.
@@ -335,20 +382,52 @@ std::vector<Decision> AdmissionQueue::Pump()
 
         // Reported candidates in placement order, then the caller: the CPU never idles while the
         // caller has room.
+        //
+        // A compile killed for memory and asked for again (#1770) is no target for a machine whose CONFIGURED budget
+        // is below its estimate: there the compile ceiling is the budget, and running it alone would be the next
+        // kill. When every reported machine it could run on is such a machine, its caller included, none ever will
+        // hold it -- it runs alone on the caller, outside the ceiling (`neverFits`). A budget the pressure allowance
+        // holds down says nothing of the configured one, so it is waited for rather than ruled out.
+        auto const afterKill = request.origin == AskOrigin::AfterKill;
+        auto const neverHolds = [&](MachineId const& machine) {
+            auto const& report = *_ledgers.at(machine).report;
+            return afterKill && report.standing == BudgetStanding::Configured
+                   && entry.chargedBytes > report.memoryBudgetBytes;
+        };
         std::vector<Target> targets;
         if (request.kind == AdmitKind::Dispatchable && entry.refusals < MaxWorkerRefusals)
             for (auto& placement: _placement.Candidates(request.fingerprint, request.excluded))
-                if (reported(placement.machine))
+                if (reported(placement.machine) && !neverHolds(placement.machine))
                     targets.push_back(Target { .machine = placement.machine, .placement = std::move(placement) });
-        if (reported(request.caller))
+        auto const neverFits = afterKill && targets.empty() && reported(request.caller) && neverHolds(request.caller);
+        if (reported(request.caller) && (neverFits || !neverHolds(request.caller)))
             targets.push_back(Target { .machine = request.caller, .placement = std::nullopt });
 
         auto const granted = std::ranges::find_if(targets, [&](Target const& target) {
             auto const& report = *_ledgers.at(target.machine).report;
             auto const& hold = reserved[target.machine];
             auto const room = RoomOn(target.machine, hold);
+            // Nothing of the fleet runs on it, and nothing older is reserved there.
+            auto const idle = room.usedBytes == 0 && room.usedSlots == 0 && hold.bytes == 0 && hold.slots == 0;
+            // A machine under memory pressure takes nothing new while any compile of the fleet runs or is reserved
+            // there, its own local compiles included (the owner's decision). Yield and Shed are one answer here --
+            // only the node's governor tells them apart, by killing under Shed. The room such a machine reports is
+            // what its compiles gave back as they finished, and admitting into it would refill exactly what the
+            // governor is yielding.
+            //
+            // Idle, it still runs its OWN compiles, one at a time and only within the budget it reports (under
+            // pressure its allowance, floored at one default estimate for exactly this compile). The fleet then holds
+            // nothing there to give back, and PSI is the host's -- another cgroup stalling at its own `memory.max`
+            // raises it as surely as a shortage does -- so waiting relieves nothing and lasts as long as the pressure
+            // does: a build on that machine never ended (dist-compile-e2e's case 9). No other machine's work goes there.
+            if (report.pressure != PressureLevel::Calm)
+                return idle && report.slots > 0
+                       && !BarredWhilePressed(target.machine, target.placement.has_value(), entry.chargedBytes);
             if (entry.chargedBytes > report.memoryBudgetBytes)
-                return report.slots > 0 && room.usedBytes == 0 && room.usedSlots == 0 && hold.bytes == 0 && hold.slots == 0;
+                // Run alone only on a budget that is the machine's configured one. One the pressure allowance holds
+                // down is what fit beside something else when pressure ended, and a compile past it is the one the
+                // ceiling kills -- then re-admitted, killed again, for as long as the ramp takes (C3).
+                return report.standing == BudgetStanding::Configured && report.slots > 0 && idle;
             return room.freeBytes >= entry.chargedBytes && room.freeSlots >= 1;
         });
 
@@ -369,13 +448,15 @@ std::vector<Decision> AdmissionQueue::Pump()
                              Charge { .machine = granted->machine,
                                       .bytes = chargedBytes,
                                       .entry = std::move(entry),
-                                      .placement = granted->placement });
+                                      .placement = granted->placement,
+                                      .reportsAtGrant = ledger.reports });
             decisions.push_back(Decision {
                 .ticket = ticket,
                 .kind = granted->placement.has_value() ? GrantKind::Worker : GrantKind::Local,
                 .placement = granted->placement,
                 .chargedBytes = chargedBytes,
                 .ranAlone = chargedBytes > BudgetOf(ledger),
+                .neverFits = neverFits,
             });
             continue;
         }
@@ -385,15 +466,25 @@ std::vector<Decision> AdmissionQueue::Pump()
         auto const wasHead = _headTickets.contains(entry.ticket);
         for (auto const& target: targets)
         {
+            // What can never run on a pressed machine -- another machine's work, or a compile larger than its budget --
+            // is never its head and reserves nothing there: that hold would keep the machine from ever being idle, so
+            // the one compile it may still run, its own, would wait for as long as this one stays blocked.
+            if (BarredWhilePressed(target.machine, target.placement.has_value(), entry.chargedBytes))
+                continue;
             if (!claimed.insert(target.machine).second)
                 continue;
             heads.insert(entry.ticket);
             if (!wasHead)
                 continue;
+            auto const& ledger = _ledgers.at(target.machine);
+            auto const budget = BudgetOf(ledger);
+            auto const alone = entry.chargedBytes > budget;
+            // Draining a machine for a compile that may not run alone there is no wait at all: its budget is held by
+            // the pressure allowance and only the ramp ends that. Smaller compiles keep the machine until then.
+            if (alone && ledger.report.has_value() && ledger.report->standing == BudgetStanding::HeldByAllowance)
+                continue;
             auto& hold = reserved[target.machine];
             auto const room = RoomOn(target.machine, hold);
-            auto const budget = BudgetOf(_ledgers.at(target.machine));
-            auto const alone = entry.chargedBytes > budget;
             hold.bytes += std::min({ entry.chargedBytes, budget, room.freeBytes });
             hold.slots += alone ? room.freeSlots : std::min<std::uint32_t>(1, room.freeSlots);
         }

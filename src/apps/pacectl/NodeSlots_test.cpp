@@ -5,6 +5,7 @@
 // than `registered` -- while it cannot know.
 #include "NodeSlots.hpp"
 
+#include <Pace/Distributed/FleetView.hpp>
 #include <Pace/Distributed/NodePolicy.hpp>
 #include <Pace/Metrics/StatsReading.hpp>
 #include <Pace/Platform/HostLoad.hpp>
@@ -217,4 +218,62 @@ TEST_CASE("A reading that carries no load names no limit", "[cli][node-slots]")
     CHECK(Unwrap(slots).registered == 16);
     CHECK_FALSE(Unwrap(slots).ceilings.has_value());
     CHECK_FALSE(Unwrap(slots).availableMemoryBytes.has_value());
+}
+
+TEST_CASE("A memory-pressure limit has the name, the remedy and the tone the node panel renders it with",
+          "[pacectl][node-slots][MemoryPressure]")
+{
+    // The panel names the binding limit through `SlotLimitTable` and dresses it through `SlotLimitTone`, so a
+    // limit missing from either would render as a blank or as plain text claiming nothing holds the node back.
+    auto const& traits = Distributed::TraitsFor(Distributed::SlotLimit::MemoryPressure);
+    CHECK(traits.name == "memory-pressure");
+    CHECK(traits.remedy.contains("memory"));
+    CHECK(Distributed::SlotLimitTone(Distributed::SlotLimit::MemoryPressure) == Distributed::CellTone::Limited);
+}
+
+TEST_CASE("A machine under memory pressure offers nothing and names memory-pressure, from one reading",
+          "[cli][node-slots][pressure]")
+{
+    // C5. The node's watcher reports its level in the host-load block; the panel folds it into the scheduler's own
+    // arithmetic, so a yielding machine's free slots are not shown as capacity the fleet has.
+    auto const pressed = [](std::uint64_t busy, std::uint64_t total, std::optional<std::uint64_t> level) {
+        auto load = Ticks(busy, total);
+        load.memoryPressure = level;
+        return load;
+    };
+    auto const yield = std::optional { static_cast<std::uint64_t>(Distributed::PressureLevel::Yield) };
+    auto const previous = ReadingOf(SixteenCores(), pressed(1000, 10000, yield));
+    auto const now = ReadingOf(SixteenCores(), pressed(1100, 11000, yield));
+
+    SECTION("with two readings")
+    {
+        auto const slots = NodeSlotsOf(&previous, now);
+        REQUIRE(slots.has_value());
+        REQUIRE(Unwrap(slots).ceilings.has_value());
+        CHECK(Unwrap(Unwrap(slots).ceilings).available == 0);
+        CHECK(Unwrap(Unwrap(slots).ceilings).binding == Distributed::SlotLimit::MemoryPressure);
+    }
+    SECTION("with ONE reading, because a level is known from one")
+    {
+        auto const slots = NodeSlotsOf(nullptr, now);
+        REQUIRE(slots.has_value());
+        REQUIRE(Unwrap(slots).ceilings.has_value());
+        CHECK(Unwrap(Unwrap(slots).ceilings).binding == Distributed::SlotLimit::MemoryPressure);
+    }
+    SECTION("and calm names nothing it does not report")
+    {
+        auto const calm = std::optional { static_cast<std::uint64_t>(Distributed::PressureLevel::Calm) };
+        auto const slots = NodeSlotsOf(nullptr, ReadingOf(SixteenCores(), pressed(1100, 11000, calm)));
+        REQUIRE(slots.has_value());
+        CHECK_FALSE(Unwrap(slots).ceilings.has_value());
+    }
+    SECTION("and an absent level, or one this build does not know, is no statement")
+    {
+        for (auto const level: { std::optional<std::uint64_t> {}, std::optional<std::uint64_t> { 7 } })
+        {
+            auto const slots = NodeSlotsOf(nullptr, ReadingOf(SixteenCores(), pressed(1100, 11000, level)));
+            REQUIRE(slots.has_value());
+            CHECK_FALSE(Unwrap(slots).ceilings.has_value());
+        }
+    }
 }

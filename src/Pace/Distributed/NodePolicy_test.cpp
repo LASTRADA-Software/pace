@@ -697,3 +697,55 @@ TEST_CASE("A compile byte budget tied with scratch names scratch, and a cordon o
     CHECK(cordoned.available == 0);
     CHECK(cordoned.binding == SlotLimit::Cordoned);
 }
+
+TEST_CASE("A machine under memory pressure offers nothing, and MemoryPressure is what the report names",
+          "[distributed][nodepolicy][slotlimit][MemoryPressure]")
+{
+    constexpr NodeCapacity machine { .logicalCores = 16,
+                                     .totalMemoryBytes = 32ULL << 30,
+                                     .nodeClass = NodeClass::Dedicated };
+    auto load = NodeLoad { .inFlight = 0,
+                           .cpuBusyPermille = std::nullopt,
+                           .availableMemoryBytes = std::nullopt,
+                           .freeScratchBytes = std::nullopt,
+                           .cache = {},
+                           .cordoned = false,
+                           .compileBudget = std::nullopt,
+                           .pressure = PressureLevel::Yield };
+
+    SECTION("yield and shed both withdraw every slot")
+    {
+        for (auto const level: { PressureLevel::Yield, PressureLevel::Shed })
+        {
+            load.pressure = level;
+            auto const ceilings = SlotCeilingsFor(machine, 16, load);
+            CHECK(ceilings.available == 0);
+            CHECK(ceilings.byMemoryPressure == std::optional<std::uint32_t> { 0 });
+            CHECK(ceilings.binding == SlotLimit::MemoryPressure);
+            CHECK(AvailableSlots(machine, 16, load) == 0);
+        }
+    }
+
+    SECTION("calm, or a node that did not say, withdraws nothing")
+    {
+        for (auto const level: { std::optional { PressureLevel::Calm }, std::optional<PressureLevel> {} })
+        {
+            load.pressure = level;
+            auto const ceilings = SlotCeilingsFor(machine, 16, load);
+            CHECK(ceilings.available == 16);
+            CHECK_FALSE(ceilings.byMemoryPressure.has_value());
+            CHECK(ceilings.binding == SlotLimit::Registered);
+        }
+    }
+
+    SECTION("a cordon still wins the tie")
+    {
+        load.cordoned = true;
+        auto const ceilings = SlotCeilingsFor(machine, 16, load);
+        CHECK(ceilings.available == 0);
+        CHECK(ceilings.binding == SlotLimit::Cordoned);
+    }
+
+    CHECK(TraitsFor(SlotLimit::MemoryPressure).name == "memory-pressure");
+    CHECK(TraitsFor(SlotLimit::MemoryPressure).refusal == SlotRefusal::Withdrawn);
+}

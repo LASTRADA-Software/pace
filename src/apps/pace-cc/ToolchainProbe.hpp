@@ -669,6 +669,25 @@ struct IncludeSearchRoots
                                                       std::string const& compiler,
                                                       DriverSpec const& spec);
 
+/// Schema tag for the validity stamp of a cached toolchain fingerprint.
+///
+/// Separate from `FingerprintSchema`, because the two version different things: this one
+/// versions what the stamp COVERS and which cache entries are TRUSTED. Moving it misses every
+/// entry written before it -- a one-time rewalk per toolchain on every machine -- and leaves
+/// every machine's fingerprint VALUE unchanged, so a fleet mid-upgrade still matches.
+///
+/// v2 added `FingerprintSchema` itself as an input (#1656). Until then nothing tied a cached
+/// value to the rules that computed it: bumping the fingerprint's schema changed every freshly
+/// computed value while a cache entry written under the old one still validated.
+///
+/// v3 retires every entry written before a stopped walk stopped being cached (#1774). A node
+/// told to stop mid-walk reported the walk whole and cached the short digest, under a stamp
+/// that folds each root's path and mtime and never its contents -- so the entry validated
+/// forever, and every later node on the machine served a fingerprint no client computes.
+/// The fix stops new entries like that; only a schema move reaches the ones already written,
+/// since nothing in an entry tells a truncated digest from a whole one.
+inline constexpr std::string_view ToolchainStampSchema = "toolchain-stamp-v3";
+
 /// A cheap check that a cached fingerprint still describes this toolchain.
 ///
 /// Digested rather than stored field-by-field, so validation is a string compare
@@ -700,11 +719,14 @@ struct IncludeSearchRoots
 /// @param roots Its include search roots.
 /// @param schema The fingerprint schema the cached value was computed under; a
 ///        parameter only so a test can stamp an entry as another build would.
+/// @param stampSchema The stamp's own schema (`ToolchainStampSchema`); a parameter only so a
+///        test can stamp an entry as an older build did.
 /// @return A hex digest, or empty when the compiler cannot be stat'd at all.
 [[nodiscard]] std::string ComputeToolchainStamp(std::string_view banner,
                                                 std::string const& compiler,
                                                 std::span<std::string const> roots,
-                                                std::string_view schema = FingerprintSchema);
+                                                std::string_view schema = FingerprintSchema,
+                                                std::string_view stampSchema = ToolchainStampSchema);
 
 /// Why a computed fingerprint must not be served as a toolchain's identity.
 ///

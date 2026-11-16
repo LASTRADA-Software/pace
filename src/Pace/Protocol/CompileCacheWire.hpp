@@ -238,7 +238,23 @@ using WireVersion = std::uint8_t;
 /// `format` field, and the reply for `Json` is `/fleet.json`'s body byte for byte. `WireSurface`
 /// also gained `Mcp`. A version-16 request has three fields where this build reads four, so it is
 /// refused `UnsupportedVersion`, naming the range, by `FleetTextResponder` before any field is read.
-inline constexpr WireVersion CurrentVersion = 17;
+///
+/// **18 lets a machine's budget report carry its memory pressure**: MACHINE-BUDGET grew from 5 to 7
+/// fields, a `PressureLevel` byte so the leader's queue holds back a machine whose node is yielding or
+/// shedding memory, and a trailing `BudgetStanding` byte so it closes the run-alone exception on a machine
+/// whose budget the pressure allowance still holds down. Both landed before 18 was released, so they share
+/// the one bump. Its decoder is exact about arity in both directions: a
+/// version-17 leader would refuse every version-18 report as a malformed frame, and a version-18
+/// leader would refuse every version-17 one the same way -- a machine whose reports are refused is
+/// one the queue admits nothing on, and nothing would say why.
+///
+/// Also in 18, for the same reason (#1770, before 18 was released): `AskOrigin::AfterKill`, a compile asked
+/// for again after its compiler was killed for memory, and `LocalGrantReason::NeverFits`, the leader's answer
+/// when no machine's budget can hold it. Each is an enumerator past a version-17 decoder's `Last`, which that
+/// decoder refuses as a malformed frame rather than misreads. And `SettleOutcome::Killed`, with the peak the killed
+/// compile held, and `LocalGrantReason::RunsAlone`; a `worker-compile-killed` reply carries that peak as an error TRAILER
+/// after a `0x00` separator, which a version-17 reader would show as part of the message -- nothing it decides on.
+inline constexpr WireVersion CurrentVersion = 18;
 
 /// The oldest version this build still accepts. Equal to `CurrentVersion` while
 /// only one version exists; widen the range when a second one ships and this
@@ -408,7 +424,12 @@ inline constexpr WireVersion CurrentVersion = 17;
 /// a version-16 request would otherwise be answered as a malformed frame, a confident wrong
 /// diagnosis for a version mismatch. `FleetTextResponder` judges the version itself, because
 /// nothing earlier on the Fleet family's path does.
-inline constexpr WireVersion MinSupportedVersion = 17;
+///
+/// Version 18 moves it for version 17's reason: MACHINE-BUDGET's field count is part of its grammar,
+/// and a version-17 report, five fields where this build reads seven, would be refused as a malformed
+/// frame -- a confident wrong diagnosis for a version mismatch, on a verb whose refusal leaves the
+/// machine out of the queue. Refused by number, the mismatch names the range instead.
+inline constexpr WireVersion MinSupportedVersion = 18;
 
 /// Size of the fixed request header: magic, version, op, payload length.
 inline constexpr std::size_t RequestHeaderSize = WireFrame::HeaderSize;
@@ -1477,6 +1498,18 @@ enum class ErrorCode : std::uint8_t
     /// `WorkerToolchainSurveyInFlight`, which is retriable and true. A new byte and no version bump: the reply
     /// grammar is unchanged, and a reader that predates it reads a refusal it does not know.
     FingerprintInputsUnrecorded = 0x34,
+
+    /// The worker's compiler was KILLED before it answered: its memory ceiling was reached, the node
+    /// shed it to relieve memory pressure, or something else ended it by `SIGKILL`. The message names
+    /// which, and the source.
+    ///
+    /// A refusal rather than a compile outcome, because a killed compiler answered nothing about the
+    /// code: carried as an outcome, its 137 would read to the client as a compiler failure in a TU that
+    /// compiles. The client compiles locally, which is also where the TU's true peak gets measured.
+    /// A new byte and no version bump, for `FingerprintInputsUnrecorded`'s reason: the reply grammar is
+    /// unchanged, and a launcher that predates it reads a refusal it does not know and compiles locally
+    /// all the same.
+    WorkerCompileKilled = 0x35,
 };
 
 /// Bit for `status` within an `OpDescriptor::legalStatuses` mask.
@@ -2576,7 +2609,7 @@ inline constexpr std::array OpTable {
                    .identity = IdentityRequirement::AddressAdmits },
     OpDescriptor { .code = Op::MachineBudget,
                    .name = "machine-budget",
-                   .fieldCount = 5, // memory budget, slots, held slots, held bytes, peaks
+                   .fieldCount = 7, // memory budget, slots, held slots, held bytes, peaks, pressure, standing
                    .legalStatuses = static_cast<std::uint8_t>(StatusBit(Status::Ok) | StatusBit(Status::Error)),
                    .preAuth = RequiresAuth,
                    .maxPayload = BoundedTo(MaxControlPayload),
@@ -3077,6 +3110,12 @@ inline constexpr std::array ErrorTable {
                       .defaultMessage = "the worker cannot classify its own configured compiler",
                       .retry = RetryWillNotHelp,
                       .retryWhy = "this build does not recognise the worker's compiler, and will not while asked" },
+    ErrorDescriptor { .code = ErrorCode::WorkerCompileKilled,
+                      .name = "worker-compile-killed",
+                      .defaultMessage = "the worker's compiler was killed before it finished",
+                      .retry = RetryMayHelp,
+                      .retryWhy = "a statement about the worker's memory at that moment, which passes; the client "
+                                  "compiles locally meanwhile" },
     ErrorDescriptor { .code = ErrorCode::NotLeader,
                       .name = "not-leader",
                       .defaultMessage = "this node does not lead the cluster",
@@ -3272,12 +3311,13 @@ static_assert(EveryRetryIsReasoned(), "every error code says why asking again ma
 /// the direction that costs is a transient refusal read as a decision, which gives up on a
 /// healthy cluster mid-election or mid-change.
 inline constexpr std::array RetriableErrorCodes {
-    ErrorCode::StorageWriteFailed, ErrorCode::NoWorker,
-    ErrorCode::NoCapacity,         ErrorCode::AlreadyInFlight,
-    ErrorCode::Withdrawn,          ErrorCode::ClusterChangeInFlight,
-    ErrorCode::EndpointBusy,       ErrorCode::WorkerToolchainSurveyInFlight,
-    ErrorCode::EnrollmentFull,     ErrorCode::EnrollmentHostFull,
-    ErrorCode::GrantUnverifiable,  ErrorCode::RosterNotYetApplied,
+    ErrorCode::StorageWriteFailed,  ErrorCode::NoWorker,
+    ErrorCode::NoCapacity,          ErrorCode::AlreadyInFlight,
+    ErrorCode::Withdrawn,           ErrorCode::ClusterChangeInFlight,
+    ErrorCode::EndpointBusy,        ErrorCode::WorkerToolchainSurveyInFlight,
+    ErrorCode::EnrollmentFull,      ErrorCode::EnrollmentHostFull,
+    ErrorCode::GrantUnverifiable,   ErrorCode::RosterNotYetApplied,
+    ErrorCode::WorkerCompileKilled,
 };
 
 /// Whether the table's retriable rows are exactly `RetriableErrorCodes`.
@@ -3926,22 +3966,60 @@ inline constexpr CacheVerbs FleetSharedCacheVerbs { Op::SharedFetch, Op::SharedS
     return EncodeReply(Status::Progress, {});
 }
 
-/// Frame an `Error` reply carrying a code and a message.
+/// What separates an `Error` reply's message from its TRAILER: structured facts a code carries beside the words
+/// (#1770: the peak a killed compile held). A message is text for a person and never holds this byte.
+inline constexpr std::byte ErrorTrailerSeparator { 0x00 };
+
+/// Frame an `Error` reply carrying a code, a message and, optionally, a trailer.
 /// @param code The refusal reason.
-/// @param message Detail for a human; falls back to the table's default when empty.
+/// @param message Detail for a human; falls back to the table's default when empty. Cut at any
+///        `ErrorTrailerSeparator`, so a message can never forge a trailer.
+/// @param trailer Structured facts the code carries beside the words; empty for none, which frames the
+///        reply byte for byte as it was before trailers existed.
 /// @return The framed reply.
-[[nodiscard]] inline std::vector<std::byte> EncodeErrorReply(ErrorCode code, std::string_view message = {})
+[[nodiscard]] inline std::vector<std::byte> EncodeErrorReply(ErrorCode code,
+                                                             std::string_view message = {},
+                                                             std::span<std::byte const> trailer = {})
 {
     if (message.empty())
         if (auto const* row = Describe(code); row != nullptr)
             message = row->defaultMessage;
-    if (message.size() >= MaxFramePayload)
+    // Text up to the separator: a message holding one would hand its tail to the trailer's reader.
+    message = message.substr(0, message.find(static_cast<char>(ErrorTrailerSeparator)));
+    if (message.size() + 1 + trailer.size() >= MaxFramePayload)
         throw std::length_error("compile-cache error message exceeds the u32 wire length");
 
-    std::vector<std::byte> payload(1 + message.size());
-    payload[0] = static_cast<std::byte>(code);
-    std::ranges::copy(AsBytes(message), std::next(payload.begin()));
+    std::vector<std::byte> payload;
+    payload.reserve(1 + message.size() + (trailer.empty() ? 0 : 1 + trailer.size()));
+    payload.push_back(static_cast<std::byte>(code));
+    std::ranges::copy(AsBytes(message), std::back_inserter(payload));
+    if (!trailer.empty())
+    {
+        payload.push_back(ErrorTrailerSeparator);
+        std::ranges::copy(trailer, std::back_inserter(payload));
+    }
     return EncodeReply(Status::Error, payload);
+}
+
+/// The trailer a `worker-compile-killed` reply carries: the peak the killed compile held, eight bytes big-endian
+/// (#1770). What the client settles its admission `Killed` with, so its requeue is charged at least that.
+/// @param peakBytes What the compile's cgroup held at its most.
+/// @return The trailer.
+[[nodiscard]] inline std::vector<std::byte> EncodeKilledPeakTrailer(std::uint64_t peakBytes)
+{
+    std::vector<std::byte> out(sizeof(std::uint64_t));
+    WireFields::PutBigEndian<std::uint64_t>(out, 0, peakBytes);
+    return out;
+}
+
+/// The peak a `worker-compile-killed` trailer names.
+/// @param trailer What followed the separator.
+/// @return The peak; disengaged for any trailer that is not exactly eight bytes -- none, or another build's.
+[[nodiscard]] inline std::optional<std::uint64_t> KilledPeakOf(std::span<std::byte const> trailer)
+{
+    if (trailer.size() != sizeof(std::uint64_t))
+        return std::nullopt;
+    return ReadBigEndian<std::uint64_t>(trailer);
 }
 
 /// Decode the fixed request header.
@@ -4061,7 +4139,7 @@ inline constexpr CacheVerbs FleetSharedCacheVerbs { Op::SharedFetch, Op::SharedS
     return AuthView { .kind = kind, .username = (*fields)[1], .secret = (*fields)[2] };
 }
 
-/// Split an `Error` reply payload into its code and message.
+/// Split an `Error` reply payload into its code and message: the text up to the trailer's separator.
 /// @param payload The bytes following the reply header.
 /// @return The code and message, or nullopt when the payload is empty.
 [[nodiscard]] inline std::optional<std::pair<ErrorCode, std::string_view>> DecodeErrorPayload(
@@ -4069,7 +4147,24 @@ inline constexpr CacheVerbs FleetSharedCacheVerbs { Op::SharedFetch, Op::SharedS
 {
     if (payload.empty())
         return std::nullopt;
-    return std::pair { static_cast<ErrorCode>(payload[0]), AsStringView(payload.subspan(1)) };
+    auto const rest = payload.subspan(1);
+    auto const separator = std::ranges::find(rest, ErrorTrailerSeparator);
+    return std::pair { static_cast<ErrorCode>(payload[0]),
+                       AsStringView(rest.first(static_cast<std::size_t>(separator - rest.begin()))) };
+}
+
+/// The trailer of an `Error` reply payload: what follows the separator after its message.
+/// @param payload The bytes following the reply header.
+/// @return The trailer; empty when there is none.
+[[nodiscard]] inline std::span<std::byte const> ErrorTrailerOf(std::span<std::byte const> payload)
+{
+    if (payload.empty())
+        return {};
+    auto const rest = payload.subspan(1);
+    auto const separator = std::ranges::find(rest, ErrorTrailerSeparator);
+    if (separator == rest.end())
+        return {};
+    return rest.subspan(static_cast<std::size_t>(separator - rest.begin()) + 1);
 }
 
 // --- distributed execution ---------------------------------------------------
@@ -5024,7 +5119,12 @@ enum class AskOrigin : std::uint8_t
     First = 0,
     /// The leader already granted this compile once in this invocation; this asks again for the same compile.
     AfterGrant = 1,
-    Last = 2
+    /// The leader granted this compile once already and its compiler was KILLED for memory -- a worker's
+    /// `worker-compile-killed`, or this machine's own compile ceiling (#1770). Counted as `AfterGrant` is, and
+    /// besides: the queue places it only on a machine whose configured budget can hold its estimate, and grants it
+    /// `Local` with `LocalGrantReason::NeverFits` when no reported machine's can.
+    AfterKill = 2,
+    Last = 3
 };
 
 /// A client asking the scheduler where to compile.
@@ -5395,10 +5495,10 @@ inline constexpr std::size_t MaxHistoryBucketBytes =
 /// a refused heartbeat is a worker the fleet stops seeing, which is the failure this
 /// whole subsystem exists to make visible rather than to cause. Half the payload is
 /// left for everything else, which is two orders of magnitude more than the rest of
-/// a heartbeat needs. Two KiB of that half are given to the condition list, which is what bought its
-/// 25th row without lowering a field ceiling: a full batch is `MaxHistoryBucketsPerHeartbeat` x
-/// `MaxHistoryBucketBytes`, about half of what is left.
-inline constexpr std::size_t HistoryPayloadShare = (MaxControlPayload / 2) - 2048;
+/// a heartbeat needs. Four KiB of that half are given to the condition list, which is what bought its
+/// 25th, 26th and 27th rows without lowering a field ceiling: a full batch is `MaxHistoryBucketsPerHeartbeat` x
+/// `MaxHistoryBucketBytes`, still well under what is left.
+inline constexpr std::size_t HistoryPayloadShare = (MaxControlPayload / 2) - 4096;
 
 static_assert(MaxHistoryBucketsPerHeartbeat * MaxHistoryBucketBytes <= HistoryPayloadShare,
               "a history batch must leave room for the heartbeat carrying it");
@@ -10211,7 +10311,17 @@ enum class LocalGrantReason : std::uint8_t
     /// Workers serve it and none had room for it when the queue reached it -- full, unreported, or
     /// refused it as often as the queue allows.
     NoRoom = 3,
-    Last = 4
+    /// A compile asked for again after it was killed for memory (`AskOrigin::AfterKill`) whose estimate is above
+    /// the configured budget of every reported machine it could run on, this one included (#1770): no machine can
+    /// ever hold it, so it runs here, alone, OUTSIDE the compile ceiling that would only kill it again. Answers a
+    /// `LocalOnly` request too, which no other reason does.
+    NeverFits = 4,
+    /// Granted here, ALONE, because its estimate exceeds this machine's whole budget -- and some other machine's
+    /// could hold it, so it is no `NeverFits` and counts as none (#1770). Answers a `LocalOnly` request too. A compile
+    /// that has been killed for memory runs it OUTSIDE the ceiling: the estimate a kill taught is a lower bound, and
+    /// this machine's ceiling, its budget, is below it.
+    RunsAlone = 5,
+    Last = 6
 };
 
 /// How a granted compile ended, as the admission queue is told. Explicit values: transmitted.
@@ -10226,7 +10336,11 @@ enum class SettleOutcome : std::uint8_t
     Failed = 2,
     /// The worker declined the job: the request is parked again at the head of the queue.
     WorkerRefused = 3,
-    Last = 4
+    /// The compiler was KILLED for memory (#1770): `peakBytes`, when present, is what it held when it died -- a
+    /// LOWER bound on what it needs, which the leader folds in as one (`PeakEstimates::RecordKilled`) rather than
+    /// as a measurement. Its waiters compile themselves; the client asks again as `AskOrigin::AfterKill`.
+    Killed = 4,
+    Last = 5
 };
 
 // --- admission: ADMIT, SETTLE and MACHINE-BUDGET (#1728) ---------------------
@@ -10309,7 +10423,8 @@ struct AdmitGrant
     /// The identity key of the worker a `Worker` grant names, `IdentityPublicKeyBytes` of it; empty
     /// otherwise. What the client authenticates the COMPILE reply against, as `LeaseGrant::workerKey`.
     std::span<std::byte const> workerKey;
-    /// Why a dispatchable request was granted `Local`; `Asked` for every other grant.
+    /// Why a request was granted `Local`: a dispatchable one's decline reason, or -- for any request, `LocalOnly`
+    /// included -- `NeverFits` or `RunsAlone` (#1770); `Asked` for every other grant.
     LocalGrantReason reason;
     /// Where a `Worker` grant's worker was last SEEN, when that differs from `endpoint` and the worker
     /// reports the address as its own -- `LeaseGrant::dialHint`, minted by the same `DialHintFor`. The
@@ -10354,6 +10469,35 @@ struct EstimateKeyFields
     [[nodiscard]] bool operator==(EstimateKeyFields const&) const = default;
 };
 
+/// How hard this machine's memory is pressed, as the node's pressure governor reads it from PSI: `Calm`
+/// lets compiles grow back toward their configured allowance, `Yield` admits nothing here beside a running compile
+/// and no other machine's, `Shed` additionally kills the youngest running one, one per dwell period, sparing a sole one
+/// within the allowance. Declared here rather than in the
+/// node because the machine-budget report carries it to the leader's queue.
+///
+/// Explicit values because these bytes are transmitted. `Last` is the count, never a value.
+enum class PressureLevel : std::uint8_t
+{
+    Calm = 0,  ///< Nothing to yield; the allowance ramps back toward its configured value.
+    Yield = 1, ///< Something other than the compiles needs memory: admit nothing here beside a running compile.
+    Shed = 2,  ///< The machine is freezing: that, and kill the youngest compile but a sole one within the allowance.
+    Last = 3
+};
+
+/// Whether the budget a machine reports is its configured one, or one its pressure governor's allowance holds
+/// below that. The leader's queue lets a compile larger than the whole budget run alone on an idle machine --
+/// but a budget the allowance lowered describes what fit beside something else a moment ago, not what the machine
+/// can hold, and a compile admitted past it is the one the ceiling then kills (C3). So the exception is closed
+/// while the allowance holds the budget down, even at `Calm`, until the ramp has brought it back.
+///
+/// Explicit values because these bytes are transmitted. `Last` is the count, never a value.
+enum class BudgetStanding : std::uint8_t
+{
+    Configured = 0,      ///< The budget is the configured one: an oversize compile may run alone on an idle machine.
+    HeldByAllowance = 1, ///< The pressure allowance holds the budget below it: nothing larger than it runs.
+    Last = 2
+};
+
 /// A node's own memory ledger, reported to the leader. OWNS its bytes, so it is its own decoded form.
 struct MachineBudgetReport
 {
@@ -10363,6 +10507,13 @@ struct MachineBudgetReport
     std::uint64_t heldBytes;         ///< Memory charged now.
     /// A bounded sample of measured peaks, newest meaning most useful to the leader's estimates.
     std::vector<std::pair<EstimateKeyFields, std::uint64_t>> peaks;
+    /// How hard the machine's memory is pressed now. Anything but `Calm` makes the leader's queue admit
+    /// nothing new there while a compile runs there -- the machine's own local compiles included -- and,
+    /// once none does, only the machine's own next compile that fits `memoryBudgetBytes`.
+    PressureLevel pressure { PressureLevel::Calm };
+    /// Whether `memoryBudgetBytes` is the configured budget or one the pressure allowance holds below it; the
+    /// latter closes the queue's run-alone exception on this machine.
+    BudgetStanding standing { BudgetStanding::Configured };
 
     /// @return True when every field is equal.
     [[nodiscard]] bool operator==(MachineBudgetReport const&) const = default;
@@ -10595,19 +10746,24 @@ inline constexpr std::size_t AdmitGrantFieldCount = 10;
         parts.emplace_back(values.emplace_back(EncodeU64Field(peak)));
     }
     auto const peaks = WireFields::Encode(WireFields::FieldList { parts });
+    auto const pressure = Detail::EncodeEnumByte(report.pressure);
+    auto const standing = Detail::EncodeEnumByte(report.standing);
     return Detail::EncodeRequest(version,
                                  Op::MachineBudget,
                                  { std::span<std::byte const> { budget },
                                    std::span<std::byte const> { slots },
                                    std::span<std::byte const> { heldSlots },
                                    std::span<std::byte const> { heldBytes },
-                                   std::span<std::byte const> { peaks } });
+                                   std::span<std::byte const> { peaks },
+                                   std::span<std::byte const> { pressure },
+                                   std::span<std::byte const> { standing } });
 }
 
 /// Split a MACHINE-BUDGET payload.
 /// @param payload The bytes following the request header.
 /// @return The owned report, or nullopt when malformed: a number of another width, more than
-///         `MaxMachineBudgetPeaks` peaks, a peak that is not four fields, or a string over its cap.
+///         `MaxMachineBudgetPeaks` peaks, a peak that is not four fields, a string over its cap, or a
+///         pressure level or budget standing this build has no reading for.
 [[nodiscard]] inline std::optional<MachineBudgetReport> DecodeMachineBudgetPayload(std::span<std::byte const> payload)
 {
     auto const fields = SplitFields(payload, OpFieldCount(Op::MachineBudget));
@@ -10617,15 +10773,22 @@ inline constexpr std::size_t AdmitGrantFieldCount = 10;
     auto const slots = DecodeU32Field((*fields)[1]);
     auto const heldSlots = DecodeU32Field((*fields)[2]);
     auto const heldBytes = DecodeU64Field((*fields)[3]);
-    if (!budget.has_value() || !slots.has_value() || !heldSlots.has_value() || !heldBytes.has_value())
+    auto const pressure = Detail::DecodeEnumByte<PressureLevel>((*fields)[5]);
+    auto const standing = Detail::DecodeEnumByte<BudgetStanding>((*fields)[6]);
+    if (!budget.has_value() || !slots.has_value() || !heldSlots.has_value() || !heldBytes.has_value()
+        || !pressure.has_value() || !standing.has_value())
         return std::nullopt;
     auto const parts = WireFields::SplitAtMost((*fields)[4], MaxMachineBudgetPeaks * 4);
     if (!parts.has_value() || parts->size() % 4 != 0)
         return std::nullopt;
 
-    MachineBudgetReport out {
-        .memoryBudgetBytes = *budget, .slots = *slots, .heldSlots = *heldSlots, .heldBytes = *heldBytes, .peaks = {}
-    };
+    MachineBudgetReport out { .memoryBudgetBytes = *budget,
+                              .slots = *slots,
+                              .heldSlots = *heldSlots,
+                              .heldBytes = *heldBytes,
+                              .peaks = {},
+                              .pressure = *pressure,
+                              .standing = *standing };
     out.peaks.reserve(parts->size() / 4);
     for (auto const index: std::views::iota(std::size_t { 0 }, parts->size() / 4))
     {

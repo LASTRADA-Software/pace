@@ -74,7 +74,8 @@ void GiveEveryCounterItsOwnValue(IMetricsSink& sink)
                                .busySlots = 7,
                                .cordoned = 1 },
         .hostLoad = HostLoadReading { .cpu = CpuTicks { .busy = 7'700'001, .total = 9'100'003 },
-                                      .availableMemoryBytes = 21'474'836'480 },
+                                      .availableMemoryBytes = 21'474'836'480,
+                                      .memoryPressure = 1 },
         .upstreamConfigured = false,
         .consensus =
             ConsensusStatus { .configuration = { .voters = { "node-a1", "node-b2", "" }, .learners = { "laptop-c3" } },
@@ -220,7 +221,8 @@ TEST_CASE("A host-load presence bit this build does not know is refused as malfo
     // The control: the untouched bytes decode, with the block present and both figures absent.
     REQUIRE(DecodeStatsReading(bytes).has_value());
 
-    bytes[at] = std::byte { 0x04 };
+    // Bit 2 is `memoryPressure`'s; bit 3 is the first this build does not know.
+    bytes[at] = std::byte { 0x08 };
     auto const refused = DecodeStatsReading(bytes);
     REQUIRE_FALSE(refused.has_value());
     CHECK(refused.error() == StatsReadingFault::Malformed);
@@ -648,7 +650,20 @@ TEST_CASE("This build's live-stats layout is the pinned one", "[metrics][livesta
     // Moved again when `worker_compiles_unmeasured_total` joined at the end of the catalogue (a node that
     // measures compile peaks in a cgroup counts the compiles it could not). Clients and nodes upgrade together.
     // Read off the built test, never computed by hand.
-    CHECK(StatsReadingLayout == 0x3289178b62af302aULL);
+    //
+    // Moved again when the three `worker_compiles_killed_{ceiling,shed,signal}_total` joined at the end of the
+    // catalogue (a killed compile is refused and counted by cause). Clients and nodes upgrade together. Read off
+    // the built test, never computed by hand.
+    //
+    // Moved again when the memory-pressure watcher added `node_memory_pressure_{yield,shed}_{seconds,entries}_total`
+    // at the end of the catalogue and the host-load block gained `memoryPressure`, absent where no watcher runs
+    // (layer C of the compile memory defence). Clients and nodes upgrade together. Read off the built test, never
+    // computed by hand.
+    //
+    // Moved again when the admission queue added `admission_requeued_after_kill_total` and
+    // `admission_never_fits_total` after its wait pair (#1770: a compile killed for memory asked for once more).
+    // Clients and nodes upgrade together. Read off the built test, never computed by hand.
+    CHECK(StatsReadingLayout == 0x908ecfe454d85cdeULL);
 }
 
 TEST_CASE("A truncated or padded reading is refused and never half-read", "[metrics][livestats]")
@@ -667,4 +682,26 @@ TEST_CASE("A truncated or padded reading is refused and never half-read", "[metr
     auto const trailing = DecodeStatsReading(padded);
     REQUIRE_FALSE(trailing.has_value());
     CHECK(trailing.error() == StatsReadingFault::TrailingBytes);
+}
+
+TEST_CASE("A memory-pressure level travels when a watcher reports one, and stays absent when none does",
+          "[metrics][livestats][pressure]")
+{
+    // Absent is not calm: a node whose watcher cannot run (no PSI, another platform) must not read as a calm machine.
+    for (auto const level:
+         { std::optional<std::uint64_t> {}, std::optional<std::uint64_t> { 0 }, std::optional<std::uint64_t> { 2 } })
+    {
+        auto const reading =
+            StatsReading { .counters = {},
+                           .snapshot = MetricsSnapshot { .storage = std::nullopt,
+                                                         .host = std::nullopt,
+                                                         .hostLoad = HostLoadReading { .cpu = std::nullopt,
+                                                                                       .availableMemoryBytes = 4096,
+                                                                                       .memoryPressure = level } } };
+        auto const decoded = DecodeStatsReading(EncodeStatsReading(reading));
+        REQUIRE(decoded.has_value());
+        CHECK(*decoded == reading);
+        REQUIRE(decoded->snapshot.hostLoad.has_value());
+        CHECK(Unwrap(decoded->snapshot.hostLoad).memoryPressure == level);
+    }
 }

@@ -621,6 +621,85 @@ TEST_CASE("SchedulerAdmission.fleet-collects-the-queue-with-machines-named",
     CHECK_FALSE(CollectFleet({ .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics }).admission);
 }
 
+TEST_CASE("SchedulerAdmission.fleet-reads-a-machine's-pressure-from-its-budget-report",
+          "[distributed][admission][scheduler][fleetview][pressure]")
+{
+    Fleet fleet;
+    auto const reply = fleet.service.Register(
+        fleet.Worker(),
+        WorkerRegistration {
+            .fingerprint = Toolchain, .endpoint = WorkerEndpoint, .displayName = "build-7", .slots = 4, .codecs = {} });
+    REQUIRE(reply.status == Wire::Status::Ok);
+    auto const collect = [&fleet] {
+        return CollectFleet({ .scheduler = &fleet.service, .cluster = nullptr, .metrics = &fleet.metrics });
+    };
+
+    // Registered and heartbeating, but no budget report: the heartbeat carries no level, so the row says nothing --
+    // never `calm`, and the worker's ceiling is not the pressure's.
+    {
+        auto const snapshot = collect();
+        REQUIRE(snapshot.nodes.size() == 1);
+        CHECK_FALSE(snapshot.nodes.front().load.pressure.has_value());
+        CHECK(RenderFleetJson(snapshot, {}).contains(R"("memory-pressure":null)"));
+    }
+
+    auto const machine = MachineOf(fleet.workerKey.PublicKey());
+    auto const report = [&](Wire::PressureLevel level, Wire::BudgetStanding standing) {
+        auto const answer = fleet.service.ReportMachineBudget(fleet.Worker(),
+                                                              machine,
+                                                              Wire::MachineBudgetReport { .memoryBudgetBytes = 512 * MiB,
+                                                                                          .slots = 4,
+                                                                                          .heldSlots = 0,
+                                                                                          .heldBytes = 0,
+                                                                                          .peaks = {},
+                                                                                          .pressure = level,
+                                                                                          .standing = standing });
+        REQUIRE(answer.status == Wire::Status::Ok);
+    };
+
+    report(Wire::PressureLevel::Yield, Wire::BudgetStanding::HeldByAllowance);
+    {
+        auto const snapshot = collect();
+        REQUIRE(snapshot.nodes.size() == 1);
+        CHECK(snapshot.nodes.front().load.pressure == std::optional { PressureLevel::Yield });
+        REQUIRE(snapshot.workers.size() == 1);
+        auto const& worker = snapshot.workers.front().info;
+        // The leader names the limit its queue acts on: a yielding machine takes nothing new.
+        CHECK(SlotCeilingsFor(worker.capacity, worker.slots, worker.load).binding == SlotLimit::MemoryPressure);
+        auto const& ledger = Unwrap(snapshot.admission).machines;
+        auto const named = std::ranges::find(ledger, "build-7", &AdmissionMachineRow::machine);
+        REQUIRE(named != ledger.end());
+        CHECK(named->standing == std::optional { BudgetStanding::HeldByAllowance });
+        CHECK(named->pressure == std::optional { PressureLevel::Yield });
+
+        auto const json = RenderFleetJson(snapshot, {});
+        CHECK(json.contains(R"("memory-pressure":"yielding")"));
+        CHECK(json.contains(R"("budget-limit":"pressure-allowance")"));
+        CHECK(json.contains(R"("limited-by":"memory-pressure")"));
+    }
+
+    // The ramp has brought the budget back: the configured figure is what holds it, and the machine is calm.
+    report(Wire::PressureLevel::Calm, Wire::BudgetStanding::Configured);
+    {
+        auto const snapshot = collect();
+        CHECK(snapshot.nodes.front().load.pressure == std::optional { PressureLevel::Calm });
+        auto const json = RenderFleetJson(snapshot, {});
+        CHECK(json.contains(R"("memory-pressure":"calm")"));
+        CHECK(json.contains(R"("budget-limit":"configured")"));
+        CHECK_FALSE(json.contains(R"("limited-by":"memory-pressure")"));
+    }
+
+    // A CONTROL, not part of the claim above: a follower leads no queue, so there is no report to read the level
+    // from and the join has nothing to copy. The absence below holds with or without the join -- it says only that a
+    // follower's document invents no level, the `calm` a default would print.
+    fleet.service.SetRole(SchedulerRole::Follower, "10.9.9.9:7100", 1);
+    auto const follower = collect();
+    CHECK_FALSE(follower.admission.has_value());
+    REQUIRE_FALSE(follower.nodes.empty());
+    for (auto const& node: follower.nodes)
+        CHECK_FALSE(node.load.pressure.has_value());
+}
+
 namespace
 {
 /// The two dispatch counters a queued worker grant moves, read together so a case asserts both.

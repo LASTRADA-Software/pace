@@ -1121,13 +1121,15 @@ TEST_CASE("A line this build writes names its format version and round-trips eve
     record.dispatchSpecifics = "argument /volatile:iso is not on this worker's accepted-flag list";
     record.timestampUnixSeconds = 1'790'000'000;
     record.exitCode = 2;
+    record.localDefense = LocalDefenseReport { .defense = LocalDefense::ShimOnly, .miss = CeilingMiss::SpawnRefused };
     AppendRecord(record);
 
     auto const lines = RawLogLines();
     REQUIRE(lines.size() == 1);
     auto const fields = FieldsOf(lines.front());
-    CHECK(fields.front() == "v3");
-    CHECK(fields.size() == 18); // the marker and seventeen columns
+    CHECK(fields.front() == "v4");
+    CHECK(fields.size() == 19); // the marker and eighteen columns
+    CHECK(fields.back() == "shim:spawn-refused");
 
     auto const reading = ReadLog("");
     CHECK(reading.unreadable == 0);
@@ -1141,6 +1143,41 @@ TEST_CASE("A line this build writes names its format version and round-trips eve
     CHECK(read.timestampUnixSeconds == 1'790'000'000);
     REQUIRE(read.exitCode.has_value());
     CHECK(Pace::Testing::Unwrap(read.exitCode) == 2);
+    CHECK(read.localDefense == record.localDefense);
+}
+
+TEST_CASE("A version-3 line is read as the current table's prefix, its memory defense absent", "[stats][log-format]")
+{
+    // Columns are only appended, so the line a launcher before #1770 wrote is the current one less its last
+    // column. It stays in the report -- and says nothing about a memory defense, which is not "none".
+    ScopedStateDir const scoped;
+    AppendRawLine("v3\tMISS\tmain\t0\t10\ta.cpp\t\t1\t2\t3\t0\t1700000000\tDISPATCHED\t\t\t0\t\t");
+
+    auto const reading = ReadLog("");
+    CHECK(reading.unreadable == 0);
+    REQUIRE(reading.records.size() == 1);
+    CHECK(reading.records.front().source == "a.cpp");
+    CHECK(Pace::Testing::Unwrap(reading.records.front().exitCode) == 0);
+    CHECK_FALSE(reading.records.front().localDefense.has_value());
+}
+
+TEST_CASE("The report counts local compiles by what defended them against memory", "[stats][log-format]")
+{
+    // #1770: a defense that is silently off is the failure, so every way a local compile was defended is a row.
+    ScopedStateDir const scoped;
+    auto inCeiling = MakeDispatchRecord(DispatchOutcome::NotConfigured, "", "a.cpp");
+    inCeiling.localDefense = LocalDefenseReport { .defense = LocalDefense::Ceiling, .miss = CeilingMiss::None };
+    AppendRecord(inCeiling);
+    AppendRecord(inCeiling);
+    auto shimOnly = MakeDispatchRecord(DispatchOutcome::NotConfigured, "", "b.cpp");
+    shimOnly.localDefense = LocalDefenseReport { .defense = LocalDefense::ShimOnly, .miss = CeilingMiss::NoNodeCeiling };
+    AppendRecord(shimOnly);
+    AppendRecord(MakeDispatchRecord(DispatchOutcome::Dispatched, "", "c.cpp")); // ran nothing here
+
+    auto const report = FormatReport("");
+    CHECK(report.contains("local compiles by memory defense:"));
+    CHECK(report.contains("2x  ceiling"));
+    CHECK(report.contains("1x  shim:no-node-ceiling"));
 }
 
 TEST_CASE("A line without a version is read by arity as the launcher that wrote it meant", "[stats][log-format]")
@@ -1166,10 +1203,10 @@ TEST_CASE("A line in a format this build does not know is skipped and counted an
           "[stats][log-format]")
 {
     // Reading three: a later launcher appending to the same log, which is what a rolling upgrade
-    // looks like. Read by position, "v4" would be an outcome, its group a byte count, and a later
+    // looks like. Read by position, "v5" would be an outcome, its group a byte count, and a later
     // column order would put one field's value into another's slot with nothing to notice.
     ScopedStateDir const scoped;
-    AppendRawLine("v4\tHIT\tmain\t4096\t10\ta.cpp\t\t1\t2\t3\t0\t1700000000\tDISPATCHED\t\t\t0\t\t\tnew-column");
+    AppendRawLine("v5\tHIT\tmain\t4096\t10\ta.cpp\t\t1\t2\t3\t0\t1700000000\tDISPATCHED\t\t\t0\t\t\t\tnew-column");
     AppendRecord(MakeDispatchRecord(DispatchOutcome::Declined, "a reason", "b.cpp"));
 
     auto const reading = ReadLog("");
@@ -1186,10 +1223,12 @@ TEST_CASE("A current-format line whose columns do not add up is skipped rather t
     // a hand edit. The version is a promise about the columns, so a line breaking it is refused
     // whole rather than read as far as it goes.
     ScopedStateDir const scoped;
+    AppendRawLine("v4\tHIT\tmain\t4096\t10");
+    // A version-3 line read as the current table's prefix owes exactly ITS columns, not "as far as it goes".
     AppendRawLine("v3\tHIT\tmain\t4096\t10");
 
     auto const reading = ReadLog("");
-    CHECK(reading.unreadable == 1);
+    CHECK(reading.unreadable == 2);
     CHECK(reading.records.empty());
 }
 

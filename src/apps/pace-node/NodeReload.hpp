@@ -20,9 +20,15 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <vector>
 
 namespace Pace::Node
 {
+
+class CompileCeilingKeeper;
+class INodeCapacitySource;
+class INodeConfigSource;
+class PresenceWake;
 
 /// The node's reloader: `NodeConfig`, read through the option table, guarded by its
 /// `reloadable` column.
@@ -99,6 +105,58 @@ class IAcceptedReloadListener
 
     /// The reloader's snapshot is the configuration in force now. Called on the reloading thread: wake and return.
     virtual void ReloadAccepted() = 0;
+};
+
+/// Every listener an accepted reload tells, in the order given: `ApplyReloadRequest` takes ONE, so a
+/// second consumer is a row here rather than a second parameter every caller must spell.
+class AcceptedReloadListeners final: public IAcceptedReloadListener
+{
+  public:
+    /// @param listeners Each told in turn; none null, all outliving this.
+    explicit AcceptedReloadListeners(std::vector<IAcceptedReloadListener*> listeners);
+
+    /// Tell each listener.
+    void ReloadAccepted() override;
+
+  private:
+    std::vector<IAcceptedReloadListener*> _listeners;
+};
+
+/// Puts the compile memory ceiling in force again after every accepted reload: `--compile-memory-limit` is
+/// reloadable, and a lowered ceiling must not wait for a restart.
+///
+/// Rewritten whether or not the figure changed (`CeilingWrite::Always`) -- one control file is cheap. Done inline on
+/// the reloading thread for that reason: one `write(2)`, never a walk. The keeper reads the configuration now in
+/// force itself, under the lock every writer of the ceiling takes (`CompileCeilingKeeper`).
+class CompileCeilingOnReload final: public IAcceptedReloadListener
+{
+  public:
+    /// @param keeper The process's ceiling keeper; outlives this.
+    explicit CompileCeilingOnReload(CompileCeilingKeeper& keeper) noexcept;
+
+    /// Write the ceiling the configuration now in force asks for.
+    void ReloadAccepted() override;
+
+  private:
+    CompileCeilingKeeper& _keeper;
+};
+
+/// Has the presence loop report this machine at once after every accepted reload, rather than at its next interval:
+/// a reload lowering `--compile-memory-limit` lowers the ceiling at once, and the budget the fleet's queue admits
+/// against must follow it before the queue places work the kernel would kill.
+///
+/// Told AFTER the ceiling's listener, so the round it asks for reads the ceiling already written.
+class PresenceRoundOnReload final: public IAcceptedReloadListener
+{
+  public:
+    /// @param wake The process's presence wait; outlives this.
+    explicit PresenceRoundOnReload(PresenceWake& wake) noexcept;
+
+    /// Ask for a round now.
+    void ReloadAccepted() override;
+
+  private:
+    PresenceWake& _wake;
 };
 
 /// Act on one SIGHUP, and say what happened either way.

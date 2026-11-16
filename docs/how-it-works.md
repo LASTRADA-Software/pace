@@ -537,7 +537,7 @@ membership is still a Raft decision. See
 | Dashboard history | `fleet-history.bin` in the cluster dir, else the cache dir, else memory | Where a directory exists |
 | Compiles per requester and per toolchain | `requester-history.bin`, `toolchain-history.bin`, beside it; the leader's own, not handed over | Where a directory exists |
 | Launcher statistics | `%LOCALAPPDATA%\pace-cc` or `$XDG_STATE_HOME/pace-cc` | Yes |
-| Cached toolchain fingerprints | `toolchains/*.fingerprint` in that same state directory | Yes, until the toolchain changes |
+| Cached toolchain fingerprints | `toolchains/*.fingerprint` in that same state directory | Yes, until the toolchain changes or an upgrade retires the entries older builds wrote (one rewalk per toolchain) |
 
 Two consequences worth drawing out.
 

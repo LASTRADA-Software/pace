@@ -505,6 +505,21 @@ enum class DeclineCause : std::uint8_t
     /// machine's setting, and the peer's message naming the ceiling -- which rides
     /// `DispatchResult::refusal` -- says which. Either way the compile runs here, correctly.
     TooLarge,
+    /// A worker's machine killed the compiler for memory (`worker-compile-killed`): its ceiling, its own
+    /// shedding, or an outside `SIGKILL`.
+    ///
+    /// Its own row rather than `WorkerRefused`'s, because it is the one decline a launcher does NOT answer by
+    /// compiling here at once (#1770): an admitted compile goes back into the queue, which places it only where
+    /// what it is now estimated to need fits. Recorded only when nothing better followed -- a requeue that ran
+    /// elsewhere is a dispatch.
+    MemoryKilled,
+    /// A compile killed for memory, requeued, and killed AGAIN (#1770): the one requeue is spent, so it compiles
+    /// here rather than loop between machines. A rise names translation units larger than the fleet's machines
+    /// will hold beside other work.
+    KilledTwice,
+    /// A compile killed for memory that no machine's configured budget can hold (`LocalGrantReason::NeverFits`,
+    /// #1770): the queue ran it alone here, outside the compile ceiling that would only kill it again.
+    NeverFits,
     /// The fleet could not name a leader to ask.
     ///
     /// Its own row rather than a share of `NotPermitted`, because it is transient by
@@ -581,6 +596,10 @@ inline constexpr std::array DeclineCauseTable {
     // which reads as a code this build has never heard of.
     DeclineCauseRow { .code = CompileCacheWire::ErrorCode::WorkerCompilerUnclassified,
                       .cause = DeclineCause::WorkerRefused },
+    // A compiler that worker's machine killed -- its memory ceiling, its own shedding, or an
+    // outside `SIGKILL`. Never `Compiled`, whose 137 would read as a compiler failure; and its own
+    // cause, since an ADMITTED compile goes back into the queue rather than compiling here (#1770).
+    DeclineCauseRow { .code = CompileCacheWire::ErrorCode::WorkerCompileKilled, .cause = DeclineCause::MemoryKilled },
     DeclineCauseRow { .code = CompileCacheWire::ErrorCode::NotLeader, .cause = DeclineCause::NoLeader },
     DeclineCauseRow { .code = CompileCacheWire::ErrorCode::NotAMember, .cause = DeclineCause::NotPermitted },
     DeclineCauseRow { .code = CompileCacheWire::ErrorCode::Withdrawn, .cause = DeclineCause::Withdrawn },
@@ -771,6 +790,10 @@ struct DispatchResult
     /// records beside the fixed tally reason, so a refusal can be acted on without `-v` and
     /// without the node's counters.
     std::string refusal;
+    /// What a compile the worker's machine killed held when it died (`worker-compile-killed`'s trailer, #1770): the
+    /// lower bound its admission is settled `Killed` with. Disengaged for every other result, and for a kill nobody
+    /// measured.
+    std::optional<std::uint64_t> killedPeakBytes {};
 
     /// @return True when a worker actually ran the compiler.
     [[nodiscard]] bool Ran() const noexcept
@@ -951,6 +974,15 @@ struct DispatchRequest
 /// @param result What `Dispatch` returned.
 /// @return True when the COMPILE exchange itself was declined for capacity.
 [[nodiscard]] bool IsWorkerCapacityRefusal(DispatchResult const& result) noexcept;
+
+/// Whether a dispatch ended in the worker's machine killing the compiler for memory (`worker-compile-killed`,
+/// `DeclineCause::MemoryKilled`), answered on the COMPILE exchange itself.
+///
+/// What sends an admitted compile back into the queue as `AskOrigin::AfterKill` rather than compiling it here at
+/// once (#1770). A kill met on any other exchange is not one: only a worker that ran the compiler can have killed it.
+/// @param result What `Dispatch` returned.
+/// @return True when the COMPILE exchange was declined because its compiler was killed.
+[[nodiscard]] bool IsWorkerCompileKilled(DispatchResult const& result) noexcept;
 
 /// Have the worker an ADMISSION granted compile this translation unit.
 ///

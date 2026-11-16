@@ -106,6 +106,10 @@ trap cleanup EXIT
 
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/e2e-common.sh"
 e2e_begin "node socket-activation E2E" "$workdir"
+# The worker's toolchain survey caches into a state directory of the run's own, never the
+# developer's machine-wide fingerprint cache (#1774). The shim `exec`s the node, so the pid
+# the activator hands `LISTEN_PID` to is still the node's.
+e2e_node_state_enter node
 
 # **States which mode it exercised**, so a green run is not silently the skip. A
 # fixture that cannot say what it did is one whose pass means nothing.
@@ -240,4 +244,5 @@ fi
 grep -q "advertising 127.0.0.1:${port}" "$log" \
     || fail "the worker did not advertise the activated port ${port}"
 
+e2e_node_state_assert_used
 echo "ok: the packaged socket-activated worker came up, adopted its socket, and advertised ${port}"

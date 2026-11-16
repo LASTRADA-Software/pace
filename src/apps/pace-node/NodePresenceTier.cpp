@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+#include "CompileMemoryMeter.hpp"
+#include "LiveNodeConfig.hpp"
 #include "NodeFormation.hpp"
 #include "NodePresenceTier.hpp"
 
@@ -203,13 +205,16 @@ NodePresence::NodePresence(NodePresenceParts const& parts, SchedulerLink link):
     _reachability { parts.reachability },
     _askedJoins { parts.askedJoins },
     _endpoints { parts.endpoints },
-    _cfg { parts.cfg },
+    _inForce { parts.inForce },
+    _ceiling { parts.ceiling },
     _capacity { parts.capacity },
     _held { parts.held },
     _peaks { parts.peaks },
     _loadSampler { MakeHostLoadSampler(MakeSystemCounterSource()) },
     _dialer { parts.dialer },
     _link { std::move(link) },
+    _pressure { parts.pressure },
+    _presenceWake { parts.wake },
     _hostSubscription { parts.hostEvents, _presenceWake }
 {
 }
@@ -239,8 +244,15 @@ void NodePresence::Loop(std::stop_token const& stop)
         // is no failure to be told by, and the budget still goes (R6).
         auto reached = true;
         // Read once per round, for both records below: a live cache-budget override moves the
-        // reserve each is derived from, and the two must describe the same moment.
-        auto const capacity = _capacity.Current();
+        // reserve each is derived from, and the two must describe the same moment. The configuration IN FORCE is
+        // read with it: `--compile-memory-limit` reloads, and the ceiling this machine's compiles run under and the
+        // budget it reports are kept from the same pair -- the ceiling FIRST, whether or not anybody is reached, so
+        // the fleet is never told of room the kernel would kill a compile for. Through the keeper where there is
+        // one, which reads the pair under the lock it writes under: a reload landing mid-round is then never
+        // overwritten by this round's older reading (`CompileCeilingKeeper::Keep`).
+        auto const [inForce, capacity] = _ceiling != nullptr
+                                             ? _ceiling->Keep(CeilingWrite::OnChange)
+                                             : CeilingBasis { .cfg = _inForce.Current(), .capacity = _capacity.Current() };
         // `AnnouncedCapacity` rather than `Distributed::CapacityToWire` alone: the latter knows
         // nothing of the version, so a node with no worker sent NODE-ANNOUNCE with none, and the
         // leader recorded it exactly as absent as a build too old to know the field.
@@ -267,14 +279,17 @@ void NodePresence::Loop(std::stop_token const& stop)
         // refused the presence was reached, and the budget is its own question; and a node with no
         // endpoint to announce has no failure to be told by. Dialled on its own, so a refusal of one
         // never costs the other.
+        //
+        // The budget is the pair read above, lowered to the pressure governor's allowance and carrying its level.
         if (reached)
-            (void) SendMachineBudgetOnce(MachineBudgetRound { .cfg = _cfg,
+            (void) SendMachineBudgetOnce(MachineBudgetRound { .cfg = inForce,
                                                               .capacity = capacity,
                                                               .held = _held,
                                                               .peaks = _peaks,
                                                               .logger = _logger,
                                                               .prover = _prover,
-                                                              .reachability = _reachability },
+                                                              .reachability = _reachability,
+                                                              .pressure = _pressure },
                                          _link,
                                          _dialer);
 
@@ -297,10 +312,19 @@ void PresenceWake::OnHostEvent(HostEvent event)
         // A wake still pending is older than a suspend, and superseded by it; one posted after is
         // owed as ever. See `HostEventActionRow::supersedesOlderWakes`.
         if (row.supersedesOlderWakes)
-            _announceNow = false;
+            _owed.reset();
         if (!row.wakesPresence)
             return;
-        _announceNow = true;
+        _owed = PresenceWakeReason::HostEvent;
+    }
+    _wake.notify_all();
+}
+
+void PresenceWake::RequestRound(PresenceWakeReason reason)
+{
+    {
+        std::scoped_lock const lock { _mutex };
+        _owed = reason;
     }
     _wake.notify_all();
 }
@@ -311,13 +335,13 @@ PresenceWakeReason PresenceWake::WaitOut(std::stop_token const& stop, std::chron
     // temporary does not bind, which is the compiler catching the lifetime question rather
     // than a style preference.
     std::unique_lock lock { _mutex };
-    auto const woken = _wake.wait_for(lock, stop, interval, [this] { return _announceNow; });
+    auto const woken = _wake.wait_for(lock, stop, interval, [this] { return _owed.has_value(); });
     if (stop.stop_requested())
         return PresenceWakeReason::Stopped;
-    if (!woken)
+    auto const owed = std::exchange(_owed, std::nullopt);
+    if (!woken || !owed.has_value())
         return PresenceWakeReason::Elapsed;
-    _announceNow = false;
-    return PresenceWakeReason::HostEvent;
+    return *owed;
 }
 
 } // namespace Pace::Node

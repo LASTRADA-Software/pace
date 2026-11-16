@@ -488,6 +488,10 @@ e2e_wait_seconds 30
 # through the shim `e2e_launcher_state_enter` (scripts/lib/e2e-common.sh) puts in
 # front of it. Before any launcher runs, and after `e2e_begin`, whose workdir holds it.
 e2e_launcher_state_enter launcher
+# And every node keeps its state -- the toolchain fingerprint cache its worker walks into --
+# in a root of the run's own, apart from the launcher's, so the developer's cache can neither
+# decide whether launcher and worker agree nor be written by a run (#1774).
+e2e_node_state_enter node
 export PACE_VERBOSE=1
 
 # --- helpers ----------------------------------------------------------------
@@ -2177,5 +2181,6 @@ else
 fi
 e2e_launcher_state_assert_used
 e2e_launcher_state_assert_caller_untouched
+e2e_node_state_assert_used --fingerprinted
 echo
 echo "dist-compile E2E PASSED"

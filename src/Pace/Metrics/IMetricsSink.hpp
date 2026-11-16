@@ -6,9 +6,11 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string_view>
+#include <type_traits>
 
 namespace Pace
 {
@@ -70,7 +72,7 @@ class IMetricsSink
     /// change, a snapshot field's included. Only `ConnectionsTotal = 0` carries a value
     /// (`readability-enum-initial-value`'s accepted form), and an omission is a build failure:
     /// `MetricsCatalog` is an `EnumTable` guarded by `RowsInEnumeratorOrder`.
-    enum class Counter : std::uint8_t
+    enum class Counter : std::uint16_t
     {
         ConnectionsTotal = 0,
         ConnectionsAdmissionRejected,
@@ -1581,6 +1583,12 @@ class IMetricsSink
         AdmissionWorkerRefused,
         AdmissionWaitMillisTotal,
         AdmissionWaitCount,
+        /// A compile asked for again after its compiler was killed for memory (`AskOrigin::AfterKill`, #1770): one
+        /// per requeue, at most one per kill, which the client bounds at one requeue per compile.
+        AdmissionRequeuedAfterKill,
+        /// A requeued killed compile no reported machine's configured budget can hold, granted to run alone on its
+        /// own machine outside the compile ceiling (`LocalGrantReason::NeverFits`, #1770).
+        AdmissionNeverFits,
 
         /// Admission forwarding (#1728): what a node that does not lead did with the queue exchanges a
         /// launcher on its machine sent it. Written by the FORWARDING node's surface, never the leader's.
@@ -1610,6 +1618,34 @@ class IMetricsSink
         /// that is the `compile-memory-unmeasured` condition, and a counter per compile would only
         /// repeat it.
         WorkerCompilesUnmeasured,
+
+        /// Compiles the KERNEL killed inside this worker's compile memory ceiling (`memory.events`
+        /// `oom_kill`). Each was refused, so its client compiled it locally. Two causes: the configured
+        /// ceiling is below what this fleet's translation units need, or memory pressure lowered the
+        /// allowance (`compiles/memory.max`) to what compiles held when it began and one grew past it --
+        /// the pressure counters tell the two apart, and only the first is fixed by a higher limit.
+        WorkerCompilesKilledCeiling,
+        /// Compiles this node's own pressure governor killed to give memory back to the machine.
+        /// Each was refused and compiled locally by its client. A rise says the machine needed its
+        /// memory for something other than compiles.
+        WorkerCompilesKilledShed,
+        /// Compiles ended by `SIGKILL` that neither the ceiling nor the governor accounts for -- a
+        /// global OOM kill, systemd-oomd, or a person. Each was refused and compiled locally.
+        WorkerCompilesKilledSignal,
+
+        /// Whole seconds this node's pressure watcher held each acting level (layer C of the compile memory
+        /// defence): `Yield` (nothing admitted on this machine beside a running compile) and `Shed` (that, and its youngest
+        /// compile killed once per dwell). Their rate over a window is the share of it spent there; calm is the rest, so it
+        /// has no row. Counted only where the watcher runs -- Linux with PSI -- so both stand still on a node without it.
+        NodeMemoryPressureYieldSeconds,
+        /// See `NodeMemoryPressureYieldSeconds`.
+        NodeMemoryPressureShedSeconds,
+        /// Times the pressure watcher entered each acting level: from calm, or -- for `Yield` -- stepping down
+        /// from `Shed`, and -- for `Shed` -- escalating a sustained yield. A rise in entries with few seconds behind
+        /// them is a machine stalling in short bursts.
+        NodeMemoryPressureYieldEntries,
+        /// See `NodeMemoryPressureYieldEntries`.
+        NodeMemoryPressureShedEntries,
 
         Last,
     };
@@ -1659,6 +1695,16 @@ class IMetricsSink
 /// pulling in `Core/EnumTable.hpp` -- and with it `<ranges>`, `<algorithm>` and `<functional>` --
 /// would be the wrong trade for one constant.
 inline constexpr std::size_t CounterCount = static_cast<std::size_t>(IMetricsSink::Counter::Last);
+
+/// The enum's width is a decision, not a default (#1772): it was a byte until the catalogue reached 254 of 255, and the
+/// next two counters would not have built. Nothing transmitted carries the WIDTH -- the live-stats reading is positional
+/// `u64` values under a digest of NAMES, `/metrics` and the history use names -- so widening moved no layout.
+///
+/// Phrased to fire only when something is wrong: the catalogue may take no more than half of what the type holds, so a
+/// future narrowing or a runaway catalogue is refused with room to spare rather than at the last enumerator, where the
+/// failure is a cast that silently wraps `Last` to a valid row.
+static_assert(CounterCount <= std::numeric_limits<std::underlying_type_t<IMetricsSink::Counter>>::max() / 2,
+              "IMetricsSink::Counter is more than half full: widen its underlying type before adding another row (#1772)");
 
 namespace CounterSkew
 {

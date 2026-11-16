@@ -14,11 +14,14 @@
 // is also exactly the history the handover exists to carry across an election. So the two cases
 // below differ in ONE thing -- the scheduler's reply -- and a round that always advanced, or
 // never did, fails exactly one of them. Neither alone tests anything.
+#include "CompileMemoryMeter.hpp"
 #include "EndpointDialerTestUtils.hpp"
 #include "HostEventInbox.hpp"
+#include "LiveNodeConfig.hpp"
 #include "NodeAnnounce.hpp"
 #include "NodeFormation.hpp"
 #include "NodePresenceTier.hpp"
+#include "NodeReload.hpp"
 #include "NodeRoster.hpp"
 #include "SchedulerReachability.hpp"
 
@@ -39,6 +42,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -54,6 +58,7 @@
 #include <core/net/ISocket.hpp>
 #include <core/platform/Clock.hpp>
 #include <tests/BoundedWait.hpp>
+#include <tests/CgroupFakes.hpp>
 #include <tests/FleetHistoryFakes.hpp>
 #include <tests/NodeFormationFakes.hpp>
 #include <tests/RaftPeerKeyFakes.hpp>
@@ -162,6 +167,12 @@ struct PresenceFixture
     std::vector<std::unique_ptr<AppliedSchedulers>> schedulers;
     /// What each loop built over this fixture reads its capacity through, kept as long as the fixture.
     std::vector<std::unique_ptr<FixedNodeCapacity>> capacities;
+    /// The configuration in force a loop reads per round: the body's own, unless a case reloads one.
+    LiveNodeConfig bodyConfig { cfg, nullptr };
+    INodeConfigSource const* inForce { nullptr };       ///< A case's own configuration in force; `bodyConfig` when null.
+    CompileCeilingKeeper* ceiling { nullptr };          ///< The worker's ceiling keeper; none by default (no worker).
+    PresenceWake wake;                                  ///< The process's presence wait, which the loop borrows.
+    IMachinePressureSource const* pressure { nullptr }; ///< The pressure watcher's decision; none by default (calm).
 
     PresenceFixture()
     {
@@ -616,7 +627,7 @@ class AnsweringDialer final: public IEndpointDialer
                                           IHostEvents& events)
 {
     fix.schedulers.push_back(std::make_unique<AppliedSchedulers>(fix.cfg, AsConfigured));
-    return NodePresenceParts { .cfg = fix.cfg,
+    return NodePresenceParts { .inForce = fix.inForce != nullptr ? *fix.inForce : fix.bodyConfig,
                                .schedulers = *fix.schedulers.back(),
                                .capacity = capacity,
                                .announced = announced,
@@ -630,7 +641,10 @@ class AnsweringDialer final: public IEndpointDialer
                                .dialer = dialer,
                                .hostEvents = events,
                                .held = fix.held,
-                               .peaks = fix.peaks };
+                               .peaks = fix.peaks,
+                               .ceiling = fix.ceiling,
+                               .wake = fix.wake,
+                               .pressure = fix.pressure };
 }
 
 /// The same, over a capacity that never moves.
@@ -885,4 +899,236 @@ TEST_CASE("The next machine budget carries a capacity moved since the last round
     // 75% of what is left after the reserve: all 32 GiB at first, 24 GiB once 8 are held back.
     CHECK(budgetOf(1) == (24ULL << 30));
     CHECK(budgetOf(3) == (18ULL << 30));
+}
+
+namespace
+{
+
+/// A configuration in force a case changes between rounds, as an accepted reload changes the reloader's snapshot.
+class ReloadableConfig final: public INodeConfigSource
+{
+  public:
+    /// @param cfg In force until `Set`.
+    explicit ReloadableConfig(NodeConfig cfg):
+        _cfg { std::move(cfg) }
+    {
+    }
+
+    [[nodiscard]] NodeConfig Current() const override
+    {
+        std::scoped_lock const lock { _mutex };
+        return _cfg;
+    }
+
+    /// @param cfg In force from now on.
+    void Set(NodeConfig cfg)
+    {
+        std::scoped_lock const lock { _mutex };
+        _cfg = std::move(cfg);
+    }
+
+  private:
+    mutable std::mutex _mutex;
+    NodeConfig _cfg;
+};
+
+/// Run a presence loop over @p parts until it has dialled @p rounds rounds of two (presence, then budget), applying
+/// @p between[n] after round n and waking the loop for the next.
+/// @return The budget report each round sent, in order.
+[[nodiscard]] std::vector<Wire::MachineBudgetReport> ReportsOverRounds(NodePresenceParts const& parts,
+                                                                       AnsweringDialer& dialer,
+                                                                       Testing::ScriptedHostEvents& events,
+                                                                       std::vector<std::function<void()>> const& between)
+{
+    {
+        auto const presence = NodePresence::Start(parts);
+        REQUIRE(presence != nullptr);
+        static_assert(NodeAnnounceInterval > Testing::WaitHangGuard);
+        for (auto const round: std::views::iota(std::size_t { 0 }, between.size() + 1))
+        {
+            REQUIRE(Testing::WaitUntil(
+                "a round's two dials",
+                [&dialer, round] { return dialer.Dials() >= 2 * (round + 1); },
+                [&dialer] { return std::format("{} dial(s)", dialer.Dials()); }));
+            if (round < between.size())
+            {
+                between[round]();
+                events.Fire(HostEvent::NetworkChanged);
+            }
+        }
+    }
+    auto reports = std::vector<Wire::MachineBudgetReport> {};
+    for (auto const round: std::views::iota(std::size_t { 0 }, between.size() + 1))
+    {
+        auto const frames = FramesIn(dialer.SentOn((2 * round) + 1));
+        REQUIRE(frames.size() == 1);
+        REQUIRE(frames.front().first == static_cast<std::uint8_t>(Wire::Op::MachineBudget));
+        reports.push_back(Unwrap(Wire::DecodeMachineBudgetPayload(frames.front().second)));
+    }
+    return reports;
+}
+
+/// As `ReportsOverRounds`, the budget alone.
+/// @return The budget each round reported, in order.
+[[nodiscard]] std::vector<std::uint64_t> BudgetsOverRounds(NodePresenceParts const& parts,
+                                                           AnsweringDialer& dialer,
+                                                           Testing::ScriptedHostEvents& events,
+                                                           std::vector<std::function<void()>> const& between)
+{
+    auto budgets = std::vector<std::uint64_t> {};
+    for (auto const& report: ReportsOverRounds(parts, dialer, events, between))
+        budgets.push_back(report.memoryBudgetBytes);
+    return budgets;
+}
+
+/// A cgroup tree in which everything works: a delegated cgroup offering memory, holding only the node.
+[[nodiscard]] std::shared_ptr<Testing::FakeCgroupHost> DelegatedCgroups()
+{
+    auto host = std::make_shared<Testing::FakeCgroupHost>();
+    host->files["/proc/self/cgroup"] = "0::/system.slice/pace-node.service\n";
+    host->files["/sys/fs/cgroup/system.slice/pace-node.service/cgroup.controllers"] = "memory\n";
+    host->files["/sys/fs/cgroup/system.slice/pace-node.service/cgroup.procs"] = "4242\n";
+    host->files["/sys/fs/cgroup/system.slice/pace-node.service/node/memory.peak"] = "1\n";
+    return host;
+}
+
+/// The figures written to `compiles/memory.max`, in order.
+[[nodiscard]] std::vector<std::uint64_t> CeilingsWritten(Testing::FakeCgroupHost const& host)
+{
+    auto const prefix = std::string { "write /sys/fs/cgroup/system.slice/pace-node.service/compiles/memory.max " };
+    auto written = std::vector<std::uint64_t> {};
+    for (auto const& entry: host.trail)
+        if (entry.starts_with(prefix))
+            written.push_back(std::stoull(entry.substr(prefix.size())));
+    return written;
+}
+
+constexpr auto PresenceGiB = std::uint64_t { 1 } << 30;
+
+} // namespace
+
+TEST_CASE("The machine budget a presence round reports follows a reload of the compile limit",
+          "[node][presence][machinebudget][reload]")
+{
+    // A reload lowering `--compile-memory-limit` lowers `compiles/memory.max` at once; the budget the queue admits
+    // against must drop on the very next round, or the kernel kills compiles the fleet was told it could run.
+    PresenceFixture fix;
+    fix.cfg.slots = 0;
+    ReloadableConfig inForce { fix.cfg };
+    fix.inForce = &inForce;
+    Testing::ScriptedHostEvents events;
+    AnsweringDialer dialer;
+    auto const machine = Distributed::NodeCapacity { .logicalCores = 6, .totalMemoryBytes = 32 * PresenceGiB };
+    AnnouncedEndpoint const announced { ThisMachine };
+    auto const derived = MachineBudgetOf(fix.cfg, machine, HeldCharges {}).memoryBudgetBytes;
+
+    auto lowered = fix.cfg;
+    lowered.compileMemoryLimitBytes = 8 * PresenceGiB;
+    auto raisedPastBudget = fix.cfg;
+    raisedPastBudget.compileMemoryLimitBytes = 64 * PresenceGiB;
+
+    auto const budgets = BudgetsOverRounds(PartsOver(fix, machine, announced, dialer, events),
+                                           dialer,
+                                           events,
+                                           { [&] { inForce.Set(lowered); }, [&] { inForce.Set(raisedPastBudget); } });
+
+    // Derived, then the lowered limit, then back to the derived budget: never above it, whatever the limit says.
+    CHECK(budgets == std::vector<std::uint64_t> { derived, 8 * PresenceGiB, derived });
+}
+
+TEST_CASE("A capacity that moves re-applies the derived ceiling in the round that reports the budget",
+          "[node][presence][machinebudget][resize][meter]")
+{
+    if (!Cc::CanSpawnIntoCgroups())
+        SKIP("this build cannot spawn into a cgroup, so the meter never prepares compiles/");
+    // A cache-budget override shrinks the tier, the reserve drops, the derived budget RISES -- and the ceiling must
+    // rise with it, or the queue admits past the cap. And the other way. Each round, the figure written to
+    // `compiles/memory.max` is the figure reported.
+    PresenceFixture fix;
+    fix.cfg.slots = 0;
+    auto const cgroups = DelegatedCgroups();
+    CompileMemoryMeter meter { cgroups, MeterPlatform::Linux };
+    REQUIRE(meter.MakeRunner(fix.metrics, fix.logger).report.state == MeterState::Measured);
+    Testing::ScriptedHostEvents events;
+    AnsweringDialer dialer;
+    MovableCapacity capacity { Distributed::NodeCapacity {
+        .logicalCores = 6, .totalMemoryBytes = 32 * PresenceGiB, .reservedMemoryBytes = 8 * PresenceGiB } };
+    CompileCeilingKeeper keeper { meter, fix.bodyConfig, capacity, fix.conditions, fix.logger };
+    fix.ceiling = &keeper;
+    AnnouncedEndpoint const announced { ThisMachine };
+
+    auto const budgets = BudgetsOverRounds(
+        PartsOver(fix, capacity, announced, dialer, events),
+        dialer,
+        events,
+        { [&] { capacity.Set(Distributed::NodeCapacity { .logicalCores = 6, .totalMemoryBytes = 32 * PresenceGiB }); },
+          [&] {
+              capacity.Set(Distributed::NodeCapacity {
+                  .logicalCores = 6, .totalMemoryBytes = 32 * PresenceGiB, .reservedMemoryBytes = 16 * PresenceGiB });
+          } });
+
+    // 75% of what the reserve leaves: 18, then 24 once the tier shrank, then 12.
+    CHECK(budgets == std::vector<std::uint64_t> { 18 * PresenceGiB, 24 * PresenceGiB, 12 * PresenceGiB });
+    // The ceiling followed each, written once per change and not once per round.
+    CHECK(CeilingsWritten(*cgroups) == budgets);
+}
+
+TEST_CASE("A presence round reports the pressure watcher's level and lowers the budget to its allowance",
+          "[node][presence][machinebudget][pressure]")
+{
+    // C6: a yielding machine tells the queue to admit nothing new on it, and states the allowance as its budget.
+    PresenceFixture fix;
+    fix.cfg.slots = 0;
+    PublishedPressure pressure;
+    fix.pressure = &pressure;
+    Testing::ScriptedHostEvents events;
+    AnsweringDialer dialer;
+    auto const machine = Distributed::NodeCapacity { .logicalCores = 6, .totalMemoryBytes = 32 * PresenceGiB };
+    AnnouncedEndpoint const announced { ThisMachine };
+    auto const derived = MachineBudgetOf(fix.cfg, machine, HeldCharges {}).memoryBudgetBytes;
+    REQUIRE(derived > 3 * PresenceGiB);
+
+    auto const reports = ReportsOverRounds(
+        PartsOver(fix, machine, announced, dialer, events),
+        dialer,
+        events,
+        { [&] {
+             pressure.Publish(MachinePressure { .level = Wire::PressureLevel::Yield, .allowanceBytes = 3 * PresenceGiB });
+         },
+          [&] { pressure.Publish(MachinePressure { .level = Wire::PressureLevel::Calm, .allowanceBytes = derived }); } });
+
+    REQUIRE(reports.size() == 3);
+    // Nothing published yet: calm, as configured.
+    CHECK(reports[0].memoryBudgetBytes == derived);
+    CHECK(reports[0].pressure == Wire::PressureLevel::Calm);
+    CHECK(reports[1].memoryBudgetBytes == 3 * PresenceGiB);
+    CHECK(reports[1].pressure == Wire::PressureLevel::Yield);
+    CHECK(reports[2].memoryBudgetBytes == derived);
+    CHECK(reports[2].pressure == Wire::PressureLevel::Calm);
+}
+
+TEST_CASE("A round requested for pressure or a reload ends the presence wait, and names why",
+          "[node][presence][pressure][reload]")
+{
+    PresenceWake wake;
+    std::stop_source stop;
+
+    wake.RequestRound(PresenceWakeReason::Pressure);
+    CHECK(wake.WaitOut(stop.get_token(), std::chrono::seconds { 30 }) == PresenceWakeReason::Pressure);
+
+    // C3: an accepted reload asks for a round, so a lowered ceiling is reported at once rather than in 20 s.
+    PresenceRoundOnReload reload { wake };
+    reload.ReloadAccepted();
+    CHECK(wake.WaitOut(stop.get_token(), std::chrono::seconds { 30 }) == PresenceWakeReason::Reload);
+
+    // Two asks before one wait are one round.
+    wake.RequestRound(PresenceWakeReason::Pressure);
+    wake.RequestRound(PresenceWakeReason::Pressure);
+    CHECK(wake.WaitOut(stop.get_token(), std::chrono::seconds { 30 }) == PresenceWakeReason::Pressure);
+    CHECK(wake.WaitOut(stop.get_token(), std::chrono::milliseconds { 20 }) == PresenceWakeReason::Elapsed);
+
+    // And a suspend supersedes one still owed, as it supersedes a host event's.
+    wake.RequestRound(PresenceWakeReason::Pressure);
+    wake.OnHostEvent(HostEvent::Suspending);
+    CHECK(wake.WaitOut(stop.get_token(), std::chrono::milliseconds { 20 }) == PresenceWakeReason::Elapsed);
 }

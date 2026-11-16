@@ -3879,6 +3879,41 @@ if(NOT WIN32)
 endif()
 
 # ---------------------------------------------------------------------------
+# The `clang-tidy` job analyses a changed HEADER with the command of a unit that
+# includes it (`scripts/tidy-header-commands.py`), rather than the command clang
+# interpolates from the nearest-NAMED unit -- which, for a test-only header, lacked
+# the include directories it needs and failed a required check on a header that
+# compiles everywhere it is included. The self-test drives a synthetic tree and
+# database: a direct includer's command with the source swapped for the header, a
+# header reached only through other headers, a header no unit includes getting no
+# entry AND being named, and the units already there left unchanged.
+#
+# Python through the `find_package(Python3)` above, and the verdict is the exit
+# code. Needs no compiler, so it is `hygiene`.
+#
+# `if(NOT WIN32)` as `tidy-sweep-scope` carries it: the script serves the Linux
+# leg's GNU-style compile lines, and the Windows tidy leg does not call it.
+if(NOT WIN32)
+    if(NOT Python3_Interpreter_FOUND)
+        message(WARNING
+            "tidy-header-commands-selftest: no Python 3 interpreter found, so how the "
+            "clang-tidy job chooses a changed header's compile command is NOT tested in this build tree")
+        pace_register_skipped_test("tidy-header-commands-selftest"
+            "no Python 3 interpreter found, so how the clang-tidy job chooses a changed header's compile command is NOT tested in this build tree")
+    else()
+        add_test(
+            NAME "tidy-header-commands-selftest"
+            COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_SOURCE_DIR}/scripts/tidy-header-commands.py" --self-test
+        )
+        set_tests_properties("tidy-header-commands-selftest" PROPERTIES
+            LABELS "hygiene"
+            TIMEOUT 60
+        )
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
 # The documented way to build the tidy sweep's compile database is the way CI
 # builds it. Fails when `scripts/tidy-sweep.sh` or
 # `.agent/rules/build-and-toolchain.md` documents a configure line that differs
@@ -4321,6 +4356,13 @@ set_tests_properties("service-accounts" PROPERTIES
 # persistent directory the service could write -- is refused by the node as a
 # cache_dir, so following the docs gave no disk tier and the obvious workaround gave
 # no node.
+#
+# And the SLICE the system unit runs the node in (#1773): it names `Slice=pace.slice`,
+# the slice ships in packaging/linux/ and is installed by one row of the packaging asset
+# table, it lies under no slice systemd-oomd monitors by default (system.slice,
+# user.slice), and its [Slice] section sets nothing. Without it the node lands in
+# system.slice, inside oomd's choice of victim, and dies with its cache tier -- while
+# everything still starts, which is why only a scan sees it.
 #
 # `docs-subject` as well as `hygiene`, because half of what it judges is prose: a
 # page that starts citing a path the unit does not create is a docs-only change,
@@ -4919,6 +4961,47 @@ else()
         LABELS "smoke"
         SKIP_RETURN_CODE 77
         TIMEOUT 180
+    )
+endif()
+
+# ---------------------------------------------------------------------------
+# A compile over its node's memory ceiling is killed by the kernel and rebuilt locally.
+#
+# Registered here rather than beside the node for the reason `dist-compile-e2e` is: it
+# names two executables, and `src/apps` walks its app table in order.
+#
+# What it covers that the fake `ICgroupHost` cases cannot: that `compiles/memory.max` is
+# written on a REAL delegated cgroup, that the kernel kills a real compiler there, and that
+# the node classifies that kill as the ceiling's and its client still builds. Skips 77 with
+# the reason on a host with no delegated memory cgroup (`systemd-run --user`), an older
+# kernel or glibc, or no Linux at all -- probed before any node starts, so a node failing
+# to cap on a host that delegates is a FAILURE rather than a skip.
+if(NOT TARGET pace-node OR NOT TARGET pace-cc)
+    message(STATUS "compile-oom-e2e: compile node or launcher not built — skipping")
+elseif(WIN32)
+    # Absent is not skipped: the ceiling is a Linux cgroup, and the row says so.
+    pace_register_skipped_test("compile-oom-e2e"
+        "the compile memory ceiling is a Linux cgroup, and this is Windows")
+else()
+    add_test(
+        NAME "compile-oom-e2e"
+        COMMAND ${PACE_BASH} "${CMAKE_SOURCE_DIR}/scripts/compile-oom-e2e.sh"
+            --node "$<TARGET_FILE:pace-node>"
+            --launcher "$<TARGET_FILE:pace-cc>"
+            --compiler "${CMAKE_CXX_COMPILER}"
+    )
+    # Serial: it drives two compiles of ~0.5 GiB each and starts real nodes, so it must not
+    # race the other server-starting smoke tests for CPU, memory or ports. The TIMEOUT sits
+    # above the fixture's own bounds so a stall is reported by the fixture's verdict, never
+    # by a bare `***Timeout`: per node 120 s to be ready, 30 s for the ceiling line, 120 s to
+    # register and 10 s to stop, twice, plus one 120 s counter wait -- 680 s -- beside six
+    # compiles of seconds each. Measured at 20.6 s on a warm 32-core host under clang++. When
+    # `e2e_wait_seconds` in the script moves, this moves with it.
+    set_tests_properties("compile-oom-e2e" PROPERTIES
+        LABELS "smoke"
+        SKIP_RETURN_CODE 77
+        RUN_SERIAL TRUE
+        TIMEOUT 900
     )
 endif()
 
@@ -8176,7 +8259,7 @@ if(TARGET PaceTest)
         # the assertion that could not have failed while this ticket was open: 69
         # cases ran, and 69 is non-zero.
         #
-        # 309 = 213 (CompileCacheWire) + 26 (RaftWire) + 27 (ClusterState)
+        # 312 = 216 (CompileCacheWire) + 26 (RaftWire) + 27 (ClusterState)
         #     + 23 (DiscoveryWire) + 9 (FingerprintInputsWire) + 6 (NodeStatusDetailWire)
         #     + 1 (RaftTypes) + 1 (SchedulerService) + 1 (MachineTicket)
         #     + 1 (MachineStanding) + 1 (IdentityKeyLabel), read off `PaceTest "[wire]"
@@ -8205,7 +8288,12 @@ if(TARGET PaceTest)
         # records (+3). From 305 to 306: the MEMBER-REPORT opcode, report bytes and frame in
         # CompileCacheWire (+1). From 306 to 307: a budget row whose note is over its ceiling, or whose
         # figure is the wrong width, refused, in NodeStatusDetailWire (+1). From 307 to 309, in
-        # ClusterState: the last release's state and its command are read and converted (+2).
+        # ClusterState: the last release's state and its command are read and converted (+2). From 309
+        # to 310, in CompileCacheWire: MACHINE-BUDGET's pressure level, its bytes and an out-of-range
+        # one refused (+1). From 310 to 311, in CompileCacheWire: MACHINE-BUDGET's trailing budget
+        # standing byte, its values and an out-of-range one refused (+1). From 311 to 312, in
+        # CompileCacheWire: an error reply's trailer after its message -- a killed compile's peak --
+        # and a reader of the message never seeing it (+1, #1770).
         #
         # `[(]` rather than `\(`: CMake reads `\(` in a quoted argument as an escape
         # and stores a bare `(`, which its regex engine then takes as a capture group
@@ -8217,7 +8305,7 @@ if(TARGET PaceTest)
         # anything matches nothing. No `SKIP_RETURN_CODE` here: every selected case
         # must PASS for the count to be the count, so a run that skipped is a failure
         # of this check, never a state to report.
-        PASS_REGULAR_EXPRESSION "All tests passed [(][0-9]+ assertions in 309 test cases[)]"
+        PASS_REGULAR_EXPRESSION "All tests passed [(][0-9]+ assertions in 312 test cases[)]"
         LABELS "hygiene"
         TIMEOUT 300
     )

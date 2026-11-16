@@ -34,9 +34,19 @@ namespace
         std::string endpoint; ///< That worker, by the endpoint it advertises.
     };
 
-    using Placement = std::variant<MissReport, Unplaced, WorkerFailed>;
+    /// The compiler was killed for memory while this invocation's one requeue was unspent, or a worker killed the
+    /// requeued one (#1770). The admission that held it was settled `Killed` with what the compile held: the leader
+    /// raises the compile's estimate to at least that, which is what the next ask is charged.
+    struct Killed
+    {
+        /// The worker whose machine killed it, by the endpoint it advertises; disengaged when it was killed here.
+        std::optional<std::string> worker;
+    };
 
-    /// The admission waits of one invocation, summed across its openings.
+    using Placement = std::variant<MissReport, Unplaced, WorkerFailed, Killed>;
+
+    /// The admission waits of one invocation, summed across its openings, and what the leader is told of the
+    /// compile when it is asked again.
     ///
     /// Within ONE opening the leader measures from that request's enqueue, so a grant after a requeue
     /// already counts the wait before it: an opening contributes its LAST grant's figure, and
@@ -70,20 +80,54 @@ namespace
             _compileGranted = true;
         }
 
+        /// The compiler was killed for memory: from here on every ask is a requeue after a kill (#1770).
+        void CompileKilled() noexcept
+        {
+            _killed = true;
+        }
+
+        /// @return Whether this invocation's one requeue after a kill is spent.
+        [[nodiscard]] bool RequeueSpent() const noexcept
+        {
+            return _killed;
+        }
+
         /// What every later request of this invocation tells the leader: once it granted this compile, asking
         /// again -- the local retry after a granted worker failed, the lease after an admission broke -- is the SAME
-        /// compile, and the leader's demand history must not count it twice (`AskOrigin`).
-        /// @return `AfterGrant` once a compile was granted, else `First`.
+        /// compile, and the leader's demand history must not count it twice (`AskOrigin`). Once it was KILLED, the
+        /// leader also places it only where its estimate fits a configured budget.
+        /// @return `AfterKill` once a compile was killed, else `AfterGrant` once one was granted, else `First`.
         [[nodiscard]] CompileCacheWire::AskOrigin Origin() const noexcept
         {
+            if (_killed)
+                return CompileCacheWire::AskOrigin::AfterKill;
             return _compileGranted ? CompileCacheWire::AskOrigin::AfterGrant : CompileCacheWire::AskOrigin::First;
+        }
+
+        /// What a LOCAL-ONLY ask after a failed or killed worker tells the leader: never `AfterKill`. That claim asks
+        /// the leader to place the compile only where it fits and to answer `NeverFits` when nothing does -- judged,
+        /// for a local-only ask, against THIS machine alone, so a compile two workers held but this laptop cannot would
+        /// be counted as one no machine can hold. The fallback is the same compile asked again, which `AfterGrant` says.
+        /// @return `AfterGrant` once a compile was granted, else `First`.
+        [[nodiscard]] CompileCacheWire::AskOrigin LocalOrigin() const noexcept
+        {
+            return _compileGranted || _killed ? CompileCacheWire::AskOrigin::AfterGrant : CompileCacheWire::AskOrigin::First;
         }
 
       private:
         std::optional<std::uint64_t> _opening;
         std::optional<std::uint64_t> _total;
         bool _compileGranted { false };
+        bool _killed { false };
     };
+
+    /// Tell the launcher a kill moved the miss path, when it asked to hear.
+    /// @param seams What to run. @param step The step taken.
+    void Say(MissSeams const& seams, KillStep step)
+    {
+        if (seams.killed)
+            seams.killed(step);
+    }
 
     /// A session's answer, with the failure told to the launcher and the wait recorded.
     /// @param seams What to run.
@@ -122,6 +166,69 @@ namespace
         return MissReport { .code = code, .queuedMs = std::nullopt, .peakMemoryBytes = run.peakMemoryBytes };
     }
 
+    /// Tell the leader a compile it granted was KILLED for memory, with what it held when it died (#1770): a lower
+    /// bound the leader folds into its estimate as one, so the next ask is charged at least that -- where a `Failed`
+    /// settle would teach it the killed run's peak as the compile's MEASURE, and a bare close would teach it nothing
+    /// past the default.
+    /// @param session The held admission. @param heldBytes What the compile held; disengaged when unmeasured.
+    void SettleKilled(IAdmitSession& session, std::optional<std::uint64_t> heldBytes)
+    {
+        session.Settle(Wire::SettleRequest { .outcome = Wire::SettleOutcome::Killed, .peakBytes = heldBytes });
+    }
+
+    /// Finish a compile that ended KILLED: settled `Killed` when an admission holds it, and reported with no peak --
+    /// a killed run's is a lower bound, never the compile's measure.
+    /// @param seams What to run. @param session The held admission; null when none holds it. @param run The compile.
+    /// @return The report: the compiler's own exit, and no peak.
+    [[nodiscard]] MissReport FinishKilled(MissSeams const& seams, IAdmitSession* session, CompileRun& run)
+    {
+        Say(seams, KillStep::LocalKilledOutside);
+        bool stored = false;
+        auto const code = seams.finish(run, stored);
+        if (session != nullptr)
+            SettleKilled(*session, run.peakMemoryBytes);
+        return MissReport { .code = code, .queuedMs = std::nullopt, .peakMemoryBytes = std::nullopt };
+    }
+
+    /// Where a grant runs its compile here: the grant reason's row, before or after a kill taught its estimate.
+    /// @param ticket The grant. @param waits Whether a kill already happened.
+    /// @return The placement to ask for.
+    [[nodiscard]] LocalPlacement PlacementFor(AdmitTicket const& ticket, Waits const& waits) noexcept
+    {
+        return PlacementForGrant(ticket.localReason, waits.RequeueSpent());
+    }
+
+    /// Run the compiler here under @p session, which a grant placed here.
+    ///
+    /// A run killed for memory while the requeue is unspent settles the session `Killed` with what it held, so the
+    /// caller asks once more, charged at least that. Once it is spent, a run killed inside the ceiling runs once more
+    /// outside it, under the same grant; one killed outside every ceiling ends killed.
+    /// @param seams What to run. @param waits Whether the requeue is spent. @param session The held admission.
+    /// @param placement Where the grant lets it run.
+    /// @return The report, or `Killed` for the caller to ask again.
+    [[nodiscard]] Placement RunHeld(MissSeams const& seams,
+                                    Waits const& waits,
+                                    IAdmitSession& session,
+                                    LocalPlacement placement)
+    {
+        auto run = seams.compileLocal(placement);
+        if (!run.killed.has_value())
+            return FinishHeld(seams, session, run);
+        if (!waits.RequeueSpent())
+        {
+            SettleKilled(session, run.peakMemoryBytes);
+            return Killed { .worker = std::nullopt };
+        }
+        if (run.inCgroup)
+        {
+            Say(seams, KillStep::LocalOutsideCeiling);
+            run = seams.compileLocal(LocalPlacement::OutsideCeiling);
+            if (!run.killed.has_value())
+                return FinishHeld(seams, session, run);
+        }
+        return FinishKilled(seams, &session, run);
+    }
+
     /// What the FETCH after a `Stored` grant leads to.
     /// @param fetched How it ended.
     /// @return A report for a served hit, else what to do next.
@@ -143,7 +250,7 @@ namespace
     /// One opening of the admission, from the ADMIT to the end of the compile.
     ///
     /// The session lives exactly as long as this call, so every way out -- a fail open, a worker that
-    /// failed the compile -- ends the connection before anything runs outside it.
+    /// failed the compile, a kill -- ends the connection before anything runs outside it.
     /// @param seams What to run.
     /// @param waits Where each grant's wait is recorded.
     /// @return A report when the compile ran here, else what to do next.
@@ -163,32 +270,39 @@ namespace
                     // Nothing is held for a deduplicated request, so there is nothing to settle: the
                     // connection ends with the session.
                     return AfterStored(seams.serveStored());
-                case Wire::GrantKind::Local: {
-                    auto run = seams.compileLocal();
-                    return FinishHeld(seams, *session, run);
-                }
+                case Wire::GrantKind::Local:
+                    return RunHeld(seams, waits, *session, PlacementFor(*ticket, waits));
                 case Wire::GrantKind::Worker: {
                     auto attempt = seams.dispatchAdmitted(*ticket);
-                    if (attempt.workerRefused)
-                    {
-                        // The launcher's own stop. The queue DID answer, so the compile that now runs
-                        // here is asked for as a local one and charged here -- never run in the open,
-                        // which is the unbounded compile the queue exists to prevent. The grant is
-                        // settled `NotStored` first, as a failed worker's is: it frees that charge and
-                        // teaches the estimator nothing, where a bare close would read as a kill.
-                        if (refusals == MaxWorkerRefusals)
-                        {
-                            session->Settle(Wire::SettleRequest { .outcome = Wire::SettleOutcome::NotStored,
-                                                                  .peakBytes = std::nullopt });
-                            return WorkerFailed { .endpoint = ticket->endpoint };
-                        }
-                        // Back into the queue on the same connection, never a compile in the open:
-                        // the leader admitted this against a ledger the worker disagreed with.
-                        ticket = Read(seams, waits, session->Requeue());
-                        continue;
-                    }
                     if (attempt.run.has_value())
                         return FinishHeld(seams, *session, *attempt.run);
+                    switch (attempt.setback)
+                    {
+                        case WorkerSetback::Killed:
+                            // Settled `Killed` with what the worker said it held: the leader raises this compile's
+                            // estimate to at least that, which is what its requeue is charged (#1770).
+                            SettleKilled(*session, attempt.killedPeakBytes);
+                            return Killed { .worker = ticket->endpoint };
+                        case WorkerSetback::Refused:
+                            // The launcher's own stop. The queue DID answer, so the compile that now runs
+                            // here is asked for as a local one and charged here -- never run in the open,
+                            // which is the unbounded compile the queue exists to prevent. The grant is
+                            // settled `NotStored` first, as a failed worker's is: it frees that charge and
+                            // teaches the estimator nothing, where a bare close would read as a kill.
+                            if (refusals == MaxWorkerRefusals)
+                            {
+                                session->Settle(Wire::SettleRequest { .outcome = Wire::SettleOutcome::NotStored,
+                                                                      .peakBytes = std::nullopt });
+                                return WorkerFailed { .endpoint = ticket->endpoint };
+                            }
+                            // Back into the queue on the same connection, never a compile in the open:
+                            // the leader admitted this against a ledger the worker disagreed with.
+                            ticket = Read(seams, waits, session->Requeue());
+                            continue;
+                        case WorkerSetback::Failed:
+                        case WorkerSetback::Last:
+                            break;
+                    }
                     // The grant charged THAT worker, which is not running the compile: this session
                     // ends here, before anything runs, and frees the charge. SETTLED rather than merely
                     // closed: a close reads as an abandonment, which teaches the leader's estimator this
@@ -208,11 +322,21 @@ namespace
     }
 
     /// Run the compiler here, held by no admission, and finish it.
+    ///
+    /// With no queue to wait in, a run killed inside the ceiling runs once more outside it at once, and one killed
+    /// outside every ceiling ends killed (#1770).
     /// @param seams What to run.
     /// @return The report.
     [[nodiscard]] MissReport CompileUnadmitted(MissSeams const& seams)
     {
-        auto run = seams.compileLocal();
+        auto run = seams.compileLocal(LocalPlacement::UnderCeiling);
+        if (run.killed.has_value() && run.inCgroup)
+        {
+            Say(seams, KillStep::LocalOutsideCeiling);
+            run = seams.compileLocal(LocalPlacement::OutsideCeiling);
+        }
+        if (run.killed.has_value())
+            return FinishKilled(seams, nullptr, run);
         bool stored = false;
         auto const code = seams.finish(run, stored);
         return MissReport { .code = code, .queuedMs = std::nullopt, .peakMemoryBytes = run.peakMemoryBytes };
@@ -228,7 +352,7 @@ namespace
     /// @return A report when the compile ran under this admission, else what to do next.
     [[nodiscard]] Placement AdmitHere(MissSeams const& seams, Waits& waits, WorkerFailed const& failed)
     {
-        auto session = seams.open(std::string_view { failed.endpoint }, waits.Origin());
+        auto session = seams.open(std::string_view { failed.endpoint }, waits.LocalOrigin());
         if (session == nullptr)
             return Unplaced::FailOpen;
         auto const ticket = Read(seams, waits, session->Await());
@@ -236,10 +360,8 @@ namespace
             return Unplaced::FailOpen;
         switch (ticket->kind)
         {
-            case Wire::GrantKind::Local: {
-                auto run = seams.compileLocal();
-                return FinishHeld(seams, *session, run);
-            }
+            case Wire::GrantKind::Local:
+                return RunHeld(seams, waits, *session, PlacementFor(*ticket, waits));
             case Wire::GrantKind::Stored: {
                 // Another compile of this key stored it meanwhile. A miss is not asked about again: the
                 // compile runs here, after this session has ended.
@@ -259,8 +381,8 @@ namespace
 
     /// What a launcher with no queue does, which is what one that cannot reach it does.
     /// @param seams What to run.
-    /// @return The report.
     /// @param origin Whether a grant this invocation already received makes this lease a second ask for one compile.
+    /// @return The report.
     [[nodiscard]] MissReport FailOpen(MissSeams const& seams, CompileCacheWire::AskOrigin origin)
     {
         auto run = seams.dispatchUnadmitted(origin);
@@ -376,26 +498,48 @@ std::string TreeLabelOf(std::string_view workingDirectory, std::string_view sour
 MissReport RunMiss(MissSeams const& seams)
 {
     Waits waits;
-    // Two openings: the first, and one more for a `Stored` grant whose object is not there.
-    for ([[maybe_unused]] auto const opening: std::views::iota(0, 2))
+    // Each pass is one opening. Bounded however the answers fall: two openings of the request as described (the
+    // second for a `Stored` grant whose object is not there), one requeue after a kill, and the local-only asks a
+    // failed or twice-killed worker leads to.
+    constexpr auto MaxOpenings = 6;
+    auto storedReopens = 0;
+    std::optional<WorkerFailed> here; // engaged once the compile is to run here, charged here
+    for ([[maybe_unused]] auto const opening: std::views::iota(0, MaxOpenings))
     {
-        auto placed = Admit(seams, waits);
+        auto placed = here.has_value() ? AdmitHere(seams, waits, *here) : Admit(seams, waits);
         waits.EndOpening();
         if (auto report = Concluded(placed, waits); report.has_value())
             return *report;
+        if (auto const* const killed = std::get_if<Killed>(&placed))
+        {
+            if (!waits.RequeueSpent())
+            {
+                // The one requeue (#1770): the same request, asked for after a kill, so the leader places it only
+                // where what it is now estimated to need fits -- here or on a worker, now or once room frees.
+                waits.CompileKilled();
+                Say(seams, killed->worker.has_value() ? KillStep::WorkerRequeued : KillStep::LocalRequeued);
+                continue;
+            }
+            // Spent: a worker killed the requeued compile too. It compiles here, charged here, rather than loop.
+            // (A kill HERE after the requeue never comes back as `Killed`: `RunHeld` decides it in place.)
+            Say(seams, KillStep::WorkerKilledTwice);
+            here = WorkerFailed { .endpoint = killed->worker.value_or(std::string {}) };
+            continue;
+        }
         if (auto const* const failed = std::get_if<WorkerFailed>(&placed))
         {
-            auto here = AdmitHere(seams, waits, *failed);
-            waits.EndOpening();
-            if (auto report = Concluded(here, waits); report.has_value())
-                return *report;
+            here = *failed;
+            continue;
+        }
+        if (here.has_value())
+        {
             // The worker's own failure was recorded where it happened; this compile runs here, held by
             // nothing, rather than trying the fleet a second way.
             auto report = CompileUnadmitted(seams);
             report.queuedMs = waits.Total();
             return report;
         }
-        if (std::get<Unplaced>(placed) == Unplaced::FailOpen)
+        if (std::get<Unplaced>(placed) == Unplaced::FailOpen || ++storedReopens > 1)
             break;
     }
     auto report = FailOpen(seams, waits.Origin());

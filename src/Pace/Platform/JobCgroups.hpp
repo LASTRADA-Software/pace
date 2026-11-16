@@ -13,7 +13,8 @@
 /// **Interfaces only, header-only and standard-library-only, and that is load-bearing**: the runner
 /// that consumes them (`apps/pace-cc/ProcessRunner.cpp`) is compiled into the launcher, which does not
 /// link `Pace`. The Linux implementation, and the startup rules that decide whether one can exist at
-/// all, are `Platform/CgroupV2.hpp` -- linked by the node alone.
+/// all, are `Platform/CgroupV2.hpp` -- the node's, and compiled into the launcher too (it is std-only), which
+/// places the compiles it runs itself below the node's `compiles/` (#1770).
 ///
 /// Why a compile gets a cgroup of its own: on Linux the `ru_maxrss` that `wait4` hands back for a
 /// spawned child INCLUDES the resident set of the process that spawned it, because the kernel folds the
@@ -23,6 +24,16 @@
 /// A cgroup's `memory.peak` counts only the tasks that were ever IN it.
 namespace Pace::Platform
 {
+
+/// How a compile came to be killed. PRIVATE (no wire, no disk), so no explicit values; the trailing
+/// `Last` is the count `EnumTable` reads, never a cause a `CompileRun` carries.
+enum class CompileKill : std::uint8_t
+{
+    Ceiling, ///< The kernel OOM-killed it inside the compile memory ceiling.
+    Shed,    ///< The node's own governor killed it to relieve memory pressure.
+    Signal,  ///< Ended by `SIGKILL` for any other reason.
+    Last,    ///< Not a cause: the count, so a table over the causes takes its extent from it.
+};
 
 /// One job's cgroup: a directory the job is spawned into and whose `memory.peak` is its peak.
 ///
@@ -48,6 +59,17 @@ class IJobCgroup
     /// Read after the job's direct child has been reaped and before this object is destroyed.
     /// @return The peak; disengaged when the kernel would not say (never 0 for "unknown").
     [[nodiscard]] virtual std::optional<std::uint64_t> PeakBytes() const = 0;
+
+    /// Whether the kernel OOM-killed a task of this job (`memory.events`, `oom_kill` > 0).
+    ///
+    /// Read after the child has been reaped and BEFORE this object is destroyed: the file goes
+    /// with the directory.
+    /// @return True only when the file was readable and said so; unreadable is false.
+    [[nodiscard]] virtual bool OomKilled() const = 0;
+
+    /// Whether the node's governor killed this job on purpose (set before it writes `cgroup.kill`).
+    /// @return True when the job was shed.
+    [[nodiscard]] virtual bool Shed() const noexcept = 0;
 };
 
 /// Makes a fresh cgroup per job.

@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <format>
 #include <mutex>
 #include <string>
 #include <tuple>
@@ -56,6 +57,13 @@ namespace
                            "is queued and counted again" },
             leader);
     }
+
+    /// A request framed at a version this build does not read.
+    constexpr Cc::UncountedRefusal VersionNotSupported {
+        .code = Wire::ErrorCode::UnsupportedVersion,
+        .rationale = "a node or client of another build, told the range this one speaks and seen by whoever ran it; a "
+                     "rise is a fleet mid-upgrade, which is not a condition an operator acts on",
+    };
 
     /// A refusal this responder decides itself, before the service is asked.
     /// @param code What the client is told.
@@ -415,6 +423,8 @@ namespace
         }
         if (verdict.ranAlone)
             metrics.Increment(IMetricsSink::Counter::AdmissionRanAlone);
+        if (verdict.neverFits)
+            metrics.Increment(IMetricsSink::Counter::AdmissionNeverFits);
         // A `_sum`/`_count` pair, moved together: the wait since this request was last parked, so a
         // worker refusal's regrant does not add the wait before the refusal a second time.
         metrics.Increment(IMetricsSink::Counter::AdmissionWaitMillisTotal,
@@ -617,6 +627,14 @@ core::async::Task<FrameReply> AdmissionResponder::Answer(std::span<std::byte con
     auto const header = Wire::DecodeRequestHeader(frame);
     if (service == nullptr || !header.has_value() || frame.size() != Wire::RequestHeaderSize + header->payloadLength)
         co_return FrameReply {};
+    // The version is judged HERE, before any payload is read, for `FleetTextResponder`'s reason: nothing
+    // earlier on this family's path asks `IsSupported`, and a version-17 MACHINE-BUDGET (five fields where
+    // this build reads seven) would otherwise be refused as a malformed frame, a confident wrong diagnosis.
+    if (!Wire::IsSupported(header->version))
+        co_return FrameReply { Cc::RefuseWithoutCounter(VersionNotSupported,
+                                                        std::format("supported versions {}..{}",
+                                                                    static_cast<unsigned>(Wire::MinSupportedVersion),
+                                                                    static_cast<unsigned>(Wire::CurrentVersion))) };
     auto const payload = frame.subspan(Wire::RequestHeaderSize);
 
     auto const scope = peer.scope;
@@ -730,6 +748,8 @@ core::async::Task<FrameReply> AdmissionResponder::Answer(std::span<std::byte con
             core->waiters.emplace(ticket, waiter);
         }
         core->metrics->Increment(IMetricsSink::Counter::AdmissionQueued);
+        if (request->origin == Wire::AskOrigin::AfterKill)
+            core->metrics->Increment(IMetricsSink::Counter::AdmissionRequeuedAfterKill);
     }
     Registration registration { core, ticket };
 

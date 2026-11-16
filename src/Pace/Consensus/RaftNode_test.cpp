@@ -10,6 +10,7 @@
 #include <optional>
 #include <ranges>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -1061,6 +1062,105 @@ TEST_CASE("A heartbeat asks for no durable log work", "[consensus][raft][replica
                                          At(10));
 
     CHECK_FALSE(output.persistLog.has_value());
+}
+
+namespace
+{
+/// An AppendEntries from `n2` in term 1 carrying one command entry per payload, after @p prev.
+/// @param prev The index the run follows; its entry, if any, is at term 1.
+/// @param payloads One entry each, at term 1.
+/// @return The request.
+[[nodiscard]] AppendEntriesRequest TermOneRun(std::uint64_t prev, std::vector<std::string_view> const& payloads)
+{
+    auto entries = std::vector<LogEntry> {};
+    for (auto const payload: payloads)
+        entries.push_back(
+            LogEntry { .term = Term { .value = 1 }, .kind = EntryKind::Command, .payload = Pace::BytesFromString(payload) });
+    return AppendEntriesRequest { .term = Term { .value = 1 },
+                                  .leaderId = "n2",
+                                  .prevLogIndex = LogIndex { .value = prev },
+                                  .prevLogTerm = prev == 0 ? Term::None() : Term { .value = 1 },
+                                  .entries = std::move(entries),
+                                  .leaderCommit = LogIndex::BeforeFirst() };
+}
+} // namespace
+
+TEST_CASE("A re-sent run the follower already holds asks for no durable log work", "[consensus][raft][replication]")
+{
+    // A leader re-sends every entry a follower has not acknowledged on EVERY heartbeat, so while
+    // an acknowledgement is in flight the same run arrives once per interval. Persisted from the
+    // run's start each time, that was a truncation and two flushes per heartbeat; on a disk whose
+    // flush outlasted the interval the follower never caught up with the re-sends, its
+    // acknowledgement never reached the leader, and a joining voter was never promoted.
+    Fixture fix;
+    (void) fix.node.Receive(TermOneRun(0, { "a", "b" }), At(10));
+
+    auto const resent = fix.node.Receive(TermOneRun(0, { "a", "b" }), At(11));
+
+    CHECK_FALSE(resent.persistLog.has_value());
+    // And it is still acknowledged as far as the run proves, which is what stops the re-sends.
+    REQUIRE(resent.messages.size() == 1);
+    auto const* const answer = std::get_if<AppendEntriesResponse>(&resent.messages[0].message);
+    REQUIRE(answer != nullptr);
+    CHECK(answer->result == AppendResult::Accepted);
+    CHECK(answer->matchIndex == LogIndex { .value = 2 });
+}
+
+TEST_CASE("A re-sent run with a new tail makes only the tail durable", "[consensus][raft][replication]")
+{
+    // The ordinary shape of replication to a follower with an answer in flight: the entries it
+    // holds, then the one the leader has just appended. Only that one is written; rewriting
+    // the rest would cut the durable log under entries this follower already acknowledged.
+    Fixture fix;
+    (void) fix.node.Receive(TermOneRun(0, { "a", "b" }), At(10));
+
+    auto const grown = fix.node.Receive(TermOneRun(0, { "a", "b", "c" }), At(11));
+
+    REQUIRE(grown.persistLog.has_value());
+    auto const logged = Unwrap(grown.persistLog);
+    CHECK(logged.fromIndex == LogIndex { .value = 3 });
+    REQUIRE(logged.entries.size() == 1);
+    CHECK(Pace::AsStringView(logged.entries[0].payload) == "c");
+}
+
+TEST_CASE("A conflicting run is made durable from the conflict", "[consensus][raft][replication]")
+{
+    // The one append that must CUT the durable log: entries of a term that lost are replaced,
+    // and the store truncates at the record's first index. Pinned beside the two above so that
+    // writing less cannot be bought by writing too little.
+    Fixture fix;
+    (void) fix.node.Receive(TermOneRun(0, { "a", "b" }), At(10));
+
+    auto replacing = TermOneRun(1, { "B" });
+    replacing.term = Term { .value = 2 };
+    replacing.entries[0].term = Term { .value = 2 };
+    auto const repaired = fix.node.Receive(replacing, At(11));
+
+    REQUIRE(repaired.persistLog.has_value());
+    auto const logged = Unwrap(repaired.persistLog);
+    CHECK(logged.fromIndex == LogIndex { .value = 2 });
+    REQUIRE(logged.entries.size() == 1);
+    CHECK(Pace::AsStringView(logged.entries[0].payload) == "B");
+}
+
+TEST_CASE("A held prefix followed by a conflict is made durable from the conflict only", "[consensus][raft][replication]")
+{
+    // A conflict that does NOT sit at `prevLogIndex + 1`: the leader re-sends what this follower
+    // holds and then contradicts its tail. Only the contradicted entry is cut and rewritten; the
+    // run's start would truncate the two acknowledged entries ahead of it.
+    Fixture fix;
+    (void) fix.node.Receive(TermOneRun(0, { "a", "b", "c" }), At(10));
+
+    auto replacing = TermOneRun(0, { "a", "b", "C" });
+    replacing.term = Term { .value = 2 };
+    replacing.entries[2].term = Term { .value = 2 };
+    auto const repaired = fix.node.Receive(replacing, At(11));
+
+    REQUIRE(repaired.persistLog.has_value());
+    auto const logged = Unwrap(repaired.persistLog);
+    CHECK(logged.fromIndex == LogIndex { .value = 3 });
+    REQUIRE(logged.entries.size() == 1);
+    CHECK(Pace::AsStringView(logged.entries[0].payload) == "C");
 }
 
 TEST_CASE("A match index beyond the leader's own log is clamped", "[consensus][raft][replication]")

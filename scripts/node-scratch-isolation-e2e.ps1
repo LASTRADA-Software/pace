@@ -1243,9 +1243,12 @@ function Invoke-Phase([string]$label, [bool]$separateTempForB) {
             }
             try {
                 $quoted = ConvertTo-QuotedArgs $argv
-                $nodeProc = Start-Process -FilePath $Node -ArgumentList $quoted -NoNewWindow -PassThru `
-                       -RedirectStandardOutput (Join-Path $phaseDir "$name.out.log") `
-                       -RedirectStandardError  (Join-Path $phaseDir "$name.err.log")
+                # Its toolchain fingerprint cache is this run's own, never the caller's (#1774).
+                $nodeProc = Use-E2ENodeState $script:nodeState {
+                    Start-Process -FilePath $Node -ArgumentList $quoted -NoNewWindow -PassThru `
+                           -RedirectStandardOutput (Join-Path $phaseDir "$name.out.log") `
+                           -RedirectStandardError  (Join-Path $phaseDir "$name.err.log")
+                }
                 $commandLines[$nodeProc.Id] = (@($Node) + @($quoted)) -join ' '
                 return $nodeProc
             } finally { $env:TEMP = $savedTemp; $env:TMP = $savedTmp }
@@ -1469,6 +1472,10 @@ $launcherState = $null
 try {
     $launcherState = Enter-E2ELauncherState -Launcher $Launcher -Fixture $PSCommandPath -RunTrees @($scratch)
     Write-Host "launcher statistics isolated to $($launcherState.Log)"
+    # And every node keeps its toolchain fingerprint cache in a root of the run's own, apart
+    # from the launcher's and from the caller's (#1774). Under `$scratch`, so it goes with it.
+    $script:nodeState = New-E2ENodeState -RunRoot $scratch
+    Write-Host "node state isolated to $($script:nodeState.Root)"
 
     # Phase 1 is the defect's own configuration and must now be clean; phase 2 is the
     # control, and a regression that broke both would otherwise look like the
@@ -1480,6 +1487,9 @@ try {
     $recorded = Get-E2ELauncherStateRecordCount $launcherState
     if ($recorded -lt 1) { throw "the launcher recorded nothing in this run's state log ($($launcherState.Log))" }
     Write-Host "this run's compiles were recorded in its own state log: $recorded record(s)"
+    $cachedFingerprints = Get-E2ENodeFingerprintCount $script:nodeState
+    if ($cachedFingerprints -lt 1) { throw "no node cached a toolchain fingerprint under this run's root ($($script:nodeState.Root))" }
+    Write-Host "this run's workers cached their toolchain fingerprints in its own node root: $cachedFingerprints entry(ies)"
 
     Write-Host "node-scratch-isolation-e2e: PASS"
     exit 0

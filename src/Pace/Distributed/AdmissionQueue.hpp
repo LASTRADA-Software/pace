@@ -28,7 +28,10 @@ using MachineId = std::string;
 using Ticket = std::uint64_t;
 
 using CompileCacheWire::AdmitKind;
+using CompileCacheWire::AskOrigin;
+using CompileCacheWire::BudgetStanding;
 using CompileCacheWire::GrantKind;
+using CompileCacheWire::PressureLevel;
 using CompileCacheWire::SettleOutcome;
 
 /// One compile asking to be admitted.
@@ -41,6 +44,10 @@ struct QueueRequest
     bool storable { true }; ///< Joins the dedup in-flight set only when true.
     std::string treeLabel;  ///< Display only.
     std::vector<std::string> excluded;
+    /// Whether this compile was granted before, and was then killed for memory (#1770). `AfterKill` places it
+    /// only on a machine whose CONFIGURED budget can hold its estimate -- running it alone past one would be the
+    /// ceiling's next kill -- and decides `Decision::neverFits` when none of its reported machines can.
+    AskOrigin origin { AskOrigin::First };
 };
 
 /// One candidate worker for a dispatchable request.
@@ -76,6 +83,13 @@ struct MachineReport
     std::uint32_t slots {};
     std::uint32_t heldSlots {}; ///< Every compile running on the machine (local leases + worker jobs).
     std::uint64_t heldBytes {}; ///< Their charged bytes. The ledger uses max(charged, held), never the sum.
+    /// How hard its memory is pressed. Anything but `Calm` admits nothing new on it while a compile runs or is
+    /// reserved there -- local compiles included, the run-alone exception included -- and reaches requests already
+    /// waiting, at the next `Pump()`. Idle, it runs its OWN compiles that fit the budget, one at a time.
+    PressureLevel pressure { PressureLevel::Calm };
+    /// Whether the budget is the configured one or the pressure allowance holds it below that. Held, nothing
+    /// larger than the budget runs here, even alone on an idle machine at `Calm`.
+    BudgetStanding standing { BudgetStanding::Configured };
 };
 
 /// An admission: what to run, and where.
@@ -86,6 +100,9 @@ struct Decision
     std::optional<Placement> placement; ///< Engaged for `Worker`.
     std::uint64_t chargedBytes {};
     bool ranAlone {}; ///< Its estimate exceeded the whole budget.
+    /// A compile killed for memory and asked for again (`AskOrigin::AfterKill`) that no reported machine's
+    /// configured budget can hold, its caller's included: granted `Local`, alone, on the caller (#1770).
+    bool neverFits {};
 };
 
 /// How a granted compile ended.
@@ -111,6 +128,11 @@ struct MachineLedgerView
     std::uint64_t chargedBytes {};            ///< What this ledger has charged it.
     std::uint64_t inUseBytes {};              ///< What the queue admits against: `max(charged, held by its report)`.
     std::optional<std::uint64_t> budgetBytes; ///< Its own stated budget; absent until it reports one.
+    /// How hard its memory is pressed, as its last report said; absent until it reports one (#1771).
+    std::optional<PressureLevel> pressure;
+    /// Whether that budget is its configured one or one the pressure allowance holds below it; absent until
+    /// it reports one (#1771).
+    std::optional<BudgetStanding> standing;
 };
 
 /// One ticket the queue holds, as a report reads it: who asked, for what, and where it stands.
@@ -166,7 +188,17 @@ struct QueueView
 /// been head across a `Pump()` it reserves whatever is free (up to what it needs) on EVERY
 /// reported machine of its target set, so a stream of small requests cannot starve it however
 /// the candidate order changes. A request estimated above the whole budget runs alone: it
-/// waits for an idle machine and reserves all free memory and slots meanwhile.
+/// waits for an idle machine and reserves all free memory and slots meanwhile -- and never on a
+/// machine under pressure, nor on one whose budget the pressure allowance holds below its configured
+/// figure (`BudgetStanding::HeldByAllowance`), where it waits for the ramp instead. A machine under pressure
+/// takes no other machine's work and nothing beside a running compile; idle, it runs its own requests that
+/// fit its reported budget one at a time, since the host's pressure need not be the fleet's to relieve.
+///
+/// A request asked for again after its compile was killed for memory (`AskOrigin::AfterKill`, #1770) never runs
+/// alone on a machine whose configured budget is below its estimate: that machine's compile ceiling is its
+/// budget, so the run would be the next kill. Such machines are no target at all for it. When EVERY reported
+/// machine it could run on is one -- its caller included -- nothing can ever hold it, and it runs alone on its
+/// caller as `Decision::neverFits`, which the client runs outside the ceiling.
 ///
 /// A storable request whose `estimate.cacheKey` is already in flight from a machine that
 /// shares its cache waits on that compile instead of running: it is never charged and holds no
@@ -265,7 +297,8 @@ class AdmissionQueue
         std::optional<MachineReport> report;
         std::uint64_t chargedBytes {};
         std::uint32_t chargedSlots {};
-        bool refused {}; ///< A worker here declined a job; admits nothing until the next report.
+        std::uint64_t reports {}; ///< Reports received, so a charge knows whether one arrived after its grant.
+        bool refused {};          ///< A worker here declined a job; admits nothing until the next report.
     };
 
     /// A granted entry and what it charged, to give back on `Settle`/`Abandon`.
@@ -275,6 +308,7 @@ class AdmissionQueue
         std::uint64_t bytes {};
         Entry entry;
         std::optional<Placement> placement; ///< The worker it was granted on; nothing when granted on its caller.
+        std::uint64_t reportsAtGrant {};    ///< The machine's `Ledger::reports` when it was granted.
     };
 
     /// A waiter its owner's store woke, held with its request until the next `Pump()` answers it.
@@ -320,10 +354,24 @@ class AdmissionQueue
     /// @return Its reported budget, or zero while it has reported none.
     [[nodiscard]] static std::uint64_t BudgetOf(Ledger const& ledger) noexcept;
 
+    /// What a killed compile held, bounded by the budget the machine it ran on last reported (#1770).
+    /// @param machine Where it ran. @param heldBytes What its settle says it held.
+    /// @return The bound figure; @p heldBytes as given when it is absent or the machine never reported.
+    [[nodiscard]] std::optional<std::uint64_t> HeldBound(MachineId const& machine,
+                                                         std::optional<std::uint64_t> heldBytes) const;
+
     /// @param machine A machine that has reported.
     /// @param hold What earlier entries of this pump reserved there.
     /// @return Its in-use and free figures.
     [[nodiscard]] Room RoomOn(MachineId const& machine, Reserved const& hold) const;
+
+    /// Whether a request can never run on @p machine while it is under memory pressure: another machine's work there,
+    /// or one larger than the budget it reports. Such a request is never that machine's head and reserves nothing.
+    /// @param machine A target of the request.
+    /// @param placed Whether the target is a worker placement (another machine's work) rather than the caller.
+    /// @param chargedBytes What the request is charged.
+    /// @return True when the machine is pressed and the request could not run there even were it idle.
+    [[nodiscard]] bool BarredWhilePressed(MachineId const& machine, bool placed, std::uint64_t chargedBytes) const;
 
     /// Frees a granted ticket's charge.
     /// @return What it held, or nothing when the ticket holds no charge.

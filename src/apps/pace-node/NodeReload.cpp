@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
+#include "CacheTier.hpp"
+#include "CompileMemoryMeter.hpp"
+#include "LiveNodeConfig.hpp"
 #include "NodeActivation.hpp"
 #include "NodeDefaults.hpp"
 #include "NodeFormation.hpp"
+#include "NodePresenceTier.hpp"
 #include "NodeReload.hpp"
 
 #include <Pace/Config/YamlReader.hpp>
@@ -142,6 +146,37 @@ void ApplyReloadRequest(NodeReloader* reloader,
                     ToStringView(current->logLevel));
     else
         logger.Logf(LogLevel::Info, "configuration reloaded; log level is now {}", ToStringView(current->logLevel));
+}
+
+AcceptedReloadListeners::AcceptedReloadListeners(std::vector<IAcceptedReloadListener*> listeners):
+    _listeners { std::move(listeners) }
+{
+}
+
+void AcceptedReloadListeners::ReloadAccepted()
+{
+    for (auto* const listener: _listeners)
+        listener->ReloadAccepted();
+}
+
+CompileCeilingOnReload::CompileCeilingOnReload(CompileCeilingKeeper& keeper) noexcept:
+    _keeper { keeper }
+{
+}
+
+void CompileCeilingOnReload::ReloadAccepted()
+{
+    static_cast<void>(_keeper.Keep(CeilingWrite::Always));
+}
+
+PresenceRoundOnReload::PresenceRoundOnReload(PresenceWake& wake) noexcept:
+    _wake { wake }
+{
+}
+
+void PresenceRoundOnReload::ReloadAccepted()
+{
+    _wake.RequestRound(PresenceWakeReason::Reload);
 }
 
 } // namespace Pace::Node

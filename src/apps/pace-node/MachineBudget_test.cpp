@@ -225,6 +225,44 @@ TEST_CASE("MachineBudget.explicit-size", "[node][machinebudget]")
     CHECK(MachineBudgetOf(cfg, MachineOf(2, 2 * GiB), HeldCharges {}).memoryBudgetBytes == 12 * GiB);
 }
 
+TEST_CASE("MachineBudget.typed-compile-limit-lowers-reported-budget", "[node][machinebudget]")
+{
+    // C3: the queue must never admit what the ceiling will kill, so a typed ceiling BELOW the budget is
+    // the budget the machine reports. A 96 GiB machine with no reserve derives 75% of it.
+    auto const machine = MachineOf(16, 96 * GiB);
+    auto const derived = MachineBudgetOf(NodeConfig {}, machine, HeldCharges {}).memoryBudgetBytes;
+    REQUIRE(derived == 72 * GiB);
+
+    auto const lower = Parsed({ "--compile-memory-limit=24g" });
+    CHECK(MachineBudgetOf(lower, machine, HeldCharges {}).memoryBudgetBytes == 24 * GiB);
+
+    // A ceiling ABOVE the budget leaves the budget alone: the queue still admits only 75%.
+    auto const higher = Parsed({ "--compile-memory-limit=90g" });
+    CHECK(MachineBudgetOf(higher, machine, HeldCharges {}).memoryBudgetBytes == derived);
+
+    // And it lowers a TYPED budget as well: the lower of the two figures the operator gave.
+    auto const both = Parsed({ "--machine-memory-budget=40g", "--compile-memory-limit=24g" });
+    CHECK(MachineBudgetOf(both, machine, HeldCharges {}).memoryBudgetBytes == 24 * GiB);
+}
+
+TEST_CASE("MachineBudget.ceiling-defaults-to-budget", "[node][machinebudget]")
+{
+    // One number for admission and the cap, so they cannot disagree.
+    auto const machine = MachineOf(16, 64 * GiB, 8 * GiB);
+    auto const bare = NodeConfig {};
+    CHECK(CompileCeilingOf(bare, machine) == MachineBudgetOf(bare, machine, HeldCharges {}).memoryBudgetBytes);
+
+    // A typed budget is the ceiling too, when no ceiling is typed.
+    auto const budget = Parsed({ "--machine-memory-budget=12g" });
+    CHECK(CompileCeilingOf(budget, machine) == 12 * GiB);
+
+    // A typed ceiling is the ceiling, as given -- even above the budget, which then still binds the queue.
+    auto const typed = Parsed({ "--compile-memory-limit=90g" });
+    CHECK(CompileCeilingOf(typed, machine) == 90 * GiB);
+    CHECK(MachineBudgetOf(typed, machine, HeldCharges {}).memoryBudgetBytes
+          == MachineBudgetOf(bare, machine, HeldCharges {}).memoryBudgetBytes);
+}
+
 TEST_CASE("MachineBudget.slots-default-cores", "[node][machinebudget]")
 {
     CHECK(MachineBudgetOf(NodeConfig {}, MachineOf(24, 64 * GiB), HeldCharges {}).slots == 24);
@@ -470,4 +508,91 @@ TEST_CASE("MachineBudget.dial-setbacks-are-filed-under-the-budget-subject", "[no
     Testing::ScriptedDialer up { { Accepted() } };
     CHECK(fixture.SendThrough(up));
     CHECK(recoveries() == 1);
+}
+
+TEST_CASE("MachineBudget.pressure-allowance-lowers-the-budget-and-carries-the-level", "[node][machinebudget][pressure]")
+{
+    // C6: a yielding machine reports what compiles held when the pressure began as its whole budget, and the level
+    // that tells the queue to admit nothing new on it. Derived from `MachineBudgetOf` itself (R3), not a figure.
+    auto const machine = MachineOf(16, 96 * GiB);
+    auto const derived = MachineBudgetOf(NodeConfig {}, machine, HeldCharges {}).memoryBudgetBytes;
+    REQUIRE(derived > 30 * GiB);
+
+    auto const yielding =
+        MachineBudgetOf(NodeConfig {},
+                        machine,
+                        HeldCharges {},
+                        MachinePressure { .level = Wire::PressureLevel::Yield, .allowanceBytes = 30 * GiB });
+    CHECK(yielding.memoryBudgetBytes == 30 * GiB);
+    CHECK(yielding.pressure == Wire::PressureLevel::Yield);
+
+    // The allowance only ever LOWERS: one above the configured budget leaves the budget as configured.
+    auto const ramped =
+        MachineBudgetOf(NodeConfig {},
+                        machine,
+                        HeldCharges {},
+                        MachinePressure { .level = Wire::PressureLevel::Calm, .allowanceBytes = derived + GiB });
+    CHECK(ramped.memoryBudgetBytes == derived);
+    CHECK(ramped.pressure == Wire::PressureLevel::Calm);
+
+    // No watcher is calm and unlowered.
+    auto const unwatched = MachineBudgetOf(NodeConfig {}, machine, HeldCharges {});
+    CHECK(unwatched.memoryBudgetBytes == derived);
+    CHECK(unwatched.pressure == Wire::PressureLevel::Calm);
+
+    // And the report carries both onto the wire.
+    auto const wire = MachineBudgetToWire(yielding, {});
+    CHECK(wire.memoryBudgetBytes == 30 * GiB);
+    CHECK(wire.pressure == Wire::PressureLevel::Yield);
+}
+
+TEST_CASE("MachineBudget.allowance-held-budget-says-so-at-every-level", "[node][machinebudget][pressure]")
+{
+    // F2: a Calm machine whose allowance is still ramping back reports a budget below its configured one, and says
+    // so, so the queue does not let a compile larger than that run alone there and be killed by the ceiling.
+    auto const machine = MachineOf(16, 96 * GiB);
+    auto const derived = MachineBudgetOf(NodeConfig {}, machine, HeldCharges {}).memoryBudgetBytes;
+    REQUIRE(derived > 30 * GiB);
+
+    auto const ramping = MachineBudgetOf(NodeConfig {},
+                                         machine,
+                                         HeldCharges {},
+                                         MachinePressure { .level = Wire::PressureLevel::Calm, .allowanceBytes = 30 * GiB });
+    CHECK(ramping.pressure == Wire::PressureLevel::Calm);
+    CHECK(ramping.standing == Wire::BudgetStanding::HeldByAllowance);
+    CHECK(MachineBudgetToWire(ramping, {}).standing == Wire::BudgetStanding::HeldByAllowance);
+
+    // Ramped all the way back the watcher publishes no allowance, and that is the configuration; no watcher is too.
+    auto const ramped = MachineBudgetOf(NodeConfig {},
+                                        machine,
+                                        HeldCharges {},
+                                        MachinePressure { .level = Wire::PressureLevel::Calm, .allowanceBytes = {} });
+    CHECK(ramped.standing == Wire::BudgetStanding::Configured);
+    CHECK(MachineBudgetOf(NodeConfig {}, machine, HeldCharges {}).standing == Wire::BudgetStanding::Configured);
+}
+
+TEST_CASE("MachineBudget.typed-limit-above-budget-is-held-until-the-ceiling-is-back", "[node][machinebudget][pressure]")
+{
+    // A `--compile-memory-limit` typed above the machine budget: the ceiling is the limit, the queue's budget the
+    // smaller figure. An allowance ramping back between the two reports the WHOLE budget -- yet `compiles/memory.max`
+    // still stands below the limit, so a compile run alone on that budget would meet a ceiling lower than configured.
+    auto const machine = MachineOf(16, 96 * GiB);
+    auto const derived = MachineBudgetOf(NodeConfig {}, machine, HeldCharges {}).memoryBudgetBytes;
+    auto cfg = NodeConfig {};
+    cfg.compileMemoryLimitBytes = derived + (8 * GiB);
+    REQUIRE(CompileCeilingOf(cfg, machine) == derived + (8 * GiB));
+
+    auto const between =
+        MachineBudgetOf(cfg,
+                        machine,
+                        HeldCharges {},
+                        MachinePressure { .level = Wire::PressureLevel::Calm, .allowanceBytes = derived + GiB });
+    CHECK(between.memoryBudgetBytes == derived);
+    CHECK(between.standing == Wire::BudgetStanding::HeldByAllowance);
+
+    // Configured only once the ceiling is: the watcher hands on no allowance once it reaches the limit.
+    auto const back = MachineBudgetOf(
+        cfg, machine, HeldCharges {}, MachinePressure { .level = Wire::PressureLevel::Calm, .allowanceBytes = {} });
+    CHECK(back.memoryBudgetBytes == derived);
+    CHECK(back.standing == Wire::BudgetStanding::Configured);
 }

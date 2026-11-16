@@ -470,7 +470,7 @@ TEST_CASE("node_status carries 64-bit figures exactly and marks a value that is 
     CHECK(At(settings[0], "non_utf8").AsBool() == std::optional { true });
     auto const& values = Elements(At(settings[0], "values"));
     REQUIRE(values.size() == 1);
-    CHECK(*values.front().AsString() == "<non-utf8: /var/cache/p\\xFF>");
+    CHECK(Unwrap(values.front().AsString()) == "<non-utf8: /var/cache/p\\xFF>");
     CHECK(text.find("\xef\xbf\xbd") == std::string::npos);
     CHECK(At(settings[1], "non_utf8").AsBool() == std::optional { false });
 }

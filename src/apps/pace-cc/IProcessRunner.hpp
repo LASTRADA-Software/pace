@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include "OomVictimExec.hpp"
+
+#include <Pace/Platform/JobCgroups.hpp>
+
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -40,6 +44,16 @@ struct CompileRun
     /// measured -- the process was not spawned, or the platform declined to answer -- and never 0
     /// for "unknown": a caller charging a memory budget must tell *nothing measured* from *tiny*.
     std::optional<std::uint64_t> peakMemoryBytes { std::nullopt };
+
+    /// Set when the process was ended by `SIGKILL` (POSIX), and why: a compiler killed is not a
+    /// compiler that failed. `exitCode` stays `128 + 9`. Precedence when several apply: `Shed`, then
+    /// `Ceiling`, then `Signal`.
+    std::optional<Platform::CompileKill> killed { std::nullopt };
+
+    /// Whether the child was started INSIDE the job cgroup its runner made for it -- and so under whatever
+    /// ceiling that cgroup's parent holds. False for a runner with no cgroup source, one that could not make a
+    /// cgroup, and one the system would not place the child in: each ran it where the spawner is (#1770).
+    bool inCgroup {};
 };
 
 /// One environment variable a spawn ADDS to the environment it inherits.
@@ -172,24 +186,28 @@ enum class PeakSource : std::uint8_t
 
 /// Whether this build can start a process directly inside a cgroup (`posix_spawnattr_setcgroup_np`:
 /// Linux with glibc 2.39 or newer).
-/// @return True when `MakeProcessRunner(std::shared_ptr<Platform::IJobCgroupSource>)` can measure.
+/// @return True when `MakeProcessRunner(std::shared_ptr<Platform::IJobCgroupSource>, std::optional<OomVictim>)` can
+///         measure.
 [[nodiscard]] bool CanSpawnIntoCgroups() noexcept;
 
-/// Create the process runner for the host platform, measuring a child's peak as `PeakSource::ResourceUsage`.
+/// Create the process runner for the host platform, measuring a child's peak as `PeakSource::ResourceUsage` and
+/// spawning each child directly, at the spawner's own OOM score.
 ///
 /// **Right for the launcher and wrong for a node ON LINUX.** There the `ru_maxrss` of a spawned child
 /// INCLUDES the resident set of the process that spawned it (`exec` folds the old address space's
 /// high-water mark into the child, and `posix_spawn` shares the parent's), so a parent holding gigabytes
 /// reports every child as holding them. The launcher is small; the node is not, and uses
-/// `MakeProcessRunner(PeakSource)` or the cgroup form. macOS makes a fresh task for the child, so its
-/// `ru_maxrss` is the child's own; Windows measures through the job object it already runs the child in.
+/// `MakeProcessRunner(PeakSource, std::optional<OomVictim>)` or the cgroup form. macOS makes a fresh task for the child, so
+/// its `ru_maxrss` is the child's own; Windows measures through the job object it already runs the child in.
 /// @return A runner spawning real child processes.
 [[nodiscard]] std::unique_ptr<IProcessRunner> MakeProcessRunner();
 
 /// Create the process runner for the host platform with an explicit peak source.
 /// @param peakSource Where the peak comes from on POSIX; Windows measures through its job object either way.
+/// @param oomVictim The shim each child is spawned through, so it starts as the kernel's first OOM victim
+///        (`OomVictimExec.hpp`); disengaged to spawn each child directly. Ignored on Windows.
 /// @return A runner spawning real child processes.
-[[nodiscard]] std::unique_ptr<IProcessRunner> MakeProcessRunner(PeakSource peakSource);
+[[nodiscard]] std::unique_ptr<IProcessRunner> MakeProcessRunner(PeakSource peakSource, std::optional<OomVictim> oomVictim);
 
 /// Create the process runner for the host platform, measuring each child's peak in a cgroup of its own.
 ///
@@ -199,8 +217,18 @@ enum class PeakSource : std::uint8_t
 /// compile matters more than its measurement, and `ru_maxrss` is never the fallback.
 /// A build that `!CanSpawnIntoCgroups()` gets a runner reporting every peak unknown, which never calls
 /// @p cgroups.
+///
+/// Through @p oomVictim, the shim is what the cgroup receives, and it becomes the compiler by `exec`: the peak,
+/// the ceiling and the kill read the same cgroup they read without it.
 /// @param cgroups Makes the per-job cgroups; shared so it outlives every spawn.
+/// @param oomVictim The shim each child is spawned through, so it starts as the kernel's first OOM victim
+///        (`OomVictimExec.hpp`); disengaged to spawn each child directly. Ignored on Windows.
+/// @param outsideCgroup Where the peak of a child that ran OUTSIDE a cgroup comes from -- none could be made,
+///        the system refused, or the build cannot place one. `Unmeasured` for a node, whose `ru_maxrss` includes its
+///        own resident set; `ResourceUsage` for the launcher, which is small (#1770).
 /// @return A runner spawning real child processes.
-[[nodiscard]] std::unique_ptr<IProcessRunner> MakeProcessRunner(std::shared_ptr<Platform::IJobCgroupSource> cgroups);
+[[nodiscard]] std::unique_ptr<IProcessRunner> MakeProcessRunner(std::shared_ptr<Platform::IJobCgroupSource> cgroups,
+                                                                std::optional<OomVictim> oomVictim,
+                                                                PeakSource outsideCgroup = PeakSource::Unmeasured);
 
 } // namespace Pace::Cc

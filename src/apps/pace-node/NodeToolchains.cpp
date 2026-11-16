@@ -196,16 +196,27 @@ namespace
                 // during the walk, and a figure printed after it finishes is one the
                 // failing case never reaches.
                 ToolchainHashProgress progress { count, ToolchainHashProgress::DefaultInterval, clock, logger };
-                return inner.Run(count, [&slice, &progress, this](std::size_t index) {
+                // A slice skipped for the stop did NOT run, and `Run`'s answer says so: it is what
+                // `ProbeToolchainFiles` folds into `complete`, and a walk reported whole after a stop
+                // cut it short is a truncated digest written to the machine-wide cache under a stamp
+                // that validates forever -- served by every later node on the machine, and refused by
+                // every client that walked the tree itself.
+                std::atomic<bool> skipped { false };
+                auto const everySliceRan = inner.Run(count, [&slice, &progress, &skipped, this](std::size_t index) {
                     // The finest grain a stop can be observed at, and it has to be
                     // this fine: ONE toolchain's walk is the thing measured past
                     // 300 s, so a check only between toolchains would still make a
                     // stopping node wait out a whole one (#365).
                     if (stop.stop_requested())
+                    {
+                        skipped.store(true, std::memory_order_relaxed);
                         return;
+                    }
                     slice(index);
                     progress.Observe();
                 });
+                // Read after `inner.Run` has joined every slice, so relaxed is enough.
+                return everySliceRan && !skipped.load(std::memory_order_relaxed);
             }
         };
         AnnouncingParallelFor announcing { parallel, clock, logger, stop, voice };

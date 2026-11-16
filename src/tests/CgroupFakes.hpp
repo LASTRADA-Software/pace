@@ -28,18 +28,22 @@ class FakeCgroupHost final: public Platform::ICgroupHost
     std::set<std::string> unmakeable;               ///< Directories `mkdir` is refused for.
     std::set<std::string> unwritable;               ///< Files `IsWritable` denies.
     std::map<std::string, std::errc> writeRefusals; ///< Files whose write is refused.
+    std::map<std::string, std::errc> xattrRefusals; ///< Directories whose `setxattr` is refused.
+    std::map<std::string, std::errc> listRefusals;  ///< Directories whose listing is refused.
     std::set<std::string> busyRemovals;             ///< Directories `rmdir` answers busy for, this many times.
     std::uint32_t busyFor { 0 };                    ///< How many `rmdir`s of a busy directory fail.
     /// What probing a spawn into a cgroup answers: `no_such_file_or_directory` is success (see the real probe).
     std::errc spawnProbe { std::errc::no_such_file_or_directory };
-    mutable std::vector<std::string> trail;      ///< Every mutation,
-    mutable std::uint32_t pauses { 0 };          ///< `Pause` calls.
-    mutable std::uint32_t removalAttempts { 0 }; ///< `RemoveCgroupDirectory` calls.
-    mutable int nextDescriptor { 1000 };         ///< The next descriptor `OpenDirectory` hands out.
-    mutable std::vector<int> closed;             ///< Descriptors closed,
+    mutable std::vector<std::string> trail;             ///< Every mutation,
+    mutable std::uint32_t pauses { 0 };                 ///< `Pause` calls.
+    mutable std::uint32_t removalAttempts { 0 };        ///< `RemoveCgroupDirectory` calls.
+    mutable int nextDescriptor { 1000 };                ///< The next descriptor `OpenDirectory` hands out.
+    mutable std::vector<int> closed;                    ///< Descriptors closed,
+    mutable std::map<std::string, std::uint32_t> reads; ///< How often each path was read.
 
     [[nodiscard]] std::expected<std::string, std::error_code> ReadFile(std::filesystem::path const& path) const override
     {
+        ++reads[path.generic_string()];
         if (auto const found = files.find(path.generic_string()); found != files.end())
             return found->second;
         return std::unexpected { std::make_error_code(std::errc::no_such_file_or_directory) };
@@ -79,6 +83,8 @@ class FakeCgroupHost final: public Platform::ICgroupHost
     [[nodiscard]] std::expected<std::vector<std::string>, std::error_code> ListDirectory(
         std::filesystem::path const& path) const override
     {
+        if (auto const refused = listRefusals.find(path.generic_string()); refused != listRefusals.end())
+            return std::unexpected { std::make_error_code(refused->second) };
         auto names = std::vector<std::string> {};
         for (auto const& directory: directories)
             if (std::filesystem::path { directory }.parent_path() == path)
@@ -116,6 +122,16 @@ class FakeCgroupHost final: public Platform::ICgroupHost
     void Pause(std::chrono::microseconds /*duration*/) const override
     {
         ++pauses;
+    }
+
+    [[nodiscard]] std::expected<void, std::error_code> SetExtendedAttribute(std::filesystem::path const& path,
+                                                                            std::string_view name,
+                                                                            std::string_view value) const override
+    {
+        if (auto const refused = xattrRefusals.find(path.generic_string()); refused != xattrRefusals.end())
+            return std::unexpected { std::make_error_code(refused->second) };
+        trail.push_back("xattr " + path.generic_string() + " " + std::string { name } + "=" + std::string { value });
+        return {};
     }
 };
 

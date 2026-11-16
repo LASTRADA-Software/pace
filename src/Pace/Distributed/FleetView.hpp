@@ -184,6 +184,11 @@ struct AdmissionMachineRow
     std::uint64_t chargedBytes {};            ///< What the queue has charged it.
     std::uint64_t inUseBytes {};              ///< What admission counts as used: `max(charged, held by its report)`.
     std::optional<std::uint64_t> budgetBytes; ///< Its own stated budget; absent until it reports one.
+    /// How hard its memory is pressed, as its last budget report said; absent until it reports one (#1771).
+    std::optional<PressureLevel> pressure {};
+    /// What holds `budgetBytes` where it is -- its configuration, or the pressure allowance; absent until it
+    /// reports one (#1771).
+    std::optional<BudgetStanding> standing {};
 };
 
 /// What the leader's compile queue looks like right now.

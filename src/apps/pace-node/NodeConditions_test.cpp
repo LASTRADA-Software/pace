@@ -1,20 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "AdminEndpoint.hpp"
 #include "BudgetOverrideApplier.hpp"
+#include "CompileMemoryMeter.hpp"
 #include "ConsensusTier.hpp"
 #include "DiscoveryTier.hpp"
 #include "EnrollmentWindow.hpp"
 #include "FormationLoop.hpp"
 #include "FormationRuntime.hpp"
+#include "LiveNodeConfig.hpp"
 #include "NodeAnnounce.hpp"
 #include "NodeConditions.hpp"
 #include "NodeConfig.hpp"
 #include "NodeDefaults.hpp"
 #include "NodeMembership.hpp"
+#include "NodePresenceTier.hpp"
 #include "NodeProofClient.hpp"
 #include "NodeRoster.hpp"
 #include "NodeStateFiles.hpp"
 #include "NodeStatusText.hpp"
+#include "PressureWatcher.hpp"
 #include "SchedulerReachability.hpp"
 #include "SchedulerTier.hpp"
 #include "SharedCacheResponder.hpp"
@@ -53,6 +57,7 @@
 #include <core/net/BlockingConnector.hpp>
 #include <core/net/BlockingSocket.hpp>
 #include <core/platform/Clock.hpp>
+#include <tests/CgroupFakes.hpp>
 #include <tests/FormationFakes.hpp>
 #include <tests/HostNamingFakes.hpp>
 #include <tests/ManualClockWait.hpp>
@@ -350,6 +355,36 @@ TEST_CASE("Every condition row is evaluated on a fully configured node", "[node]
     Platform::SystemReplacingRename const replaceRename;
     REQUIRE(ReportReplaceRoute(replaceState.Path(), replaceFiles, replaceRename, logger, metrics, conditions).has_value());
 
+    // And the memory-pressure watcher, which every node starts: PSI read through the same source `main` builds, over
+    // a cgroup tree whose system file answers (no compiles cgroup -- no worker prepared one here). Not launched: the
+    // row is answered at `Start`.
+    auto psiHost = std::make_shared<Pace::Testing::FakeCgroupHost>();
+    psiHost->files[std::string { Platform::PsiSystemPath }] = "some avg10=0.00 avg60=0.00 avg300=0.00 total=0\n"
+                                                              "full avg10=0.00 avg60=0.00 avg300=0.00 total=0\n";
+    core::platform::ManualClock pressureClock;
+    FixedNodeCapacity const pressureCapacity { Distributed::NodeCapacity { .logicalCores = 4 } };
+    auto const pressureBody = Testing::FirstStart(NodeConfig {});
+    LiveNodeConfig const pressureConfig { pressureBody, nullptr };
+    LivePressureSettings const pressureSettings { pressureConfig, pressureCapacity };
+    HeldChargeRegistry pressureHeld;
+    PublishedPressure published;
+    PresenceWake presenceWake;
+    PressureWatcher pressure { PressureWatcherParts {
+        .source = std::make_unique<Platform::PsiPressureSource>(psiHost, std::nullopt),
+        .settings = pressureSettings,
+        .ceiling = nullptr,
+        .killer = nullptr,
+        .held = pressureHeld,
+        .published = published,
+        .wake = presenceWake,
+        .conditions = conditions,
+        .metrics = metrics,
+        .logger = logger,
+        .clock = pressureClock } };
+    // Started on every platform, as `main` starts it: where PSI is Linux's alone, `Start` refuses by design and the row
+    // is answered `not-evaluated` with the platform's reason -- still answered, so still not `undecided`.
+    CHECK(pressure.Start(false).has_value() == ThisPlatformHasPsi);
+
     // The consensus scope: the membership a consensus node builds.
     auto clustered = Testing::FirstStart(NodeConfig {});
     NodeMembership membership { clustered, membershipLog };
@@ -389,6 +424,13 @@ TEST_CASE("Every condition row is evaluated on a fully configured node", "[node]
     auto const workerTier = worker.Start();
     REQUIRE(workerTier.has_value());
     REQUIRE(*workerTier != nullptr);
+    // And the worker's compile ceiling, put in force where `main` puts it, once the worker exists: it answers
+    // `compile-memory-uncapped`, which the worker tier leaves to it. Over a tree that delegates nothing, so the
+    // answer is the same whatever this build can spawn into.
+    auto const ceilingHost = std::make_shared<Pace::Testing::FakeCgroupHost>();
+    CompileMemoryMeter ceilingMeter { ceilingHost, MeterPlatform::Linux };
+    static_cast<void>(ceilingMeter.MakeRunner(metrics, logger));
+    PutCompileCeilingInForce(ceilingMeter, worker.cfg, worker.capacity, conditions, logger);
 
     // The enrollment scope.
     core::platform::ManualClock windowClock;

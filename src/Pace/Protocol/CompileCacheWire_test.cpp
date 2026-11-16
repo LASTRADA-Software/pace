@@ -93,8 +93,11 @@ TEST_CASE("The wire constants have their specified byte values", "[wire]")
     // grant names the worker's key and a compile reply is signed by it, NODE-ANNOUNCE carries join
     // memos, and four verbs are new and three retired. No reader steps over any of it, so both
     // move, and a version-14 peer is refused BY NUMBER (the case below the range test).
-    CHECK(CurrentVersion == 17);
-    CHECK(MinSupportedVersion == 17);
+    //
+    // Version 18 adds the pressure level to MACHINE-BUDGET, a sixth field the exact-arity decoder
+    // cannot step over in either direction, so both move.
+    CHECK(CurrentVersion == 18);
+    CHECK(MinSupportedVersion == 18);
     CHECK(RequestHeaderSize == 7);
     CHECK(ReplyHeaderSize == 5);
 
@@ -140,7 +143,7 @@ TEST_CASE("EncodeFetch emits the specified bytes exactly", "[wire]")
     // clang-format off: the grid IS the specification -- one wire field per row.
     auto const expected = Bytes({
         0xFC,                   // magic
-        0x11,                   // version
+        0x12,                   // version
         0x02,                   // op = Fetch
         0x00, 0x00, 0x00, 0x06, // payloadLength = 6
         0x00, 0x00, 0x00, 0x02, // field[0] length = 2
@@ -159,7 +162,7 @@ TEST_CASE("EncodeStore emits the specified bytes exactly", "[wire]")
 
     auto const expected = Bytes({
         0xFC,                               // magic
-        0x11,                               // version
+        0x12,                               // version
         0x01,                               // op = Store
         0x00, 0x00, 0x00, 0x19,             // payloadLength = 25 = (4+1) + (4+0) + (4+1) + (4+1) + (4+2)
         0x00, 0x00, 0x00, 0x01, 0x6B,       // key           = "k"
@@ -358,7 +361,7 @@ TEST_CASE("EncodeCacheDrop emits the specified bytes exactly", "[wire][cache-dro
     // clang-format off: the grid IS the specification -- one wire field per row.
     auto const expected = Bytes({
         0xFC,                   // magic
-        0x11,                   // version
+        0x12,                   // version
         0x15,                   // op = CacheDrop
         0x00, 0x00, 0x00, 0x06, // payloadLength = 6
         0x00, 0x00, 0x00, 0x02, // field[0] length = 2
@@ -551,16 +554,18 @@ TEST_CASE("A version-14 peer is outside the range by NUMBER: the flag day leaves
     // constant says. 14 is the grammar before the office-fleet flag day -- AUTH of two fields, LEASE of
     // three, an unsigned compile reply -- and nothing in this build reads it. 15 is the one before the
     // admission queue (#1728): its client cannot read an ADMIT pulse, so it is refused by number too,
-    // and 16 is the one before FLEET-TEXT carried a format field.
+    // and 16 is the one before FLEET-TEXT carried a format field, 17 the one before MACHINE-BUDGET
+    // carried a pressure level.
     CHECK_FALSE(IsSupported(14));
     CHECK_FALSE(IsSupported(15));
     CHECK_FALSE(IsSupported(16));
-    CHECK(IsSupported(17));
-    CHECK_FALSE(IsSupported(18));
+    CHECK_FALSE(IsSupported(17));
+    CHECK(IsSupported(18));
+    CHECK_FALSE(IsSupported(19));
     // And the byte every request this build sends carries.
     auto const frame = EncodeFetch("ab");
     REQUIRE(frame.size() > 1);
-    CHECK(std::to_integer<unsigned>(frame[1]) == 0x11);
+    CHECK(std::to_integer<unsigned>(frame[1]) == 0x12);
 }
 
 // --- AUTH ------------------------------------------------------------------
@@ -570,7 +575,7 @@ TEST_CASE("EncodeAuth emits the specified bytes exactly", "[wire]")
     auto const frame = EncodeAuth(AuthRequest { .username = "bob", .secret = "hunter2" });
 
     auto const expected = Bytes({
-        0xFC, 0x11, 0x03,             // magic, version, op=Auth
+        0xFC, 0x12, 0x03,             // magic, version, op=Auth
         0x00, 0x00, 0x00, 0x17,       // payload length: (4+1) + (4+3) + (4+7) = 23
         0x00, 0x00, 0x00, 0x01, 0x01, // kind = Password
         0x00, 0x00, 0x00, 0x03, 'b',  'o', 'b', 0x00, 0x00, 0x00, 0x07, 'h', 'u', 'n', 't', 'e', 'r', '2',
@@ -4721,7 +4726,7 @@ TEST_CASE("A member admission carries three fields and a version no version-10 p
     {
         REQUIRE(frame.size() > RequestHeaderSize);
         CHECK(std::to_integer<unsigned>(frame[0]) == 0xFC);
-        CHECK(std::to_integer<unsigned>(frame[1]) == 17);
+        CHECK(std::to_integer<unsigned>(frame[1]) == 18);
 
         // No key is a zero-length THIRD field, never a two-field payload: the arity is exact.
         auto const payload = std::span<std::byte const> { frame }.subspan(RequestHeaderSize);
@@ -4921,7 +4926,7 @@ TEST_CASE("NODE-ANNOUNCE carries an endpoint, a capacity, a load and its join me
     CHECK(OpFieldCount(Op::NodeAnnounce) == 4);
     auto const frame = EncodeNodeAnnounce(NodeAnnounceRequest { .endpoint = "10.0.0.2:6674", .capacity = {}, .load = {} });
     REQUIRE(frame.size() > RequestHeaderSize);
-    CHECK(std::to_integer<unsigned>(frame[1]) == 17);
+    CHECK(std::to_integer<unsigned>(frame[1]) == 18);
     auto const payload = std::span<std::byte const> { frame }.subspan(RequestHeaderSize);
     auto const fields = WireFields::SplitExactly(payload, 4);
     REQUIRE(fields.has_value());
@@ -5753,11 +5758,11 @@ template <std::size_t N>
 }
 } // namespace
 
-TEST_CASE("A MINT-TICKET request at version 17 is exactly these bytes", "[wire][ticket]")
+TEST_CASE("A MINT-TICKET request at version 18 is exactly these bytes", "[wire][ticket]")
 {
     // clang-format off
     auto const golden = Bytes({
-        0xFC, 0x11, 0x1E,             // magic, version 17, op = MintTicket
+        0xFC, 0x12, 0x1E,             // magic, version 18, op = MintTicket
         0x00, 0x00, 0x00, 0x07,       // payload = 4 + 3
         0x00, 0x00, 0x00, 0x03, 'h', ':', '1', // audience
     });
@@ -5767,12 +5772,12 @@ TEST_CASE("A MINT-TICKET request at version 17 is exactly these bytes", "[wire][
           == std::optional<std::string> { "h:1" });
 }
 
-TEST_CASE("A FLEET-SUMMARY request and its reply at version 17 are exactly these bytes", "[wire][formation]")
+TEST_CASE("A FLEET-SUMMARY request and its reply at version 18 are exactly these bytes", "[wire][formation]")
 {
     auto const nonce = FilledArray<NodeChallengeBytes>(0x11);
     // clang-format off
     auto const request = Join({ Bytes({
-        0xFC, 0x11, 0x1F,             // magic, version 17, op = FleetSummary
+        0xFC, 0x12, 0x1F,             // magic, version 18, op = FleetSummary
         0x00, 0x00, 0x00, 0x24,       // payload = 4 + 32
         0x00, 0x00, 0x00, 0x20,       // nonce, 32 bytes
     }), Filled(NodeChallengeBytes, 0x11) });
@@ -5794,7 +5799,7 @@ TEST_CASE("A FLEET-SUMMARY request and its reply at version 17 are exactly these
     CHECK(DecodeFleetSummaryReply(golden) == std::optional { reply });
 }
 
-TEST_CASE("A LEASE request at version 17 is its six fields in this order, exactly these bytes", "[wire][lease]")
+TEST_CASE("A LEASE request at version 18 is its six fields in this order, exactly these bytes", "[wire][lease]")
 {
     // fingerprint, key, codecs, exclusions (nested), toolchain label, ask origin -- the order lane 0 fixes here.
     auto const excluded = std::array<std::string_view, 1> { "e:1" };
@@ -5802,7 +5807,7 @@ TEST_CASE("A LEASE request at version 17 is its six fields in this order, exactl
         .fingerprint = "f", .key = "k", .acceptedCodecs = { 0x01 }, .excluded = excluded, .toolchainLabel = "L" });
     // clang-format off
     auto const golden = Bytes({
-        0xFC, 0x11, 0x06,             // magic, version 17, op = Lease
+        0xFC, 0x12, 0x06,             // magic, version 18, op = Lease
         0x00, 0x00, 0x00, 0x24,       // payload = 5 + 5 + 5 + 11 + 5 + 5 = 36
         0x00, 0x00, 0x00, 0x01, 'f',  // fingerprint
         0x00, 0x00, 0x00, 0x01, 'k',  // key
@@ -5821,7 +5826,7 @@ TEST_CASE("A LEASE request at version 17 is its six fields in this order, exactl
     CHECK(AsStringView(Unwrap(decoded).toolchainLabel) == "L");
 }
 
-TEST_CASE("A LEASE grant at version 17 is its six fields, exactly these bytes, with and without a hint and a key",
+TEST_CASE("A LEASE grant at version 18 is its six fields, exactly these bytes, with and without a hint and a key",
           "[wire][lease]")
 {
     // endpoint, token, codecs, lifetime (u32 milliseconds), dial hint, worker key.
@@ -5857,7 +5862,7 @@ TEST_CASE("A LEASE grant at version 17 is its six fields, exactly these bytes, w
     CHECK(Unwrap(DecodeLeaseGrant(withNeither)).workerKey.empty());
 }
 
-TEST_CASE("A COMPILE reply at version 17 carries the worker's signature sixth, exactly these bytes", "[wire][compile]")
+TEST_CASE("A COMPILE reply at version 18 carries the worker's signature sixth, exactly these bytes", "[wire][compile]")
 {
     auto const object = Bytes({ 0xAA });
     auto const correlation = Bytes({ 0xC0, 0xC1 });
@@ -5926,7 +5931,7 @@ TEST_CASE("A worker's interface addresses ride the tenth field of REGISTER's cap
     CHECK(std::ranges::equal(Unwrap(loadFields)[7], golden));
 }
 
-TEST_CASE("An ENROLL request at version 17 is its seven fields, exactly these bytes, first ask and answer",
+TEST_CASE("An ENROLL request at version 18 is its seven fields, exactly these bytes, first ask and answer",
           "[wire][enrollment]")
 {
     // nodeId, nodeEndpoint, role, publicKey, nonce, challenge (empty on a first ask), signature.
@@ -5948,7 +5953,7 @@ TEST_CASE("An ENROLL request at version 17 is its seven fields, exactly these by
         0x00, 0x00, 0x00, 0x20,                  // public key
     });
     // clang-format on
-    auto const firstAsk = Join({ Bytes({ 0xFC, 0x11, 0x10, 0x00, 0x00, 0x00, 0xA1 }), // Enroll, payload 161
+    auto const firstAsk = Join({ Bytes({ 0xFC, 0x12, 0x10, 0x00, 0x00, 0x00, 0xA1 }), // Enroll, payload 161
                                  head,
                                  key,
                                  Bytes({ 0x00, 0x00, 0x00, 0x20 }), // nonce
@@ -5961,7 +5966,7 @@ TEST_CASE("An ENROLL request at version 17 is its seven fields, exactly these by
 
     auto const challenge = Filled(NodeChallengeBytes, 0x45);
     request.challenge = challenge;
-    auto const answer = Join({ Bytes({ 0xFC, 0x11, 0x10, 0x00, 0x00, 0x00, 0xC1 }), // payload 161 + 32
+    auto const answer = Join({ Bytes({ 0xFC, 0x12, 0x10, 0x00, 0x00, 0x00, 0xC1 }), // payload 161 + 32
                                head,
                                key,
                                Bytes({ 0x00, 0x00, 0x00, 0x20 }),
@@ -5976,7 +5981,7 @@ TEST_CASE("An ENROLL request at version 17 is its seven fields, exactly these by
     REQUIRE(Unwrap(decoded).challenge.has_value());
 }
 
-TEST_CASE("An ENROLL reply at version 17 is its five fields, exactly these bytes, pending and approved",
+TEST_CASE("An ENROLL reply at version 18 is its five fields, exactly these bytes, pending and approved",
           "[wire][enrollment]")
 {
     // outcome, roster, challenge, the answering node's key, its signature.
@@ -6007,7 +6012,7 @@ TEST_CASE("An ENROLL reply at version 17 is its five fields, exactly these bytes
     CHECK(std::ranges::equal(Unwrap(DecodeEnrollReply(approved)).roster, roster));
 }
 
-TEST_CASE("An enrollment report row at version 17 is its twelve facts, exactly these bytes", "[wire][enrollment]")
+TEST_CASE("An enrollment report row at version 18 is its twelve facts, exactly these bytes", "[wire][enrollment]")
 {
     auto const report = EnrollmentReport {
         .state = WireEnrollmentState::Manual,
@@ -6054,7 +6059,7 @@ TEST_CASE("An enrollment report row at version 17 is its twelve facts, exactly t
     CHECK(Unwrap(decoded).pending[0].attempts == 2);
 }
 
-TEST_CASE("A NODE-ANNOUNCE at version 17 carries its join memos fourth, exactly these bytes", "[wire][roster]")
+TEST_CASE("A NODE-ANNOUNCE at version 18 carries its join memos fourth, exactly these bytes", "[wire][roster]")
 {
     // The endpoint and the memos as literal bytes, at their positions; the capacity and load records
     // between them are pinned where they are defined.
@@ -6064,7 +6069,7 @@ TEST_CASE("A NODE-ANNOUNCE at version 17 carries its join memos fourth, exactly 
         EncodeNodeAnnounce(NodeAnnounceRequest { .endpoint = "n:1", .capacity = {}, .load = {}, .joinMemos = memos });
     REQUIRE(frame.size() > RequestHeaderSize);
     CHECK(std::to_integer<unsigned>(frame[0]) == 0xFC);
-    CHECK(std::to_integer<unsigned>(frame[1]) == 0x11);
+    CHECK(std::to_integer<unsigned>(frame[1]) == 0x12);
     CHECK(std::to_integer<unsigned>(frame[2]) == 0x1A); // op = NodeAnnounce
     auto const fields = WireFields::SplitExactly(std::span<std::byte const> { frame }.subspan(RequestHeaderSize), 4);
     REQUIRE(fields.has_value());
@@ -6236,11 +6241,12 @@ TEST_CASE("ADMIT and LEASE carry the ask origin as their last byte, pinned", "[w
     // The VALUES travel: a leader that read another byte as `AfterGrant` would stop counting first asks.
     CHECK(static_cast<std::uint8_t>(AskOrigin::First) == 0);
     CHECK(static_cast<std::uint8_t>(AskOrigin::AfterGrant) == 1);
-    CHECK(static_cast<std::uint8_t>(AskOrigin::Last) == 2);
+    CHECK(static_cast<std::uint8_t>(AskOrigin::AfterKill) == 2);
+    CHECK(static_cast<std::uint8_t>(AskOrigin::Last) == 3);
     CHECK(OpFieldCount(Op::Admit) == 10);
     CHECK(OpFieldCount(Op::Lease) == 6);
 
-    for (auto const origin: { AskOrigin::First, AskOrigin::AfterGrant })
+    for (auto const origin: { AskOrigin::First, AskOrigin::AfterGrant, AskOrigin::AfterKill })
     {
         INFO("origin " << static_cast<int>(origin));
         auto admit = SampleAdmit({});
@@ -6275,11 +6281,12 @@ TEST_CASE("ADMIT and LEASE carry the ask origin as their last byte, pinned", "[w
     for (auto const op: { Op::Admit, Op::Lease })
     {
         auto const& frame = op == Op::Admit ? admitFrame : leaseFrame;
-        CHECK(refuses(frame, op, Bytes({ 2 })));
+        CHECK(refuses(frame, op, Bytes({ 3 })));
         CHECK(refuses(frame, op, Bytes({ 0, 0 })));
         CHECK(refuses(frame, op, {}));
         // The control: a known byte is read.
         CHECK_FALSE(refuses(frame, op, Bytes({ 1 })));
+        CHECK_FALSE(refuses(frame, op, Bytes({ 2 })));
     }
 }
 
@@ -6417,7 +6424,11 @@ TEST_CASE("An ADMIT grant round-trips what the leader decided", "[wire][admissio
     }
     SECTION("a local grant says why a dispatchable request did not go to a worker")
     {
-        for (auto const reason: { LocalGrantReason::NoWorker, LocalGrantReason::AllExcluded, LocalGrantReason::NoRoom })
+        for (auto const reason: { LocalGrantReason::NoWorker,
+                                  LocalGrantReason::AllExcluded,
+                                  LocalGrantReason::NoRoom,
+                                  LocalGrantReason::NeverFits,
+                                  LocalGrantReason::RunsAlone })
         {
             auto const local = DecodeAdmitGrant(EncodeAdmitGrant(AdmitGrant { .kind = GrantKind::Local,
                                                                               .endpoint = {},
@@ -6544,6 +6555,80 @@ TEST_CASE("A MACHINE-BUDGET report round-trips with no peaks and with three", "[
     auto const threeBack = DecodeMachineBudgetPayload(PayloadOfFrame(EncodeMachineBudget(three)));
     REQUIRE(threeBack.has_value());
     CHECK(Unwrap(threeBack) == three);
+}
+
+TEST_CASE("A MACHINE-BUDGET report carries its pressure level, one byte, and refuses one past the last",
+          "[wire][admission][machine-budget]")
+{
+    auto report = MachineBudgetReport { .memoryBudgetBytes = 4ULL << 30,
+                                        .slots = 8,
+                                        .heldSlots = 0,
+                                        .heldBytes = 0,
+                                        .peaks = {},
+                                        .pressure = PressureLevel::Calm };
+    for (auto const level: { PressureLevel::Calm, PressureLevel::Yield, PressureLevel::Shed })
+    {
+        report.pressure = level;
+        auto const back = DecodeMachineBudgetPayload(PayloadOfFrame(EncodeMachineBudget(report)));
+        REQUIRE(back.has_value());
+        CHECK(Unwrap(back).pressure == level);
+    }
+
+    // The byte, not only the name: the level is the payload's sixth field of seven, one byte long; the budget
+    // standing follows it.
+    report.pressure = PressureLevel::Shed;
+    auto frame = EncodeMachineBudget(report);
+    auto const fields = WireFields::SplitAll(PayloadOfFrame(frame));
+    REQUIRE(fields.has_value());
+    REQUIRE(Unwrap(fields).size() == 7);
+    CHECK(Unwrap(fields)[5].size() == 1);
+    CHECK(Unwrap(fields)[5][0] == std::byte { 0x02 });
+    CHECK(static_cast<std::uint8_t>(PressureLevel::Calm) == 0x00);
+    CHECK(static_cast<std::uint8_t>(PressureLevel::Yield) == 0x01);
+
+    // A level this build has no reading for is refused, never read as the nearest one it knows. The level is no
+    // longer the frame's last byte -- the standing's field follows it -- so it is found through the split fields.
+    auto const levelAt = static_cast<std::size_t>(Unwrap(fields)[5].data() - frame.data());
+    frame[levelAt] = std::byte { 0x03 };
+    CHECK_FALSE(DecodeMachineBudgetPayload(PayloadOfFrame(frame)).has_value());
+}
+
+TEST_CASE("A MACHINE-BUDGET report carries its budget standing, one trailing byte, and refuses one past the last",
+          "[wire][admission][machine-budget]")
+{
+    auto report = MachineBudgetReport { .memoryBudgetBytes = 2ULL << 30,
+                                        .slots = 8,
+                                        .heldSlots = 0,
+                                        .heldBytes = 0,
+                                        .peaks = {},
+                                        .pressure = PressureLevel::Calm,
+                                        .standing = BudgetStanding::Configured };
+    for (auto const standing: { BudgetStanding::Configured, BudgetStanding::HeldByAllowance })
+    {
+        report.standing = standing;
+        auto const back = DecodeMachineBudgetPayload(PayloadOfFrame(EncodeMachineBudget(report)));
+        REQUIRE(back.has_value());
+        CHECK(Unwrap(back).standing == standing);
+    }
+
+    // The byte, not only the name: the standing is the payload's seventh and last field, one byte long, after the
+    // pressure level -- both inside version 18, which was not released before either landed.
+    report.standing = BudgetStanding::HeldByAllowance;
+    auto frame = EncodeMachineBudget(report);
+    auto const fields = WireFields::SplitAll(PayloadOfFrame(frame));
+    REQUIRE(fields.has_value());
+    REQUIRE(Unwrap(fields).size() == 7);
+    CHECK(Unwrap(fields)[6].size() == 1);
+    CHECK(frame.back() == std::byte { 0x01 });
+    CHECK(static_cast<std::uint8_t>(BudgetStanding::Configured) == 0x00);
+    CHECK(static_cast<std::uint8_t>(BudgetStanding::HeldByAllowance) == 0x01);
+    CHECK(static_cast<std::uint8_t>(BudgetStanding::Last) == 0x02);
+    CHECK(OpFieldCount(Op::MachineBudget) == 7);
+    CHECK(CurrentVersion == 18);
+
+    // A standing this build has no reading for is refused, never read as the nearest one it knows.
+    frame.back() = std::byte { 0x02 };
+    CHECK_FALSE(DecodeMachineBudgetPayload(PayloadOfFrame(frame)).has_value());
 }
 
 TEST_CASE("A MACHINE-BUDGET report over the peak cap is refused rather than truncated", "[wire][admission]")
@@ -6673,21 +6758,25 @@ TEST_CASE("The admission enums have their specified bytes", "[wire][admission]")
     CHECK(static_cast<std::uint8_t>(SettleOutcome::NotStored) == 1);
     CHECK(static_cast<std::uint8_t>(SettleOutcome::Failed) == 2);
     CHECK(static_cast<std::uint8_t>(SettleOutcome::WorkerRefused) == 3);
-    CHECK(static_cast<std::uint8_t>(SettleOutcome::Last) == 4);
+    CHECK(static_cast<std::uint8_t>(SettleOutcome::Killed) == 4);
+    CHECK(static_cast<std::uint8_t>(SettleOutcome::Last) == 5);
 
     CHECK(static_cast<std::uint8_t>(LocalGrantReason::Asked) == 0);
     CHECK(static_cast<std::uint8_t>(LocalGrantReason::NoWorker) == 1);
     CHECK(static_cast<std::uint8_t>(LocalGrantReason::AllExcluded) == 2);
     CHECK(static_cast<std::uint8_t>(LocalGrantReason::NoRoom) == 3);
-    CHECK(static_cast<std::uint8_t>(LocalGrantReason::Last) == 4);
+    CHECK(static_cast<std::uint8_t>(LocalGrantReason::NeverFits) == 4);
+    CHECK(static_cast<std::uint8_t>(LocalGrantReason::RunsAlone) == 5);
+    CHECK(static_cast<std::uint8_t>(LocalGrantReason::Last) == 6);
 }
 
-TEST_CASE("The wire is at version 17 at both ends of its range", "[wire][admission]")
+TEST_CASE("The wire is at version 18 at both ends of its range", "[wire][admission][machine-budget]")
 {
     // ADMIT may be answered with `Status::Progress`, a reply grammar an older client cannot step
-    // over, so the floor moves with the ceiling.
-    CHECK(CurrentVersion == 17);
-    CHECK(MinSupportedVersion == 17);
+    // over, so the floor moved with the ceiling. MACHINE-BUDGET's pressure level is a sixth field
+    // an exact-arity decoder refuses in either direction, so both moved again at 18.
+    CHECK(CurrentVersion == 18);
+    CHECK(MinSupportedVersion == 18);
 }
 
 TEST_CASE("Exactly COMPILE and ADMIT may be answered with a progress pulse", "[wire][admission]")
@@ -6794,4 +6883,35 @@ TEST_CASE("The budget values keep their layout, read back as sent, and refuse a 
     CHECK(decoded.overrideId == 4242);
     CHECK_FALSE(DecodeBudgetBaselineValue(EncodeBudgetClearValue(BudgetClearValue { .tier = 1 })).has_value());
     CHECK_FALSE(DecodeBudgetDropValue(baselineBytes).has_value());
+}
+
+TEST_CASE("An error reply carries a trailer after its message, and a reader of the message never sees it",
+          "[wire][admission][oom]")
+{
+    // #1770: `worker-compile-killed` says what the killed compile held. The words stay words: every reader that
+    // takes the message stops at the separator, and the trailer is eight big-endian bytes.
+    auto const trailer = EncodeKilledPeakTrailer(0x0102030405060708ULL);
+    auto const frame =
+        EncodeErrorReply(ErrorCode::WorkerCompileKilled, "the compiler of a.cpp was killed (ceiling)", trailer);
+    auto const payload = std::span { frame }.subspan(ReplyHeaderSize);
+
+    auto const decoded = Unwrap(DecodeErrorPayload(payload));
+    CHECK(decoded.first == ErrorCode::WorkerCompileKilled);
+    CHECK(decoded.second == "the compiler of a.cpp was killed (ceiling)");
+    CHECK(std::ranges::equal(ErrorTrailerOf(payload), Bytes({ 1, 2, 3, 4, 5, 6, 7, 8 })));
+    CHECK(KilledPeakOf(ErrorTrailerOf(payload)) == std::optional<std::uint64_t> { 0x0102030405060708ULL });
+
+    // With none, the payload is byte for byte what it always was, and there is no peak.
+    auto const plain = EncodeErrorReply(ErrorCode::WorkerCompileKilled, "words");
+    auto const plainPayload = std::span { plain }.subspan(ReplyHeaderSize);
+    CHECK(plainPayload.size() == 1 + std::string_view { "words" }.size());
+    CHECK(ErrorTrailerOf(plainPayload).empty());
+    CHECK_FALSE(KilledPeakOf(ErrorTrailerOf(plainPayload)).has_value());
+    // A trailer of another shape names no peak; a message holding the separator cannot forge one.
+    CHECK_FALSE(KilledPeakOf(Bytes({ 1, 2, 3 })).has_value());
+    auto message = std::string { "a" };
+    message.push_back('\0');
+    message.append(8, '\x01');
+    auto const forged = EncodeErrorReply(ErrorCode::WorkerCompileKilled, message);
+    CHECK(ErrorTrailerOf(std::span { forged }.subspan(ReplyHeaderSize)).empty());
 }

@@ -1158,6 +1158,12 @@ try {
     Write-Host "== scratch root for this run: $scratchRoot"
     $launcherState = Enter-E2ELauncherState -Launcher $Launcher -Fixture $PSCommandPath -RunTrees @($scratchRoot)
     Write-Host "launcher statistics isolated to $($launcherState.Log)"
+    # And every node keeps its state -- the toolchain fingerprint cache its worker walks
+    # into -- in a root of the run's own, apart from the launcher's, so the developer's
+    # cache can neither decide whether launcher and worker agree nor be written by a run
+    # (#1774). Under the scratch root, so it goes with it.
+    $nodeState = New-E2ENodeState -RunRoot $scratchRoot
+    Write-Host "node state isolated to $($nodeState.Root)"
 
     foreach ($driver in $Drivers) {
         $cc = $driver.Name
@@ -1256,13 +1262,15 @@ try {
         # compile verbs answer on --listen-node, and --advertise names it.
         $workerLog = Join-Path $scratch "worker.log"
         $workerState = Join-Path $scratch "worker.state"
-        $worker = Start-Background $Node @(
-            $NoLocalCache, "--fleet-open",
-            "--listen-node=127.0.0.1:$dispatchPort", "--advertise=127.0.0.1:$dispatchPort",
-            "--listen-raft=127.0.0.1:$schedRaftPort", "--raft-self=127.0.0.1",
-            "--cluster-dir=$workerState", "--discovery=",
-            "--toolchain=$ccPath", "--slots=$workerSlots",
-            "--log-level=debug") $workerLog
+        $worker = Use-E2ENodeState $nodeState {
+            Start-Background $Node @(
+                $NoLocalCache, "--fleet-open",
+                "--listen-node=127.0.0.1:$dispatchPort", "--advertise=127.0.0.1:$dispatchPort",
+                "--listen-raft=127.0.0.1:$schedRaftPort", "--raft-self=127.0.0.1",
+                "--cluster-dir=$workerState", "--discovery=",
+                "--toolchain=$ccPath", "--slots=$workerSlots",
+                "--log-level=debug") $workerLog
+        }
         $procs += $worker
         Wait-ForReady Node $dispatchPort $worker "worker" $workerLog
         Wait-ForLine $workerLog "scheduling for the fleet" 60 "worker" | Out-Null
@@ -1678,13 +1686,15 @@ int Entry(void) { return Helper((int) sizeof(size_t)); }
         # only one its scheduler has.
         $isoWorkerLog = Join-Path $scratch "iso-worker.log"
         $isoWorkerState = Join-Path $scratch "iso-worker.state"
-        $isoNode = Start-Background $Node @(
-            $NoLocalCache, "--fleet-open",
-            "--listen-node=127.0.0.1:$isoDispatch", "--advertise=127.0.0.1:$isoDispatch",
-            "--listen-raft=127.0.0.1:$isoRaftPort", "--raft-self=127.0.0.1",
-            "--cluster-dir=$isoWorkerState", "--discovery=",
-            "--toolchain=not-the-compiler-this-client-uses=$ccPath", "--slots=2",
-            "--log-level=debug") $isoWorkerLog
+        $isoNode = Use-E2ENodeState $nodeState {
+            Start-Background $Node @(
+                $NoLocalCache, "--fleet-open",
+                "--listen-node=127.0.0.1:$isoDispatch", "--advertise=127.0.0.1:$isoDispatch",
+                "--listen-raft=127.0.0.1:$isoRaftPort", "--raft-self=127.0.0.1",
+                "--cluster-dir=$isoWorkerState", "--discovery=",
+                "--toolchain=not-the-compiler-this-client-uses=$ccPath", "--slots=2",
+                "--log-level=debug") $isoWorkerLog
+        }
         $procs += $isoNode
         Wait-ForReady Node $isoDispatch $isoNode "isolation worker" $isoWorkerLog
         Wait-ForLine $isoWorkerLog "scheduling for the fleet" 60 "isolation worker" | Out-Null
@@ -1817,6 +1827,10 @@ int Entry(void) { return Helper((int) sizeof(size_t)); }
     $recorded = Get-E2ELauncherStateRecordCount $launcherState
     if ($recorded -lt 1) { throw "the launcher recorded nothing in this run's state log ($($launcherState.Log))" }
     Write-Host "this run's compiles were recorded in its own state log: $recorded record(s)"
+    # And the workers' walks cached into this run's node root, not the caller's.
+    $cachedFingerprints = Get-E2ENodeFingerprintCount $nodeState
+    if ($cachedFingerprints -lt 1) { throw "no node cached a toolchain fingerprint under this run's root ($($nodeState.Root))" }
+    Write-Host "this run's workers cached their toolchain fingerprints in its own node root: $cachedFingerprints entry(ies)"
 
     Write-Host ""
     Write-Host "dist-compile E2E PASSED"
