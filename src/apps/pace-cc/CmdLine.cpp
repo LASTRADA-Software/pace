@@ -651,8 +651,9 @@ namespace
         std::optional<Flavor> onlyFlavor {};
     };
 
-    /// Flags that make a compile write something BESIDES its object file, and one flag,
-    /// `cl`'s `/Yu`, that makes the object depend on a build artefact the key cannot see.
+    /// Flags that make a compile write something BESIDES its object file, and flags (`cl`'s
+    /// `/Yu`, the GNU profile and plugin flags) that make the object depend on a file the key
+    /// cannot see.
     ///
     /// One row per spelling, exactly as PathValues does it and for the same reason:
     /// an MSVC driver accepts `-` for every option, and a row matched on introducer
@@ -664,7 +665,7 @@ namespace
     /// and matches nothing here. It is left out rather than half-matched, because a
     /// row that fires on `-Xclang` alone would un-cache every build that passes any
     /// `-Xclang` flag at all.
-    constexpr std::array<SideArtefactFlag, 25> SideArtefacts { {
+    constexpr std::array<SideArtefactFlag, 37> SideArtefacts { {
         { .spelling = "/interface", .families = DriverFamily::Msvc },
         { .spelling = "-interface", .families = DriverFamily::Msvc },
         { .spelling = "/internalPartition", .families = DriverFamily::Msvc },
@@ -681,14 +682,33 @@ namespace
         // The GNU flags that write a file beside the object (#1691), each measured by the
         // audit to write its side file: split DWARF (`a.dwo`, whose id the skeleton names),
         // coverage notes (`a.gcno`), clang's time trace (`a.json`), stack usage (`a.su`), and
-        // every intermediate. A hit restores the object alone, so the side file is missing or
-        // from another compile.
+        // every intermediate (`-save-temps`, the `-fdump-*` family, clang's
+        // `-fsave-optimization-record`, `-fcallgraph-info`, `-aux-info`). A hit restores the
+        // object alone, so the side file is missing or from another compile.
         { .spelling = "-gsplit-dwarf", .families = DriverFamily::Gnu },
         { .spelling = "--coverage", .families = DriverFamily::Gnu },
         { .spelling = "-ftest-coverage", .families = DriverFamily::Gnu },
         { .spelling = "-ftime-trace", .families = DriverFamily::Gnu },
         { .spelling = "-fstack-usage", .families = DriverFamily::Gnu },
         { .spelling = "-save-temps", .families = DriverFamily::Gnu },
+        { .spelling = "-fdump-", .families = DriverFamily::Gnu },
+        { .spelling = "-fsave-optimization-record", .families = DriverFamily::Gnu },
+        { .spelling = "-fcallgraph-info", .families = DriverFamily::Gnu },
+        { .spelling = "-aux-info", .families = DriverFamily::Gnu },
+        // Files a GNU compile READS that reach neither the preprocessed text nor the depfile,
+        // so the key cannot see them change (#1692): `/Yu`'s reason, for the GNU drivers.
+        // Measured: `gcc -fprofile-use` with and without its `.gcda` gave identical `-E` text
+        // and depfiles and different objects -- one key. The profile flags (gcc's, the sample
+        // and auto-profile ones, clang's `-fprofile-instr-use`), plugins, `-specs=`, and `-B`,
+        // which swaps the compiler proper under the same driver banner.
+        { .spelling = "-fprofile-use", .families = DriverFamily::Gnu },
+        { .spelling = "-fprofile-sample-use", .families = DriverFamily::Gnu },
+        { .spelling = "-fauto-profile", .families = DriverFamily::Gnu },
+        { .spelling = "-fprofile-instr-use", .families = DriverFamily::Gnu },
+        { .spelling = "-fplugin", .families = DriverFamily::Gnu },
+        { .spelling = "-fpass-plugin", .families = DriverFamily::Gnu },
+        { .spelling = "-specs", .families = DriverFamily::Gnu },
+        { .spelling = "-B", .families = DriverFamily::Gnu },
         // `cl`'s shared-PDB debug formats. The object only REFERS to the PDB, which holds
         // every translation unit's types, so a hit restores an object whose types were
         // never written anywhere. clang-cl reads these spellings as `/Z7` -- its own option
@@ -1818,8 +1838,27 @@ ParsedCommand ParseCommand(std::span<std::string const> argv)
     return body.contains('/') || body.contains('\\');
 }
 
+bool NamesHostCpu(std::string_view arg) noexcept
+{
+    // The GNU spellings that take a CPU; `native` is the one value that names none.
+    constexpr std::array<std::string_view, 3> CpuFlags { "-march=", "-mcpu=", "-mtune=" };
+    return std::ranges::any_of(
+        CpuFlags, [arg](std::string_view flag) { return arg.starts_with(flag) && arg.substr(flag.size()) == "native"; });
+}
+
 namespace
 {
+    /// @param argv The compile line.
+    /// @return Why a worker may not be handed it -- an argument names this machine's CPU, which
+    ///         the worker would resolve to its own (#1688); nullopt when none does.
+    [[nodiscard]] std::optional<std::string> HostCpuRefusal(std::span<std::string const> argv)
+    {
+        auto const host = std::ranges::find_if(argv, NamesHostCpu);
+        if (host == argv.end())
+            return std::nullopt;
+        return std::format("argument {} names this machine's CPU, which a worker would resolve to its own", *host);
+    }
+
     /// The language a dispatched compile states for its input, or why it can state none.
     ///
     /// The extension, overridden by a driver that compiles everything as C++, overridden in turn
@@ -1923,6 +1962,11 @@ std::expected<std::vector<std::string>, std::string> RemoteCompileArgs(ParsedCom
                                                                        std::string_view targetTriple)
 {
     auto const& driver = DriverOf(cmd.flavor);
+
+    // A worker resolves `native` to ITS CPU and the client would store that object under a
+    // key folding the CLIENT's (#1688), so such a line compiles here.
+    if (auto const refusal = HostCpuRefusal(argv))
+        return std::unexpected(*refusal);
 
     // Asked FIRST, before a single argument is examined: whether the job can be dispatched at
     // all, and in which language (`DispatchedLanguage`).

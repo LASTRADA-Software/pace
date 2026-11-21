@@ -4313,6 +4313,8 @@ translation unit and every test green.
 ## Open work
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues; AGENT.md tripwires rules, not residuals -->
+- **[#1701](https://github.com/LASTRADA-Software/pace/issues/1701)** — the memcached and Redis surfaces can modify 0xFC compile keys (no namespace), and a
+  `CompileValue` carries no checksum.
 - **[#661](https://github.com/LASTRADA-Software/pace/issues/661)** — `IProcessRunner`
   has no cancellable seam, so a compile whose client has GONE runs to completion and this
   machine pays for an object nobody will read. The departure is already detected and

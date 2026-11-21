@@ -32,6 +32,12 @@ collapse or a mis-serve and is now covered by regression tests:
   The path is safe to drop because nothing a key could see depends on it: `__FILE__` is
   already expanded in the text, and a name recorded after preprocessing is root binding's
   and the prefix maps' to answer.
+  - **`-march=native` is keyed by the CPU the driver RESOLVES it to** (`HostCpuKeyItem`, #1688):
+    the argument names no CPU, so two machines passing it shared an object built for one of
+    them. The unit's own line plus `-###` lists the expanded target (gcc's `-march=<cpu>`,
+    feature switches and `--param` cache sizes; clang's `-target-cpu`/`-target-feature`), and
+    only those tokens are keyed, never the listing's paths. An unresolvable listing is not
+    cached, and a line naming `native` is never dispatched (a worker resolves it to ITS CPU).
   - On MSVC never `/P` beside it: `/P` preprocesses to a `<base>.i` file rather than
     stdout, and `/EP /P` left the launcher hashing an empty stdout, so a Windows key
     carried nothing from the source and an edited file was answered with the object
@@ -2991,6 +2997,13 @@ nobody can account for.
 
 <!-- agent-tripwire: none: deferred work, tracked as GitHub issues; AGENT.md tripwires rules, not residuals -->
 
+- **[#1699](https://github.com/LASTRADA-Software/pace/issues/1699)** — `PathCanon`'s comparison case-folds on POSIX layouts, and a prefix-map head's trailing separator
+  is lost in the key.
+- **[#1707](https://github.com/LASTRADA-Software/pace/issues/1707)** — the verifier compares only the object, not the depfile or the replayed streams, and the servers
+  count hits on values the launcher then rejects (the store, stale and failed-verify outcomes landed).
+- **[#1708](https://github.com/LASTRADA-Software/pace/issues/1708)** — lower-severity robustness: atomic temp names that can collide across PID namespaces, an object
+  stored without checking this run wrote it, `flush_all <delay>` ignored, an in-memory decompression
+  failure answered as an empty value.
 - **[#1653](https://github.com/LASTRADA-Software/pace/issues/1653)** — a header
   replaced during the key's preprocess by a copy that keeps an older change time is not seen by
   the input witness. On NTFS `CopyFileW` copies the SOURCE's change time onto the destination

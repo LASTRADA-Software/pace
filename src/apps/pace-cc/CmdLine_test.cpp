@@ -329,6 +329,92 @@ TEST_CASE("Only a source prefix map is carried and only on the driver that carri
     }
 }
 
+TEST_CASE("A line naming the host CPU is never dispatched, and nothing else is mistaken for one")
+{
+    // #1688: a worker resolves `native` to its OWN CPU, and the client would store that object
+    // under a key folding the client's.
+    for (std::string_view const flag: { "-march=native", "-mcpu=native", "-mtune=native" })
+    {
+        INFO(flag);
+        CHECK(NamesHostCpu(flag));
+        std::vector<std::string> const argv { "g++", std::string { flag }, "-O2", "-c", "a.cpp", "-o", "a.o" };
+        auto const remote = RemoteCompileArgs(Parse(argv), argv, {});
+        REQUIRE_FALSE(remote.has_value());
+        CHECK(remote.error().contains(flag));
+        CHECK(remote.error().contains("worker would resolve to its own"));
+    }
+    // Controls: a named CPU, and a word that merely ends in `native`, are not the host's.
+    for (std::string_view const other: { "-march=znver4", "-mtune=generic", "-march=nativeish", "-fnative", "native" })
+    {
+        INFO(other);
+        CHECK_FALSE(NamesHostCpu(other));
+    }
+    std::vector<std::string> const named { "g++", "-march=znver4", "-O2", "-c", "a.cpp", "-o", "a.o" };
+    auto const remote = RemoteCompileArgs(Parse(named), named, {});
+    INFO("refused: " << remote.error_or(""));
+    CHECK(remote.has_value());
+}
+
+TEST_CASE("A compile writing a file beside its object is not cached", "[launcher]")
+{
+    // #1691: a hit restores the object and the depfile, so a side file is missing afterwards
+    // or left over from another build (a `.dwo` the restored skeleton does not match).
+    for (std::string_view const flag: { "-gsplit-dwarf",
+                                        "-gsplit-dwarf=single",
+                                        "--coverage",
+                                        "-ftest-coverage",
+                                        "-ftime-trace",
+                                        "-ftime-trace=out.json",
+                                        "-fstack-usage",
+                                        "-save-temps",
+                                        "-save-temps=obj",
+                                        "-fdump-tree-all",
+                                        "-fsave-optimization-record",
+                                        "-fcallgraph-info",
+                                        "-aux-info" })
+    {
+        INFO(flag);
+        std::vector<std::string> const argv { "g++", std::string { flag }, "-O2", "-c", "a.cpp", "-o", "a.o" };
+        auto const cmd = Parse(argv);
+        CHECK(cmd.sideArtefact);
+        CHECK_FALSE(cmd.parsedOk);
+    }
+    // Controls: flags that change the object but write nothing beside it stay cacheable.
+    for (std::string_view const flag: { "-g", "-gdwarf-5", "-fprofile-arcs", "-fprofile-generate", "-ftrapv" })
+    {
+        INFO(flag);
+        std::vector<std::string> const argv { "g++", std::string { flag }, "-O2", "-c", "a.cpp", "-o", "a.o" };
+        CHECK(Parse(argv).parsedOk);
+    }
+}
+
+TEST_CASE("A compile reading a file the key cannot see is not cached", "[launcher]")
+{
+    // #1692: a profile, a plugin, a specs file or a `-B` tool directory reaches neither the
+    // preprocessed text nor the depfile, so the key could not see it change.
+    for (std::string_view const flag: { "-fprofile-use",
+                                        "-fprofile-use=prof/",
+                                        "-fprofile-sample-use=a.prof",
+                                        "-fauto-profile=a.afdo",
+                                        "-fprofile-instr-use=a.profdata",
+                                        "-fplugin=x.so",
+                                        "-fpass-plugin=p.so",
+                                        "-specs=nano.specs",
+                                        "-B/opt/tools/" })
+    {
+        INFO(flag);
+        std::vector<std::string> const argv { "g++", std::string { flag }, "-O2", "-c", "a.cpp", "-o", "a.o" };
+        CHECK_FALSE(Parse(argv).parsedOk);
+    }
+    // Controls: generating a profile writes it at run time, not at compile time.
+    for (std::string_view const flag: { "-fprofile-generate", "-fprofile-instr-generate", "-fprofile-update=atomic" })
+    {
+        INFO(flag);
+        std::vector<std::string> const argv { "g++", std::string { flag }, "-O2", "-c", "a.cpp", "-o", "a.o" };
+        CHECK(Parse(argv).parsedOk);
+    }
+}
+
 TEST_CASE("The end-of-options marker stays with the source, which never travels")
 {
     // CMake's clang-cl rule ends `-c -- $in`. The launcher dropped the source and forwarded
