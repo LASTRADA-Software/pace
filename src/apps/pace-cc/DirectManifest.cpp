@@ -1169,7 +1169,10 @@ std::string ComputeManifestKey(std::string_view canonicalSource,
     // Re-keying is the only thing that retires a v10 manifest: each one keeps its key under the
     // fixed rules and keeps validating, and a direct hit never re-records. `objkey` does not
     // move: the objects are correct under their own keys.
-    KeyDigest digest { "manifest-v11" };
+    //
+    // v12 is the lock-step half of `objkey-v10` (the line structure): a v11 manifest stores
+    // an object key of the generation before it.
+    KeyDigest digest { "manifest-v12" };
     digest.Field(toolchainStamp);
     digest.Field(canonicalSource);
     for (auto const& arg: relativizedArgs)

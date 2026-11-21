@@ -35,7 +35,9 @@
 //
 // A REAL COMPILE names `-c` or `/c` and no preprocess-only or probe switch. A DISPATCH
 // PREPROCESS names `-E` or `/E` and none of the switches that make it the key's preprocess
-// (`-E -P`, `/EP`), the include probe (`-E -v`) or the target probe (`-###`). Everything else --
+// (its dependency record, `-MD -MF` or `/showIncludes`: both preprocess runs keep their line
+// markers since #1687, so `-P` no longer tells them apart), the include probe (`-E -v`) or the
+// target probe (`-###`). Everything else --
 // the key's preprocess, the banner probe, `-###` -- is forwarded untouched.
 //
 // Exit status: the real compiler's; 125 when the stub cannot do what it was asked (a missing
@@ -118,7 +120,8 @@ struct ClassifyRow
 constexpr std::array<std::string_view, 2> CompileSwitches { "-c", "/c" };
 constexpr std::array<std::string_view, 7> NotACompile { "-E", "/E", "-EP", "/EP", "-P", "/P", "-###" };
 constexpr std::array<std::string_view, 2> PreprocessSwitches { "-E", "/E" };
-constexpr std::array<std::string_view, 6> NotADispatchPreprocess { "-P", "/P", "-EP", "/EP", "-v", "-###" };
+constexpr std::array<std::string_view, 9> NotADispatchPreprocess { "-P",  "/P",  "-EP",           "/EP", "-v",
+                                                                   "-MD", "-MF", "/showIncludes", "-###" };
 
 /// The classification, first match wins; no row matching is `Invocation::Other`.
 constexpr std::array<ClassifyRow, 2> ClassifyTable {

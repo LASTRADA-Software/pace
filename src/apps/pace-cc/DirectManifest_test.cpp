@@ -1746,7 +1746,7 @@ TEST_CASE("The manifest digests are pinned, so changing them is deliberate")
     // to disagree about what was hashed.
     std::vector<std::string> const args { "/O2", "<SRCROOT>/src/a.cpp" };
     auto const manifestKey = ComputeManifestKey("<SRCROOT>/src/a.cpp", args, "cl-19.51", {});
-    CHECK(manifestKey == "88fad3f9230114ec78ee0aa163916054");
+    CHECK(manifestKey == "b7e580c5f28a2f7582ff637acf989b50");
 
     // And the generations it has retired stay retired. This is the half the vector
     // above cannot cover: a v5 manifest is only safe because no launcher carrying
@@ -1774,6 +1774,9 @@ TEST_CASE("The manifest digests are pinned, so changing them is deliberate")
         // carried no shadow census, so each validated across a change to what it compiled.
         // Only the tag moved for these inputs.
         { .key = "manifest-v10", .digest = "7063f9c97376cce355decb8f99859612" },
+        // Retired with `objkey-v10` (the line structure): a v11 manifest points at an object of
+        // the generation before it. Only the tag moved.
+        { .key = "manifest-v11", .digest = "88fad3f9230114ec78ee0aa163916054" },
     });
     RequireNoRetiredDigest<std::string_view>(manifestKey, Retired);
 

@@ -433,7 +433,7 @@ TEST_CASE("ComputeKey's value is pinned, so changing the construction is deliber
     // to disagree about what was hashed, and the retirement check would go vacuous
     // in the one edit it exists to catch.
     auto const key = ComputeKey(inputs);
-    CHECK(key == "ccb841c6012c541ddf44ebaefe48132b");
+    CHECK(key == "0fc3b62f1f1ddc380c8517b715d4f018");
 
     // What the vector alone cannot say: that the tag has not been put BACK. See
     // Generation -- reverting the tag and re-pasting the vector is one edit
@@ -449,6 +449,9 @@ TEST_CASE("ComputeKey's value is pinned, so changing the construction is deliber
         { .key = "objkey-v7", .digest = "7323057f60d9ffaca969b16ef293ceaa" },
         // The v8 -> v9 bump (a clang worker's dropped macro map) changed nothing but the tag.
         { .key = "objkey-v8", .digest = "e86dc84efc6cb5de598620cc334f4ee7" },
+        // The v9 -> v10 bump (the line structure) moved what `preprocessed` holds, not how it is
+        // folded, so this is the outgoing vector.
+        { .key = "objkey-v9", .digest = "ccb841c6012c541ddf44ebaefe48132b" },
     });
     RequireNoRetiredDigest<std::string_view>(key, Retired);
 }
@@ -812,6 +815,59 @@ TEST_CASE("A prefix-map flag's root is relativized, so two checkouts still share
     // COFF, where no mapping exists, and it is written down in
     // `.agent/rules/compile-cache.md` rather than left to be rediscovered here.
     CHECK(keyFor(RootA, {}) == keyFor(RootB, {}));
+}
+
+TEST_CASE("The keyed text keeps every marker's line and drops its path")
+{
+    // `-E -P` collapsed blank and comment lines, so a comment inserted above a function left
+    // the key unchanged while `source_location`, `__builtin_LINE` and the `-g` line tables
+    // moved -- measured on g++ and clang++, one key and two objects. The probe keeps its
+    // markers now and the key keeps their line numbers; the paths, which differ per checkout,
+    // go.
+    SECTION("GNU markers, flags kept, every other byte untouched")
+    {
+        std::string const in = "# 0 \"/home/a/src/t.cpp\"\n"
+                               "# 1 \"/usr/include/c++/16/vector\" 1 3\n"
+                               "#pragma GCC diagnostic push\n"
+                               "int f() { return 1; }\n"
+                               "# 12 \"/home/a/src/t.cpp\" 2\n";
+        CHECK(KeyedPreprocessedText(in)
+              == "# 0\n"
+                 "# 1 1 3\n"
+                 "#pragma GCC diagnostic push\n"
+                 "int f() { return 1; }\n"
+                 "# 12 2\n");
+    }
+    SECTION("MSVC #line, doubled separators and CRLF")
+    {
+        std::string const in = "#line 1 \"c:\\\\src\\\\t.cpp\"\r\nint g();\r\n#line 40 \"c:\\\\src\\\\t.cpp\"\r\n";
+        CHECK(KeyedPreprocessedText(in) == "#line 1\r\nint g();\r\n#line 40\r\n");
+    }
+    SECTION("an escaped quote does not end the path")
+    {
+        CHECK(KeyedPreprocessedText("# 3 \"/w/odd\\\"name.h\" 1\n") == "# 3 1\n");
+    }
+    SECTION("what is not a marker stays verbatim")
+    {
+        for (std::string_view const line: { "#pragma once\n",
+                                            "# not a marker\n",
+                                            "#line x \"a\"\n",
+                                            "# 7 unquoted\n",
+                                            "# 7 \"unterminated\n",
+                                            "#define X 1\n",
+                                            "  # 5 \"/a\"\n" })
+        {
+            INFO(line);
+            CHECK(KeyedPreprocessedText(line) == line);
+        }
+    }
+
+    // The property, stated on its own: two checkouts' markers agree, and a moved line does not.
+    auto const at = [](std::string_view root, int line) {
+        return KeyedPreprocessedText(std::format("# {} \"{}/src/t.cpp\"\nint h();\n", line, root));
+    };
+    CHECK(at("/home/alice/work/fc", 5) == at("/srv/bob/deeper/fc", 5));
+    CHECK(at("/home/alice/work/fc", 5) != at("/home/alice/work/fc", 8));
 }
 
 TEST_CASE("A source prefix map's root is relativized, and the build tree's place under it is keyed")
